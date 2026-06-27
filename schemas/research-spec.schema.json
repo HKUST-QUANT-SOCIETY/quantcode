@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/research-spec.schema.json",
+  "title": "Research Specification",
+  "description": "研报生成的输入规格",
+  "type": "object",
+  "required": ["target", "as_of_date", "research_questions"],
+  "properties": {
+    "target": {
+      "type": "object",
+      "required": ["type", "identifier"],
+      "properties": {
+        "type": { "type": "string", "enum": ["company", "industry", "macro"] },
+        "identifier": {
+          "type": "string",
+          "description": "公司用 ticker（如 2097.HK），行业用代码，宏观用主题字符串"
+        },
+        "name": { "type": "string" }
+      }
+    },
+    "as_of_date": { "type": "string", "format": "date" },
+    "research_questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "研究员关心的具体问题清单"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["overview", "business", "financials", "valuation", "risks", "industry_comparison"]
+      },
+      "default": ["overview", "business", "financials", "valuation", "risks"]
+    },
+    "retrieval": {
+      "type": "object",
+      "description": "pit-rag skill 返回的检索结果",
+      "properties": {
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "published_at", "snippet"],
+            "properties": {
+              "id": { "type": "string" },
+              "source": { "type": "string" },
+              "published_at": { "type": "string", "format": "date" },
+              "snippet": { "type": "string" },
+              "score": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "output_format": {
+      "type": "string",
+      "enum": ["pdf", "markdown", "both"],
+      "default": "pdf"
+    }
+  },
+  "additionalProperties": false
+}

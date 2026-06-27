@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/pipeline-task.schema.json",
+  "title": "Pipeline Task",
+  "description": "统一任务信封，所有 skill 之间的协作以此为契约",
+  "type": "object",
+  "required": ["task_id", "skill", "status", "created_at"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "UUID v4"
+    },
+    "parent_task_id": {
+      "type": ["string", "null"]
+    },
+    "skill": {
+      "type": "string",
+      "enum": ["risk-gate", "pit-rag", "research-pdf", "factor-eval"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "succeeded", "failed", "rejected"]
+    },
+    "submitter": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "group": {
+          "type": "string",
+          "enum": ["fundamentals", "factor", "model", "risk", "strategy", "agent"]
+        }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "input": {
+      "type": "object",
+      "description": "skill-specific 输入"
+    },
+    "output": {
+      "type": "object",
+      "description": "skill-specific 输出，符合各 skill 的输出 schema"
+    },
+    "acceptance": {
+      "type": "object",
+      "properties": {
+        "verdict": { "type": "string", "enum": ["pass", "fail"] },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "mime": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

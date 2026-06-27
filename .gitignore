@@ -13,3 +13,8 @@ __pycache__/
 
 # Jupyter
 .ipynb_checkpoints/
+vendor/mimo-code/
+
+# OpenCode 调研报告（HTML）
+OpenCode*.html
+

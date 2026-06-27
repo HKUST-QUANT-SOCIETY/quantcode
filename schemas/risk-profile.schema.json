@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/risk-profile.schema.json",
+  "title": "Risk Profile",
+  "description": "策略代码经 risk-gate skill 分析后的风控画像，用于 CI 自动门禁",
+  "type": "object",
+  "required": [
+    "strategy_id",
+    "as_of_date",
+    "max_drawdown",
+    "position_limit",
+    "correlation_with_existing",
+    "capacity_estimate_usd",
+    "tail_risk_var_99"
+  ],
+  "properties": {
+    "strategy_id": {
+      "type": "string",
+      "description": "策略唯一 ID，建议格式 <group>-<name>-<version>"
+    },
+    "as_of_date": {
+      "type": "string",
+      "format": "date",
+      "description": "评估时点"
+    },
+    "pr_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "触发本次评估的 PR 链接"
+    },
+    "max_drawdown": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "最大回撤，0-1 之间的小数"
+    },
+    "position_limit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "单股最大仓位"
+    },
+    "correlation_with_existing": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1,
+      "description": "与现有策略组合的相关性"
+    },
+    "capacity_estimate_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "策略容量估计（美元）"
+    },
+    "tail_risk_var_99": {
+      "type": ["number", "null"],
+      "description": "99% VaR；数据缺失时为 null"
+    },
+    "analyst_notes": {
+      "type": "string",
+      "description": "agent 生成的自然语言备注"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  // QuantCode 项目配置 — MimoCode 入口
+  // Docs: https://mimo.xiaomi.com/coder
+  "$schema": "https://opencode.ai/config.json",
+
+  // Provider 配置由各成员本地 .mimocode/mimocode.local.jsonc 提供，不入库
+  "provider": {},
+
+  // 权限：默认拒绝高风险路径修改
+  "permission": {
+    "edit": {
+      "vendor/**": "deny",
+      "schemas/**": "ask"
+    },
+    "bash": {
+      "rm -rf *": "deny",
+      "git push --force*": "deny"
+    }
+  },
+
+  // MCP servers（按需添加）
+  "mcp": {}
+}

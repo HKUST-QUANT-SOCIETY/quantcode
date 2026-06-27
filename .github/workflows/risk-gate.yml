@@ -1,0 +1,35 @@
+name: Risk Gate
+
+on:
+  pull_request:
+    paths:
+      - 'strategies/**'
+      - 'factors/**'
+
+jobs:
+  risk-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          pip install -e .
+          pip install jsonschema
+
+      # TODO: T1 owner（陈振宏）实现
+      - name: Run risk-gate skill via MimoCode
+        run: echo "TODO: invoke mimocode skill risk-gate against PR diff"
+
+      - name: Validate JSON output
+        run: echo "TODO: python -m runner.schema_validator risk-profile artifacts/risk.json"
+
+      - name: Run acceptance
+        run: echo "TODO: python -m runner.acceptance risk-gate artifacts/risk.json"

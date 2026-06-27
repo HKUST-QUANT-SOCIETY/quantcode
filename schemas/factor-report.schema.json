@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/factor-report.schema.json",
+  "title": "Factor Evaluation Report",
+  "description": "因子评估 skill 的标准化输出",
+  "type": "object",
+  "required": ["factor_name", "evaluation_period", "ic_metrics", "verdict"],
+  "properties": {
+    "factor_name": { "type": "string" },
+    "factor_version": { "type": "string" },
+    "evaluation_period": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "string", "format": "date" },
+        "end": { "type": "string", "format": "date" }
+      }
+    },
+    "universe": { "type": "string", "examples": ["CSI300", "CSI500", "CSI1000"] },
+    "ic_metrics": {
+      "type": "object",
+      "required": ["ic_mean", "ic_std", "ir", "t_stat"],
+      "properties": {
+        "ic_mean": { "type": "number" },
+        "ic_std": { "type": "number", "minimum": 0 },
+        "ir": { "type": "number" },
+        "t_stat": { "type": "number" },
+        "ic_method": { "type": "string", "enum": ["pearson", "spearman"] }
+      }
+    },
+    "turnover": {
+      "type": "object",
+      "properties": {
+        "monthly": { "type": "number", "minimum": 0 },
+        "annual": { "type": "number", "minimum": 0 }
+      }
+    },
+    "decay": {
+      "type": "object",
+      "description": "IC 在 N 日后的衰减",
+      "properties": {
+        "ic_1d": { "type": "number" },
+        "ic_3d": { "type": "number" },
+        "ic_5d": { "type": "number" },
+        "ic_10d": { "type": "number" },
+        "ic_20d": { "type": "number" }
+      }
+    },
+    "layered_backtest": {
+      "type": "object",
+      "properties": {
+        "top_decile_annual_return": { "type": "number" },
+        "bottom_decile_annual_return": { "type": "number" },
+        "long_short_annual_return": { "type": "number" },
+        "long_short_sharpe": { "type": "number" }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "marginal"],
+      "description": "runner 自动给出的验收结论"
+    },
+    "fail_reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
