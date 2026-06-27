@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MimoCode 在 OpenCode 之上改进了什么</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Libre+Baskerville:ital,wght@0,700;1,400&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@700&family=Source+Sans+3:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg: #ffffff;
+    --bg-warm: #faf8f5;
+    --bg-code: #f4f1ec;
+    --ink: #1a1a1a;
+    --ink-secondary: #4a4a4a;
+    --ink-caption: #777777;
+    --accent: #c0392b;
+    --accent-light: #c0392b18;
+    --teal: #16786a;
+    --teal-light: #16786a15;
+    --blue: #2c5aa0;
+    --blue-light: #2c5aa015;
+    --orange: #b8731f;
+    --orange-light: #b8731f15;
+    --border: #e0ddd8;
+    --border-strong: #c8c4be;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: var(--bg); color: var(--ink);
+    font-family: 'Source Sans 3', 'Noto Sans SC', sans-serif;
+    font-weight: 400; line-height: 1.8; font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 820px; margin: 0 auto; padding: 60px 28px 100px; }
+h1, h2, h3 { font-family: 'Libre Baskerville', 'Noto Serif SC', Georgia, serif; font-weight: 700; color: var(--ink); }
+h1 { font-size: 2.4rem; line-height: 1.2; margin-bottom: 20px; letter-spacing: -0.01em; }
+h2 { font-size: 1.55rem; margin: 72px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--ink); line-height: 1.3; }
+h3 { font-size: 1.15rem; margin: 40px 0 12px; font-weight: 700; }
+p { margin-bottom: 16px; }
+strong { font-weight: 700; color: var(--ink); }
+em { font-style: italic; }
+a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; background: var(--bg-code); padding: 1px 5px; border-radius: 3px; color: var(--accent); }
+pre { background: var(--bg-warm); border: 1px solid var(--border); padding: 14px 18px; overflow-x: auto; margin: 16px 0; font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; line-height: 1.6; }
+pre code { background: transparent; padding: 0; color: var(--ink); }
+.header { margin-bottom: 48px; padding-bottom: 32px; border-bottom: 1px solid var(--border); }
+.header-meta { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--ink-caption); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 20px; }
+.header-subtitle { font-family: 'Libre Baskerville', serif; font-size: 1.15rem; font-style: italic; color: var(--ink-secondary); line-height: 1.65; max-width: 680px; }
+.toc { background: var(--bg-warm); padding: 20px 24px; margin-bottom: 56px; border: 1px solid var(--border); }
+.toc-label { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-caption); margin-bottom: 10px; }
+.toc ol { list-style: none; counter-reset: toc; }
+.toc li { counter-increment: toc; padding: 4px 0; font-size: 0.95rem; }
+.toc li::before { content: counter(toc) "."; font-family: 'IBM Plex Mono', monospace; color: var(--accent); margin-right: 10px; font-size: 0.85rem; font-weight: 600; }
+.toc a { color: var(--ink-secondary); text-decoration: none; }
+.toc a:hover { color: var(--accent); }
+.box { margin: 24px 0; padding: 18px 22px; border-left: 4px solid var(--border-strong); background: var(--bg-warm); }
+.box.danger { border-left-color: var(--accent); background: var(--accent-light); }
+.box.success { border-left-color: var(--teal); background: var(--teal-light); }
+.box.info { border-left-color: var(--blue); background: var(--blue-light); }
+.box.warn { border-left-color: var(--orange); background: var(--orange-light); }
+.box.danger .box-label { color: var(--accent); }
+.box.success .box-label { color: var(--teal); }
+.box.info .box-label { color: var(--blue); }
+.box.warn .box-label { color: var(--orange); }
+.box p:last-child { margin-bottom: 0; }
+ul, ol { padding-left: 24px; margin: 12px 0 16px; }
+li { margin: 6px 0; }
+table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 0.95rem; }
+th, td { text-align: left; padding: 10px 14px; border: 1px solid var(--border); vertical-align: top; }
+th { background: var(--bg-warm); font-weight: 700; font-size: 0.88rem; }
+svg { display: block; margin: 20px auto; max-width: 100%; height: auto; }
+.section-num { font-family: 'IBM Plex Mono', monospace; color: var(--accent); font-weight: 600; margin-right: 8px; }
+.footer { margin-top: 80px; padding-top: 28px; border-top: 1px solid var(--border); color: var(--ink-caption); font-size: 0.88rem; }
+.tag { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; padding: 1px 8px; border-radius: 2px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; vertical-align: middle; margin-right: 4px; }
+.tag.new { background: var(--teal-light); color: var(--teal); border: 1px solid var(--teal); }
+.tag.keep { background: var(--blue-light); color: var(--blue); border: 1px solid var(--blue); }
+.tag.exp { background: var(--orange-light); color: var(--orange); border: 1px solid var(--orange); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 12px 0; font-size: 0.94rem; }
+.kv dt { font-family: 'IBM Plex Mono', monospace; color: var(--ink-caption); font-size: 0.82rem; padding-top: 2px; }
+.kv dd { color: var(--ink); }
+@media (max-width: 640px) {
+    .container { padding: 40px 18px 60px; }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.3rem; margin-top: 56px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header class="header">
+    <div class="header-meta">项目分析 · MIMOCODE vs OPENCODE</div>
+    <h1>MimoCode 在 OpenCode 之上改进了什么</h1>
+    <p class="header-subtitle">
+        小米 MiMo 团队 fork OpenCode 之后，把"短期助手"改造成"长任务工程"——
+        持久化记忆、自动 checkpoint、Goal 评判、Compose 工作流，再加上语音和自学习。
+        这份文档拆解每一项加法。
+    </p>
+    <div class="box info" style="margin-top:24px;">
+        <div class="box-label">范围说明</div>
+        <p>基于 <code>XiaomiMiMo/MiMo-Code</code> 源码与 README 整理（2026-06-27 拉取，版本约 v1.x）。
+        与 <code>anomalyco/opencode</code> 同期版本对照，重点放在新增能力，
+        不重复展开 OpenCode 已有的载体层（TUI/Web/Desktop/IDE）。</p>
+    </div>
+</header>
+
+<nav class="toc">
+    <div class="toc-label">目录</div>
+    <ol>
+        <li><a href="#s1">总体结论</a></li>
+        <li><a href="#s2">持久化记忆系统</a></li>
+        <li><a href="#s3">智能上下文管理</a></li>
+        <li><a href="#s4">树状任务追踪</a></li>
+        <li><a href="#s5">Subagent 编排</a></li>
+        <li><a href="#s6">Goal 与 Judge 模型</a></li>
+        <li><a href="#s7">Compose Mode：specs-driven 工作流</a></li>
+        <li><a href="#s8">Dream 与 Distill：自我改进</a></li>
+        <li><a href="#s9">Voice：语音输入</a></li>
+        <li><a href="#s10">Max Mode：best-of-N + judge</a></li>
+        <li><a href="#s11">Provider 整合：MiMo Auto / 一键迁移</a></li>
+        <li><a href="#s12">对 QuantCode 的意义</a></li>
+        <li><a href="#s13">小结与取舍</a></li>
+    </ol>
+<section id="s1">
+<h2><span class="section-num">1</span>总体结论</h2>
+
+<p>OpenCode 是一个<strong>短交互式</strong> AI 编程 agent——一次会话内完成一件事，会话结束信息就散了。
+MimoCode 把它改造成<strong>长任务工程平台</strong>：会话之间能记住上下文、上下文满了能自动重建、任务有树状结构、可以同时跑几个 subagent、停止之前还要一个独立的 judge 模型来评判"是不是真的完成了"。</p>
+
+<p>用一句话总结：<strong>OpenCode 解决"如何让 AI 写代码"，MimoCode 解决"如何让 AI 持续地、可靠地写代码"。</strong></p>
+
+<div class="box info">
+    <div class="box-label">官方表述</div>
+    <p>MiMoCode 的 README 在 "Relationship to OpenCode" 一节写道：保留所有 OpenCode 核心能力（multi-provider / TUI / LSP / MCP / plugins），
+    在其之上 <strong>新增持久化记忆、智能上下文管理、subagent 编排、goal 驱动的自主循环、compose 工作流、以及通过 dream/distill 的自我改进</strong>。</p>
+</div>
+
+<svg viewBox="0 0 720 340" style="max-width: 720px;">
+    <rect width="720" height="340" fill="#faf8f5" rx="6"/>
+    <text x="360" y="36" text-anchor="middle" font-family="Libre Baskerville, serif" font-size="15" font-weight="700" fill="#1a1a1a">从 OpenCode 到 MimoCode 的能力扩展</text>
+
+    <rect x="60" y="70" width="600" height="60" rx="4" fill="#ffffff" stroke="#2c5aa0" stroke-width="1.5"/>
+    <text x="360" y="94" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="#2c5aa0">OpenCode 基础层（保留）</text>
+    <text x="360" y="116" text-anchor="middle" font-family="Source Sans 3, sans-serif" font-size="12" fill="#4a4a4a">TUI · Web · Desktop · IDE 扩展 · LSP · MCP · Plugin · 多 Provider</text>
+
+    <rect x="60" y="160" width="600" height="60" rx="4" fill="#ffffff" stroke="#16786a" stroke-width="1.5"/>
+    <text x="360" y="184" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="#16786a">MimoCode 长任务能力层（新增）</text>
+    <text x="360" y="206" text-anchor="middle" font-family="Source Sans 3, sans-serif" font-size="12" fill="#4a4a4a">持久化记忆 · 自动 checkpoint · 任务树 · Subagent · Goal/Judge · Compose</text>
+
+    <rect x="60" y="250" width="600" height="60" rx="4" fill="#ffffff" stroke="#c0392b" stroke-width="1.5"/>
+    <text x="360" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="#c0392b">MimoCode 体验层（新增）</text>
+    <text x="360" y="296" text-anchor="middle" font-family="Source Sans 3, sans-serif" font-size="12" fill="#4a4a4a">Voice · Dream · Distill · Max Mode · MiMo Auto 免配置 · 从 Claude Code 一键迁移</text>
+</svg>
+
+<h3>一图对照</h3>
+<table>
+    <thead>
+        <tr><th>能力</th><th>OpenCode</th><th>MimoCode</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>多载体（TUI/Web/Desktop/IDE）</td><td>✓</td><td>✓ <span class="tag keep">继承</span></td></tr>
+        <tr><td>多 Provider / MCP / Plugin</td><td>✓</td><td>✓ <span class="tag keep">继承</span></td></tr>
+        <tr><td>会话内权限裁决</td><td>✓</td><td>✓ <span class="tag keep">继承</span></td></tr>
+        <tr><td>跨会话持久化记忆（MEMORY.md / FTS5）</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>自动 checkpoint + 上下文重建</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>树状任务（T1 / T1.1 / T1.2）</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>Subagent 并行 + 后台 + 取消</td><td>部分</td><td>✓ <span class="tag new">完整化</span></td></tr>
+        <tr><td>/goal + Judge 评判停止</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>Compose Mode（specs-driven）</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>/dream + /distill 自学习</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>语音输入</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+        <tr><td>Max Mode（best-of-N + judge）</td><td>—</td><td>✓ <span class="tag exp">实验</span></td></tr>
+        <tr><td>从 Claude Code 一键迁移认证</td><td>—</td><td>✓ <span class="tag new">新增</span></td></tr>
+    </tbody>
+</table>
+</section>
+
+<section id="s2">
+<h2><span class="section-num">2</span>持久化记忆系统</h2>
+
+<p>OpenCode 的会话状态主要在内存里。SQLite 存的是 session 元数据和消息，但<strong>项目级别的"知识"没有专门的载体</strong>——每次新开会话，agent 要重新读代码、重新理解架构。</p>
+
+<p>MimoCode 引入了一套<strong>四层文件结构</strong>，专门保存跨会话的知识，并用 SQLite FTS5 全文索引：</p>
+
+<div class="kv">
+    <dt>MEMORY.md</dt><dd>项目级长期知识：架构决策、命名规范、关键路径——session 之间共享</dd>
+    <dt>checkpoint.md</dt><dd>当前 session 的结构化快照，由专门的 checkpoint-writer subagent 自动维护</dd>
+    <dt>notes.md</dt><dd>agent 用的临时草稿区，可以丢一些短期信息</dd>
+    <dt>tasks/&lt;id&gt;/progress.md</dt><dd>每个任务自己的日志，断点续跑时读这个</dd>
+</div>
+
+<p>会话 resume 时这些文件被自动注入上下文。<strong>这是从"AI 助手"到"团队成员"的关键差异</strong>——你不需要每次都给它讲一遍"我们用 SolidJS 不用 React"。</p>
+
+<div class="box success">
+    <div class="box-label">为什么这件事重要</div>
+    <p>OpenCode 的范式是"每次对话从零开始 + 一次性把上下文喂够"。
+    MimoCode 的范式是"agent 在项目里安家"。后者更接近一个真实工程师的工作方式——你不会每天早上把所有项目知识重学一遍。</p>
+</div>
+
+<p>实现上的代码组织（<code>packages/opencode/src/memory/</code>）：</p>
+<pre><code>memory/
+├── service.ts        # 统一入口
+├── reconcile.ts      # 合并/去重逻辑
+├── fts.sql.ts        # SQLite FTS5 schema
+├── fts-query.ts      # 全文检索
+└── paths.ts          # 文件路径约定</code></pre>
+</section>
+
+<section id="s3">
+<h2><span class="section-num">3</span>智能上下文管理</h2>
+
+<p>所有 agent 工具的天敌都是 <strong>context window 满了之后怎么办</strong>。OpenCode 的处理比较朴素——截断或者让用户手动开新会话。MimoCode 在这里下了三个工夫：</p>
+
+<h3>3.1 自动 checkpoint</h3>
+<p>系统根据当前模型的 context window 占用率，<strong>自动判断什么时候应该 snapshot</strong>。不需要用户手动按"保存"。</p>
+
+<h3>3.2 上下文重建</h3>
+<p>当 context 接近上限时，MimoCode 不是简单截断，而是用以下材料<strong>重新组装一个新的 working context</strong>：</p>
+
+<ol>
+    <li>最新的 checkpoint.md（结构化任务状态）</li>
+    <li>MEMORY.md 中相关的项目知识（FTS5 检索）</li>
+    <li>当前 task 的 progress.md</li>
+    <li>最近 N 条原始消息（保留语义连续性）</li>
+</ol>
+
+<p>结果是 agent 可以"接着干"，而不是"重新开始"。</p>
+
+<h3>3.3 预算化注入（budgeted injection）</h3>
+<p>注入新上下文时有一个 <strong>token budget</strong>，并按 importance ranking 决定哪些内容进、哪些不进。
+这是工程化的关键——不是"全部塞进去"，而是"按价值排序后塞够为止"。</p>
+
+<div class="box warn">
+    <div class="box-label">这解决了什么真实问题</div>
+<section id="s4">
+<h2><span class="section-num">4</span>树状任务追踪</h2>
+
+<p>OpenCode 的 task 是<strong>扁平的列表</strong>——你提一个需求，它做一个 task。MimoCode 引入了<strong>树状任务系统</strong>：</p>
+
+<pre><code>T1   实现 risk-gate skill
+├── T1.1   定义 risk-profile JSON Schema
+├── T1.2   实现策略代码静态分析
+│   ├── T1.2.1   识别仓位计算逻辑
+│   └── T1.2.2   识别杠杆使用
+├── T1.3   实现回测调用
+└── T1.4   接入 CI Gate
+</code></pre>
+
+<p>每个节点都有自己的 <code>progress.md</code>，<strong>和 checkpoint 系统自动联动</strong>——会话 resume 时知道你做到哪一棵子树的哪一个叶子。</p>
+
+<p>这对我们有什么实际价值？<strong>它直接对应了 QuantCode 设计文档里的"任务拆分"方法论。</strong>我们不需要再设计一套 task hierarchy，MimoCode 已经有了。</p>
+
+<div class="box info">
+    <div class="box-label">和我们设计文档的映射</div>
+    <p>设计文档 §2.1 写的是"把大任务拆成无状态子任务，子任务间用确定性 JSON schema 通信"。
+    <strong>树状任务 = 拆分；JSON Schema = 我们写在 <code>schemas/</code>；checkpoint 联动 = idempotent 重启。</strong>
+    三件事在 MimoCode 里都齐了。</p>
+</div>
+</section>
+
+<section id="s5">
+<h2><span class="section-num">5</span>Subagent 编排</h2>
+
+<p>OpenCode 已经有了 subagent 的初步概念（比如 <code>@general</code>、自定义 subagent），但 MimoCode 把它做完整了：</p>
+
+<ul>
+    <li><strong>按需创建</strong>：primary agent 在需要时动态生成 subagent，不是事先注册</li>
+    <li><strong>共享上下文</strong>：subagent 继承当前会话的上下文，不需要重新喂</li>
+    <li><strong>并行执行</strong>：多个 subagent 可以同时跑（关键！）</li>
+    <li><strong>生命周期追踪</strong>：每个 subagent 都有 ID，可以查询状态</li>
+    <li><strong>取消能力</strong>：跑错了能 kill 掉，不会一路炸到底</li>
+    <li><strong>后台执行</strong>：长任务可以放后台，不占主对话</li>
+</ul>
+
+<p>实际场景：一个 <code>compose:plan</code> skill 跑完之后，可以同时启动 3 个 subagent 分别去做 3 个独立子任务，并在它们都完成后汇总。</p>
+
+<div class="box success">
+    <div class="box-label">对我们的意义</div>
+    <p>研报生成场景里非常用得到——
+    <strong>一个 subagent 拉财务数据、一个去 RAG 检索研报、一个画图，三件事并行</strong>，
+    最后由 primary agent 合成 PDF。这是 MimoCode 直接送给我们的并发模型。</p>
+</div>
+</section>
+
+<section id="s6">
+<h2><span class="section-num">6</span>Goal 与 Judge 模型</h2>
+
+<p>这一节是 MimoCode 最有"研究气质"的设计。</p>
+
+<p>问题：autonomous agent 在长任务里有一个臭名昭著的失败模式——<strong>"optimistic stop"</strong>，
+也就是模型觉得"我做完了"然后停下来，但其实没完成。OpenCode 里这种事经常发生。</p>
+
+<p>MimoCode 的解决方案：</p>
+
+<ol>
+    <li>用户用 <code>/goal "完成因子评估并通过验收"</code> 设置一个停止条件</li>
+    <li>Agent 想要停止时，<strong>系统先调用一个独立的 judge model</strong></li>
+    <li>Judge 拿到整个对话历史，独立判断："这个 goal 真的满足了吗？"</li>
+    <li>Judge 说 yes → 停；说 no → agent 必须继续</li>
+</ol>
+
+<p>这个设计的精髓在于<strong>判断者和执行者分离</strong>。执行者天然乐观（它做了很多工作，倾向于说"够了"），
+判断者只看结果（没有付出沉没成本，更客观）。</p>
+
+<div class="box danger">
+    <div class="box-label">这是我们设计文档"程序化验收"的灵魂版本</div>
+<section id="s7">
+<h2><span class="section-num">7</span>Compose Mode：specs-driven 工作流</h2>
+
+<p>OpenCode 的工作模式是 <code>build</code>（写代码）和 <code>plan</code>（只读分析）二选一。
+MimoCode 引入了第三种 primary agent —— <code>compose</code>，它<strong>把整个软件开发周期编成了一套可调用的 skills</strong>：</p>
+
+<pre><code>brainstorm  →  plan  →  execute  →  review  →  tdd
+                                                   ↓
+                                  verify  ←  debug
+                                     ↓
+                                   merge
+</code></pre>
+
+<p>每一步都是一个 SKILL.md：</p>
+
+<div class="kv">
+    <dt>brainstorm</dt><dd>把模糊需求拆成清晰的 spec</dd>
+    <dt>plan</dt><dd>spec 转工程计划，<strong>包含完整文件结构、任务清单、测试方案</strong></dd>
+    <dt>execute</dt><dd>按 plan 实施</dd>
+    <dt>review</dt><dd>独立 reviewer 模型做 code review</dd>
+    <dt>tdd</dt><dd>测试先行</dd>
+    <dt>debug</dt><dd>失败时的诊断 skill</dd>
+    <dt>verify</dt><dd>最终验收</dd>
+    <dt>merge</dt><dd>合并到主分支</dd>
+    <dt>parallel</dt><dd>多 subagent 并行调度</dd>
+    <dt>worktree</dt><dd>用 git worktree 做隔离开发</dd>
+    <dt>subagent</dt><dd>显式启动子 agent</dd>
+    <dt>report</dt><dd>结构化报告产出</dd>
+    <dt>feedback / ask</dt><dd>主动征求人类反馈</dd>
+    <dt>new-skill</dt><dd>由 agent 自己写新 skill</dd>
+</div>
+
+<div class="box success">
+    <div class="box-label">这对我们是天降甘霖</div>
+    <p>QuantCode 设计文档 §2 的"任务拆分 + 程序化验收"在 compose mode 里已经被实现一遍了。
+    我们要做的不是<strong>重新发明</strong>这套工作流，而是<strong>在 compose 之上加业务 skill</strong>——
+    比如 <code>quant:risk-gate</code> 直接复用 <code>compose:verify</code> 的验收骨架，只换业务阈值。</p>
+</div>
+</section>
+
+<section id="s8">
+<h2><span class="section-num">8</span>Dream 与 Distill：自我改进</h2>
+
+<p>这是 MimoCode 最具有"未来感"的两个命令。</p>
+
+<h3>8.1 /dream — 知识沉淀</h3>
+<p>扫描最近会话的 trace，<strong>把反复出现的、值得长期持有的知识提取到 MEMORY.md</strong>，并删除过期条目。
+本质上是 agent 的"睡眠记忆固化"——白天工作累积的临时记忆，晚上整理成长期记忆。</p>
+
+<h3>8.2 /distill — 工作流封装</h3>
+<p>检查最近的手动操作，<strong>识别重复的工作流，把高置信度的候选打包成新的 skill / subagent / command</strong>。
+也就是说，<strong>agent 可以自己写新的 skill</strong>。</p>
+
+<p>例子：你前三周手动跑了 5 次"读财报 → 提取关键数字 → 写 markdown summary"，distill 会问你："要不要我把这个流程做成一个 skill <code>financial-summary</code>？"
+你说 yes，它就生成 SKILL.md 写入 <code>.mimocode/skills/</code>。</p>
+
+<div class="box info">
+    <div class="box-label">对量化团队的杠杆</div>
+    <p>我们最重的工作是把"研究员的隐性工作流"转成"机器可执行 pipeline"。
+    Distill 提供了一条<strong>"边用边沉淀"</strong>的路——研究员只管手工跑业务，agent 在后台观察、提议、封装。
+    这是从"显式编码所有 skill"到"涌现 skill"的范式转换。</p>
+</div>
+</section>
+
+<section id="s9">
+<h2><span class="section-num">9</span>Voice：语音输入</h2>
+
+<p>OpenCode 没有原生语音。MimoCode 做了一套<strong>流式语音输入</strong>：</p>
+
+<ul>
+    <li>VAD（语音活动检测）：<strong>TenVAD</strong>，按停顿切片</li>
+    <li>ASR：<strong>MiMo ASR</strong>（小米自家），逐段转写到输入框</li>
+    <li>触发：<code>/voice</code> 命令</li>
+    <li>依赖：<code>sox</code>（命令行音频工具）</li>
+</ul>
+
+<p>对量化团队是不是必需？<strong>未必</strong>。但有两个场景可能有用：</p>
+
+<ol>
+    <li>研究员开会时口述"我要看一下今天宁德时代的新闻流和情绪"，agent 直接接住</li>
+    <li>跑长任务时不想打字，可以语音追加指令</li>
+</ol>
+
+<div class="box warn">
+    <div class="box-label">注意点</div>
+<section id="s10">
+<h2><span class="section-num">10</span>Max Mode：best-of-N + judge</h2>
+
+<p>这是 MimoCode 的<strong>实验特性</strong>，藏在 <code>experimental.maxMode</code> 配置里。</p>
+
+<p>思路：对于关键决策，<strong>并行让 N 个模型实例独立给答案</strong>，然后一个 judge 模型选出最好的一个。
+本质上是把"模型采样不稳定"问题用集成来缓解。</p>
+
+<div class="kv">
+    <dt>开销</dt><dd>token 成本 ×N（默认 3-5），延迟约 ×1.2（并行）</dd>
+    <dt>收益</dt><dd>关键节点正确率显著提升，尤其在边缘 case 上</dd>
+    <dt>适用场景</dt><dd>架构决策、code review、生成验收报告等"错了代价大"的任务</dd>
+    <dt>不适用</dt><dd>日常补全、简单工具调用</dd>
+</div>
+
+<div class="box warn">
+    <div class="box-label">对量化场景的应用</div>
+    <p>风控门禁场景是典型适用——
+    <strong>风控判断错了代价远大于多花一些 token</strong>。
+    我们的 <code>risk-gate</code> skill 可以默认开启 Max Mode，
+    其他低风险的 skill（如 RAG 检索结果摘要）保持单实例。</p>
+</div>
+</section>
+
+<section id="s11">
+<h2><span class="section-num">11</span>Provider 整合：MiMo Auto 与 Claude Code 一键迁移</h2>
+
+<p>OpenCode 启动时需要用户自己配置 provider 和 API key，对新用户门槛高。MimoCode 做了三件事降低门槛：</p>
+
+<h3>11.1 MiMo Auto 免配置 channel</h3>
+<p>首次启动可以选 <strong>MiMo Auto（free for limited time）</strong>，匿名 channel，零配置就能跑。
+背后用的是小米自家模型（MiMo 系列）。</p>
+
+<h3>11.2 从 Claude Code 一键迁移</h3>
+<p>如果用户之前用 Claude Code，MimoCode 提供 <strong>"Import from Claude Code"</strong> 选项，
+一键迁移已有的 Anthropic 认证。这对从 Claude Code 切换过来的人是<strong>零摩擦体验</strong>。</p>
+
+<h3>11.3 Custom Provider in TUI</h3>
+<p>OpenAI 兼容的 provider 可以在 TUI 里直接添加，不用编辑配置文件。</p>
+
+<div class="box info">
+    <div class="box-label">对我们的策略含义</div>
+    <p>团队成员各自有自己习惯的 LLM provider（Claude / GPT / DeepSeek / 国产模型）。
+    MimoCode 的多 provider 设计意味着<strong>我们不需要锁定一家</strong>——
+    Lead 用 Claude Opus，组员用 DeepSeek，CI 用便宜的 batch 模型，都在同一个 MimoCode 框架里跑。</p>
+</div>
+</section>
+
+<section id="s12">
+<h2><span class="section-num">12</span>对 QuantCode 的意义</h2>
+
+<p>这一节把前面所有改进映射到 QuantCode 的具体决策上。</p>
+
+<h3>12.1 设计文档里要自建的，哪些其实不用</h3>
+<table>
+    <thead><tr><th>原计划自建</th><th>MimoCode 已经提供</th><th>建议</th></tr></thead>
+    <tbody>
+        <tr><td>子任务调度器</td><td>树状任务系统</td><td><strong>砍掉</strong>，直接用</td></tr>
+        <tr><td>checkpoint / 重放机制</td><td>自动 checkpoint + 重建</td><td><strong>砍掉</strong></td></tr>
+        <tr><td>状态外化到文件</td><td>MEMORY.md / progress.md</td><td><strong>砍掉</strong></td></tr>
+        <tr><td>子任务并行编排</td><td>Subagent + parallel skill</td><td><strong>砍掉</strong></td></tr>
+        <tr><td>半程序化验收（人工 gate）</td><td>Goal + Judge model</td><td><strong>砍掉</strong>，用 Judge</td></tr>
+        <tr><td>spec 到代码的工作流</td><td>Compose mode</td><td><strong>砍掉</strong>，直接复用</td></tr>
+        <tr><td>JSON Schema 业务契约</td><td>—</td><td><strong>保留</strong>，这是我们的 IP</td></tr>
+        <tr><td>量化业务 skill（risk / factor / pdf / rag）</td><td>—</td><td><strong>保留</strong>，全力做</td></tr>
+        <tr><td>程序化验收阈值（量化指标）</td><td>—</td><td><strong>保留</strong>，写在 runner 里</td></tr>
+        <tr><td>Typst 研报模板</td><td>—</td><td><strong>保留</strong>，扒中金研报实现</td></tr>
+    </tbody>
+</table>
+
+<h3>12.2 五个 Track 的工作量重估</h3>
+<table>
+    <thead><tr><th>Track</th><th>原估</th><th>重估</th><th>变化</th></tr></thead>
+    <tbody>
+        <tr><td>T0 地基</td><td>大（调度器 + 状态 + 验收）</td><td>中（JSON Schema + 业务 runner）</td><td>−60%</td></tr>
+        <tr><td>T1 风控门禁</td><td>中</td><td>中（业务逻辑没法省）</td><td>持平</td></tr>
+        <tr><td>T2 RAG</td><td>大</td><td>中（subagent 编排省了）</td><td>−30%</td></tr>
+        <tr><td>T3 研报 PDF</td><td>大</td><td>中（compose:plan / execute 复用）</td><td>−40%</td></tr>
+        <tr><td>T4 因子评估</td><td>中</td><td>中</td><td>持平</td></tr>
+    </tbody>
+</table>
+
+<h3>12.3 我们要做的真正的事</h3>
+<p>把整个项目重新定位为<strong>"在 MimoCode 上写量化 skills"</strong>，而不是"造一个量化平台"。
+我们的 IP 是<strong>业务知识的编码</strong>（JSON Schema、阈值、Typst 模板、prompt 工程），
+不是<strong>工具链本身</strong>。</p>
+</section>
+
+<section id="s13">
+<h2><span class="section-num">13</span>小结与取舍</h2>
+
+<p>MimoCode 在 OpenCode 之上的改进，<strong>本质是把"短交互助手"升级为"长任务工程平台"</strong>。
+持久化记忆、自动 checkpoint、Goal/Judge、Compose mode 这四件事是核心；
+Dream/Distill/Voice/Max Mode 是锦上添花。</p>
+
+<p>取舍上，MimoCode 也付出了代价：</p>
+
+<ul>
+    <li><strong>复杂度增加</strong>：相比 OpenCode 的"一次会话一次 task"，新用户需要理解 memory / checkpoint / task tree / subagent 这套体系</li>
+    <li><strong>磁盘占用</strong>：MEMORY.md / checkpoint.md / notes.md 等文件需要管理</li>
+    <li><strong>调试难度</strong>：subagent 并行 + 自动 checkpoint 之后，"为什么 agent 做了 X" 更难追溯</li>
+    <li><strong>厂商绑定风险</strong>：MiMo Auto / MiMo ASR 这些免费 channel 依赖小米自家服务</li>
+</ul>
+
+<div class="box success">
+    <div class="box-label">一句话总结</div>
+    <p><strong>"OpenCode 给你 agent，MimoCode 给你 agent 的工程化生命周期。"</strong>
+    对 QuantCode 而言，这意味着我们不用造工具链，只用造业务——
+    把港科大量化协会的隐性流程，编译成 MimoCode 跑得动的 skills。</p>
+</div>
+</section>
+
+<footer class="footer">
+    <p>项目分析 · MimoCode vs OpenCode · 改进点全景</p>
+    <p style="margin-top: 6px;">基于 XiaomiMiMo/MiMo-Code README + 源码（2026-06-27）整理 · 供 QuantCode 团队内部使用</p>
+</footer>
+
+</div>
+</body>
+</html>
+
+
+
+
+
