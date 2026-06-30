@@ -15,7 +15,8 @@
     },
     "skill": {
       "type": "string",
-      "enum": ["risk-gate", "pit-rag", "research-pdf", "factor-eval"]
+      "description": "OpenCode skill 名称，自由扩展（参考 .opencode/groups/<group>/skills/）",
+      "examples": ["risk-gate", "pit-rag", "research-pdf", "factor:autoeval", "model:pr-submit"]
     },
     "status": {
       "type": "string",
@@ -27,9 +28,14 @@
         "name": { "type": "string" },
         "group": {
           "type": "string",
-          "enum": ["fundamentals", "factor", "model", "risk", "strategy", "agent"]
+          "enum": ["fundamental", "factor", "model", "risk", "strategy", "options", "agent"]
         }
       }
+    },
+    "compose_flow": {
+      "type": "string",
+      "description": "触发本 task 的 Compose 流",
+      "enum": ["fundamental", "factor", "model", "risk", "strategy", "options"]
     },
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },

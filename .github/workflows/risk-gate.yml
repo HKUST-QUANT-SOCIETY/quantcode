@@ -6,6 +6,10 @@ on:
       - 'strategies/**'
       - 'factors/**'
 
+# Owner: 杨欣琳（T2 风控 / 跨组接收）
+# 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
+# 副作用（写 PR 评论）依赖 tools/utils/dedupe.py（陈镇鸿 Day 1 实现）
+
 jobs:
   risk-gate:
     runs-on: ubuntu-latest
@@ -24,12 +28,17 @@ jobs:
           pip install -e .
           pip install jsonschema
 
-      # TODO: T1 owner（陈振宏）实现
-      - name: Run risk-gate skill via MimoCode
-        run: echo "TODO: invoke mimocode skill risk-gate against PR diff"
+      # TODO(杨欣琳): 通过 OpenCode CLI 触发 risk-gate skill
+      # 计划：bunx opencode run --skill risk-gate --input pr-diff.json
+      - name: Run risk-gate skill via OpenCode
+        run: echo "TODO: invoke opencode skill risk-gate against PR diff"
 
       - name: Validate JSON output
         run: echo "TODO: python -m runner.schema_validator risk-profile artifacts/risk.json"
 
       - name: Run acceptance
         run: echo "TODO: python -m runner.acceptance risk-gate artifacts/risk.json"
+
+      # TODO(杨欣琳): 写 PR 评论必须通过 @dedupe_within 装饰
+      - name: Comment on PR (deduped)
+        run: echo "TODO: python -m tools.utils.dedupe_test --commit ${{ github.event.pull_request.head.sha }}"

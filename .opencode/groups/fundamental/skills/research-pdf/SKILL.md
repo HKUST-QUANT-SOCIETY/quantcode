@@ -1,6 +1,9 @@
 ---
 name: research-pdf
 description: 从结构化输入生成中金/华泰风格的专业 PDF 研报
+group: fundamental
+owner: 用户（Lead）主 / 刘炽 副
+pattern: Pattern 1 (Orchestrator-Worker)
 ---
 
 # Research PDF Skill
@@ -11,7 +14,7 @@ description: 从结构化输入生成中金/华泰风格的专业 PDF 研报
 
 ## 输入
 
-符合 `schemas/research-spec.schema.json` 的研究规格。
+符合 `schemas/research-spec.schema.json` 的研究规格（`ResearchSpec`）。
 
 ## 工作流程
 
@@ -42,8 +45,8 @@ description: 从结构化输入生成中金/华泰风格的专业 PDF 研报
 - PDF 渲染成功（exit code 0）
 - 所有章节非空
 - 至少 10 条引用
-- **人工验收（半程序化）**：研究员愿意发出去 = 通过
+- **人工验收（半程序化）**：研究员愿意发出去 = 通过（走 HumanGate）
 
 ## 模板
 
-`templates/typst/research-report.typ` 由 T3 owner 维护，需对齐中金研报版式。
+`templates/typst/research-report.typ` 由刘炽维护，需对齐中金研报版式，Day 1 由 Lead 与刘炽共同拆解版式。

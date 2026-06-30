@@ -1,19 +1,25 @@
 ---
 name: pit-rag
 description: 量化研究专用 RAG，强制 point-in-time 时点正确，杜绝 lookahead bias
+group: fundamental
+owner: 用户（Lead）
+shared_with: [risk, model]
+pattern: Pattern 2 (Stateful Blackboard)
 ---
 
 # Point-in-Time RAG Skill
 
 ## 何时使用
 
-当用户需要在某个历史时点检索研报、公告、纪要或财务数据时调用。
+当用户需要在某个历史时点检索研报、公告、纪要或财务数据时调用。基本面组的 `fundamental:fetch` 默认依赖此 skill；风控组在做历史 PR 复盘时也可调用。
 
 ## 关键约束
 
 **所有检索结果必须满足 `published_at <= as_of_date`**。这是量化 RAG 与普通 RAG 的核心差异。
 
 ## 输入
+
+符合 `PITQuery` schema（Lead 在 Day 1 起草）：
 
 - query：自然语言研究问题
 - as_of_date：检索的时点（YYYY-MM-DD）
@@ -25,11 +31,11 @@ description: 量化研究专用 RAG，强制 point-in-time 时点正确，杜绝
 2. 向量检索，召回 top-k 候选
 3. **时点过滤**：丢弃所有 `published_at > as_of_date` 的文档
 4. 二次重排（rerank）按相关性 + 时间衰减
-5. 输出结构化结果
+5. 输出 `PITResult` schema 结构化结果
 
 ## 输出 schema
 
-见 `schemas/research-spec.schema.json` 的 `retrieval` 字段。
+`PITResult`（见 schemas/，Day 1 由 Lead 起草），同时填充 `schemas/research-spec.schema.json` 的 `retrieval` 字段。
 
 ## 验收标准
 
@@ -39,6 +45,6 @@ description: 量化研究专用 RAG，强制 point-in-time 时点正确，杜绝
 
 ## 数据依赖
 
-- 向量库：Chroma（本地起步）
+- 向量库：Chroma（本地起步，Day 2 由 Lead 主导上线）
 - 切片策略：按段落 + 重叠 50 token
 - Embedding：bge-large-zh-v1.5 或 OpenAI text-embedding-3

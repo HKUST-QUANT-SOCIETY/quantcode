@@ -1,7 +1,7 @@
 # Day 1 任务清单
 
 > **日期**：开发启动日（具体日期由 Lead 编排）
-> **总体目标**：6 个人都能本地跑起 OpenCode fork；v1 Pydantic schema 评审通过（**7 套**）；至少一个自定义 SKILL.md 被 OpenCode 成功加载并调用；副作用 tool 去重保险栓上线。
+> **总体目标**：5 人能本地跑起 OpenCode fork（俞高磊暂不计入）；v1 Pydantic schema 评审通过（**8 套**：三大契约 + 5 套业务）；至少一个自定义 SKILL.md 被 OpenCode 成功加载并调用；副作用 tool 去重保险栓上线。
 > **核心理念**：能 mock 就 mock，先把闭环跑通。今天不追求功能完整，追求**链路打通 + 三大生产模式各有契约**。
 > **架构基石**：Pattern 1 (Orchestrator-Worker) + Pattern 2 (Stateful Blackboard) + Pattern 5 (Human Gate) + 副作用 tool dedupe 保险栓。详见 `docs/QuantCode_Design.md §3.2`。
 
@@ -25,7 +25,7 @@
 
 | 组员 | 读什么 | 汇报什么 |
 |---|---|---|
-| 用户（Lead） | [LangGraph](https://github.com/langchain-ai/langgraph) state machine + checkpoint | 我们的 `ComposeTask` 和 `BlackboardState` schema 怎么改 |
+| 用户（Lead） | [LangGraph](https://github.com/langchain-ai/langgraph) state machine + checkpoint **设计思路**（不引入运行时） | 我们的 `ComposeTask` 和 `BlackboardState` schema 怎么借鉴 |
 | 陈镇鸿 | [Temporal](https://learn.temporal.io/tutorials/ai/durable-ai-agent/) durable execution（只学 checkpoint，不学 event log） | 怎么保证 Pattern 2 的状态恢复正确；同时学习如何写 `@dedupe_within` 装饰器 |
 | 杨欣琳 | [barkain/claude-code-workflow-orchestration](https://github.com/barkain/claude-code-workflow-orchestration) | OpenCode 插件机制 + `HumanGate` 设计 |
 
@@ -139,7 +139,7 @@
 
 ### 议程
 
-1. **Schema 评审结论**（10 分钟）：7 套 schema 是否全部通过？没通过的卡在哪？特别确认三大契约（ComposeTask / BlackboardState / HumanGate）已冻结
+1. **Schema 评审结论**（10 分钟）：**8 套 schema** 是否全部通过？没通过的卡在哪？特别确认三大契约（ComposeTask / BlackboardState / HumanGate）已冻结
 2. **各 Track 进展**（每人 3 分钟）：完成了什么、阻塞了什么
 3. **Day 2 优先级确认**（5 分钟）：谁先做什么
 4. **决策记录**（Lead 当场更新 `docs/QuantCode_Design.md` §11）
@@ -164,7 +164,7 @@
 | 风险 | 概率 | 影响 | 对策 |
 |---|---|---|---|
 | **三大契约评审分歧大，开 2 小时还没共识** | 中 | **高（业务 schema 全部阻塞）** | Lead 强制 "v1 先冻结，v2 再改"，给业务 schema 让路 |
-| OpenCode 本地跑不起来（Bun / TypeScript 环境问题） | 中 | 中 | 俞高磊 / 陈镇鸿先跑通，做"踩坑笔记" |
+| OpenCode 本地跑不起来（Bun / TypeScript 环境问题） | 中 | 中 | 陈镇鸿 / Lead 先跑通，做"踩坑笔记" |
 | AutoEval 接口对接卡住（仓库 owner 没空） | 高 | 中 | 肖骥超先 mock 接口，先把 schema 走通 |
 | 真实模型组 PR 拿不到 | 中 | 中 | 陈镇鸿用 fixture mock，不阻塞 |
 | **dedupe 装饰器没及时上线，前期 PR 评论刷屏** | 低 | 中 | 陈镇鸿 Day 1 上午必须先出装饰器，下午杨欣琳才接 |

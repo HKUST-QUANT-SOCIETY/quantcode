@@ -1,1 +1,1 @@
-"""Point-in-time RAG pipeline. Owner: P3 / 杨欣琳."""
+"""Point-in-time RAG pipeline. Owner: T3a / 用户（Lead）."""

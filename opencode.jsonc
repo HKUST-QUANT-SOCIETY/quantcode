@@ -1,0 +1,26 @@
+{
+  // QuantCode 项目配置 — OpenCode 入口
+  // 详细架构: docs/QuantCode_Design.md
+  "$schema": "https://opencode.ai/config.json",
+
+  // Provider 配置由各成员本地 opencode.local.jsonc 提供，不入库
+  "provider": {},
+
+  // 权限：高风险路径需 ask 或 deny
+  "permission": {
+    "edit": {
+      "vendor/**": "deny",
+      "schemas/**": "ask",
+      ".opencode/groups/**/skills/**": "ask",
+      ".github/workflows/**": "ask"
+    },
+    "bash": {
+      "rm -rf *": "deny",
+      "git push --force*": "deny",
+      "git push origin main": "ask"
+    }
+  },
+
+  // MCP servers（按需添加）
+  "mcp": {}
+}

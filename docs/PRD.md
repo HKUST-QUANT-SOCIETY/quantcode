@@ -1,26 +1,24 @@
 # QuantCode PRD — 产品需求文档
 
-> **版本**：v0（today, 团队会议前框架）
+> **版本**：v1（产品方向已落地到 OpenCode fork + 6 套 Compose 流）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
-> **最后更新**：2026-06-27
+> **最后更新**：2026-06-30
 
 ---
 
 ## 0. TL;DR
 
-> ⚠️ 本节需要团队会议后填写最终版本
-
 **一句话定义产品**：
-> QuantCode 是 HKUST QUANT SOCIETY 内部使用的量化投研 Agent 平台，把投研流程编译成确定性 pipeline，让 5 人 agent 组放大整个量化团队的产能。
+> QuantCode 是 HKUST QUANT SOCIETY 内部使用的量化投研 Agent 平台，**6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；流跑完自动接入生产主线**。
 
 **一句话定义目标用户**：
-> HKUST QUANT SOCIETY 的 5 个研究组（基本面、因子、模型、策略风控、期权），以及内部 agent 组本身。
+> HKUST QUANT SOCIETY 的 6 个研究/业务组（基本面、因子、模型、风控、策略、期权），以及内部 agent 组本身。
 
 **一句话定义核心价值**：
-> 把"人与人的协商"换成"机器与机器的 schema 校验"，把验收标准从"看一眼觉得行"换成"assert 通过/失败"。
+> 把"人与人的协商"换成"机器与机器的 schema 校验"，把验收标准从"看一眼觉得行"换成"`assert` 通过/失败 + Goal/Judge"。
 
 **Agent 搭建边界**：
-> QuantCode 不是单纯写一组量化函数库。因子函数、评估配置、风控阈值是 Agent 要调用的工具输入；真正的 Agent 工作是把研究员需求路由到 skill，补齐上下文，调用 pipeline，执行 schema/assert 验收，并把结果写回 PR、报告或 artifact。
+> QuantCode 不是单纯写一组量化函数库。因子函数、评估配置、风控阈值是 Agent 调用的工具输入；真正的 Agent 工作是把研究员需求路由到 Compose 流的对应 skill，补齐上下文，按 Pattern 1/2/5 调度，执行 schema/assert 验收，并把结果写回 PR、报告或 artifact。
 
 ---
 
@@ -28,7 +26,7 @@
 
 ### 1.1 当前痛点
 
-- **跨组协作的隐性损耗**：模型组提 PR 后需要和策略风控组协商，风控判断标准不统一，流程慢
+- **跨组协作的隐性损耗**：模型组提 PR 后需要和风控组协商，风控判断标准不统一，流程慢
 - **研报生产不可复用**：每份基本面研报都是手写，结构没法批量生成
 - **因子评估口径不一**：每个人算 IC 用的样本和方法不同，难以横向比较
 - **AI 工具孤立使用**：组员各自调 ChatGPT / Cursor，没有沉淀成团队资产
@@ -36,15 +34,16 @@
 
 ### 1.2 现有方案为什么不够
 
-- **直接用 MimoCode / Claude Code**：通用，没有量化业务知识，每次都要重新喂上下文
-- **Fork MimoCode 改源码**：会被上游变更和合并冲突拖死，不是 5 人小组该做的事
-- **完全自建一个 IDE**：和腾讯 Workbench 比拼端到端体验，必死
+- **直接用 OpenCode / MimoCode / Claude Code**：通用，没有量化业务知识，没有按组分发，每次都要重新喂上下文
+- **完全自建 IDE**：和腾讯 Workbench 比拼端到端体验，必死
+- **只做 4 个独立 skill**：协会要的是覆盖 6 个组的工作流编排，单点 skill 解决不了跨组协作
 
 ### 1.3 为什么是现在
 
-- MimoCode 2026-06 开源，扩展机制成熟（skills / plugins / config 三件套）
-- LLM 长上下文能力足够支撑 30 分钟以上的研究任务
-- 团队有真实痛点（模型组和策略风控组协作摩擦），有 6 人 agent 组可以建设
+- OpenCode 2026 H1 趋于稳定，扩展机制成熟（plugin / tool / SKILL.md / Compose Mode 四件套）
+- MimoCode 已开源 Memory / Checkpoint / Subagent / Goal / Dream / Distill，可 cherry-pick
+- LLM 长上下文能力足够支撑 30 分钟以上的研究任务，配合 Pattern 2（Blackboard）可外化长状态
+- 团队有真实痛点（模型组和风控组协作摩擦），有 6 人 agent 组可以建设
 
 ---
 
@@ -55,27 +54,28 @@
 | 组 | 人数 | 主要工作 | 对 QuantCode 的需求 |
 |---|---|---|---|
 | **基本面组** | 2-3 | 公司研究、行业研究、写研报 | 快速生成专业 PDF、point-in-time 检索研报 |
-| **因子组** | 3-4 | 因子开发、因子评估 | 标准化的因子评估流水线、横向比较 |
-| **模型组** | 3-4 | 策略建模、机器学习因子 | 提 PR 后自动风控反馈、无需反复同步策略风控组 |
-| **策略风控组** | 2-3 | 组合构建、调仓决策、策略风控 | 程序化阈值，24h 自动执行风控规则，统一策略评估口径 |
-| **期权组** | 1-2 | 期权定价、波动率研究、对冲策略 | 期权数据处理、波动率曲面、希腊字母和组合风险评估 |
+| **因子组** | 3-4 | 因子开发、因子评估 | 标准化因子评估、接 AutoFactorEvaluation、横向比较 |
+| **模型组** | 3-4 | 策略建模、机器学习因子 | 提 PR 后自动风控反馈，无需反复同步风控组 |
+| **风控组** | 2-3 | 风险评估、PR 审批 | 程序化阈值，24h 自动执行风控规则，HumanGate 兜底人审 |
+| **策略组** | 2-3 | 组合构建、调仓决策 | 标的筛选、组合优化、回测 |
+| **期权组** | 1-2 | 期权定价、波动率研究、对冲策略 | 期权数据处理、波动率曲面、Greeks 和组合风险 |
 | **Agent 组**（我们） | 6 | 建设和维护 QuantCode | dogfood：每天用自己的工具 |
 
-### 2.2 典型工作流变化
+### 2.2 典型工作流变化（模型 → 风控）
 
 **模型组同学的"今天"**：
 1. 写完一个新的 ML 因子，提 PR
-2. 微信群里 @ 策略风控组，问"我这个 max_drawdown 算得对吗"
-3. 策略风控组同学有空了才看，可能 1-2 天
+2. 微信群里 @ 风控组，问"我这个 max_drawdown 算得对吗"
+3. 风控组同学有空了才看，可能 1-2 天
 4. 来回讨论 3-5 轮，统一口径
 5. 终于 merge
 
 **模型组同学的"明天"**：
-1. 写完一个新的 ML 因子，提 PR
-2. CI 自动触发 risk-gate agent
-3. 10 分钟内 PR 评论里出现风控 JSON + 自动结论
-4. 不满足阈值 → 自动打回并附原因；满足 → 自动 approve 等人 review
-5. 策略风控组只需要 review JSON，不用从 0 开始算
+1. 在 QuantCode 用 `model` Compose 流（`model:pr-submit` skill 自动填风控元数据）
+2. 自动触发风控组的 `risk` Compose 流（`risk:detect → analyze → schema-gen → ci-gate`）
+3. 10 分钟内 PR 评论里出现 `RiskProfile` JSON + 自动结论
+4. 越过阈值 → 走 `HumanGate`，等风控组同学人工审批；通过阈值 → 自动 approve 等人 review
+5. 风控组只需要 review JSON，不用从 0 开始算
 
 ---
 
@@ -83,148 +83,108 @@
 
 ### 3.1 必做（P0，MVP）
 
-四个核心 skill，每个独立可用：
+**6 套 vertical Compose 流**（按组分发，详见 Design §4.3）：
 
-| Skill | 价值 | 验收 |
+| Compose 流 | 价值 | Owner |
 |---|---|---|
-| `risk-gate` | PR 风控门禁 | 一个真实 PR 走完流程，策略风控组认可输出 |
-| `pit-rag` | Point-in-time 检索 | 时点过滤无 lookahead bias |
-| `research-pdf` | 中金风格 PDF 研报 | 研究员愿意发出去 |
-| `factor-eval` | 因子有效性评估 | IC/IR/换手自动算出，符合 schema |
+| `fundamental` | 基本面研究 + 研报 PDF | 用户（Lead） |
+| `factor` | 因子开发 → AutoEval → 主线 | 肖骥超 |
+| `model` | 模型 PR 元数据 → 跨组发起 | 陈镇鸿 |
+| `risk` | PR 风控门禁 → HumanGate | 杨欣琳 |
+| `strategy` | 组合构建、回测、上线 | 待定 |
+| `options` | 波动率曲面、Greeks、对冲 | 刘炽 |
 
-加共用基础设施：
+**三大生产模式的契约**（所有 Compose 流的架构基石）：
 
-- JSON Schema 契约（4 套）
-- 验收 runner（公用）
+| Schema | 对应模式 | Owner |
+|---|---|---|
+| `ComposeTask` | Pattern 1 (Orchestrator-Worker) | 用户（Lead） |
+| `BlackboardState` | Pattern 2 (Stateful Blackboard) | 用户（Lead） |
+| `HumanGate` | Pattern 5 (Human-in-the-Loop Gate) | 杨欣琳 |
+
+**业务 schema**：`ModelSpec` / `RiskProfile` / `FactorSpec` / `ResearchSpec` / `PITQuery` + `PITResult`
+
+**共用基础设施**：
+
+- 验收 runner（公用，吃 JSON 吐 pass/fail + Goal/Judge）
 - GitHub Actions CI gate
+- `@dedupe_within` 副作用 tool 去重保险栓（约 30 行装饰器 + SQLite）
+- 从 MimoCode cherry-pick：Memory（FTS5）、Checkpoint、Subagent、Goal/Judge、Dream/Distill
 
 ### 3.2 应做（P1，MVP 之后）
 
-- `data-fetch`：自动化数据拉取（依赖基建组的数据库）
-- `factor-synthesis`：因子合成建议
-- `ppt-gen`：投资人 pitch deck 自动生成
-- `meeting-notes`：会议纪要结构化
-- Web dashboard：观察所有 pipeline 跑状态
+- **Compose 视图前端**（OpenCode desktop fork UI 改造：Compose 视图、任务树、Subagent 监控）
+- **idea-router agent**（核心：把任意 idea 路由到对应组的 Compose 流）
+- **Schema 动态生成**（LLM 读 idea + 主线，输出 Pydantic 类）
+- **跨组通知中心**（HumanGate 触发后的统一通知面板）
+- **Dog Food 模块**（每周自动爬 GH Trending / Twitter / Reddit）
 
 ### 3.3 不做（明确边界）
 
-- ❌ **自建 IDE / 桌面端 / 终端 UI** —— MimoCode 已经提供
-- ❌ **Fork MimoCode 源码** —— 用扩展机制做加法
+- ❌ **自建 IDE / 桌面端 / 终端 UI** —— OpenCode 已经提供，我们只改 desktop UI 加业务面板
+- ❌ **Fork MimoCode 源码** —— 从 MimoCode cherry-pick 模块到我们的 OpenCode fork
 - ❌ **多租户 SaaS / 对外服务** —— 我们是内部工具
-- ❌ **自建 LLM 训练** —— 用 Claude / GPT / MiMo Auto
+- ❌ **自建 LLM 训练** —— 用 Claude / GPT
 - ❌ **造数据基建** —— 让基建组负责，agent 组消费
+- ❌ **Supervisor/Verifier 独立 agent**（Pattern 3） —— 量化验收天然量化，`assert` + Goal/Judge 已够
+- ❌ **Event-Driven Pub/Sub**（Pattern 4） —— 6 人小团队 A→B 直接调用足够
+- ❌ **完整 Idempotent Retry Chain**（Pattern 6） —— 副作用 tool dedupe 兜底，不做完整哈希链
 
 ---
 
-## 4. 功能详述（4 个核心 skill）
+## 4. 功能详述（核心 P0）
 
-### 4.1 risk-gate（PR 风控门禁）
+### 4.1 6 套 vertical Compose 流
+
+每套流 = 一组 SKILL.md + 调度规则 + 默认 tool 集 + MEMORY.md。详细 skill 列表见 `docs/QuantCode_Design.md` §4.3。
+
+#### 4.1.1 risk Compose 流（PR 风控门禁）
 
 **用户故事**：
-> 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，这样我不用等策略风控组人工 review 就知道哪里要改。
+> 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，不用等风控组人工 review 就知道哪里要改。
 
-**输入**：
-- PR diff（GitHub Actions context）
-- 策略代码路径
+**核心 skill**：`risk:detect → analyze → schema-gen → ci-gate → feedback`
 
-**输出**：符合 `schemas/risk-profile.schema.json`
+**输入**：PR diff + `ModelSpec`（模型组 PR 元数据）
 
-**验收标准**（程序化）：
+**输出**：符合 `schemas/risk-profile.schema.json` 的 `RiskProfile`
+
+**验收标准**：
 ```python
 assert risk_json["max_drawdown"] <= 0.20
 assert risk_json["position_limit"] <= 0.30
 assert abs(risk_json["correlation_with_existing"]) <= 0.60
-assert risk_json["tail_risk_var_99"] is not None  # 必须有 VaR
+assert risk_json["tail_risk_var_99"] is not None
+# 越过阈值时自动触发 HumanGate
 ```
 
-**Owner**：陈镇鸿（T1）
+**Owner**：杨欣琳（T2）；统计公式由肖骥超提供
 
----
+#### 4.1.2 fundamental Compose 流（基本面 + PIT-RAG）
 
-### 4.2 pit-rag（Point-in-Time RAG）
+**核心 skill**：`fundamental:brainstorm → fetch → extract → dcf → draft → render → review → publish`
 
-**用户故事**：
-> 作为基本面研究员，我要在 2024-03-15 这个时点做蜜雪冰城研报，需要检索"当时能看到的"所有研报和公告。系统必须保证不会给我 2024-03-16 之后发布的信息（lookahead bias）。
+**关键约束**：`pit-rag` 强制 `published_at <= as_of_date`，杜绝 lookahead bias
 
-**输入**：
-```json
-{
-  "query": "蜜雪冰城 2023 年度财务分析",
-  "as_of_date": "2024-03-15",
-  "corpus": ["research_reports", "announcements"]
-}
-```
-
-**输出**：
-```json
-{
-  "documents": [
-    {
-      "id": "cicc-2097hk-2024-02-20",
-      "source": "中金公司",
-      "published_at": "2024-02-20",
-      "snippet": "...",
-      "score": 0.89
-    }
-  ]
-}
-```
+**输入**：`PITQuery`（query + as_of_date + corpus）
+**输出**：`PITResult` → `ResearchSpec` → research.pdf
 
 **验收标准**：
 ```python
-for doc in output["documents"]:
-    assert doc["published_at"] <= input["as_of_date"]
+for doc in result["documents"]:
+    assert doc["published_at"] <= query["as_of_date"]
+# 渲染 PDF 后人工验收：研究员愿意发出去 = 通过（走 HumanGate）
 ```
 
-**Owner**：杨欣琳（T2 主），用户（Lead，把关基本面检索口径）
+**Owner**：用户（Lead，T3a）；PDF 副手 刘炽
 
----
+#### 4.1.3 factor Compose 流（因子评估）
 
-### 4.3 research-pdf（研报 PDF 生成）
+**核心 skill**：`factor:brainstorm → match-main → gen-schema → execute → autoeval → risk-check → merge-main`
 
-**用户故事**：
-> 作为基本面研究员，我输入公司名 + 关注点，系统自动调研报 RAG、生成结构化章节、渲染出中金风格的 PDF。如果我愿意发给投资人，就算验收通过。
+**接入**：HKUST-QUANT-SOCIETY/auto_factor_evaluation
 
-**输入**：符合 `schemas/research-spec.schema.json`
-
-**工作流**：
-1. 调 `pit-rag` 拉数据
-2. LLM 生成各章节（markdown/JSON）
-3. 填 Typst 模板 → 渲染 PDF
-
-**输出**：
-```json
-{
-  "pdf_path": "artifacts/research/2097HK-2026-06-27.pdf",
-  "sections_generated": ["overview", "business", "financials", "valuation", "risks"],
-  "citations_count": 23
-}
-```
-
-**验收标准**（半程序化）：
-- PDF 渲染成功（exit code 0）
-- 所有章节非空 ✓
-- 至少 10 条引用 ✓
-- **人工验收**：研究员愿意发 = 通过
-
-**Owner**：用户（T3 主，基本面 workflow / 研报 spec），刘炽（PDF 渲染与 options workflow）
-
----
-
-### 4.4 factor-eval（因子评估）
-
-**用户故事**：
-> 作为因子组研究员，我写完一个新因子函数，系统自动跑 IC / IR / 换手 / 衰减 / 分层回测，输出标准化 JSON。我能快速和历史 50 个因子横向比较。
-
-**输入**：
-```python
-def my_factor(panel: pd.DataFrame) -> pd.Series:
-    return panel["eps_ttm"] / panel["close"]
-```
-
-加上 universe / date_range / benchmark。
-
-**输出**：符合 `schemas/factor-report.schema.json`
+**输出**：符合 `schemas/factor-report.schema.json` 的 `FactorReport`
 
 **验收标准**：
 ```python
@@ -236,6 +196,44 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 
 **Owner**：肖骥超（T4）
 
+#### 4.1.4 model Compose 流（模型 / 跨组发起）
+
+**核心 skill**：`model:brainstorm → lit-review → plan → execute → pr-submit → cross-handoff`
+
+**关键**：`model:pr-submit` 自动填风控元数据，`model:cross-handoff` 触发 risk Compose 流
+
+**Owner**：陈镇鸿（T1）；同时实现 `tools/utils/dedupe.py` 装饰器（杨欣琳依赖）
+
+#### 4.1.5 options Compose 流
+
+**核心 skill**：`options:brainstorm → vol-surface → greeks → execute`
+
+**Owner**：刘炽（T3b）
+
+#### 4.1.6 strategy Compose 流
+
+**核心 skill**：`strategy:brainstorm → select → combine → backtest → deploy`
+
+**Owner**：待定（暂未分配）
+
+### 4.2 三大生产模式契约
+
+详见 `docs/QuantCode_Design.md` §3.2 + §4.2.0。所有功能必须落到这三个契约之一。
+
+| Pattern | 落地 | Owner |
+|---|---|---|
+| **1 Orchestrator-Worker** | Compose Mode 中心调度 + SKILL.md/Subagent 工人 | Lead |
+| **2 Stateful Blackboard** | MEMORY.md / checkpoint.md / progress.md + SQLite FTS5 | Lead |
+| **5 Human-in-the-Loop Gate** | HumanGate schema + OpenCode permission 系统 | 杨欣琳 |
+
+**保险栓**：`@dedupe_within` 装饰器（陈镇鸿）覆盖 `github_pr_*` / `send_email` / `slack_notify` / `cross_team_notify`。
+
+### 4.3 共用基础设施
+
+- **验收 runner**（`runner/acceptance.py`）：吃 JSON 吐 pass/fail；阈值由 `pipelines/<flow>/config.yaml` 覆盖
+- **Schema 校验**（`runner/schema_validator.py`）：所有 Compose 流的输入输出强制校验
+- **CI gate**（`.github/workflows/risk-gate.yml`）：PR 触发 → OpenCode skill → schema → runner → PR 评论（去重）
+
 ---
 
 ## 5. 非功能性需求
@@ -245,115 +243,122 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - 一次因子评估（CSI 1000，3 年回溯）< 30s
 - pit-rag 检索 P95 延迟 < 500ms
 - 研报 PDF 生成 < 5min（含 RAG + LLM + 渲染）
+- 模型组 PR → 风控反馈 < 10min
 
 ### 5.2 可观测性
 
 - 每次 agent run 落 trace（OpenTelemetry 或简易 JSON log）
 - 每个 task 有 UUID，可追踪
 - runner 验收结果持久化（SQLite 本地）
+- 副作用 tool 调用进 dedupe 日志表，可审计
 
-### 5.3 可重放
+### 5.3 可重放（依赖 MimoCode 移植的 Checkpoint）
 
 - 任何 task 带 ID 可以 `quantcode replay <task_id>`
-- checkpoint 机制：长任务失败后不用从 0 重跑
+- Checkpoint：context > 70% 自动 snapshot；> 90% 触发上下文重建
+- 长任务（10h+）context 不丢失，可断点续跑
 
 ### 5.4 安全性
 
 - 敏感配置（API key / 数据库密码）不入库
-- `.mimocode/mimocode.local.jsonc` 本地覆盖
-- 高风险操作（删库、force push）permission 设为 deny
+- `opencode.local.jsonc` 本地覆盖（`.gitignore` 排除）
+- 高风险操作（删库、force push、修改 schemas/）permission 设为 deny / ask
+- 跨组发邮件 / 写 PR 评论强制走 `@dedupe_within`，防止刷屏
 
 ---
 
 ## 6. 技术架构
 
-### 6.1 总体图
+### 6.1 三层架构（详见 Design §3.1）
 
 ```
-              ┌────────────────────────┐
-              │     MimoCode（载体）     │
-              │   TUI / Desktop / IDE   │
-              └───────────┬────────────┘
-                          │ skill 调用
-              ┌───────────▼────────────┐
-              │   .mimocode/skills/    │  ← QuantCode IP
-              │   factor-eval          │
-              │   risk-gate            │
-              │   pit-rag              │
-              │   research-pdf         │
-              └───────────┬────────────┘
-                          │ Python import
-              ┌───────────▼────────────┐
-              │     pipelines/         │
-              │  （业务实现，Python）    │
-              └───────────┬────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-   ┌─────────┐      ┌─────────┐      ┌─────────┐
-   │ schemas │      │ runner  │      │templates│
-   │ 契约    │      │ 验收    │      │ Typst 等 │
-   └─────────┘      └─────────┘      └─────────┘
+                  ┌────────────────────────┐
+                  │       前端层（人）        │
+                  │ OpenCode desktop UI fork│
+                  │ + Compose 视图 + 任务树  │
+                  └───────────┬────────────┘
+                              │ HTTP / SSE
+                  ┌───────────▼────────────┐
+                  │     Agent 引擎层         │
+                  │ Layer 1: OpenCode 原生  │
+                  │ Layer 2: MimoCode 移植   │
+                  │ Layer 3: QuantCode 自建  │
+                  │   6 套 Compose 流        │
+                  │   idea-router agent      │
+                  │   Pydantic Schema 生成器  │
+                  └───────────┬────────────┘
+                              │
+                  ┌───────────▼────────────┐
+                  │       集成层             │
+                  │ AutoEval · Server A/B   │
+                  │ GitHub · ChromaDB · 爬虫 │
+                  └────────────────────────┘
 ```
 
-### 6.2 数据流（以 risk-gate 为例）
+### 6.2 数据流（以 model → risk 跨组为例）
 
 ```
-PR push → GitHub Actions → MimoCode CLI invoke skill
-       → pipelines/risk_gate/analyze.py → 输出 risk.json
-       → runner.acceptance.run_acceptance() → pass/fail
-       → 写回 PR 评论 + 决定是否阻塞 merge
+模型组用户在 model Compose 流提交 PR
+   → model:pr-submit skill 自动填 ModelSpec 元数据
+   → GitHub PR push
+   → GitHub Actions 触发 risk-gate workflow
+   → OpenCode CLI invoke risk-gate skill（杨欣琳的）
+   → pipelines/risk_gate/analyze.py 输出 RiskProfile JSON
+   → runner.acceptance.run_acceptance() 跑阈值校验
+   → 越过阈值：HumanGate 通知风控组同学
+   → 阈值内：@dedupe_within(github_pr_comment) 写 PR 评论 + 自动 approve
 ```
 
 ### 6.3 Schema 契约
 
-所有 skill 之间通过 JSON Schema 通信。schema 改动需要走 PR review（`.mimocode/mimocode.jsonc` 中已配 `"schemas/**": "ask"`）。
+所有 skill 之间通过 Pydantic v2（SoT）+ `model_json_schema()` 导出 JSON Schema 通信。
+Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "ask"`）。
 
 ---
 
-## 7. 里程碑（5 天超敏捷冲刺）
+## 7. 里程碑（M1 / M2 / M3，具体日期由 Lead 编排）
 
-| Day | 目标 | 关键产出 |
-|---|---|---|
-| **Day 1** | 地基冻结 + 各 track 脚手架 | schema 与调度器 API 冻结；5 条 track 都能 mock 跑通空流程 |
-| **Day 2** | 各 track 核心实现 | T1 产出真实风控 JSON；T2 时点查询无 lookahead；T4 runner 能出 pass/fail |
-| **Day 3** | 风控门禁端到端打通 | 一个真实 PR 跑完 PR → 风控 JSON → CI gate → 验收报告 |
-| **Day 4** | 横向接入 RAG + PDF + 因子 | ≥3 条 pipeline 跑在同一调度 + 验收框架上 |
-| **Day 5** | 集成加固 + Demo + 文档 | 投资人级 demo、CI log、因子迭代数据、交接文档成型 |
+> **时间线由 Lead 编排**，不在 PRD 内固化。下表只描述里程碑达成标准。
 
-**5 天冲刺硬规则**：
-- Day 1 上午冻结 schema，后续只允许通过 owner review 修改
+| 里程碑 | 达成标准 |
+|---|---|
+| **M1 地基冻结** | 三大模式契约（ComposeTask / BlackboardState / HumanGate）v1 通过；5 套业务 schema v1 通过；6 个 SKILL.md 草案存在；6 人能本地跑 OpenCode fork；`@dedupe_within` 上线 |
+| **M2 端到端打通** | 一条 PR → model Compose → risk Compose → CI gate → 验收报告全链路跑通；至少 1 个非 agent 组同学用上 |
+| **M3 横向接入** | ≥3 套 Compose 流跑在同一调度 + 验收框架上（risk / fundamental / factor）；投资人 demo 物料齐全（研报 PDF + CI log + 因子迭代数据） |
+| **M4 闭环 + 自我进化** | Dream / Distill 上线；MEMORY/RAG 跨会话留存；前端 Compose 视图可用；6 个组全部接入 |
+
+**节奏硬规则**：
+- M1 完成前不允许业务 schema 不通过 review 就动工
 - 每天必须有可运行产物，不用纯文档替代
-- Day 3 必须跑通 `risk-gate` 端到端闭环
-- Day 5 必须能 demo，并留下可交接文档
+- 每周 standup 把里程碑进度对齐到这张表
 
 ---
 
 ## 8. 团队和分工
 
-| Track | 主 Owner | 副 Owner | 主要技能匹配 |
+| Track | 主 Owner | 副 Owner | 主要范围 |
 |---|---|---|---|
-| **T0 地基**（schema / runner / 工具集成） | 用户（Lead） | 全员分摊 | Agent/Workflow 搭建、schema review、runner、checkpoint/replay |
-| **T1 risk-gate** | 陈镇鸿 | 肖骥超模型评估支持 | FastAPI + Docker + 部署 + RAG |
-| **T2 pit-rag** | 杨欣琳 | 用户（Lead） | LLM 底层 + MLLM 长上下文；基本面检索口径由 Lead 把关 |
-| **T3 fundamental/research-pdf** | 用户（Lead） | 刘炽 | 基本面工作流、研报 spec、Typst 模板、PDF 验收 |
-| **T3b options** | 刘炽 | 用户（Lead） | 期权数据处理、波动率曲面、Greeks、期权风险报告 |
-| **T4 model/factor-eval** | 肖骥超 | 用户（Lead） | 模型组评估、因子评估、统计口径、因果推断 |
+| **T0 地基** | 用户（Lead） | — | OpenCode fork 维护、MimoCode 移植、Compose 流脚手架、Schema 引擎、Acceptance Runner、CI/部署、`@dedupe_within` 集成 |
+| **T1 模型 / 跨组发起** | 陈镇鸿 | 肖骥超统计支持 | model Compose 流 + 写 `tools/utils/dedupe.py` |
+| **T2 风控 / 跨组接收** | 杨欣琳 | 肖骥超统计支持 | risk Compose 流 + HumanGate 契约 + CI gate dedupe 验证 |
+| **T3a 基本面 / 研报 / PIT-RAG** | 用户（Lead） | 刘炽 | fundamental Compose 流、point-in-time RAG、研报 spec、Typst 模板、PDF 验收 |
+| **T3b 期权** | 刘炽 | 用户（Lead） | options Compose 流 |
+| **T4 因子评估** | 肖骥超 | 用户（Lead） | factor Compose 流、对接 AutoEval、为 risk-gate 提供统计公式 |
+| **T5 前端 / Compose 视图** | 待定 | — | OpenCode desktop UI 改造 |
 
-**Lead（用户）的职责**：
-- 项目方向 + PRD 维护
-- 跨 track 协调 + schema 评审
-- 对外沟通（投资人 / 协会其他组）
+> **暂未分配**：俞高磊（后续根据其入组进度补充任务）
 
-### 8.1 按 design 章节落任务
+**Lead 职责**：项目方向 + PRD/Design 维护、跨 track 协调、三大模式契约把控、对外沟通。
 
-| Owner | 对应章节 | 任务 | Day 5 交付物 |
-|---|---|---|---|
-| 用户（Lead） | `quantcode_design.md` §1、§2、§3、§4.2、§4.3、§5、§7、§8 | 产品范围、5 天节奏、schema review、跨组验收、demo 叙事；多做基本面：研报 spec、fundamental workflow、RAG-PDF 验收口径；把 T0 地基拆给组员 | 交接文档、demo checklist、task schema、research spec |
-| 陈镇鸿 | §4.1 `risk-gate` | 真实 PR → `risk.json` → CI gate → PR 评论；对接策略风控阈值 | `risk.json`、CI log、PR 评论模板 |
-| 杨欣琳 | §4.2 `pit-rag` | point-in-time 检索、样本索引、时点过滤验收 | `pit-results.json`、PIT 检索 demo |
-| 刘炽 | §4.3 `research-pdf` + options workflow | PDF 渲染、引用整理；期权数据处理、波动率曲面、Greeks、期权组合风险报告 | `research.pdf`、引用列表、渲染 log、`options-risk.json` |
-| 肖骥超 | §4.1、§4.4 `model/factor-eval`，辅助 §4.3 | 多做模型组：模型/策略评估口径、risk-gate 统计支持、IC/IR/换手/衰减、图表模板 | `factor-report.json`、模型评估报告、统计图表 |
+### 8.1 按 Design 章节落任务
+
+| Owner | 对应 Design 章节 | 主要任务 |
+|---|---|---|
+| 用户（Lead） | §1-§3 + §4.2 + §4.3.1 + §9.2 | 产品方向、三大模式契约、fundamental + PIT-RAG Compose 流、跨组协调、demo 叙事 |
+| 陈镇鸿 | §4.2.0.1 + §4.3.3 | `tools/utils/dedupe.py`、model Compose 流（含 lit-review / pr-submit）、ModelSpec |
+| 杨欣琳 | §4.2.0 (HumanGate) + §4.3.4 | risk Compose 流、HumanGate / RiskProfile schema、CI gate + dedupe 验证 |
+| 刘炽 | §4.3.6 + §4.3.1 副 | options Compose 流、Typst 研报模板、PDF 渲染与引用整理 |
+| 肖骥超 | §4.3.2 + 跨组统计支持 | factor Compose 流、对接 AutoEval、风控统计公式 |
 
 ---
 
@@ -361,42 +366,52 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 
 | 风险 | 概率 | 影响 | 对策 |
 |---|---|---|---|
-| MimoCode 升级 break 我们的 skill | 中 | 中 | 在 CI 跑 smoke test，锁定 MimoCode 版本 |
-| 用户不愿意用（adoption 风险） | 高 | 高 | Day 3 起强制找真实用户，把 ta 拉进 review |
-| Schema 设计不当导致后期改造大 | 中 | 高 | Day 1 上午 schema 评审会，让所有 owner 都签字 |
-| 6 人协作沟通成本爆炸 | 中 | 中 | 强制 standup（每日 15min）+ schema 异步协作 |
-| 学生时间不稳定 | 高 | 中 | 每个 track 双 owner（主/副），主病了副可顶 |
-| 数据基建依赖卡住 RAG | 中 | 高 | Day 1 就和基建组确认数据接入方式 |
+| OpenCode 上游升级 break 我们的 plugin | 中 | 中 | 锁定上游版本，CI 跑 smoke test，定期 `git pull upstream dev` |
+| MimoCode cherry-pick 代码有隐含依赖 | 中 | 中 | 移植时遇到依赖就手动重写，避免引入小米服务（MiMo Auto / MiMo ASR） |
+| 用户不愿意用（adoption 风险） | 高 | 高 | 每个里程碑强制找真实用户 review，拉进 Compose 流试用 |
+| Schema 设计不当后期改造大 | 中 | 高 | M1 强制 schema 评审会，三大契约改动需 Lead + 起草人双签 |
+| 6 人协作沟通成本爆炸 | 中 | 中 | Compose 视图把所有协作显式化，Memory 留痕，schema 异步评审 |
+| 学生时间不稳定 | 高 | 中 | 每个 track 配主副 owner，主病了副可顶 |
+| 数据基建依赖卡住 RAG | 中 | 高 | M1 就和基建组确认数据接入方式 |
+| dedupe 装饰器没及时上线导致 PR 评论刷屏 | 低 | 中 | 陈镇鸿 Day 1 必须先出装饰器，CI 上线前 mock 不写真实评论 |
 
 ---
 
 ## 10. 成功指标
 
-### Day 3
-- [ ] 一条 PR → 风控 JSON → CI gate pipeline 跑通
-- [ ] 一个模型组同事用上并认可
+### M2（端到端打通）
 
-### Day 5
-- [ ] ≥3 条 pipeline（风控 / RAG-PDF / 因子）跑在同一调度 + 验收框架上
-- [ ] 至少 1 个非 agent 组同事通过 YAML spec 成功提交任务
-- [ ] 投资人 demo 物料齐全（研报 PDF + CI log + 因子迭代数据）
-- [ ] pipeline 模板库雏形，新 skill < 1 天上线
+- 一条 PR → model Compose → risk Compose → CI gate pipeline 跑通
+- 一个模型组同事用上并认可输出
+- `@dedupe_within` 在真实 GitHub Actions 中验证（同 commit 不重复评论）
 
-### 5 天之后
-- [ ] 5 个用户组全部接入
-- [ ] 平均每组提效 > 30%（用节省的人工小时数衡量）
-- [ ] 监控、降级、性能优化等生产化加固
+### M3（横向接入）
+
+- ≥3 套 Compose 流（risk / fundamental / factor）跑在同一调度 + 验收框架上
+- 至少 1 个非 agent 组同事通过 Compose 流成功提交任务
+- 投资人 demo 物料齐全（研报 PDF + CI log + 因子迭代数据）
+- 一个新因子从 idea 到接入主线，因子组负责人认可
+
+### M4 / 长期
+
+- 6 个组全部接入
+- 平均每组提效 > 30%（按节省的人工小时数衡量）
+- Distill 自动生成的 skill 数量持续增长
+- 监控、降级、性能优化等生产化加固
 
 ---
 
 ## 附录 A：术语表
 
-- **Skill**：MimoCode 的扩展机制，一个 `SKILL.md` 描述一个能力
-- **Pipeline**：业务流程的代码实现（Python 包）
-- **Schema**：JSON Schema 契约，所有 skill 之间通信的格式
+- **Compose Mode**：OpenCode 的第三种 primary agent，specs-driven 工作流编排模式（QuantCode 的产品中枢）
+- **SKILL.md**：一个 Markdown 文件描述一个能力，agent 自动调用；落在 `.opencode/groups/<group>/skills/`
+- **Subagent**：主 agent 动态创建的子任务执行者，共享上下文
+- **Schema**：Pydantic 类（SoT）+ JSON Schema 导出，skill 之间通信的强类型契约
 - **Runner**：验收 runner，吃 JSON 吐 pass/fail
 - **PIT**：Point-in-Time，时点正确性
 - **Lookahead bias**：用了未来才能看到的信息，量化研究的大忌
+- **AutoEval**：HKUST-QUANT-SOCIETY 的 auto_factor_evaluation 服务
+- **Dream / Distill**：从 MimoCode 移植的自我进化命令
 
 ## 附录 B：决策日志
 
@@ -404,9 +419,15 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 |---|---|---|
 | 2026-06-23 | 不 fork MimoCode，做加法 | 避免被上游变更和合并冲突拖死 |
 | 2026-06-27 | 仓库名 `quantcode`（不是 QuantumCode） | 设计文档里 Quantum 是拼写错误 |
-| 2026-06-27 | 团队 6 人确定（张梦婷退组） | 4 份新简历 + Lead |
-| 2026-06-30 | 保留 5 天超敏捷冲刺 | 当前执行计划仍是 5 天，不按 6 Sprint 展开 |
+| 2026-06-30 | Fork OpenCode（不是 MimoCode） | OpenCode 干净，MimoCode 的好特性可 cherry-pick |
+| 2026-06-30 | Compose Mode 是产品中枢，不是辅助 | 6 套垂直流全部基于 Compose 实现 |
+| 2026-06-30 | 千组千流（不是千人千面 UI） | 统一 UI + 按组分发 SKILL.md / MEMORY |
+| 2026-06-30 | 采用业界生产模式 Pattern 1 + 2 + 5 + 副作用 tool dedupe 保险栓 | 6 人小团队不做 Verifier / Event Bus / Idempotent Retry |
+| 2026-06-30 | Track 调整：陈镇鸿 → 模型组，杨欣琳 → 风控组 | 陈擅长后端工程；杨擅长 LLM 评估 |
+| 2026-06-30 | Lead 接 PIT-RAG track | 基本面是主要使用方，由 Lead 维护契约 |
+| 2026-06-30 | 俞高磊任务暂不分配 | 等其入组进度确认后再补 |
+| 2026-06-30 | 时间线由 Lead 单独编排，不在 PRD 内固化 | PRD 描述里程碑标准，避免日期漂移 |
 
 ---
 
-**文档维护**：本 PRD 持续迭代，每天收工后根据实际进展更新。重大变更需要团队评审。
+**文档维护**：本 PRD 持续迭代，重大变更需要团队评审。Design 文档（`docs/QuantCode_Design.md`）是工程实现细节的真理源，PRD 描述产品需求与里程碑标准。

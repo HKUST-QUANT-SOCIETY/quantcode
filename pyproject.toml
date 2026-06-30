@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantcode"
+version = "0.0.1"
+description = "QuantCode — HKUST QUANT SOCIETY agent platform on OpenCode fork"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+  { name = "HKUST QUANT SOCIETY — Agent Group" },
+]
+dependencies = [
+  "pydantic>=2.6",
+  "jsonschema>=4.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["runner*", "pipelines*", "tools*", "schemas*"]
+exclude = ["vendor*", "templates*", "docs*", "tests*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

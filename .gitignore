@@ -18,3 +18,12 @@ vendor/mimo-code/
 # OpenCode 调研报告（HTML）
 OpenCode*.html
 
+# 本地 OpenCode 配置（含 API key），不入库
+opencode.local.jsonc
+.opencode/**/*.local.*
+
+# 构建产物
+artifacts/
+*.pdf
+!templates/**/*.pdf
+
