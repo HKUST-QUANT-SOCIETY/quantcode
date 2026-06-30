@@ -128,7 +128,81 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Compose Mode 是产品中枢
+### 3.2 三大生产模式（架构基石）
+
+QuantCode 采用业界 2026 年生产生存率最高的最小组合（Pattern 1 + 2 + 5），加一颗轻量幂等保险栓。这三个模式是所有 Compose 流的**架构基石**，所有功能都必须落到这三个模式之一。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Pattern 1: Orchestrator-Worker（中心调度 + 工人 agent）         │
+│  ─────────────────────────────────────────────                  │
+│  Compose Mode = 中心 Orchestrator                               │
+│  SKILL.md / Subagent = Workers（工人 agent）                     │
+│  6 套 vertical Compose 流（按组分发）                            │
+│                                                                 │
+│  规则:                                                          │
+│  - Workers 只向 Orchestrator 汇报，不互相直接通信               │
+│  - Orchestrator 负责任务拆分、调度、合并结果                     │
+│  - 路由可预测，日志线索清晰                                      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕
+┌─────────────────────────────────────────────────────────────────┐
+│  Pattern 2: Stateful Blackboard（共享状态层）                    │
+│  ─────────────────────────────────────────────                  │
+│  agent 不通过对话传递数据，全部读写共享状态层。                  │
+│                                                                 │
+│  存储:                                                          │
+│  - 项目级 MEMORY.md（跨会话长期知识）                            │
+│  - 组级 groups/<group>/MEMORY.md（组内私有）                     │
+│  - 会话级 checkpoint.md（自动 snapshot）                         │
+│  - 任务级 tasks/<id>/progress.md                                 │
+│  - SQLite FTS5 全文索引                                          │
+│                                                                 │
+│  契约: BlackboardState schema 规定哪些字段进共享、命名规范        │
+└─────────────────────────────────────────────────────────────────┘
+                              ↕
+┌─────────────────────────────────────────────────────────────────┐
+│  Pattern 5: Human-in-the-Loop Gate（人审断路器）                 │
+│  ─────────────────────────────────────────────                  │
+│  任何跨越风险阈值的动作自动暂停，等人审批后才继续。               │
+│                                                                 │
+│  触发场景:                                                       │
+│  - 写主线 PR / 修改主线代码                                      │
+│  - 发邮件 / Slack 通知给协会外部                                 │
+│  - 调用付费 API 超过预算阈值                                     │
+│  - LLM 自评信心 < 阈值                                           │
+│                                                                 │
+│  契约: HumanGate schema 规定触发条件、阈值、超时、通知方式        │
+│  实现: 复用 OpenCode permission 系统 + 业务阈值                  │
+└─────────────────────────────────────────────────────────────────┘
+                              +
+┌─────────────────────────────────────────────────────────────────┐
+│  保险栓: 副作用 tool 去重（@dedupe_within）                       │
+│  ─────────────────────────────────────────────                  │
+│  对外副作用 tool（GitHub 评论、邮件、PR 创建）强制 5 分钟内去重。 │
+│  实现: 装饰器 + SQLite 一张小表，30 行代码。                     │
+│                                                                 │
+│  覆盖范围:                                                       │
+│  - github_pr_comment / github_pr_create                         │
+│  - send_email / slack_notify / cross_team_notify                │
+│  不覆盖（天然幂等）:                                              │
+│  - AutoEval / RAG / 文件覆盖写                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 为什么不做另外三个模式
+
+业界另有三个模式（Supervisor/Verifier、Event-Driven Pub/Sub、Idempotent Retry Chains），我们选择不做：
+
+| 不做的模式 | 理由 | 替代方案 |
+|---|---|---|
+| **Supervisor/Verifier**（独立审核 agent） | 量化验收本就量化（IC/IR/夏普），`assert` + Goal/Judge 已够 | 验收靠 schema + assert + 半程序化场景走 Pattern 5 |
+| **Event-Driven Pub/Sub**（事件总线） | 6 人小团队 A→B 直接调用足够 | 跨组直接调用，扩展到 10 人后再加 |
+| **Idempotent Retry Chains**（完整哈希链） | 多数操作天然幂等，完整实现成本过高 | 副作用 tool 用 @dedupe_within 兜底 |
+
+---
+
+### 3.3 Compose Mode 是产品中枢
 
 Compose 不是辅助工具，是**第三种 primary agent**：
 
@@ -138,9 +212,11 @@ plan     → 只读分析模式
 compose  → specs-driven 工作流编排模式（QuantCode 的主战场）
 ```
 
-每个组的工作流 = 一组 SKILL.md 文件 + 调度规则。Compose 自动按 skill 间的依赖关系编排，跑完一个进入下一个。
+每个组的工作流 = 一组 SKILL.md 文件 + 调度规则。Compose 自动按 skill 间的依赖关系编排，跑完一个进入下一个。Compose 实现 Pattern 1 的中心 Orchestrator 角色。
 
-### 3.3 仓库结构
+---
+
+### 3.4 仓库结构
 
 ```
 quantcode/
@@ -209,6 +285,32 @@ quantcode/
 | **/distill** | 识别重复手动操作，封装成新 SKILL.md / subagent / command |
 
 ### 4.2 业务能力（QuantCode 自建）
+
+#### 4.2.0 三大模式的契约 schema
+
+每个生产模式对应一套 Pydantic schema，所有功能必须落到这三个契约之一。
+
+| Schema | 对应模式 | 用途 | Owner |
+|---|---|---|---|
+| `ComposeTask` | Pattern 1 | Orchestrator 任务信封：task_id / status / parent / children / artifacts | 俞高磊 |
+| `BlackboardState` | Pattern 2 | 共享状态层契约：字段命名、隔离粒度（项目/组/会话/任务）、写入权限 | 用户（Lead） |
+| `HumanGate` | Pattern 5 | 人审契约：触发条件、风险阈值、超时策略、通知方式、补救路径 | 陈镇鸿 |
+
+#### 4.2.0.1 副作用 tool 去重保险栓
+
+任何"对外发送 / 创建 / 修改"的 tool 必须用 `@dedupe_within` 装饰：
+
+```python
+from quantcode.tools.utils import dedupe_within
+
+@dedupe_within(seconds=300, key=lambda commit_sha, msg: f"{commit_sha}:{hash(msg)}")
+def github_pr_comment(commit_sha: str, msg: str):
+    ...
+```
+
+- 实现：装饰器 + SQLite 一张小表，约 30 行代码
+- 覆盖：`github_pr_*` / `send_email` / `slack_notify` / `cross_team_notify`
+- 不覆盖（天然幂等）：`autoeval_*` / `rag_*` / 文件覆盖写
 
 #### 4.2.1 身份识别与组分发
 
