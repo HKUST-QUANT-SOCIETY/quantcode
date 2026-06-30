@@ -16,7 +16,7 @@ QuantCode 是 HKUST QUANT SOCIETY agent 组在 [MimoCode](https://github.com/Xia
 | **确定性契约** | skill 之间用 JSON schema 通信，不依赖自然语言 |
 | **程序化验收** | 验收标准 = `assert` 语句，不是人工"看一眼" |
 
-详见 [QuantumCode_Design.md](./QuantumCode_Design.md)。
+详见 [quantcode_design.md](./quantcode_design.md)。
 
 ## 目录结构
 
@@ -53,15 +53,15 @@ mimo
 
 | Skill | 描述 | Owner |
 |---|---|---|
-| `risk-gate` | PR 风控门禁 | 陈振宏 |
-| `pit-rag` | Point-in-time RAG | 杨欣琳 |
-| `research-pdf` | 中金风格 PDF 研报 | 刘驰 |
+| `risk-gate` | PR 风控门禁 | 陈镇鸿 |
+| `pit-rag` | Point-in-time RAG | 杨欣琳 / Lead |
+| `research-pdf` | 中金风格 PDF 研报 | Lead / 刘炽 |
 | `factor-eval` | 因子有效性评估 | 肖骥超 |
 
 ## 文档
 
 - [PRD](docs/PRD.md) — 产品需求文档
-- [设计文档](QuantumCode_Design.md) — 架构方法论
+- [设计文档](quantcode_design.md) — 架构方法论
 
 ## 团队
 

@@ -14,10 +14,13 @@
 > QuantCode 是 HKUST QUANT SOCIETY 内部使用的量化投研 Agent 平台，把投研流程编译成确定性 pipeline，让 5 人 agent 组放大整个量化团队的产能。
 
 **一句话定义目标用户**：
-> HKUST QUANT SOCIETY 的 5 个研究组（基本面、因子、模型、风控、策略），以及内部 agent 组本身。
+> HKUST QUANT SOCIETY 的 5 个研究组（基本面、因子、模型、策略风控、期权），以及内部 agent 组本身。
 
 **一句话定义核心价值**：
 > 把"人与人的协商"换成"机器与机器的 schema 校验"，把验收标准从"看一眼觉得行"换成"assert 通过/失败"。
+
+**Agent 搭建边界**：
+> QuantCode 不是单纯写一组量化函数库。因子函数、评估配置、风控阈值是 Agent 要调用的工具输入；真正的 Agent 工作是把研究员需求路由到 skill，补齐上下文，调用 pipeline，执行 schema/assert 验收，并把结果写回 PR、报告或 artifact。
 
 ---
 
@@ -25,7 +28,7 @@
 
 ### 1.1 当前痛点
 
-- **跨组协作的隐性损耗**：模型组提 PR 后需要和风控组协商，风控判断标准不统一，流程慢
+- **跨组协作的隐性损耗**：模型组提 PR 后需要和策略风控组协商，风控判断标准不统一，流程慢
 - **研报生产不可复用**：每份基本面研报都是手写，结构没法批量生成
 - **因子评估口径不一**：每个人算 IC 用的样本和方法不同，难以横向比较
 - **AI 工具孤立使用**：组员各自调 ChatGPT / Cursor，没有沉淀成团队资产
@@ -41,7 +44,7 @@
 
 - MimoCode 2026-06 开源，扩展机制成熟（skills / plugins / config 三件套）
 - LLM 长上下文能力足够支撑 30 分钟以上的研究任务
-- 团队有真实痛点（模型组和风控组协作摩擦），有 6 人 agent 组可以建设
+- 团队有真实痛点（模型组和策略风控组协作摩擦），有 6 人 agent 组可以建设
 
 ---
 
@@ -53,17 +56,17 @@
 |---|---|---|---|
 | **基本面组** | 2-3 | 公司研究、行业研究、写研报 | 快速生成专业 PDF、point-in-time 检索研报 |
 | **因子组** | 3-4 | 因子开发、因子评估 | 标准化的因子评估流水线、横向比较 |
-| **模型组** | 3-4 | 策略建模、机器学习因子 | 提 PR 后自动风控反馈、无需联系风控组 |
-| **风控组** | 1-2 | 策略风控、组合管理 | 程序化阈值，24h 自动执行风控规则 |
-| **策略组** | 1-2 | 组合构建、调仓决策 | 因子和策略的统一评估口径 |
+| **模型组** | 3-4 | 策略建模、机器学习因子 | 提 PR 后自动风控反馈、无需反复同步策略风控组 |
+| **策略风控组** | 2-3 | 组合构建、调仓决策、策略风控 | 程序化阈值，24h 自动执行风控规则，统一策略评估口径 |
+| **期权组** | 1-2 | 期权定价、波动率研究、对冲策略 | 期权数据处理、波动率曲面、希腊字母和组合风险评估 |
 | **Agent 组**（我们） | 6 | 建设和维护 QuantCode | dogfood：每天用自己的工具 |
 
 ### 2.2 典型工作流变化
 
 **模型组同学的"今天"**：
 1. 写完一个新的 ML 因子，提 PR
-2. 微信群里 @ 风控组，问"我这个 max_drawdown 算得对吗"
-3. 风控组同学有空了才看，可能 1-2 天
+2. 微信群里 @ 策略风控组，问"我这个 max_drawdown 算得对吗"
+3. 策略风控组同学有空了才看，可能 1-2 天
 4. 来回讨论 3-5 轮，统一口径
 5. 终于 merge
 
@@ -72,7 +75,7 @@
 2. CI 自动触发 risk-gate agent
 3. 10 分钟内 PR 评论里出现风控 JSON + 自动结论
 4. 不满足阈值 → 自动打回并附原因；满足 → 自动 approve 等人 review
-5. 风控组只需要 review JSON，不用从 0 开始算
+5. 策略风控组只需要 review JSON，不用从 0 开始算
 
 ---
 
@@ -84,7 +87,7 @@
 
 | Skill | 价值 | 验收 |
 |---|---|---|
-| `risk-gate` | PR 风控门禁 | 一个真实 PR 走完流程，风控组认可输出 |
+| `risk-gate` | PR 风控门禁 | 一个真实 PR 走完流程，策略风控组认可输出 |
 | `pit-rag` | Point-in-time 检索 | 时点过滤无 lookahead bias |
 | `research-pdf` | 中金风格 PDF 研报 | 研究员愿意发出去 |
 | `factor-eval` | 因子有效性评估 | IC/IR/换手自动算出，符合 schema |
@@ -118,7 +121,7 @@
 ### 4.1 risk-gate（PR 风控门禁）
 
 **用户故事**：
-> 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，这样我不用等风控组人工 review 就知道哪里要改。
+> 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，这样我不用等策略风控组人工 review 就知道哪里要改。
 
 **输入**：
 - PR diff（GitHub Actions context）
@@ -134,7 +137,7 @@ assert abs(risk_json["correlation_with_existing"]) <= 0.60
 assert risk_json["tail_risk_var_99"] is not None  # 必须有 VaR
 ```
 
-**Owner**：陈振宏（T1）
+**Owner**：陈镇鸿（T1）
 
 ---
 
@@ -173,7 +176,7 @@ for doc in output["documents"]:
     assert doc["published_at"] <= input["as_of_date"]
 ```
 
-**Owner**：杨欣琳（T2 主），刘驰（副）
+**Owner**：杨欣琳（T2 主），用户（Lead，把关基本面检索口径）
 
 ---
 
@@ -204,7 +207,7 @@ for doc in output["documents"]:
 - 至少 10 条引用 ✓
 - **人工验收**：研究员愿意发 = 通过
 
-**Owner**：刘驰（T3 主），肖骥超（Typst 实现）
+**Owner**：用户（T3 主，基本面 workflow / 研报 spec），刘炽（PDF 渲染与 options workflow）
 
 ---
 
@@ -308,21 +311,21 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 
 ---
 
-## 7. 里程碑（6 个 Sprint，每个 1 周）
+## 7. 里程碑（5 天超敏捷冲刺）
 
-| Sprint | 目标 | 关键产出 |
+| Day | 目标 | 关键产出 |
 |---|---|---|
-| **S0**（本周） | 仓库脚手架 + PRD 锁定 + schema v1 冻结 | 本仓库当前状态 |
-| **S1** | `risk-gate` MVP | 一个真实 PR 触发 agent 输出风控 JSON，CI gate 跑通 |
-| **S2** | `pit-rag` MVP | 一个研究问题能从向量库检索到结果，带时点过滤 |
-| **S3** | `research-pdf` MVP | 输入公司名输出 Typst 渲染的 PDF |
-| **S4** | `factor-eval` MVP | 输入因子代码输出 IC/IR/换手 JSON |
-| **S5** | 4 个 skill 集成 + CI gate | 跑通完整 demo，对内分享 |
+| **Day 1** | 地基冻结 + 各 track 脚手架 | schema 与调度器 API 冻结；5 条 track 都能 mock 跑通空流程 |
+| **Day 2** | 各 track 核心实现 | T1 产出真实风控 JSON；T2 时点查询无 lookahead；T4 runner 能出 pass/fail |
+| **Day 3** | 风控门禁端到端打通 | 一个真实 PR 跑完 PR → 风控 JSON → CI gate → 验收报告 |
+| **Day 4** | 横向接入 RAG + PDF + 因子 | ≥3 条 pipeline 跑在同一调度 + 验收框架上 |
+| **Day 5** | 集成加固 + Demo + 文档 | 投资人级 demo、CI log、因子迭代数据、交接文档成型 |
 
-**每个 Sprint 的硬规则**：
-- 周一定目标
-- 周五必须有可演示的东西
-- 周末 retro，下周再来
+**5 天冲刺硬规则**：
+- Day 1 上午冻结 schema，后续只允许通过 owner review 修改
+- 每天必须有可运行产物，不用纯文档替代
+- Day 3 必须跑通 `risk-gate` 端到端闭环
+- Day 5 必须能 demo，并留下可交接文档
 
 ---
 
@@ -330,16 +333,27 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 
 | Track | 主 Owner | 副 Owner | 主要技能匹配 |
 |---|---|---|---|
-| **T0 地基**（schema / runner / 工具集成） | 俞高磊 | 用户（Lead） | Agent/Workflow 搭建 + 第一作者 IEEE + SFT/RL |
-| **T1 risk-gate** | 陈振宏 | 肖骥超统计支持 | FastAPI + Docker + 部署 + RAG |
-| **T2 pit-rag** | 杨欣琳 | 刘驰 | LLM 底层 + MLLM 长上下文（两人已合作过） |
-| **T3 research-pdf** | 刘驰 | 肖骥超 Typst | IR 比赛 20 页研报 + LaTeX |
-| **T4 factor-eval** | 肖骥超 | 俞高磊兼 | 数学/统计博士级 + 因果推断论文 |
+| **T0 地基**（schema / runner / 工具集成） | 用户（Lead） | 全员分摊 | Agent/Workflow 搭建、schema review、runner、checkpoint/replay |
+| **T1 risk-gate** | 陈镇鸿 | 肖骥超模型评估支持 | FastAPI + Docker + 部署 + RAG |
+| **T2 pit-rag** | 杨欣琳 | 用户（Lead） | LLM 底层 + MLLM 长上下文；基本面检索口径由 Lead 把关 |
+| **T3 fundamental/research-pdf** | 用户（Lead） | 刘炽 | 基本面工作流、研报 spec、Typst 模板、PDF 验收 |
+| **T3b options** | 刘炽 | 用户（Lead） | 期权数据处理、波动率曲面、Greeks、期权风险报告 |
+| **T4 model/factor-eval** | 肖骥超 | 用户（Lead） | 模型组评估、因子评估、统计口径、因果推断 |
 
 **Lead（用户）的职责**：
 - 项目方向 + PRD 维护
 - 跨 track 协调 + schema 评审
 - 对外沟通（投资人 / 协会其他组）
+
+### 8.1 按 design 章节落任务
+
+| Owner | 对应章节 | 任务 | Day 5 交付物 |
+|---|---|---|---|
+| 用户（Lead） | `quantcode_design.md` §1、§2、§3、§4.2、§4.3、§5、§7、§8 | 产品范围、5 天节奏、schema review、跨组验收、demo 叙事；多做基本面：研报 spec、fundamental workflow、RAG-PDF 验收口径；把 T0 地基拆给组员 | 交接文档、demo checklist、task schema、research spec |
+| 陈镇鸿 | §4.1 `risk-gate` | 真实 PR → `risk.json` → CI gate → PR 评论；对接策略风控阈值 | `risk.json`、CI log、PR 评论模板 |
+| 杨欣琳 | §4.2 `pit-rag` | point-in-time 检索、样本索引、时点过滤验收 | `pit-results.json`、PIT 检索 demo |
+| 刘炽 | §4.3 `research-pdf` + options workflow | PDF 渲染、引用整理；期权数据处理、波动率曲面、Greeks、期权组合风险报告 | `research.pdf`、引用列表、渲染 log、`options-risk.json` |
+| 肖骥超 | §4.1、§4.4 `model/factor-eval`，辅助 §4.3 | 多做模型组：模型/策略评估口径、risk-gate 统计支持、IC/IR/换手/衰减、图表模板 | `factor-report.json`、模型评估报告、统计图表 |
 
 ---
 
@@ -348,27 +362,27 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 | 风险 | 概率 | 影响 | 对策 |
 |---|---|---|---|
 | MimoCode 升级 break 我们的 skill | 中 | 中 | 在 CI 跑 smoke test，锁定 MimoCode 版本 |
-| 用户不愿意用（adoption 风险） | 高 | 高 | S1-S4 每个 sprint 强制找一个真实用户，把 ta 拉进 review |
-| Schema 设计不当导致后期改造大 | 中 | 高 | S0 schema 评审会，让所有 owner 都签字 |
+| 用户不愿意用（adoption 风险） | 高 | 高 | Day 3 起强制找真实用户，把 ta 拉进 review |
+| Schema 设计不当导致后期改造大 | 中 | 高 | Day 1 上午 schema 评审会，让所有 owner 都签字 |
 | 6 人协作沟通成本爆炸 | 中 | 中 | 强制 standup（每日 15min）+ schema 异步协作 |
 | 学生时间不稳定 | 高 | 中 | 每个 track 双 owner（主/副），主病了副可顶 |
-| 数据基建依赖卡住 RAG | 中 | 高 | S0 就和基建组确认数据接入方式 |
+| 数据基建依赖卡住 RAG | 中 | 高 | Day 1 就和基建组确认数据接入方式 |
 
 ---
 
 ## 10. 成功指标
 
-### Day 30（S5 结束）
-- [ ] 4 个 skill MVP 跑通
-- [ ] 至少 1 个非 agent 组同事日常使用
-- [ ] CI risk-gate 在 GitHub Actions 24h 自动执行
+### Day 3
+- [ ] 一条 PR → 风控 JSON → CI gate pipeline 跑通
+- [ ] 一个模型组同事用上并认可
 
-### Day 60
-- [ ] 3 个用户组日常使用
-- [ ] pipeline 模板库雏形，新 skill < 1 天上线
+### Day 5
+- [ ] ≥3 条 pipeline（风控 / RAG-PDF / 因子）跑在同一调度 + 验收框架上
+- [ ] 至少 1 个非 agent 组同事通过 YAML spec 成功提交任务
 - [ ] 投资人 demo 物料齐全（研报 PDF + CI log + 因子迭代数据）
+- [ ] pipeline 模板库雏形，新 skill < 1 天上线
 
-### Day 90
+### 5 天之后
 - [ ] 5 个用户组全部接入
 - [ ] 平均每组提效 > 30%（用节省的人工小时数衡量）
 - [ ] 监控、降级、性能优化等生产化加固
@@ -391,9 +405,8 @@ PR push → GitHub Actions → MimoCode CLI invoke skill
 | 2026-06-23 | 不 fork MimoCode，做加法 | 避免被上游变更和合并冲突拖死 |
 | 2026-06-27 | 仓库名 `quantcode`（不是 QuantumCode） | 设计文档里 Quantum 是拼写错误 |
 | 2026-06-27 | 团队 6 人确定（张梦婷退组） | 4 份新简历 + Lead |
-| 2026-06-27 | 改超敏捷开发，6 个 sprint 每周一个 | 比 5 天集中冲刺更可持续 |
+| 2026-06-30 | 保留 5 天超敏捷冲刺 | 当前执行计划仍是 5 天，不按 6 Sprint 展开 |
 
 ---
 
-**文档维护**：本 PRD 持续迭代，每个 Sprint 末尾根据实际进展更新。重大变更需要团队评审。
-
+**文档维护**：本 PRD 持续迭代，每天收工后根据实际进展更新。重大变更需要团队评审。

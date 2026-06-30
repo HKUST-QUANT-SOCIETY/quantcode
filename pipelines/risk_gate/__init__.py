@@ -1,1 +1,1 @@
-"""Risk gate pipeline. Owner: P2 / 陈振宏."""
+"""Risk gate pipeline. Owner: T1 / 陈镇鸿."""

@@ -1,1 +1,1 @@
-"""Factor evaluation pipeline. Owner: P5 / 肖骥超."""
+"""Model and factor evaluation pipeline. Owner: T4 / 肖骥超."""

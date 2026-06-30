@@ -505,9 +505,7 @@ options:execute       →   下单 / 回测
 
 ---
 
-## 8. 附录
-
-### 8.1 术语表
+## 8. 附录：术语表
 
 - **Compose**：OpenCode 的第三种 primary agent，specs-driven 工作流编排模式
 - **SKILL.md**：一个 Markdown 文件描述一个能力，agent 自动调用
@@ -518,15 +516,74 @@ options:execute       →   下单 / 回测
 - **AutoEval**：HKUST-QUANT-SOCIETY 的 AutoFactorEvaluation 服务
 - **Dream / Distill**：MimoCode 的自我进化命令
 
-### 8.2 角色
+---
 
-| 角色 | 职责 |
-|---|---|
-| **Lead** | 项目方向、PRD 维护、跨 track 协调、对外沟通 |
-| **T0 / 地基** | OpenCode fork 维护、MimoCode 移植、CI/部署 |
-| **T1 / 因子** | factor Compose 流 + AutoEval 接入 |
-| **T2 / RAG + 研报** | RAG 引擎 + fundamental Compose 流 |
-| **T3 / 模型 + 跨组** | model Compose 流 + 跨组协作引擎 |
-| **T4 / 前端** | Compose 视图 + 任务树 + Subagent 监控 |
+## 9. 团队分工
 
-具体人员分配见 PRD。
+### 9.1 Track 划分
+
+| Track | 主 Owner | 副 Owner | 范围 |
+|---|---|---|---|
+| **T0 地基** | 用户（Lead） | 全员分摊 | OpenCode fork 维护、MimoCode 移植、Compose 流脚手架、Schema 引擎、Acceptance Runner、CI/部署 |
+| **T1 风控 / 跨组** | 陈镇鸿 | 肖骥超统计支持 | risk Compose 流 + model→risk 跨组协作 + GitHub Actions CI gate |
+| **T2 PIT-RAG / 基本面检索** | 杨欣琳 | 用户（Lead） | point-in-time RAG 引擎、时点查询、基本面检索口径 |
+| **T3a 基本面 / 研报** | 用户（Lead） | 刘炽 | fundamental Compose 流、研报 spec、Typst 模板、PDF 验收 |
+| **T3b 期权** | 刘炽 | 用户（Lead） | options Compose 流：波动率曲面、Greeks、期权组合风险 |
+| **T4 模型 / 因子评估** | 肖骥超 | 用户（Lead） | model + factor Compose 流、IC/IR/换手/衰减、对接 AutoEval |
+| **T5 前端 / Compose 视图** | 待定 | — | OpenCode desktop UI 改造：Compose 视图、任务树、Subagent 监控 |
+
+### 9.2 Lead 职责
+
+- 项目方向 + PRD/Design 维护
+- 跨 track 协调 + schema 评审
+- **多做基本面**：研报 spec、fundamental Compose 流验收口径（不只是协调）
+- 对外沟通（投资人 / 协会其他组）
+
+### 9.3 按 Compose 流 swimlane 对应
+
+每个 Owner 对应一条 swimlane，所有 swimlane 最终汇入 QuantCode Platform 的 skill invocation、Python pipelines、schema validation、checkpoint/replay 和 acceptance gate。
+
+| Owner | 对应 Compose 流 | Eraser workflow lane | 主要任务 |
+|---|---|---|---|
+| 用户（Lead） | fundamental + 全局 | Agent Group / Orchestrate + Fundamental Research Group + QuantCode Platform | 冻结产品范围；主持 schema review；定义研报 spec、fundamental workflow、RAG-PDF 验收口径；维护 PRD/design；盯 runner、schema、checkpoint/replay 和 demo 串场 |
+| 陈镇鸿 | risk + 跨组 | Model Group + Strategy & Risk Group | 对接模型组 PR，生成 `risk.json`，接入策略风控阈值，配置 CI gate 写回 PR 评论 |
+| 杨欣琳 | pit-rag | Fundamental Research Group | 实现 point-in-time 检索，定义查询 schema，准备研报/公告样本，保证无 lookahead bias |
+| 刘炽 | options + research-pdf 副 | Fundamental Research Group + Options Group + Artifacts | 实现研报 PDF 渲染和引用整理；期权组 workflow：数据处理、波动率曲面、Greeks、期权组合风险 |
+| 肖骥超 | model + factor | Model Group + Factor Group | 多做模型组：定义模型/策略评估口径，支持 `risk-gate` 的统计指标；实现 IC/IR/换手/衰减评估，输出 `factor-report.json`；辅助 Typst 图表 |
+
+---
+
+## 10. 核心交付物
+
+每个 Compose 流跑通后产出标准化 artifact，命名一致便于横向追踪：
+
+| 交付物 | Owner | 用途 |
+|---|---|---|
+| `risk.json` | 陈镇鸿 | PR 风控门禁输入 acceptance runner |
+| `factor-report.json` | 肖骥超 | 因子组横向比较和验收 |
+| `pit-results.json` | 杨欣琳 | 基本面组时点检索结果 |
+| `research-spec.yaml` | 用户（Lead） | 基本面研报任务输入和验收口径 |
+| `research.pdf` | 用户（Lead） / 刘炽 | 投资人 demo 和基本面研报样例 |
+| `options-risk.json` | 刘炽 | 期权组 Greeks、波动率曲面和组合风险 demo |
+| `ci-log.txt` | 陈镇鸿 / 用户（Lead） | 证明 risk-gate 可 24h 自动执行 |
+| `acceptance-report.json` | 用户（Lead） | 所有 Compose 流的 pass/fail 汇总 |
+| `MEMORY.md` per group | 该组 Owner | Dream/Distill 沉淀的组内长期知识 |
+| `handoff.md` | 用户（Lead） / 全员 | 阶段性交接与复盘 |
+
+---
+
+## 11. 决策日志
+
+| 日期 | 决策 | 理由 |
+|---|---|---|
+| 2026-06-23 | 载体层不自建，做加法 | 避免被上游变更和合并冲突拖死 |
+| 2026-06-27 | 仓库名 `quantcode`（小写） | `QuantumCode` 是旧拼写错误 |
+| 2026-06-27 | 团队按 6 人 agent 组规划 | PRD 已确认当前 agent 组人数 |
+| 2026-06-30 | Fork OpenCode（不是 MimoCode） | OpenCode 干净，MimoCode 的好特性可 cherry-pick |
+| 2026-06-30 | Compose Mode 是产品中枢，不是辅助 | 6 套垂直流全部基于 Compose 实现，不重新发明编排 |
+| 2026-06-30 | 千组千流（不是千人千面 UI） | 统一 UI + 按组分发 SKILL.md / MEMORY，降低前端工作量 |
+| 2026-06-30 | 吸收 MimoCode 的 Memory / Checkpoint / Subagent / Goal / Dream / Distill | 这些是工程化长任务的必备底座，自建不划算 |
+
+---
+
+**文档维护**：本设计文档跟随 `docs/PRD.md` 更新。PRD 变更产品范围时，设计文档同步工程实现与架构影响。时间线由 Lead 编排，不在本文档内固化。
