@@ -6,6 +6,11 @@
   // Provider 配置由各成员本地 opencode.local.jsonc 提供，不入库
   "provider": {},
 
+  // 让 OpenCode 递归发现 .opencode/groups/**/SKILL.md
+  "skills": {
+    "paths": [".opencode/groups"]
+  },
+
   // 权限：高风险路径需 ask 或 deny
   "permission": {
     "edit": {

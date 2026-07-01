@@ -1,0 +1,25 @@
+{
+  "model_name": "pb_roe_ranker",
+  "model_type": "boosting",
+  "owner": "chen-zhenhong",
+  "code_path": "tests/fixtures/sample_model/sample_model.py",
+  "training_data_start": "2021-01-01",
+  "training_data_end": "2023-12-31",
+  "as_of_date": "2024-03-15",
+  "hyperparameters": {
+    "n_estimators": 100,
+    "learning_rate": 0.05,
+    "max_depth": 3
+  },
+  "feature_dependencies": ["pb", "roe_ttm", "market_cap"],
+  "operator_dependencies": ["rank", "zscore"],
+  "risk_metadata": {
+    "universe": "CSI1000",
+    "benchmark": "CSI1000",
+    "expected_holding_period_days": 20,
+    "max_position_pct": 0.05,
+    "uses_leverage": false,
+    "notes": "Day 1 fixture for model-to-risk handoff; uses mock PB/ROE features."
+  },
+  "commit_sha": "abcdef1"
+}

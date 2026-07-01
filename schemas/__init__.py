@@ -25,6 +25,7 @@ from .compose_task import (
     TaskStatus,
     WritePolicy,
 )
+from .model import ModelRiskMetadata, ModelSpec, ModelType
 
 __all__ = [
     "BlackboardEntry",
@@ -40,4 +41,7 @@ __all__ = [
     "TaskOutcome",
     "TaskStatus",
     "WritePolicy",
+    "ModelRiskMetadata",
+    "ModelSpec",
+    "ModelType",
 ]
