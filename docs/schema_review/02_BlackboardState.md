@@ -3,7 +3,7 @@
 > **Owner**: 用户（Lead）  
 > **模式**: Pattern 2 (Stateful Blackboard)  
 > **评审时长**: 5 分钟  
-> **状态**: 待评审
+> **状态**: 已评审
 
 ---
 
@@ -16,11 +16,13 @@
 ## 为什么需要它
 
 **问题**：
+
 - 长任务（10+ 小时）会遇到上下文 compact，依赖 LLM 长程记忆不可靠
 - Worker agent 之间不能直接对话传数据（Pattern 1 禁止），必须通过共享层
 - 跨组协作：模型组写 PR 元数据，风控组读取 → 需要明确的读写权限
 
 **解决**：
+
 - 状态外化到磁盘（MEMORY.md / checkpoint.md / progress.md）
 - 4+1 层隔离（GLOBAL / PROJECT / GROUP / SESSION / TASK）
 - WritePolicy 明确谁能写（OWNER / APPEND / GROUP_APPEND）
@@ -31,53 +33,56 @@
 
 ### BlackboardEntry（一条记录）
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `key` | `str` | ✅ | 命名空间 key（如 `factor.pb_roe.ic_metrics`） |
-| `scope` | `BlackboardScope` | ✅ | 隔离级别（5 选 1） |
-| `group` | `GroupName \| None` | scope=GROUP 时必填 | 哪个组的数据 |
-| `value` | `dict \| list \| str \| ...` | ✅ | JSON-serializable 任意值 |
-| `write_policy` | `WritePolicy` | ✅ | 谁能写（OWNER / APPEND / GROUP_APPEND） |
-| `written_by_task_id` | `str` | ✅ | 哪个 task 写的（溯源） |
-| `written_by_group` | `GroupName` | ✅ | 哪个组写的（权限判断） |
-| `version` | `int` | ✅ | 版本号（乐观锁） |
-| `created_at` | `datetime` | ✅ | 创建时间 |
-| `updated_at` | `datetime` | ✅ | 更新时间 |
+| 字段                 | 类型                         | 必填               | 用途                                          |
+| -------------------- | ---------------------------- | ------------------ | --------------------------------------------- |
+| `key`                | `str`                        | ✅                 | 命名空间 key（如 `factor.pb_roe.ic_metrics`） |
+| `scope`              | `BlackboardScope`            | ✅                 | 隔离级别（5 选 1）                            |
+| `group`              | `GroupName \| None`          | scope=GROUP 时必填 | 哪个组的数据                                  |
+| `value`              | `dict \| list \| str \| ...` | ✅                 | JSON-serializable 任意值                      |
+| `write_policy`       | `WritePolicy`                | ✅                 | 谁能写（OWNER / APPEND / GROUP_APPEND）       |
+| `written_by_task_id` | `str`                        | ✅                 | 哪个 task 写的（溯源）                        |
+| `written_by_group`   | `GroupName`                  | ✅                 | 哪个组写的（权限判断）                        |
+| `version`            | `int`                        | ✅                 | 版本号（乐观锁）                              |
+| `created_at`         | `datetime`                   | ✅                 | 创建时间                                      |
+| `updated_at`         | `datetime`                   | ✅                 | 更新时间                                      |
 
 ### BlackboardState（整个黑板）
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `session_id` | `str` | ✅ | 当前会话 ID |
-| `entries` | `dict[str, BlackboardEntry]` | ✅ | 所有记录（key = `make_entry_key(scope, group, key)`） |
-| `updated_at` | `datetime` | ✅ | 黑板最后更新时间 |
+| 字段         | 类型                         | 必填 | 用途                                                  |
+| ------------ | ---------------------------- | ---- | ----------------------------------------------------- |
+| `session_id` | `str`                        | ✅   | 当前会话 ID                                           |
+| `entries`    | `dict[str, BlackboardEntry]` | ✅   | 所有记录（key = `make_entry_key(scope, group, key)`） |
+| `updated_at` | `datetime`                   | ✅   | 黑板最后更新时间                                      |
 
 ---
 
 ## 5 层隔离（核心决策）
 
-| Scope | 磁盘路径 | 谁能读 | 典型用途 | 示例 key |
-|---|---|---|---|---|
-| **GLOBAL** | `.quantcode/memory/global/MEMORY.md` | 所有人 | 跨项目用户偏好 | `user.preferred_model` |
-| **PROJECT** | `./MEMORY.md` | 所有组 | 项目级共享知识 | `shared.last_pr` |
-| **GROUP** | `.quantcode/memory/groups/<group>/MEMORY.md` | **仅本组** | 组内私有知识 | `factor.ic_registry` |
-| **SESSION** | `.quantcode/memory/sessions/<sid>/checkpoint.md` | 本会话 | 会话 checkpoint | `session.current_task` |
-| **TASK** | `.quantcode/memory/sessions/<sid>/tasks/<tid>/progress.md` | 本任务 | 任务进度 | `task.progress_pct` |
+| Scope       | 磁盘路径                                                   | 谁能读     | 典型用途        | 示例 key               |
+| ----------- | ---------------------------------------------------------- | ---------- | --------------- | ---------------------- |
+| **GLOBAL**  | `.quantcode/memory/global/MEMORY.md`                       | 所有人     | 跨项目用户偏好  | `user.preferred_model` |
+| **PROJECT** | `./MEMORY.md`                                              | 所有组     | 项目级共享知识  | `shared.last_pr`       |
+| **GROUP**   | `.quantcode/memory/groups/<group>/MEMORY.md`               | **仅本组** | 组内私有知识    | `factor.ic_registry`   |
+| **SESSION** | `.quantcode/memory/sessions/<sid>/checkpoint.md`           | 本会话     | 会话 checkpoint | `session.current_task` |
+| **TASK**    | `.quantcode/memory/sessions/<sid>/tasks/<tid>/progress.md` | 本任务     | 任务进度        | `task.progress_pct`    |
 
 ### 🔴 关键决策：GROUP 隔离墙是硬的
 
 **用户核心要求**：
+
 > "跨组读权限应该不能给。只有部分 public 的数据可以读 memory，或者说干脆就全部隔离，因为我们本身代码设计上就是隔离的。"
 
 **实现**：
+
 - **GROUP scope 默认不可跨组读**：factor 组写的 `group:factor:ic_registry`，risk 组调 `get_entry(GROUP, FACTOR, "ic_registry")` 返回 `None`
 - **显式 PUBLIC 数据**：如果要跨组共享，必须写到 **PROJECT scope**，并在 key 里标记 `shared.*` 前缀
 - **示例**：
+
   ```python
   # ❌ 跨组读不到
   factor_private = bb.get_entry(BlackboardScope.GROUP, GroupName.FACTOR, "ic_registry")
   # factor_private = None（如果当前是 risk 组）
-  
+
   # ✅ 显式 PUBLIC 数据
   bb.add_entry(BlackboardEntry(
       scope=BlackboardScope.PROJECT,
@@ -93,16 +98,18 @@
 
 ## WritePolicy（3 种）
 
-| Policy | 谁能写 | 典型场景 |
-|---|---|---|
-| **OWNER** | 只有写入的 task | 任务进度（task 自己独占） |
-| **APPEND** | 任何 task，仅追加 | 全局日志、trace |
+| Policy           | 谁能写                  | 典型场景                      |
+| ---------------- | ----------------------- | ----------------------------- |
+| **OWNER**        | 只有写入的 task         | 任务进度（task 自己独占）     |
+| **APPEND**       | 任何 task，仅追加       | 全局日志、trace               |
 | **GROUP_APPEND** | 同组的任何 task，仅追加 | 因子注册表（factor 组内协作） |
 
 **R2 Q1 澄清**：`GROUP_APPEND` 在 `PROJECT` scope 的语义
+
 - **场景**：factor registry 放在 PROJECT scope（让 fundamental 组也能追加）
 - **权限判断**：用 `written_by_group` 追踪，但策略是"任意组可追加"
 - **示例**：
+
   ```python
   # fundamental 组写一个因子
   bb.add_entry(BlackboardEntry(
@@ -112,7 +119,7 @@
       value={"factors": ["pb_roe"]},
       written_by_group=GroupName.FUNDAMENTAL,
   ))
-  
+
   # factor 组追加另一个因子
   entry = bb.get_entry(BlackboardScope.PROJECT, None, "shared.factor_registry")
   entry.value["factors"].append("momentum")
@@ -172,6 +179,7 @@ pr_info = notification.value["pr_123"]
 **格式**：`<scope>:<group_or_'_'>:<key>`
 
 **示例**：
+
 ```python
 BlackboardState.make_entry_key(BlackboardScope.PROJECT, None, "last_pr")
 # → "project:_:last_pr"
@@ -229,10 +237,12 @@ BlackboardState.make_entry_key(BlackboardScope.GROUP, GroupName.FACTOR, "ic")
 ## 依赖关系
 
 **BlackboardState 被以下 schema 依赖**：
+
 - `ComposeTask` — task 通过 blackboard 读写状态
 - 所有业务 schema（间接）— 业务数据最终落到 blackboard
 
 **BlackboardState 依赖**：
+
 - `GroupName` (enum) — 6 组边界
 - `TaskIDStr` (type alias) — 溯源到 task
 
@@ -241,6 +251,7 @@ BlackboardState.make_entry_key(BlackboardScope.GROUP, GroupName.FACTOR, "ic")
 ## 测试覆盖
 
 ✅ 29 个测试中有 8 个覆盖 BlackboardState：
+
 - GROUP scope 需要 group 字段（否则 ValidationError）
 - GROUP_APPEND 只能用于 GROUP/PROJECT scope
 - `make_entry_key()` 格式正确
@@ -251,12 +262,12 @@ BlackboardState.make_entry_key(BlackboardScope.GROUP, GroupName.FACTOR, "ic")
 
 ## 决策记录（评审会后填写）
 
-| 决策点 | 决策 | 理由 | 反对意见 |
-|---|---|---|---|
-| Q1: SESSION checkpoint 保留期 | ？ | ？ | ？ |
-| Q2: TASK progress 清理策略 | ？ | ？ | ？ |
-| Q3: 是否细分子组/用户 | ？ | ？ | ？ |
-| Q4: version 乐观锁语义 | ？ | ？ | ？ |
+| 决策点                        | 决策                | 理由                                                        | 反对意见                                   |
+| ----------------------------- | ------------------- | ----------------------------------------------------------- | ------------------------------------------ |
+| Q1: SESSION checkpoint 保留期 | 保留 7 天滚动清理   | 兼顾 compact/replay debug 和磁盘占用                        | 项目关闭前长期复盘需求可另行归档           |
+| Q2: TASK progress 清理策略    | 保留到 session 结束 | 便于 debug 单次长任务，不立即丢失进度                       | 长期留存交给 artifacts，而不是 progress.md |
+| Q3: 是否细分子组/用户         | MVP 不细分          | 6 个组已经是当前隔离边界，避免过早增加 USER scope           | 多人协作冲突后续通过 owner/audit 扩展      |
+| Q4: version 乐观锁语义        | MVP 只做审计字段    | 当前单 session 串行执行，先不引入 expected-version 写入协议 | 并行写入上线时再改为乐观锁检查             |
 
 ---
 
@@ -266,4 +277,4 @@ BlackboardState.make_entry_key(BlackboardScope.GROUP, GroupName.FACTOR, "ic")
 - [ ] 陈镇鸿
 - [ ] 杨欣琳
 - [ ] 刘炽
-- [ ] 肖骥超
+- [√] 肖骥超

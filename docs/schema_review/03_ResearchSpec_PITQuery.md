@@ -3,7 +3,7 @@
 > **Owner**: 用户（Lead）  
 > **组**: fundamental  
 > **评审时长**: 5 分钟  
-> **状态**: 待评审
+> **状态**: 已评审
 
 ---
 
@@ -16,11 +16,13 @@
 ## 为什么需要它们
 
 **问题**：
+
 - 基本面研报生成流程（brainstorm → fetch → extract → dcf → draft → render）需要明确输入输出
 - 时点正确性是量化研究的生死线：用 2024-03-16 的信息做 2024-03-15 的研报 = lookahead bias
 - LLM 生成研报时容易"穿越"，必须用 schema + 验收 assert 强制约束
 
 **解决**：
+
 - `ResearchSpec` 定义"研究什么、什么时点、要哪些章节"
 - `PITQuery` 发给 pit-rag skill，`PITResult` 返回时点正确的文档
 - `PITResult` 的 Pydantic validator 自动检查 lookahead bias
@@ -29,73 +31,73 @@
 
 ## ResearchSpec 字段
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `target_type` | `TargetType` | ✅ | company / industry / macro |
-| `target_identifier` | `str` | ✅ | ticker（2097.HK）或行业代码或主题 |
-| `target_name` | `str \| None` | ❌ | 可读名称（如'蜜雪冰城'） |
-| `as_of_date` | `date` | ✅ | 研报时点（所有引用数据 ≤ 此日期） |
-| `research_questions` | `list[str]` | ✅ | 研究员关心的问题（≥1 个） |
-| `sections` | `list[SectionType]` | ❌ | 要生成的章节（默认 5 章节） |
-| `output_format` | `str` | ❌ | pdf / markdown / both（默认 pdf） |
-| `retrieval_result` | `PITResult \| None` | ❌ | pit-rag 填充的检索结果 |
+| 字段                 | 类型                | 必填 | 用途                              |
+| -------------------- | ------------------- | ---- | --------------------------------- |
+| `target_type`        | `TargetType`        | ✅   | company / industry / macro        |
+| `target_identifier`  | `str`               | ✅   | ticker（2097.HK）或行业代码或主题 |
+| `target_name`        | `str \| None`       | ❌   | 可读名称（如'蜜雪冰城'）          |
+| `as_of_date`         | `date`              | ✅   | 研报时点（所有引用数据 ≤ 此日期） |
+| `research_questions` | `list[str]`         | ✅   | 研究员关心的问题（≥1 个）         |
+| `sections`           | `list[SectionType]` | ❌   | 要生成的章节（默认 5 章节）       |
+| `output_format`      | `str`               | ❌   | pdf / markdown / both（默认 pdf） |
+| `retrieval_result`   | `PITResult \| None` | ❌   | pit-rag 填充的检索结果            |
 
 ### SectionType（中金风格 6 章节）
 
-| Enum 值 | 中文 | 说明 |
-|---|---|---|
-| `OVERVIEW` | 公司概览 | 基本信息、股权结构 |
-| `BUSINESS` | 业务分析 | 商业模式、竞争优势 |
-| `FINANCIALS` | 财务分析 | 三表、关键指标 |
-| `VALUATION` | 估值 | DCF、相对估值 |
-| `RISKS` | 风险提示 | 政策风险、经营风险 |
-| `INDUSTRY_COMPARISON` | 行业对比 | 同业对比（可选） |
+| Enum 值               | 中文     | 说明               |
+| --------------------- | -------- | ------------------ |
+| `OVERVIEW`            | 公司概览 | 基本信息、股权结构 |
+| `BUSINESS`            | 业务分析 | 商业模式、竞争优势 |
+| `FINANCIALS`          | 财务分析 | 三表、关键指标     |
+| `VALUATION`           | 估值     | DCF、相对估值      |
+| `RISKS`               | 风险提示 | 政策风险、经营风险 |
+| `INDUSTRY_COMPARISON` | 行业对比 | 同业对比（可选）   |
 
 ---
 
 ## PITQuery 字段
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `query` | `str` | ✅ | 自然语言问题 |
-| `as_of_date` | `date` | ✅ | 检索时点 |
-| `corpus` | `list[CorpusType]` | ❌ | 语料范围（默认 ALL） |
-| `top_k` | `int` | ❌ | 召回数量（默认 10，1-100） |
+| 字段         | 类型               | 必填 | 用途                       |
+| ------------ | ------------------ | ---- | -------------------------- |
+| `query`      | `str`              | ✅   | 自然语言问题               |
+| `as_of_date` | `date`             | ✅   | 检索时点                   |
+| `corpus`     | `list[CorpusType]` | ❌   | 语料范围（默认 ALL）       |
+| `top_k`      | `int`              | ❌   | 召回数量（默认 10，1-100） |
 
 ### CorpusType
 
-| Enum 值 | 说明 |
-|---|---|
-| `RESEARCH_REPORTS` | 券商研报 |
-| `ANNOUNCEMENTS` | 公司公告 |
-| `EARNINGS_CALLS` | 业绩电话会 |
-| `NEWS` | 新闻 |
-| `ALL` | 全部 |
+| Enum 值            | 说明       |
+| ------------------ | ---------- |
+| `RESEARCH_REPORTS` | 券商研报   |
+| `ANNOUNCEMENTS`    | 公司公告   |
+| `EARNINGS_CALLS`   | 业绩电话会 |
+| `NEWS`             | 新闻       |
+| `ALL`              | 全部       |
 
 ---
 
 ## PITResult 字段
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `query` | `str` | ✅ | 原始查询 |
-| `as_of_date` | `date` | ✅ | 检索时点 |
-| `documents` | `list[PITDocument]` | ✅ | 返回文档（按 score 降序） |
-| `total_candidates` | `int` | ✅ | 召回候选总数（过滤前） |
-| `filtered_count` | `int` | ✅ | 过滤掉的文档数（lookahead） |
-| `retrieval_time_ms` | `int` | ✅ | 检索耗时（毫秒） |
+| 字段                | 类型                | 必填 | 用途                        |
+| ------------------- | ------------------- | ---- | --------------------------- |
+| `query`             | `str`               | ✅   | 原始查询                    |
+| `as_of_date`        | `date`              | ✅   | 检索时点                    |
+| `documents`         | `list[PITDocument]` | ✅   | 返回文档（按 score 降序）   |
+| `total_candidates`  | `int`               | ✅   | 召回候选总数（过滤前）      |
+| `filtered_count`    | `int`               | ✅   | 过滤掉的文档数（lookahead） |
+| `retrieval_time_ms` | `int`               | ✅   | 检索耗时（毫秒）            |
 
 ### PITDocument（单个文档）
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `id` | `str` | ✅ | 文档唯一 ID |
-| `source` | `str` | ✅ | 来源（如'中金公司'） |
-| `title` | `str \| None` | ❌ | 文档标题 |
-| `published_at` | `date` | ✅ | **发布日期（关键）** |
-| `snippet` | `str` | ✅ | 相关片段 |
-| `score` | `float` | ✅ | 相关性得分（0-1） |
-| `url` | `str \| None` | ❌ | 原文链接 |
+| 字段           | 类型          | 必填 | 用途                 |
+| -------------- | ------------- | ---- | -------------------- |
+| `id`           | `str`         | ✅   | 文档唯一 ID          |
+| `source`       | `str`         | ✅   | 来源（如'中金公司'） |
+| `title`        | `str \| None` | ❌   | 文档标题             |
+| `published_at` | `date`        | ✅   | **发布日期（关键）** |
+| `snippet`      | `str`         | ✅   | 相关片段             |
+| `score`        | `float`       | ✅   | 相关性得分（0-1）    |
+| `url`          | `str \| None` | ❌   | 原文链接             |
 
 ---
 
@@ -109,6 +111,7 @@ for doc in result.documents:
 ```
 
 **如果违反**：
+
 ```python
 PITResult(
     query="蜜雪冰城财务",
@@ -296,14 +299,17 @@ task.output = output
 ## 依赖关系
 
 **ResearchSpec 依赖**：
+
 - `PITResult` — 作为 `retrieval_result` 字段类型
 - `ComposeTask[ResearchSpec, ResearchResult]` — 作为泛型参数
 
 **PITQuery/PITResult 依赖**：
+
 - 无（独立 schema）
 - 被 `ResearchSpec` 引用
 
 **被依赖**：
+
 - `fundamental:fetch` skill — 消费 `PITQuery`，产出 `PITResult`
 - `fundamental:draft` skill — 消费 `ResearchSpec`（含 `retrieval_result`），产出 `ResearchResult`
 
@@ -312,6 +318,7 @@ task.output = output
 ## 测试覆盖（TODO）
 
 需要补充的测试（`tests/test_fundamental.py`）：
+
 - [ ] ResearchSpec 合法实例可序列化
 - [ ] PITResult validator 检测 lookahead bias
 - [ ] PITResult validator 通过合法输入
@@ -322,12 +329,12 @@ task.output = output
 
 ## 决策记录（评审会后填写）
 
-| 决策点 | 决策 | 理由 | 反对意见 |
-|---|---|---|---|
-| Q1: 自定义章节支持 | ？ | ？ | ？ |
-| Q2: PITQuery.corpus 默认值 | ？ | ？ | ？ |
-| Q3: filtered_count 语义 | ？ | ？ | ？ |
-| Q4: ResearchResult 验收阈值 | ？ | ？ | ？ |
+| 决策点                      | 决策                                                     | 理由                                                     | 反对意见                               |
+| --------------------------- | -------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------- |
+| Q1: 自定义章节支持          | MVP 不支持自定义章节                                     | enum 能保证前端、runner、模板的章节集合稳定              | 后续需要"管理层分析"等章节时再加 enum  |
+| Q2: PITQuery.corpus 默认值  | 保持 `[CorpusType.ALL]`                                  | 当前实现已覆盖全部语料，具体 skill 可显式传入更窄 corpus | 噪音控制交给 fetch skill 或配置        |
+| Q3: filtered_count 语义     | 保持字段名，语义固定为 lookahead 过滤数                  | 避免破坏现有接口，同时在字段说明中明确含义               | 如后续加入多类过滤统计，再新增细分字段 |
+| Q4: ResearchResult 验收阈值 | 按 `target_type` 分层：company 10 / industry 5 / macro 3 | 短研报不应被公司深度报告阈值误杀                         | runner thresholds 仍可覆盖默认值       |
 
 ---
 
@@ -337,4 +344,4 @@ task.output = output
 - [ ] 陈镇鸿
 - [ ] 杨欣琳
 - [ ] 刘炽
-- [ ] 肖骥超
+- [√] 肖骥超
