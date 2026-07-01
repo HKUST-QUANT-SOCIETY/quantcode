@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LangGraph 学习笔记 — QuantCode Day 0 调研</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --card-alt: #212d3d;
+      --text: #e8edf4;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --accent-soft: rgba(96, 165, 250, 0.12);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.12);
+      --orange: #fbbf24;
+      --orange-soft: rgba(251, 191, 36, 0.12);
+      --purple: #a78bfa;
+      --border: #2d3a4f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 2rem 1rem 4rem;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #312e81 100%);
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      margin-bottom: 2rem;
+      border: 1px solid var(--border);
+    }
+    header h1 { font-size: 1.85rem; margin-bottom: 0.5rem; }
+    header .sub { color: #cbd5e1; font-size: 0.95rem; }
+    header .meta { margin-top: 1rem; font-size: 0.85rem; color: #94a3b8; }
+    header a { color: #93c5fd; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.5rem 1.75rem;
+      margin-bottom: 1.25rem;
+    }
+    section h2 {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--accent);
+    }
+    section h3 { font-size: 1rem; margin: 1.25rem 0 0.6rem; color: var(--green); }
+    p, li { color: var(--muted); font-size: 0.93rem; }
+    p { margin-bottom: 0.75rem; }
+    ul, ol { padding-left: 1.4rem; margin-bottom: 0.75rem; }
+    li { margin-bottom: 0.4rem; }
+    strong { color: var(--text); }
+    .lead {
+      font-size: 1.05rem;
+      color: #cbd5e1;
+      border-left: 3px solid var(--accent);
+      padding-left: 1rem;
+      margin-bottom: 1rem;
+    }
+    .tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      margin-right: 0.35rem;
+      margin-bottom: 0.35rem;
+    }
+    .tag-blue { background: var(--accent-soft); color: var(--accent); }
+    .tag-green { background: var(--green-soft); color: var(--green); }
+    .tag-orange { background: var(--orange-soft); color: var(--orange); }
+    .tag-purple { background: rgba(167, 139, 250, 0.15); color: var(--purple); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 0.75rem 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--card-alt); color: var(--text); }
+    pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      margin: 0.75rem 0;
+      color: #c9d1d9;
+    }
+    code { font-family: "SF Mono", Menlo, monospace; }
+    .diagram {
+      background: var(--card-alt);
+      border-radius: 10px;
+      padding: 1.25rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+      color: #94a3b8;
+      overflow-x: auto;
+      white-space: pre;
+      margin: 0.75rem 0;
+    }
+    .compare-grid {
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .card-sm {
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .card-sm h4 { font-size: 0.9rem; color: var(--text); margin-bottom: 0.4rem; }
+    .quantcode {
+      background: linear-gradient(135deg, rgba(52, 211, 153, 0.08), rgba(96, 165, 250, 0.08));
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>LangGraph 学习笔记</h1>
+      <p class="sub">低层编排框架 · 有状态 Agent · Checkpoint · 与 QuantCode 架构对照</p>
+      <p class="meta">
+        来源：<a href="https://github.com/langchain-ai/langgraph" target="_blank">langchain-ai/langgraph</a> ·
+        文档：<a href="https://docs.langchain.com/oss/python/langgraph/" target="_blank">docs.langchain.com</a> ·
+        整理：QuantCode Day 0 调研 · 刘炽
+      </p>
+    </header>
+
+    <section>
+      <h2>一、LangGraph 是什么？</h2>
+      <p class="lead">
+        LangGraph 是一个<strong>用「图（Graph）」来编排 AI Agent 工作流</strong>的 Python 框架。
+        它不负责「聊天」，而是负责：<strong>多步骤任务怎么跑、状态怎么存、失败了怎么恢复、人怎么介入</strong>。
+      </p>
+      <p>
+        官方一句话：<em>Low-level orchestration framework for building stateful agents</em>
+        —— 构建<strong>有状态、可长期运行、能从失败中恢复</strong>的 Agent 的底层编排框架。
+      </p>
+      <p>
+        由 LangChain 团队维护，GitHub 约 36k+ stars（<a href="https://github.com/langchain-ai/langgraph" target="_blank">langchain-ai/langgraph</a>）。
+        安装：<code>pip install -U langgraph</code>
+      </p>
+      <div>
+        <span class="tag tag-blue">Python</span>
+        <span class="tag tag-green">Stateful</span>
+        <span class="tag tag-orange">Checkpoint</span>
+        <span class="tag tag-purple">Human-in-the-loop</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>二、为什么要用 LangGraph？（解决什么问题）</h2>
+      <p>普通 LLM 调用是「一问一答」。真实投研 / 工程任务往往是：</p>
+      <ul>
+        <li>很多步（拉数据 → 算因子 → 回测 → 风控 → 发 PR）</li>
+        <li>要记中间结果（不能全靠对话上下文）</li>
+        <li>会失败、要重试、要暂停等人审批</li>
+        <li>多个子 Agent 分工协作</li>
+      </ul>
+      <p>LangGraph 专门解决这类<strong>长流程、有状态</strong>问题，而不是替代 Cursor / OpenCode 的单轮对话。</p>
+
+      <h3>官方强调的 5 大能力</h3>
+      <table>
+        <thead>
+          <tr><th>能力</th><th>含义</th><th>类比</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Durable execution</strong><br>持久化执行</td>
+            <td>任务跑到一半挂了，能从 checkpoint 精确恢复，不用从头来</td>
+            <td>游戏存档</td>
+          </tr>
+          <tr>
+            <td><strong>Human-in-the-loop</strong><br>人工介入</td>
+            <td>任意节点暂停，人可查看/修改状态后再继续</td>
+            <td>PR Review、风控审批</td>
+          </tr>
+          <tr>
+            <td><strong>Memory</strong><br>记忆</td>
+            <td>短期工作记忆 + 跨会话长期记忆</td>
+            <td>Blackboard / MEMORY.md</td>
+          </tr>
+          <tr>
+            <td><strong>Debugging</strong><br>可观测</td>
+            <td>配合 LangSmith 追踪每一步状态变化</td>
+            <td>CI 日志、trace</td>
+          </tr>
+          <tr>
+            <td><strong>Deployment</strong><br>生产部署</td>
+            <td>面向长时间、有状态工作流的部署方案</td>
+            <td>QuantCode 生产主线</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>三、核心概念（必懂）</h2>
+
+      <h3>3.1 Graph（图）</h3>
+      <p>整个 Agent 工作流是一张<strong>有向图</strong>：</p>
+      <div class="diagram">       ┌─────────┐
+       │  START  │
+       └────┬────┘
+            ▼
+       ┌─────────┐     条件分支      ┌─────────┐
+       │  Node A │ ───────────────► │  Node B │
+       │ (拉数据) │                   │ (算因子) │
+       └────┬────┘                   └────┬────┘
+            │                             │
+            └──────────┬──────────────────┘
+                       ▼
+                  ┌─────────┐
+                  │  Node C │  ← Human Gate：等人批准
+                  │ (风控)  │
+                  └────┬────┘
+                       ▼
+                    [ END ]</div>
+      <ul>
+        <li><strong>Node（节点）</strong>：一个函数 / 一个 Agent 步骤（做一件事）</li>
+        <li><strong>Edge（边）</strong>：节点之间的流转（下一步去哪）</li>
+        <li><strong>Conditional Edge</strong>：按状态决定走哪条分支（if/else）</li>
+      </ul>
+
+      <h3>3.2 State（状态）</h3>
+      <p>
+        图里有一个共享的 <strong>State</strong> 对象（通常是 TypedDict 或 Pydantic），
+        每个节点<strong>读取 State → 干活 → 写回 State</strong>。
+      </p>
+      <pre><code># 概念示例（简化）
+class AgentState(TypedDict):
+    messages: list
+    task_id: str
+    artifacts: dict
+    status: str</code></pre>
+      <p>这就是 LangGraph 版的「黑板」—— 所有节点通过 State 交换信息，而不是互相私聊。</p>
+
+      <h3>3.3 Checkpoint（检查点）</h3>
+      <p>
+        LangGraph 可以把每一步的 State <strong>持久化到磁盘/数据库</strong>（checkpoint）。
+        进程崩溃、服务重启后，用 <code>thread_id</code> 加载上次 checkpoint 继续跑。
+      </p>
+      <pre><code># 概念：编译图时开启 checkpointer
+from langgraph.checkpoint.memory import MemorySaver
+
+checkpointer = MemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+# 恢复执行
+config = {"configurable": {"thread_id": "session-abc"}}
+graph.invoke(input, config=config)</code></pre>
+      <p><strong>重点：</strong>checkpoint 存的是<strong>状态快照</strong>，不是完整 event log。QuantCode 的 BlackboardState 设计参考了这一点。</p>
+
+      <h3>3.4 Subgraph（子图）</h3>
+      <p>大图里可以嵌小图。例如「fundamental 流」是一个 subgraph，「factor 流」是另一个。对应 QuantCode 的 <strong>6 套 Compose 流</strong>。</p>
+    </section>
+
+    <section>
+      <h2>四、LangGraph vs 其他方案</h2>
+      <div class="compare-grid">
+        <div class="card-sm">
+          <h4>vs 普通 ChatGPT / Cursor</h4>
+          <p>单轮对话，无持久状态机。LangGraph 管<strong>多步编排 + 状态恢复</strong>。</p>
+        </div>
+        <div class="card-sm">
+          <h4>vs Temporal / Airflow</h4>
+          <p>传统工作流引擎偏确定性任务；LangGraph 专为 <strong>LLM + 工具调用</strong> 设计，节点可以是 Agent。</p>
+        </div>
+        <div class="card-sm">
+          <h4>vs OpenCode / Claude Code</h4>
+          <p>OpenCode 是<strong>交互式 coding agent 载体</strong>；LangGraph 是<strong>后台编排引擎</strong>。QuantCode 在 OpenCode 之上加 LangGraph 式契约。</p>
+        </div>
+        <div class="card-sm">
+          <h4>vs LangChain Chains</h4>
+          <p>Chain 是线性管道；LangGraph 支持<strong>循环、分支、并行、人机协作</strong>，更适合复杂 Agent。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>五、最小可运行示例（理解用）</h2>
+      <pre><code>from typing import TypedDict
+from langgraph.graph import StateGraph, START, END
+
+# 1. 定义状态
+class State(TypedDict):
+    step: int
+    log: list[str]
+
+# 2. 定义节点（每个节点是一个函数）
+def step_a(state: State) -> State:
+    return {"step": 1, "log": state["log"] + ["fetched data"]}
+
+def step_b(state: State) -> State:
+    return {"step": 2, "log": state["log"] + ["computed factor"]}
+
+# 3. 建图
+builder = StateGraph(State)
+builder.add_node("fetch", step_a)
+builder.add_node("compute", step_b)
+builder.add_edge(START, "fetch")
+builder.add_edge("fetch", "compute")
+builder.add_edge("compute", END)
+
+graph = builder.compile()
+
+# 4. 运行
+result = graph.invoke({"step": 0, "log": []})
+print(result)
+# {'step': 2, 'log': ['fetched data', 'computed factor']}</code></pre>
+      <p>加上 <code>checkpointer</code> 后，每一步都会存档，可随时 resume。</p>
+    </section>
+
+    <section class="quantcode">
+      <h2>六、与 QuantCode 的对照（Day 0 汇报重点）</h2>
+      <p>Day 0 任务：读 LangGraph 的 state machine + checkpoint，思考 <code>ComposeTask</code> 和 <code>BlackboardState</code> 怎么改。</p>
+
+      <h3>6.1 Pattern 1 — Orchestrator-Worker ↔ LangGraph Graph</h3>
+      <table>
+        <thead>
+          <tr><th>LangGraph</th><th>QuantCode</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Graph / Node</td><td><code>ComposeTask</code> 树（父子任务分解）</td></tr>
+          <tr><td>State 字段</td><td>task 的 <code>input</code> / <code>output</code> artifacts</td></tr>
+          <tr><td>Conditional Edge</td><td>status: open → in_progress → blocked → done</td></tr>
+          <tr><td>Subgraph</td><td>6 组各自的 Compose 流（options / factor / …）</td></tr>
+        </tbody>
+      </table>
+
+      <h3>6.2 Pattern 2 — Stateful Blackboard ↔ LangGraph State + Checkpoint</h3>
+      <table>
+        <thead>
+          <tr><th>LangGraph</th><th>QuantCode</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>State 对象</td><td><code>BlackboardState.entries</code></td></tr>
+          <tr><td>Checkpoint 持久化</td><td>磁盘：MEMORY.md / checkpoint.md / progress.md</td></tr>
+          <tr><td>thread_id</td><td><code>session_id</code>（64-bit 熵）</td></tr>
+          <tr><td>Scope 隔离</td><td>GLOBAL / PROJECT / GROUP / SESSION / TASK 五层</td></tr>
+        </tbody>
+      </table>
+
+      <h3>6.3 Pattern 5 — Human Gate ↔ interrupt_before / interrupt_after</h3>
+      <p>
+        LangGraph 支持在指定节点<strong>中断执行</strong>，等人审批后再 <code>graph.invoke(None, config)</code> 继续。
+        对应 QuantCode 的风控审批、PR merge 前人工确认。
+      </p>
+
+      <h3>6.4 我们从 LangGraph 借鉴了什么、没照搬什么</h3>
+      <table>
+        <thead>
+          <tr><th>借鉴</th><th>QuantCode 自己的设计</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>状态机 + checkpoint 恢复</td><td>Pydantic schema 冻结契约，不靠自然语言传数据</td></tr>
+          <tr><td>图编排思想</td><td>跑在 OpenCode fork 上，不是直接用 LangGraph 运行时</td></tr>
+          <tr><td>Human-in-the-loop</td><td>独立的 Human Gate + risk-gate CI</td></tr>
+          <tr><td>—</td><td>6 组硬隔离（GROUP scope），LangGraph 默认无此概念</td></tr>
+          <tr><td>—</td><td><code>@dedupe_within</code> 副作用 tool 保险栓</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>七、学习路径建议</h2>
+      <ol>
+        <li><strong>README + 官方 Quickstart</strong><br>
+          <a href="https://github.com/langchain-ai/langgraph" target="_blank">GitHub README</a> →
+          <a href="https://docs.langchain.com/oss/python/langgraph/" target="_blank">官方文档 Quickstart</a>
+        </li>
+        <li><strong>理解 StateGraph 三件套</strong>：State、Node、Edge</li>
+        <li><strong>跑通 Checkpoint 示例</strong>：故意中断进程，验证 resume</li>
+        <li><strong>读 Human-in-the-loop 指南</strong>：理解 interrupt 节点</li>
+        <li><strong>对照 QuantCode schema</strong>：读 <code>schemas/compose_task.py</code> 和 <code>docs/schema_review/02_BlackboardState.md</code></li>
+        <li><strong>Day 0 汇报产出</strong>：3 条具体建议 — ComposeTask 字段改什么、Blackboard scope 怎么定、checkpoint 存哪</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>八、关键术语速查</h2>
+      <table>
+        <thead>
+          <tr><th>术语</th><th>一句话</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>StateGraph</code></td><td>用共享状态建图的核心类</td></tr>
+          <tr><td><code>Node</code></td><td>图上的一个步骤（函数）</td></tr>
+          <tr><td><code>Edge</code></td><td>节点间的连接（固定或条件）</td></tr>
+          <tr><td><code>Checkpoint</code></td><td>某时刻 State 的持久化快照</td></tr>
+          <tr><td><code>thread_id</code></td><td>一次会话 / 任务的唯一 ID，用于恢复</td></tr>
+          <tr><td><code>compile()</code></td><td>把 builder 变成可执行的 graph</td></tr>
+          <tr><td><code>invoke()</code></td><td>同步跑完一轮</td></tr>
+          <tr><td><code>stream()</code></td><td>流式输出每一步结果</td></tr>
+          <tr><td><code>interrupt</code></td><td>暂停图执行，等人介入</td></tr>
+          <tr><td><code>Subgraph</code></td><td>嵌套子工作流</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>九、Day 0 汇报模板（可直接用）</h2>
+      <pre><code>## LangGraph 调研汇报（5 分钟）
+
+### 1. LangGraph 是什么
+- 有状态 Agent 的图编排框架，核心：State + Node + Checkpoint
+
+### 2. 对 ComposeTask 的建议
+- 借鉴 LangGraph 的父子图分解 → task_id 层级 T1.2.3
+- 借鉴 status 状态机 → open/in_progress/blocked/done/abandoned
+- 建议增加/保留：dispatch_count 上限、terminal outcome 约束
+
+### 3. 对 BlackboardState 的建议
+- 借鉴 checkpoint 外化状态 → 不依赖 LLM 上下文记忆
+- 五层 scope 对应不同生命周期（GLOBAL → TASK）
+- WritePolicy 明确读写权限，防止跨组污染
+
+### 4. 我们不直接上 LangGraph 的原因
+- QuantCode 跑在 OpenCode fork 上，用 Pydantic 契约 + 文件持久化
+- 需要 6 组隔离、dedupe 保险栓等 LangGraph 原生不提供的约束
+
+### 5. 下一步
+- 冻结 ComposeTask + BlackboardState v1 schema
+- options 组在 Blackboard 上写 options-risk.json 试点</code></pre>
+    </section>
+
+    <footer>
+      QuantCode · LangGraph Day 0 学习笔记 ·
+      <a href="https://github.com/langchain-ai/langgraph" style="color:#60a5fa">GitHub</a> ·
+      生成于 2026-07-01
+    </footer>
+  </div>
+</body>
+</html>
