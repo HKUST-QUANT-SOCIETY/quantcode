@@ -1,5 +1,5 @@
 ---
-name: risk-gate
+name: risk:gate
 description: 接收模型组 PR，生成 RiskProfile，必要时触发 HumanGate，并向 PR 写入风控评论
 group: risk
 owner: 杨欣琳

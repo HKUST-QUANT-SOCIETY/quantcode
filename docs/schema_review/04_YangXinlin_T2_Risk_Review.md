@@ -3,7 +3,7 @@
 > Reviewer: 杨欣琳  
 > Track: T2 风控 / 跨组接收  
 > Review scope: ComposeTask, BlackboardState, ResearchSpec + PITQuery/PITResult  
-> Main concern: whether the foundational contracts can support HumanGate, RiskProfile, risk-gate, and deduped PR comments.
+> Main concern: whether the foundational contracts can support HumanGate, RiskProfile, risk:gate, and deduped PR comments.
 
 ---
 
@@ -11,10 +11,10 @@
 
 I agree with freezing `ComposeTask` and `BlackboardState` as the Day 1 v1 contracts.
 They are enough for the T2 risk flow to start drafting `HumanGate`, `RiskProfile`,
-and `risk-gate` without blocking on a larger orchestration redesign.
+and `risk:gate` without blocking on a larger orchestration redesign.
 
 My main review comments are not blockers. They are interface questions that should be
-clarified before the risk-gate flow starts writing PR comments and creating manual
+clarified before the risk:gate flow starts writing PR comments and creating manual
 approval gates.
 
 ---
