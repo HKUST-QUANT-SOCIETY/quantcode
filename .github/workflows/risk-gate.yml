@@ -2,9 +2,13 @@ name: Risk Gate
 
 on:
   pull_request:
-    paths:
-      - 'strategies/**'
-      - 'factors/**'
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
 
 # Owner: 杨欣琳（T2 风控 / 跨组接收）
 # 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
@@ -28,17 +32,20 @@ jobs:
           pip install -e .
           pip install jsonschema
 
-      # TODO(杨欣琳): 通过 OpenCode CLI 触发 risk-gate skill
-      # 计划：bunx opencode run --skill risk-gate --input pr-diff.json
-      - name: Run risk-gate skill via OpenCode
-        run: echo "TODO: invoke opencode skill risk-gate against PR diff"
+      - name: Comment hello on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMENT_BODY: hello
+        run: python -m pipelines.risk_gate.comment_hello
 
-      - name: Validate JSON output
-        run: echo "TODO: python -m runner.schema_validator risk-profile artifacts/risk.json"
-
-      - name: Run acceptance
-        run: echo "TODO: python -m runner.acceptance risk-gate artifacts/risk.json"
-
-      # TODO(杨欣琳): 写 PR 评论必须通过 @dedupe_within 装饰
-      - name: Comment on PR (deduped)
-        run: echo "TODO: python -m tools.utils.dedupe_test --commit ${{ github.event.pull_request.head.sha }}"
+      - name: Repeat same comment to verify dedupe
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMENT_BODY: hello
+        run: python -m pipelines.risk_gate.comment_hello
