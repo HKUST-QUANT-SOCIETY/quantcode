@@ -1,5 +1,5 @@
 ---
-name: model-pr-submit
+name: model:pr-submit
 description: 模型组提 PR 时自动填风控元数据 + 触发 risk Compose 流
 group: model
 owner: 陈镇鸿
