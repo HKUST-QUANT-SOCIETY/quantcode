@@ -58,3 +58,43 @@ def factor_func(panel: pd.DataFrame) -> pd.Series:
 ## 跨组接口
 
 - 评估通过的因子，向风控组提供统计公式（max_drawdown / VaR 计算口径）
+
+## Day1 T4 Schema Review Alignment
+
+本节由肖骥超补充，用于对齐 `docs/schema_review/01_ComposeTask.md` 和
+`docs/schema_review/02_BlackboardState.md`。
+
+- 输入 payload 是 `schemas.factor.FactorSpec`。
+- 输出 payload 是 `schemas.factor.FactorReport`。
+- 在 Compose 流中，本 skill 应作为 `ComposeTask[FactorSpec, FactorReport]` 执行。
+- 若 AutoFactorEvaluation 的真实 HTTP/SDK 接口暂不可用，先使用
+  `pipelines/factor_eval/README.md` 中的 mock response 跑通 schema path。
+- 对 strategy / risk 的公开共享结果不能写 GROUP scope；应写 PROJECT scope，
+  key 使用 `shared.factor_autoeval_results.<factor_name>`。
+- 边界：T4 提供 `FactorReport` 和统计口径，不生成 `risk.json`，不替代
+  `risk-gate`。
+
+## AutoFactorEvaluation Invocation
+
+根据 `D:\桌面\agent\factor_miner_usage.md`，AutoFactorEvaluation 当前不是
+HTTP/SDK 常驻服务，正式入口是仓库根目录的 CLI pipeline：
+
+```bash
+python -m pipeline --all
+python -m pipeline --gateway-only
+python -m pipeline --assetization-only
+python -m pipeline --purification-only
+python -m pipeline --evaluation-only --ev-workers 4
+AFVCONFIG=/path/to/config_dir python -m pipeline --all
+```
+
+本 skill 应将 `FactorSpec` 转换为候选因子 manifest，并写入：
+
+```text
+candidate_pool/{campaign_id}/{candidate_id}/manifest.json
+```
+
+其中 `candidate_id` 建议使用 `FactorSpec.name`。pipeline 完成后，从最终
+`afv.json` 的 `Evaluation` 段和 Evaluation artifacts 读取结果，并映射为
+`schemas.factor.FactorReport`。Pydantic `FactorReport` 是当前 source of truth；
+旧的 `schemas/factor-report.schema.json` 仅作为 legacy JSON Schema artifact。

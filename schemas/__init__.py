@@ -41,3 +41,28 @@ __all__ = [
     "TaskStatus",
     "WritePolicy",
 ]
+
+# T4 factor schemas (肖骥超).
+from .factor import (  # noqa: E402
+    DateRange,
+    DecayMetrics,
+    FactorReport,
+    FactorSpec,
+    FactorVerdict,
+    ICMetrics,
+    ICMethod,
+    LayeredBacktest,
+    TurnoverMetrics,
+)
+
+__all__.extend([
+    "DateRange",
+    "DecayMetrics",
+    "FactorReport",
+    "FactorSpec",
+    "FactorVerdict",
+    "ICMetrics",
+    "ICMethod",
+    "LayeredBacktest",
+    "TurnoverMetrics",
+])
