@@ -28,3 +28,6 @@ artifacts/
 *.pdf
 !templates/**/*.pdf
 
+# Lead内部规划草案（不对外）
+docs/Day2_to_Day5_Roadmap.md
+
