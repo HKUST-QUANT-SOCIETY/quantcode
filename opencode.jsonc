@@ -6,6 +6,9 @@
   // Provider 配置由各成员本地 opencode.local.jsonc 提供，不入库
   "provider": {},
 
+  // Plugins
+  "plugins": ["@dietrichgebert/ponytail"],
+
   // 让 OpenCode 递归发现 .opencode/groups/**/SKILL.md
   "skills": {
     "paths": [".opencode/groups"]

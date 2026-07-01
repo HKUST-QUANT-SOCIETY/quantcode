@@ -11,6 +11,9 @@ __pycache__/
 .venv/
 *.egg-info/
 
+# Node
+node_modules/
+
 # Jupyter
 .ipynb_checkpoints/
 vendor/mimo-code/
