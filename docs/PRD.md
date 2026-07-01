@@ -109,7 +109,8 @@
 - 验收 runner（公用，吃 JSON 吐 pass/fail + Goal/Judge）
 - GitHub Actions CI gate
 - `@dedupe_within` 副作用 tool 去重保险栓（约 30 行装饰器 + SQLite）
-- 从 MimoCode cherry-pick：Memory（FTS5）、Checkpoint、Subagent、Goal/Judge、Dream/Distill
+- 从 MimoCode cherry-pick（P0）：Memory FTS5、自动 Checkpoint、Dream 原型
+- 从 MimoCode cherry-pick（P1，Week 2）：上下文重建、Subagent 监控、Distill 完整版
 
 ### 3.2 应做（P1，MVP 之后）
 

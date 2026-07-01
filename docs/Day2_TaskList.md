@@ -49,7 +49,7 @@ Day 1 我们冻结了 Pattern 1+2+5 的架构。Day 2 我们决定用 **LangGrap
 - Day 2 目标确认：factor:autoeval 跑通
 - LangGraph 技术栈快速对齐（5 分钟）
 
-### 1.1 尹一帆 · LangGraph 基础模板（上午 4 小时）
+### 1.1 尹一帆 · LangGraph 基础模板（上午 2 小时）
 
 > **新人背景**：尹一帆（HKU MPhil），Agent 系统和多智能体编排专家，Funcent 实习经验（Agent 自动审计闭环、Schema 合约、动态工作流编排）。Day 2 主攻 LangGraph 基础设施。
 
@@ -101,62 +101,37 @@ def get_checkpointer():
     return SqliteSaver.from_conn_string(".quantcode/checkpoints.db")
 ```
 
-### 1.2 Lead · Blackboard SQLite 基础（上午 3 小时）
+### 1.2 尹一帆 · Memory FTS5 实现（上午 4 小时）
+
+> 从 MimoCode 移植 Memory 系统（`vendor/mimo-code/packages/opencode/src/memory/`，461 行 TS），重写为 Python。
 
 | 任务 | 说明 | 验收 |
 |---|---|---|
-| 创建 `runner/blackboard.py` | 5 层 scope 的表结构：<br>```sql<br>CREATE TABLE blackboard (<br>  scope TEXT NOT NULL,  -- GLOBAL/PROJECT/GROUP/SESSION/TASK<br>  group_name TEXT,<br>  key TEXT NOT NULL,<br>  value TEXT NOT NULL,<br>  created_at INTEGER,<br>  PRIMARY KEY (scope, group_name, key)<br>);<br>CREATE VIRTUAL TABLE blackboard_fts USING fts5(key, value, content=blackboard);<br>```| 表创建成功 |
-| 实现读写接口 | `write(scope, group, key, value)` - 写入<br>`read(scope, group, key)` - 读取 + 权限检查<br>`search(query, group)` - FTS5 全文搜索 | 单元测试通过 |
-| 实现 GROUP 隔离规则 | - GROUP scope：只有 owner group 可读写<br>- PROJECT scope：所有组可读，写入需标记 `shared.*` 前缀<br>- SESSION/TASK scope：只有 owner 可读写<br>- GLOBAL scope：所有组可读，只有 Lead 可写 | 测试：factor 组读不到 model 组的 GROUP 数据 |
-| 写单元测试 | `tests/test_blackboard.py` - 覆盖所有 scope 的读写和权限 | `pytest tests/test_blackboard.py -v` 全部通过 |
+| 创建 `runner/memory/fts.py` | SQLite FTS5 表结构（照抄 MimoCode schema，加 QuantCode 扩展）：<br>```sql<br>CREATE TABLE memory_fts (<br>  id INTEGER PRIMARY KEY,<br>  path TEXT UNIQUE,<br>  scope TEXT,        -- global/projects/groups/sessions/tasks<br>  scope_id TEXT,     -- project_hash/"fundamental"/thread_id/task_uuid<br>  type TEXT,         -- memory/checkpoint/progress/notes/feedback/...<br>  body TEXT,<br>  fingerprint TEXT,  -- size-mtime for change detection<br>  last_indexed_at INTEGER<br>);<br>CREATE INDEX memory_fts_scope_idx ON memory_fts(scope, scope_id);<br>CREATE VIRTUAL TABLE memory_fts_search USING fts5(body);<br>```| 表创建成功 |
+| 创建 `runner/memory/paths.py` | 路径解析 + QuantCode 扩展：<br>- 加 `groups` scope（MimoCode 没有）<br>- 加 `tasks` scope（MimoCode 没有）<br>- Type 检测（memory/checkpoint/progress/notes/...）<br>- 路径安全检查（防 `..` 穿越） | 能解析 `.quantcode/groups/factor/memory/last-run.md` |
+| 创建 `runner/memory/query.py` | buildFtsQuery（照抄 MimoCode fts-query.ts）：<br>- 自由文本 → FTS5 MATCH 安全转换<br>- CJK 支持（`\p{L}\p{N}_` Unicode regex）<br>- OR-join 保证召回 | `"PB-ROE因子"` → `'"PB" OR "ROE" OR "因子"'` |
+| 创建 `runner/memory/service.py` | Search API（照抄 MimoCode service.ts）：<br>- `search(query, scope, scope_id, type, limit)`<br>- BM25 排序<br>- 相对 floor（0.15 * top_score）过滤噪音<br>- **GROUP 隔离权限检查**（QuantCode 核心） | CJK 查询能返回结果 |
+| 创建 `runner/memory/reconcile.py` | 磁盘 ↔ SQLite 双向同步：<br>- 扫描 `.quantcode/` 下所有 `.md` 文件<br>- 用 fingerprint（size + mtime）判断是否需要重新索引<br>- 自动 prune 已删除的文件 | LangGraph node 写 `.md` 后，reconcile 能自动索引 |
+| GROUP 隔离权限 | `groups` scope 的 read 必须检查 requester_group：<br>```python<br>def search(query, scope, scope_id, requester_group):<br>    if scope == "groups" and scope_id != requester_group:<br>        raise PermissionError(...)<br>``` | 测试：factor 组读不到 model 组的 memory |
+| 写单元测试 | `tests/test_memory.py` - 覆盖 5 scope + 8 type + 权限 | `pytest tests/test_memory.py -v` 全部通过 |
 
-**关键代码框架**：
+**估算**：461 行 TS → 约 500 行 Python（4 小时紧但可行）
 
-```python
-# runner/blackboard.py
-
-import sqlite3
-from enum import StrEnum
-
-class Scope(StrEnum):
-    GLOBAL = "GLOBAL"
-    PROJECT = "PROJECT"
-    GROUP = "GROUP"
-    SESSION = "SESSION"
-    TASK = "TASK"
-
-class Blackboard:
-    def __init__(self, db_path: str = ".quantcode/blackboard.db"):
-        self.conn = sqlite3.connect(db_path)
-        self._create_tables()
-    
-    def write(self, scope: Scope, group: str, key: str, value: str):
-        """写入，自动检查权限"""
-        if scope == Scope.PROJECT and not key.startswith("shared."):
-            raise PermissionError("PROJECT scope keys must start with 'shared.'")
-        # ...
-    
-    def read(self, scope: Scope, group: str, key: str, requester_group: str) -> str | None:
-        """读取，自动检查权限"""
-        if scope == Scope.GROUP and group != requester_group:
-            raise PermissionError(f"{requester_group} cannot read {group}'s GROUP data")
-        # ...
-```
-
-### 1.3 肖骥超 · 开始设计 FactorFlowState（上午 1 小时）
+### 1.3 Lead · Memory 权限测试 + 协调（上午 2 小时）
 
 | 任务 | 说明 | 验收 |
 |---|---|---|
-| 定义 `FactorFlowState` | 继承 `BaseFlowState`，添加业务字段：<br>- `input_spec: FactorSpec \| None`<br>- `eval_result: dict \| None`（AutoEval 原始返回）<br>- `report: FactorReport \| None` | 类型定义完成 |
-| 草稿 4 个 node 函数签名 | `validate_factor_spec(state) -> dict`<br>`call_autoeval_api(state) -> dict`<br>`generate_factor_report(state) -> dict`<br>`run_acceptance(state) -> dict` | 函数签名完成，实现留到下午 |
+| 写 GROUP 隔离权限测试 | 基于尹一帆的 Memory 实现：<br>- factor 组能读写自己的 `groups/factor/memory/*.md`<br>- factor 组**不能**读 `groups/model/memory/*.md`<br>- 所有组可读 `projects/<hash>/memory/*.md` | 测试通过 |
+| 全局协调 | 解决各 Track 的阻塞点；确保下午 5 点前 factor:autoeval 能跑通 | 无阻塞遗留 |
 
 ### 1.4 其他组员 · 准备工作（上午）
 
 | 组员 | 任务 | 验收 |
 |---|---|---|
-| 陈镇鸿 | 阅读 LangGraph 文档（https://docs.langchain.com/langgraph/），学习 StateGraph 用法；验证 `@dedupe_within` 在 LangGraph node 中的兼容性 | 能说出 StateGraph 的 3 个核心概念（node/edge/state） |
-| 杨欣琳 | 把 Day 1 的 `schemas/human-gate.schema.json` 转为 Pydantic schema；起草 `runner/human_gate.py` 的接口 | `HumanGate` Pydantic 类定义完成 |
-| 刘炽 | 优化 Day 1 的 Typst 模板：补充图表、脚注、引用格式 | `typst compile templates/typst/research-report.typ` 产出更完整的 PDF |
+| 陈镇鸿 | 阅读 LangGraph 文档；验证 `@dedupe_within` 在 LangGraph node 中的兼容性 | 能说出 StateGraph 的 3 个核心概念 |
+| 杨欣琳 | 把 `schemas/human-gate.schema.json` 转为 Pydantic；起草 `runner/human_gate.py` | `HumanGate` Pydantic 类完成 |
+| 刘炽 | 优化 Typst 模板：补充图表、脚注、引用格式 | `typst compile` 产出更完整的 PDF |
+| 肖骥超 | 定义 `FactorFlowState`，草稿 4 个 node 函数签名 | 类型定义完成，实现留到下午 |
 
 ---
 
@@ -196,7 +171,7 @@ def _mock_autoeval_result(spec: FactorSpec) -> dict:
 | 任务 | 说明 | 验收 |
 |---|---|---|
 | 实现 `execute_compose_flow()` | 供其他组员调用的统一接口：<br>```python<br>from runner.compose_executor import execute_compose_flow<br><br>result = execute_compose_flow(<br>    group="factor",<br>    flow_name="factor:autoeval",<br>    input_data={"name": "pb_roe", ...},<br>)<br># 返回: {"artifacts": [...], "output_data": {...}}<br>``` | 肖骥超能用这个接口跑通 factor:autoeval |
-| 集成 Blackboard | 在 StateGraph 的 state 中注入 `blackboard` 实例，每个 node 可以：<br>```python<br>def some_node(state):<br>    blackboard = state["_blackboard"]<br>    blackboard.write(Scope.GROUP, "factor", "last_run", "2026-07-02")<br>``` | 能在 node 中读写 Blackboard |
+| 集成 Memory | 在 StateGraph 的 state 中注入 `memory` 实例，每个 node 可以：<br>```python<br>def some_node(state):<br>    memory = state["_memory"]<br>    memory.write(scope="groups", scope_id="factor", type="progress", key="last_run", body="2026-07-02")<br>    results = memory.search(query="PB-ROE", scope="groups", scope_id="factor")<br>``` | 能在 node 中读写 Memory |
 
 ### 2.3 陈镇鸿 · dedupe 装饰器兼容性测试（下午 2 小时）
 
@@ -246,9 +221,10 @@ def _mock_autoeval_result(spec: FactorSpec) -> dict:
 
 - [ ] factor:autoeval 完整跑通，产出 valid `factor-report.json`
 - [ ] checkpoint 机制验证：kill 进程 → resume → 从中断点继续
-- [ ] Blackboard GROUP 隔离验证（factor 组读不到 model 组的 GROUP 数据）
+- [ ] Memory FTS5 验证：写入 `.md` → reconcile → 能 search 到，CJK 查询正常
+- [ ] Memory GROUP 隔离验证（factor 组读不到 model 组的 memory）
 - [ ] 第一份 LangGraph trace（本地 log 或 LangSmith）
-- [ ] `runner/langgraph_base.py` 和 `runner/compose_executor.py` 完成，其他组员 Day 3 可直接使用
+- [ ] `runner/langgraph_base.py`、`runner/compose_executor.py`、`runner/memory/` 完成，其他组员 Day 3 可直接使用
 - [ ] `docs/LangGraph_Integration.md` 文档完成
 
 ---
@@ -259,6 +235,7 @@ def _mock_autoeval_result(spec: FactorSpec) -> dict:
 |---|---|---|---|
 | **LangGraph 学习成本高，上午卡住** | 中 | 高 | 尹一帆上午必须出基础模板，其他人下午才开始写 flow；Lead 提供 1 小时 LangGraph 快速培训 |
 | **AutoEval API 调不通** | 高 | 中 | 用 mock 数据，Demo 不影响；真实接入推到 Day 3 |
+| **Memory FTS5 移植卡住** | 中 | 高 | 尹一帆上午必须出基础结构（表+路径解析），下午补 search/reconcile；如果 4 小时不够，search 先用简单 SQL LIKE，reconcile 推到 Day 3 |
 | **Blackboard SQLite 并发写入冲突** | 低 | 中 | Day 2 只有 1 条流，不会并发；Day 4 再专门测试 |
 | **checkpoint 恢复失败（序列化问题）** | 中 | 高 | 尹一帆提前写 hello-world 示例验证；如果失败，简化 state 结构 |
 

@@ -271,18 +271,20 @@ quantcode/
 
 ### 4.1 引擎能力（从 MimoCode 移植）
 
-| 功能 | 描述 |
-|---|---|
-| **持久化 Memory** | `MEMORY.md` / `checkpoint.md` / `notes.md` / `tasks/<id>/progress.md`，SQLite FTS5 全文索引 |
-| **自动 Checkpoint** | context 占用 > 70% 自动 snapshot；> 90% 触发上下文重建 |
-| **上下文重建** | 抛弃旧消息，从 checkpoint + MEMORY + 最近 N 条消息重组 working context |
-| **预算化注入** | token budget + importance ranking，决定哪些内容进上下文 |
-| **树状任务** | T1 / T1.1 / T1.2 层级，与 checkpoint 联动；支持自动编排 + 人工 YAML 编排 |
-| **Subagent 编排** | 按需创建、共享上下文、并行、生命周期追踪、可取消、后台执行 |
-| **Goal + Judge** | `/goal "完成 X"` 设置停止条件，独立 judge 模型判定是否真的完成 |
-| **Compose Mode** | 15 个内置 skill：brainstorm / plan / execute / review / tdd / debug / verify / merge / parallel / subagent / worktree / report / feedback / ask / new-skill |
-| **/dream** | 扫描 trace，提取持久知识到 MEMORY.md，删过期条目 |
-| **/distill** | 识别重复手动操作，封装成新 SKILL.md / subagent / command |
+参考实现：`vendor/mimo-code/packages/opencode/src/memory/`（461 行 TypeScript，MIT）。
+
+| 功能 | 描述 | 优先级 |
+|---|---|---|
+| **Memory FTS5** | SQLite FTS5 表 + BM25 排序 + CJK 支持 + reconcile 机制（磁盘 ↔ 索引双向同步）。QuantCode 扩展：加 GROUP scope + GROUP 隔离权限 | **P0（Day 2）** |
+| **树状任务** | T1 / T1.1 / T1.2 层级，parent/children，与 checkpoint 联动 | **P0（已完成）** ComposeTask schema 已支持 |
+| **自动 Checkpoint** | LangGraph SqliteSaver + context 占用 > 70% 自动 snapshot | **P0（Day 3）** |
+| **/dream 原型** | 扫描 checkpoints.db 的 execution trace，用 LLM 提取重复 pattern，写入 memory type | **P0（Day 4）** |
+| **上下文重建** | context > 90% 抛弃旧消息，从 checkpoint + MEMORY + 最近 N 条重组 | P1（Week 2） |
+| **Subagent 监控** | LangGraph subgraph 已可调用；补生命周期追踪、UI 监控、单独 kill | P1（Week 2） |
+| **/distill 完整实现** | 识别重复操作 → 候选新 SKILL.md 草案 | P1（Week 2） |
+| **预算化注入** | token budget + importance ranking 决定哪些内容进上下文 | P2（Week 3+） |
+| **Goal + Judge** | `/goal` 命令 + 独立 judge 模型（Haiku）评估 | P2（Week 3+） |
+| **Compose Mode 15 skill** | 我们只做 6 条业务 Compose 流，不照搬 MimoCode 的通用 skill | 不做 |
 
 ### 4.2 业务能力（QuantCode 自建）
 
@@ -494,10 +496,68 @@ options:execute       →   下单 / 回测
 
 ### 4.5 Memory + RAG（跨组共享 + 组内私有）
 
-- **Project Memory**：`MEMORY.md` 项目级长期知识
-- **Group Memory**：`.opencode/groups/<group>/MEMORY.md` 组内私有
-- **Session Checkpoint**：每个 session 自己的 checkpoint.md
-- **Task Progress**：每个 task 自己的 progress.md
+#### Memory System 架构（从 MimoCode 移植 + QuantCode 扩展）
+
+**SQLite FTS5 表结构**（参考 `vendor/mimo-code/packages/opencode/src/memory/fts.sql.ts`）：
+
+```sql
+CREATE TABLE memory_fts (
+  id INTEGER PRIMARY KEY,
+  path TEXT UNIQUE,
+  scope TEXT,        -- global | projects | groups | sessions | tasks
+  scope_id TEXT,     -- project_hash | "fundamental" | thread_id | task_uuid
+  type TEXT,         -- memory | checkpoint | progress | notes | feedback | project | reference | user
+  body TEXT,
+  fingerprint TEXT,  -- size-mtime for change detection
+  last_indexed_at INTEGER
+);
+CREATE INDEX memory_fts_scope_idx ON memory_fts(scope, scope_id);
+CREATE INDEX memory_fts_type_idx ON memory_fts(type);
+CREATE VIRTUAL TABLE memory_fts_search USING fts5(body);
+```
+
+**Scope 分层**（QuantCode 5 层 vs MimoCode 3 层）：
+
+| Scope | 路径 | 读权限 | 用途 |
+|---|---|---|---|
+| `global` | `.quantcode/global/` | 所有人可读 | 全局配置、项目约定 |
+| `projects` | `.quantcode/projects/<hash>/` | 所有组可读 | 项目级长期知识（跨组共享） |
+| `groups` | `.quantcode/groups/<group>/` | 只有 owner group 可读 | 组内私有知识（**QuantCode 新增**） |
+| `sessions` | `.quantcode/sessions/<thread_id>/` | 只有 owner 可读 | 会话级 checkpoint |
+| `tasks` | `.quantcode/tasks/<task_uuid>/` | 只有 owner 可读 | 任务级 progress（**QuantCode 新增**） |
+
+**Type 分类**：
+
+- `memory` - 长期语义知识（手动 + Dream 自动提取）
+- `checkpoint` - 会话快照（自动）
+- `progress` - 任务进度（自动）
+- `notes` - 临时笔记（手动）
+- `feedback` / `project` / `reference` / `user` - 元数据
+
+**Reconcile 机制**：
+
+磁盘 .md 文件 ↔ SQLite 索引双向同步：
+- LangGraph node 可以直接写 `.quantcode/groups/factor/memory/last-run.md`
+- reconcile 扫描文件 fingerprint（size + mtime），变化的自动重新索引
+- SQLite 中已删除的文件自动 prune
+
+**Search API**：
+
+```python
+memory.search(
+  query="PB-ROE因子",
+  scope="groups",
+  scope_id="factor",
+  type="memory",
+  limit=5
+)
+# 返回: [(path, snippet, bm25_score), ...]
+# BM25 排序 + 相对 floor (0.15 * top_score) 过滤噪音
+# CJK 支持：Unicode regex \p{L}\p{N}_
+```
+
+#### RAG 补充
+
 - **向量库**：ChromaDB 存研报、主线代码 chunks、历史 session 摘要
 - **Point-in-time**：所有文档带 `published_at`，检索时过滤 lookahead bias
 
