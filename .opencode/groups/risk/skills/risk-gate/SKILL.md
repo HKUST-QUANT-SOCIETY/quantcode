@@ -1,52 +1,50 @@
 ---
 name: risk-gate
-description: 分析模型组提交的 PR 中的策略代码，计算风控画像并输出标准化 JSON，用于 CI 自动门禁
+description: 接收模型组 PR，生成 RiskProfile，必要时触发 HumanGate，并向 PR 写入风控评论
 group: risk
 owner: 杨欣琳
-pattern: Pattern 5 (Human-in-the-Loop Gate)
+pattern: Pattern 5 (Human-in-the-Loop Gate) + Pattern 1 (Orchestrator-Worker)
 ---
 
 # Risk Gate Skill
 
 ## 何时使用
 
-当模型组提交一个包含策略代码的 PR，或在 CI 中触发 risk-gate workflow 时调用本 skill。本 skill 是 Pattern 5（人审 Gate）的入口，是跨组协作（model → risk）的接收端。
+当模型组提交一个真实 PR，需要风控组判断策略风险是否可接受时调用本 skill。
+
+典型入口：
+
+- GitHub Actions 在 PR 创建或更新时触发
+- 模型组通过 `model:pr-submit` handoff 给 risk 组
+- 风控组手动指定一个 PR URL 做测试
 
 ## 输入
 
-- PR diff（来自 GitHub Actions context）
-- 策略代码所在路径
-- `ModelSpec` 元数据（PR 提交者在 PR 描述里附带）
+必需输入：
 
-## 工作流程
+- `pr_url`: 模型组 PR 链接
+- `head_sha`: PR 当前 commit SHA，用于去重评论
+- `changed_files`: PR 中变更的文件列表
+- `model_summary`: 模型或策略的简短说明
 
-1. **静态分析** 策略代码，识别仓位计算、止损逻辑、杠杆使用
-2. **运行回测**（如配置允许），取最近 1 年的样本外数据
-3. **计算指标**（公式由肖骥超 / 因子组提供）：
-   - max_drawdown
-   - position_limit
-   - correlation_with_existing
-   - capacity_estimate_usd
-   - tail_risk_var_99
-4. **输出符合 `schemas/risk-profile.schema.json` 的 JSON**
-5. **调用 runner 跑预设阈值校验**
-6. **跨阈值时触发 `HumanGate`**，等待风控组同学人工审批
+可选输入：
 
-## 输出 schema
+- `model_spec`: 模型组提供的结构化元数据
+- `risk_thresholds`: 风控阈值配置
+- `backtest_result`: 回测结果；Day 1 可用 mock 数据代替
 
-见 `schemas/risk-profile.schema.json`。
+示例输入：
 
-## 验收标准
-
-- JSON 严格通过 schema 校验
-- 所有数值字段非空
-- runner 返回 `pass` / `fail` 明确结论
-
-## 失败处理
-
-- 回测数据缺失 → 标记 `tail_risk_var_99=null`，runner 自动 fail
-- 静态分析无法识别策略类型 → 进入 HumanGate
-
-## 副作用 tool 约定
-
-- 写 PR 评论 / 触发 Slack 通知必须经 `@dedupe_within(seconds=300)` 装饰（见 `tools/utils/dedupe.py`）
+```json
+{
+  "pr_url": "https://github.com/HKUST-QUANT-SOCIETY/quantcode/pull/123",
+  "head_sha": "abc123",
+  "changed_files": ["docs/model/sample_model_pr.md"],
+  "model_summary": "sample mean-reversion model",
+  "risk_thresholds": {
+    "max_drawdown": 0.2,
+    "position_limit": 0.3,
+    "correlation": 0.6,
+    "var_95": 0.05
+  }
+}
