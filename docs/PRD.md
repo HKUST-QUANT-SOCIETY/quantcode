@@ -114,10 +114,7 @@
 ### 3.2 应做（P1，MVP 之后）
 
 - **Compose 视图前端**（OpenCode desktop fork UI 改造：Compose 视图、任务树、Subagent 监控）
-- **idea-router agent**（核心：把任意 idea 路由到对应组的 Compose 流）
-- **Schema 动态生成**（LLM 读 idea + 主线，输出 Pydantic 类）
 - **跨组通知中心**（HumanGate 触发后的统一通知面板）
-- **Dog Food 模块**（每周自动爬 GH Trending / Twitter / Reddit）
 
 ### 3.3 不做（明确边界）
 
@@ -295,19 +292,9 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
                   └────────────────────────┘
 ```
 
-### 6.2 数据流（以 model → risk 跨组为例）
+### 6.2 数据流
 
-```
-模型组用户在 model Compose 流提交 PR
-   → model:pr-submit skill 自动填 ModelSpec 元数据
-   → GitHub PR push
-   → GitHub Actions 触发 risk-gate workflow
-   → OpenCode CLI invoke risk-gate skill（杨欣琳的）
-   → pipelines/risk_gate/analyze.py 输出 RiskProfile JSON
-   → runner.acceptance.run_acceptance() 跑阈值校验
-   → 越过阈值：HumanGate 通知风控组同学
-   → 阈值内：@dedupe_within(github_pr_comment) 写 PR 评论 + 自动 approve
-```
+model→risk 跨组数据流详见 `docs/QuantCode_Design.md`（Compose 流拆解章节）。
 
 ### 6.3 Schema 契约
 
@@ -336,29 +323,7 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 
 ## 8. 团队和分工
 
-| Track | 主 Owner | 副 Owner | 主要范围 |
-|---|---|---|---|
-| **T0 地基** | 用户（Lead） | — | OpenCode fork 维护、MimoCode 移植、Compose 流脚手架、Schema 引擎、Acceptance Runner、CI/部署、`@dedupe_within` 集成 |
-| **T1 模型 / 跨组发起** | 陈镇鸿 | 肖骥超统计支持 | model Compose 流 + 写 `tools/utils/dedupe.py` |
-| **T2 风控 / 跨组接收** | 杨欣琳 | 肖骥超统计支持 | risk Compose 流 + HumanGate 契约 + CI gate dedupe 验证 |
-| **T3a 基本面 / 研报 / PIT-RAG** | 用户（Lead） | 刘炽 | fundamental Compose 流、point-in-time RAG、研报 spec、Typst 模板、PDF 验收 |
-| **T3b 期权** | 刘炽 | 用户（Lead） | options Compose 流 |
-| **T4 因子评估** | 肖骥超 | 用户（Lead） | factor Compose 流、对接 AutoEval、为 risk-gate 提供统计公式 |
-| **T5 前端 / Compose 视图** | 待定 | — | OpenCode desktop UI 改造 |
-
-> **暂未分配**：俞高磊（后续根据其入组进度补充任务）
-
-**Lead 职责**：项目方向 + PRD/Design 维护、跨 track 协调、三大模式契约把控、对外沟通。
-
-### 8.1 按 Design 章节落任务
-
-| Owner | 对应 Design 章节 | 主要任务 |
-|---|---|---|
-| 用户（Lead） | §1-§3 + §4.2 + §4.3.1 + §9.2 | 产品方向、三大模式契约、fundamental + PIT-RAG Compose 流、跨组协调、demo 叙事 |
-| 陈镇鸿 | §4.2.0.1 + §4.3.3 | `tools/utils/dedupe.py`、model Compose 流（含 lit-review / pr-submit）、ModelSpec |
-| 杨欣琳 | §4.2.0 (HumanGate) + §4.3.4 | risk Compose 流、HumanGate / RiskProfile schema、CI gate + dedupe 验证 |
-| 刘炽 | §4.3.6 + §4.3.1 副 | options Compose 流、Typst 研报模板、PDF 渲染与引用整理 |
-| 肖骥超 | §4.3.2 + 跨组统计支持 | factor Compose 流、对接 AutoEval、风控统计公式 |
+分工详见 `docs/QuantCode_Design.md` §9.1。
 
 ---
 
@@ -401,32 +366,9 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 
 ---
 
-## 附录 A：术语表
+## 附录：术语表与决策日志
 
-- **Compose Mode**：OpenCode 的第三种 primary agent，specs-driven 工作流编排模式（QuantCode 的产品中枢）
-- **SKILL.md**：一个 Markdown 文件描述一个能力，agent 自动调用；落在 `.opencode/groups/<group>/skills/`
-- **Subagent**：主 agent 动态创建的子任务执行者，共享上下文
-- **Schema**：Pydantic 类（SoT）+ JSON Schema 导出，skill 之间通信的强类型契约
-- **Runner**：验收 runner，吃 JSON 吐 pass/fail
-- **PIT**：Point-in-Time，时点正确性
-- **Lookahead bias**：用了未来才能看到的信息，量化研究的大忌
-- **AutoEval**：HKUST-QUANT-SOCIETY 的 auto_factor_evaluation 服务
-- **Dream / Distill**：从 MimoCode 移植的自我进化命令
-
-## 附录 B：决策日志
-
-| 日期 | 决策 | 理由 |
-|---|---|---|
-| 2026-06-23 | 不 fork MimoCode，做加法 | 避免被上游变更和合并冲突拖死 |
-| 2026-06-27 | 仓库名 `quantcode`（不是 QuantumCode） | 设计文档里 Quantum 是拼写错误 |
-| 2026-06-30 | Fork OpenCode（不是 MimoCode） | OpenCode 干净，MimoCode 的好特性可 cherry-pick |
-| 2026-06-30 | Compose Mode 是产品中枢，不是辅助 | 6 套垂直流全部基于 Compose 实现 |
-| 2026-06-30 | 千组千流（不是千人千面 UI） | 统一 UI + 按组分发 SKILL.md / MEMORY |
-| 2026-06-30 | 采用业界生产模式 Pattern 1 + 2 + 5 + 副作用 tool dedupe 保险栓 | 6 人小团队不做 Verifier / Event Bus / Idempotent Retry |
-| 2026-06-30 | Track 调整：陈镇鸿 → 模型组，杨欣琳 → 风控组 | 陈擅长后端工程；杨擅长 LLM 评估 |
-| 2026-06-30 | Lead 接 PIT-RAG track | 基本面是主要使用方，由 Lead 维护契约 |
-| 2026-06-30 | 俞高磊任务暂不分配 | 等其入组进度确认后再补 |
-| 2026-06-30 | 时间线由 Lead 单独编排，不在 PRD 内固化 | PRD 描述里程碑标准，避免日期漂移 |
+术语表和决策日志见 `docs/QuantCode_Design.md` §8（术语表）和 §11（决策日志）。
 
 ---
 
