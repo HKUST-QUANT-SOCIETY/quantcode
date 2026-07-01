@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>产业研究六阶段工作流｜精简执行版</title>
+<style>
+@page { size: A4; margin: 0; }
+
+@font-face {
+  font-family: "QS-Times-Latin";
+  src: local("Times New Roman");
+  unicode-range: U+0000-00FF, U+0100-024F, U+1E00-1EFF, U+2000-206F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
+}
+@font-face {
+  font-family: "QS-KaiTi-CJK";
+  src: local("楷体_GB2312"), local("KaiTi"), local("KaiTi_GB2312");
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
+}
+
+:root {
+  --quant-red:#9B1E24;
+  --deep-burgundy:#641018;
+  --soft-red:#C95C5D;
+  --light-red:#F5DEDE;
+  --pale-red:#FBF1F1;
+  --ink:#111111;
+  --deep-gray:#262626;
+  --text-gray:#3A3A3A;
+  --mid-gray:#5E5E5E;
+  --light-gray:#D9D9D9;
+  --paper:#FFFFFF;
+  --warm-paper:#F8F5F1;
+  --warm-border:#EFE8DF;
+  --gold:#B88A2E;
+  --deep-gold:#A67A24;
+  --light-gold:#F5EBD0;
+  --tech-blue:#1F3A5F;
+  --steel-blue:#365C7F;
+  --light-blue:#DDE8F1;
+  --cool-bg:#F1F5F8;
+  --positive:#2F6F73;
+  --positive-light:#DCEDEC;
+}
+
+* { box-sizing:border-box; }
+
+html { scroll-behavior:smooth; }
+
+body {
+  margin:0;
+  background:#E9E9E9;
+  color:var(--ink);
+  font-family:"QS-Times-Latin","Times New Roman","QS-KaiTi-CJK","楷体_GB2312","KaiTi",serif;
+}
+
+.cn, :lang(zh-CN) {
+  font-family:"QS-Times-Latin","Times New Roman","QS-KaiTi-CJK","楷体_GB2312","KaiTi",serif;
+}
+.en { font-family:"QS-Times-Latin","Times New Roman",serif; }
+
+.page {
+  width:210mm;
+  min-height:297mm;
+  padding:25.4mm 31.8mm;
+  margin:12mm auto;
+  background:var(--paper);
+  position:relative;
+  page-break-after:always;
+  overflow:hidden;
+  box-shadow:0 8px 28px rgba(0,0,0,.13);
+}
+
+.header {
+  position:absolute;
+  top:12mm;
+  left:31.8mm;
+  right:31.8mm;
+  height:13mm;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1.2px solid var(--quant-red);
+  color:var(--mid-gray);
+  font-size:8.5pt;
+}
+
+.footer {
+  position:absolute;
+  bottom:12mm;
+  left:31.8mm;
+  right:31.8mm;
+  height:10mm;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-top:1px solid var(--light-gray);
+  color:#777;
+  font-size:8pt;
+}
+
+.content { padding-top:13mm; padding-bottom:8mm; }
+.cover .content { padding-top:0; }
+
+.logo {
+  width:62mm;
+  max-width:100%;
+  max-height:24mm;
+  object-fit:contain;
+  object-position:left center;
+  display:block;
+}
+
+.kicker {
+  color:var(--quant-red);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-size:9pt;
+  font-weight:bold;
+  margin-bottom:4mm;
+}
+
+h1 {
+  font-size:25pt;
+  line-height:1.15;
+  margin:0 0 6mm;
+  color:var(--ink);
+  font-weight:700;
+}
+
+h2 {
+  font-size:18pt;
+  line-height:1.25;
+  margin:0 0 5mm;
+  color:var(--quant-red);
+  border-bottom:1px solid var(--warm-border);
+  padding-bottom:2mm;
+}
+
+h3 {
+  font-size:13.2pt;
+  margin:5mm 0 2.2mm;
+  color:var(--deep-gray);
+}
+
+h4 {
+  font-size:10.5pt;
+  margin:0 0 1.5mm;
+  color:var(--deep-gray);
+}
+
+p {
+  font-size:10.2pt;
+  line-height:1.62;
+  margin:0 0 3mm;
+}
+
+ul {
+  margin:1.5mm 0 3mm 5mm;
+  padding-left:4mm;
+}
+
+li {
+  font-size:9.7pt;
+  line-height:1.48;
+  margin:0 0 1.4mm;
+}
+
+.small { font-size:8.5pt; color:var(--mid-gray); line-height:1.5; }
+
+.red-line {
+  height:1.8mm;
+  background:var(--quant-red);
+  width:100%;
+  margin:12mm 0 6mm;
+}
+
+.meta-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:4mm;
+  margin-top:12mm;
+}
+
+.meta-card {
+  border:1px solid var(--warm-border);
+  background:var(--warm-paper);
+  padding:5mm;
+  min-height:24mm;
+}
+
+.meta-label {
+  font-size:8pt;
+  color:var(--mid-gray);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  margin-bottom:2mm;
+}
+
+.meta-value { font-size:11.5pt; color:var(--ink); font-weight:bold; }
+
+.callout {
+  border-left:3px solid var(--quant-red);
+  background:var(--pale-red);
+  padding:4mm 5mm;
+  margin:4mm 0;
+}
+
+.callout.gold { border-left-color:var(--gold); background:var(--light-gold); }
+.callout.blue { border-left-color:var(--tech-blue); background:var(--cool-bg); }
+.callout.green { border-left-color:var(--positive); background:var(--positive-light); }
+
+.grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:5mm; }
+.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:4mm; }
+
+.card {
+  border:1px solid var(--warm-border);
+  background:#fff;
+  padding:4.5mm;
+  min-height:34mm;
+}
+
+.card.warm { background:var(--warm-paper); }
+.card.blue { background:var(--cool-bg); border-color:#DDE8F1; }
+.card.gold { background:#FFFCF5; border-color:#E8D9B4; }
+.card.red { background:var(--pale-red); border-color:#E8C6C8; }
+.card.green { background:var(--positive-light); border-color:#BFDAD8; }
+
+.card-label {
+  font-size:7.8pt;
+  text-transform:uppercase;
+  letter-spacing:.07em;
+  color:var(--mid-gray);
+  margin-bottom:1.8mm;
+  font-weight:bold;
+}
+
+.card-title {
+  font-size:12pt;
+  line-height:1.3;
+  font-weight:bold;
+  color:var(--deep-gray);
+  margin-bottom:2mm;
+}
+
+.card p, .card li { font-size:9.35pt; }
+
+.stage-hero {
+  border:1px solid var(--warm-border);
+  padding:7mm;
+  margin:4mm 0 6mm;
+  background:linear-gradient(90deg,#fff 0%,#fff 72%,var(--warm-paper) 72%,var(--warm-paper) 100%);
+  position:relative;
+  overflow:hidden;
+}
+
+.stage-hero.blue {
+  background:linear-gradient(90deg,#fff 0%,#fff 72%,var(--cool-bg) 72%,var(--cool-bg) 100%);
+  border-color:#DDE8F1;
+}
+
+.stage-hero.gold {
+  background:linear-gradient(90deg,#fff 0%,#fff 72%,#FBF5E7 72%,#FBF5E7 100%);
+  border-color:#E8D9B4;
+}
+
+.stage-hero.red {
+  background:linear-gradient(90deg,#fff 0%,#fff 72%,var(--pale-red) 72%,var(--pale-red) 100%);
+  border-color:#E8C6C8;
+}
+
+.stage-tag {
+  font-size:8.5pt;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--quant-red);
+  font-weight:bold;
+  margin-bottom:2.2mm;
+}
+
+.stage-hero.blue .stage-tag { color:var(--tech-blue); }
+.stage-hero.gold .stage-tag { color:var(--gold); }
+
+.stage-title {
+  font-size:21pt;
+  line-height:1.18;
+  font-weight:bold;
+  margin-bottom:3mm;
+}
+
+.stage-message {
+  color:var(--text-gray);
+  border-left:2.5px solid var(--quant-red);
+  padding-left:3mm;
+  font-size:10.2pt;
+  line-height:1.55;
+  max-width:128mm;
+}
+
+.stage-hero.blue .stage-message { border-left-color:var(--tech-blue); }
+.stage-hero.gold .stage-message { border-left-color:var(--gold); }
+
+.flow {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:2mm;
+  margin:5mm 0;
+}
+
+.node {
+  flex:1;
+  min-width:0;
+  min-height:18mm;
+  border:1px solid #C8D5E0;
+  background:#fff;
+  padding:3mm 2mm;
+  text-align:center;
+  font-size:8.5pt;
+  line-height:1.35;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.node.brand { border-color:var(--quant-red); background:var(--pale-red); }
+.node.tech { border-color:var(--tech-blue); background:var(--cool-bg); }
+.node.gold { border-color:var(--gold); background:var(--light-gold); }
+.node.green { border-color:var(--positive); background:var(--positive-light); }
+.arrow { color:var(--steel-blue); font-weight:bold; }
+
+.table {
+  width:100%;
+  border-collapse:collapse;
+  margin:4mm 0;
+  font-size:8.8pt;
+}
+
+.table th {
+  text-align:left;
+  background:var(--warm-paper);
+  color:var(--deep-gray);
+  border-bottom:1.3px solid var(--light-gray);
+  padding:2.4mm;
+}
+
+.table td {
+  border-bottom:1px solid var(--warm-border);
+  padding:2.4mm;
+  vertical-align:top;
+  line-height:1.42;
+}
+
+.output-box {
+  border:1px solid var(--gold);
+  background:#FFFCF5;
+  padding:4mm 5mm;
+  margin:4mm 0;
+}
+
+.output-title {
+  color:#6B4A0A;
+  font-size:9pt;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  font-weight:bold;
+  margin-bottom:1.5mm;
+}
+
+.output-main { font-size:12pt; font-weight:bold; line-height:1.45; }
+
+.finish-box {
+  border-left:3px solid var(--positive);
+  background:var(--positive-light);
+  padding:4mm 5mm;
+  margin-top:4mm;
+}
+
+.file-ref {
+  display:inline-block;
+  margin-top:2mm;
+  padding:1.4mm 2.6mm;
+  border-radius:99px;
+  background:#EFEFEF;
+  color:#444;
+  font-size:8.2pt;
+  font-family:"QS-Times-Latin","Times New Roman","QS-KaiTi-CJK","楷体_GB2312",serif;
+}
+
+.rule {
+  height:1px;
+  background:var(--warm-border);
+  margin:5mm 0;
+}
+
+.principle-strip {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:3mm;
+  margin-top:4mm;
+}
+
+.principle {
+  padding:3.5mm;
+  background:var(--warm-paper);
+  border-top:2.5px solid var(--quant-red);
+  font-size:8.8pt;
+  line-height:1.45;
+  min-height:26mm;
+}
+
+.principle.blue { border-top-color:var(--tech-blue); }
+.principle.gold { border-top-color:var(--gold); }
+.principle.green { border-top-color:var(--positive); }
+
+
+@media print {
+  body { background:white; }
+  .page { margin:0; box-shadow:none; page-break-after:always; }
+}
+
+@media screen and (max-width:900px) {
+  .page {
+    width:100%;
+    min-height:auto;
+    margin:0 0 14px;
+    padding:24px;
+  }
+  .header,.footer { display:none; }
+  .content { padding:0; }
+  .grid-2,.grid-3,.principle-strip { grid-template-columns:1fr; }
+  .flow { flex-wrap:wrap; }
+  .arrow { display:none; }
+  .node { flex:0 0 calc(50% - 4px); min-height:64px; }
+}
+</style>
+</head>
+<body>
+
+<section class="page cover" id="cover">
+  <div class="content">
+    <img class="logo" src="data:image/png;base64,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" alt="HKUST-MAFM Quant Trading Society Logo" />
+    <div style="margin-top:36mm" class="kicker en">Fundamental Research / Operating Workflow</div>
+    <h1 class="cn">产业研究六阶段工作流<br><span class="en" style="font-size:17pt;color:var(--mid-gray);">Human-Readable Operating Edition</span></h1>
+    <p class="cn" style="font-size:13pt;color:var(--text-gray);max-width:138mm;">
+      面向日常执行的产业研究主流程。它说明每个阶段解决什么问题、完成什么工作、产出什么成果，以及何时可以进入下一阶段。
+    </p>
+    <div class="red-line"></div>
+    <div class="meta-grid">
+      <div class="meta-card"><div class="meta-label en">Document Role</div><div class="meta-value cn">日常执行主线</div></div>
+      <div class="meta-card"><div class="meta-label en">Detailed Standards</div><div class="meta-value cn">六份详细流程作为验收 Checklist</div></div>
+      <div class="meta-card"><div class="meta-label en">Primary Users</div><div class="meta-value cn">项目负责人 / 研究成员 / AI 工具</div></div>
+      <div class="meta-card"><div class="meta-label en">Version</div><div class="meta-value en">V1.1 · 2026-06-23</div></div>
+    </div>
+    <div class="callout gold" style="margin-top:10mm;">
+      <p class="cn"><b>核心原则：</b>执行时看精简版；阶段结束时看详细版；需要设计 Prompt、Agent、模板或自动化检查时，将详细版作为底层规则。</p>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>01</span></div>
+</section>
+
+<section class="page" id="overview">
+  <div class="header"><span class="en">Workflow Overview</span><span class="cn">使用方式与流程总览</span></div>
+  <div class="content">
+    <div class="kicker en">How to Use</div>
+    <h2 class="cn">精简版负责导航，详细版负责验收</h2>
+    <div class="grid-2">
+      <div class="card warm">
+        <div class="card-label en">During Execution</div>
+        <div class="card-title cn">实际工作时</div>
+        <ul class="cn">
+          <li>用本文件判断项目当前处于哪个阶段。</li>
+          <li>聚焦本阶段最重要的问题和主要产出。</li>
+          <li>不必在日常推进中逐条阅读全部详细规范。</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-label en">At Checkpoint</div>
+        <div class="card-title cn">阶段结束时</div>
+        <ul class="cn">
+          <li>打开对应详细规范进行检查和验收。</li>
+          <li>确认没有遗漏必要内容、边界和异常记录。</li>
+          <li>只有满足退出条件，才进入下一阶段。</li>
+        </ul>
+      </div>
+      <div class="card gold">
+        <div class="card-label en">For AI Systems</div>
+        <div class="card-title cn">交给 AI 时</div>
+        <ul class="cn">
+          <li>精简版作为上层流程导航。</li>
+          <li>详细版作为 Prompt、字段、模板和检查规则。</li>
+          <li>AI负责整理和提示，人类负责判断和验收。</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-label en">When Problems Occur</div>
+        <div class="card-title cn">出现问题时</div>
+        <ul class="cn">
+          <li>范围失控、资料冲突或分工失衡时返回详细规范。</li>
+          <li>判断争议应落到数据、假设、口径或证据上。</li>
+          <li>不通过增加文档数量来替代问题解决。</li>
+        </ul>
+      </div>
+    </div>
+    <h3 class="cn">完整研究链条</h3>
+    <div class="flow">
+      <div class="node brand">产业地图维护</div><div class="arrow">→</div>
+      <div class="node brand">研究项目立项</div><div class="arrow">→</div>
+      <div class="node tech">技术与产业链研究</div><div class="arrow">→</div>
+      <div class="node gold">标的池与公司全覆盖</div><div class="arrow">→</div>
+      <div class="node brand">团队判断与投资命题</div><div class="arrow">→</div>
+      <div class="node green">结项、跟踪与复盘</div>
+    </div>
+    <div class="callout">
+      <p class="cn"><b>流程逻辑：</b>从长期产业认知出发，选择值得研究的问题；先理解行业如何运行，再用公司经营和财务验证行业逻辑；最后判断市场已经定价了什么，并把结论转化为可跟踪、可复盘的长期资产。</p>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>02</span></div>
+</section>
+
+<section class="page" id="stage-map">
+  <div class="header"><span class="en">Workflow Map</span><span class="cn">各阶段的核心任务</span></div>
+  <div class="content">
+    <div class="kicker en">Stage Map</div>
+    <h2 class="cn">每个阶段只解决一类核心问题</h2>
+    <table class="table">
+      <tr><th class="cn">阶段</th><th class="cn">核心问题</th><th class="cn">主要产出</th></tr>
+      <tr><td class="cn"><b>产业地图维护</b></td><td class="cn">团队长期研究哪些产业，这个项目应该放在哪里？</td><td class="cn">长期产业地图</td></tr>
+      <tr><td class="cn"><b>研究项目立项</b></td><td class="cn">为什么现在研究，究竟要回答什么问题？</td><td class="cn">研究项目立项卡</td></tr>
+      <tr><td class="cn"><b>技术与产业链研究</b></td><td class="cn">行业为什么增长，技术如何实现，价值和利润落在哪里？</td><td class="cn">行业研究主文档、产业链图、技术路线对比</td></tr>
+      <tr><td class="cn"><b>标的池与公司全覆盖</b></td><td class="cn">产业链上有哪些公司，谁真正具备业务、竞争和财务兑现能力？</td><td class="cn">行业标的主表、公司标准化研究报告</td></tr>
+      <tr><td class="cn"><b>团队判断与投资命题</b></td><td class="cn">市场已经预期什么，团队与市场的差异是什么？</td><td class="cn">行业综合判断、公司比较矩阵、投资命题卡</td></tr>
+      <tr><td class="cn"><b>结项、跟踪与复盘</b></td><td class="cn">如何把一次研究变成长期可更新的研究资产？</td><td class="cn">项目结项与跟踪包</td></tr>
+    </table>
+    <div class="principle-strip">
+      <div class="principle"><b>产业位置清楚</b><br>所有项目、公司和资产都有明确归属。</div>
+      <div class="principle blue"><b>行业机制清楚</b><br>客户、技术、供给、价格和利润形成完整链条。</div>
+      <div class="principle gold"><b>公司兑现清楚</b><br>优势必须进入订单、收入、利润和现金流。</div>
+      <div class="principle green"><b>市场定价清楚</b><br>预期差能够被验证，也能够被推翻。</div>
+    </div>
+    <div class="callout blue" style="margin-top:7mm;">
+      <p class="cn">六个阶段不是六份彼此独立的报告，而是一条从产业结构、研究问题、行业机制、公司兑现，到市场定价和长期跟踪的连续认知链。</p>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>03</span></div>
+</section>
+
+<section class="page" id="industry-map">
+  <div class="header"><span class="en">Industry Map Maintenance</span><span class="cn">产业地图维护</span></div>
+  <div class="content">
+    <div class="stage-hero">
+      <div class="stage-tag en">Industry Map Maintenance</div>
+      <div class="stage-title cn">产业地图维护</div>
+      <div class="stage-message cn">建立团队唯一有效的长期产业目录，让产业、技术、项目、公司和研究资产都能挂接到明确位置。</div>
+    </div>
+    <div class="grid-2">
+      <div class="card warm">
+        <div class="card-label en">Purpose</div>
+        <div class="card-title cn">这一阶段解决什么问题</div>
+        <ul class="cn">
+          <li>团队长期关注哪些产业与赛道。</li>
+          <li>产业、技术模块和短期专题如何区分。</li>
+          <li>哪些领域已经覆盖，哪些仍是空白。</li>
+          <li>已有项目、公司和资产分别属于哪里。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">Operating Logic</div>
+        <div class="card-title cn">实际工作中做什么</div>
+        <ul class="cn">
+          <li>统一产业与技术名称。</li>
+          <li>新增、拆分、合并、重命名或归档节点。</li>
+          <li>更新研究状态、负责人和时间。</li>
+          <li>同步项目、公司和研究资产的挂接关系。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <p class="cn"><b>分类边界示例：</b>“光互联”可以是赛道，“光模块”可以是产业，“CPO”可以是技术模块，“1.6T放量”更适合作为阶段性专题。不同对象不应混在同一层级。</p>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Primary Output</div>
+      <div class="output-main cn">《长期产业地图主表》</div>
+      <p class="cn small">团队唯一有效的产业分类入口。</p>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>进入下一阶段的标志：</b>某个产业节点或技术专题已经值得投入正式研究资源，需要被转化为一个明确项目。</p>
+    </div>
+    <span class="file-ref">详细规范：1_产业地图维护_V1.0.1.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>04</span></div>
+</section>
+
+<section class="page" id="project-initiation">
+  <div class="header"><span class="en">Project Initiation</span><span class="cn">研究项目立项</span></div>
+  <div class="content">
+    <div class="stage-hero">
+      <div class="stage-tag en">Project Initiation</div>
+      <div class="stage-title cn">研究项目立项</div>
+      <div class="stage-message cn">在开始搜集资料之前，先把“为什么现在研究、究竟要回答什么、做到什么程度”定义清楚。</div>
+    </div>
+    <div class="grid-2">
+      <div class="card warm">
+        <div class="card-label en">Key Questions</div>
+        <div class="card-title cn">立项必须回答</div>
+        <ul class="cn">
+          <li>为什么现在启动。</li>
+          <li>唯一核心问题是什么。</li>
+          <li>本轮包含什么、不处理什么。</li>
+          <li>最终交付什么，由谁负责，多久完成。</li>
+          <li>是否已有相似研究或关键前置条件。</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-label en">Good Project Definition</div>
+        <div class="card-title cn">项目名称要体现判断目标</div>
+        <p class="cn">不直接使用“研究液冷”“研究CPO”之类宽泛名称，而应写成能够得出条件性结论的问题。</p>
+        <div class="callout blue" style="margin:2mm 0 0;">
+          <p class="cn small">AI服务器功率密度上升是否正在形成持续的液冷需求，价值量和利润最可能集中在哪些产业链环节？</p>
+        </div>
+      </div>
+    </div>
+    <h3 class="cn">实际工作</h3>
+    <div class="grid-3">
+      <div class="card"><div class="card-title cn">确定归属</div><p class="cn">从产业地图中确定项目对应的产业节点、技术模块和专题背景。</p></div>
+      <div class="card"><div class="card-title cn">收敛边界</div><p class="cn">明确核心问题、研究范围、目标市场和不处理内容。</p></div>
+      <div class="card"><div class="card-title cn">确认资源</div><p class="cn">检查既有资产、负责人、成员时间、资料和首个交付节点。</p></div>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Primary Output</div>
+      <div class="output-main cn">《研究项目立项卡》</div>
+      <p class="cn small">项目启动的唯一正式凭证。</p>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>进入下一阶段的标志：</b>核心问题、范围、负责人、周期和交付物均已明确，且不存在重大重复、资源冲突或前置障碍。</p>
+    </div>
+    <span class="file-ref">详细规范：2_研究立项_V2.1.0.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>05</span></div>
+</section>
+
+<section class="page" id="industry-research">
+  <div class="header"><span class="en">Industry &amp; Technology Research</span><span class="cn">技术与产业链研究</span></div>
+  <div class="content">
+    <div class="stage-hero blue">
+      <div class="stage-tag en">Industry & Technology Research</div>
+      <div class="stage-title cn">技术与产业链拆解及研究</div>
+      <div class="stage-message cn">建立行业级认知：谁产生需求、技术如何实现、有效供给何时形成、价值与利润最终落在哪里。</div>
+    </div>
+    <div class="callout blue">
+      <p class="cn"><b>核心链条：</b>客户需求 → 技术方案 → 产业链实现 → 产能与价格 → 价值与利润分配。</p>
+    </div>
+    <div class="grid-2">
+      <div class="card blue">
+        <div class="card-label en">Demand</div>
+        <div class="card-title cn">真实需求与采购机制</div>
+        <ul class="cn">
+          <li>谁是客户，预算从哪里来。</li>
+          <li>为什么现在采购。</li>
+          <li>采购、测试、认证和导入需要多久。</li>
+          <li>订单、出货和实际使用之间有什么时间差。</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-label en">Market</div>
+        <div class="card-title cn">市场空间与行业阶段</div>
+        <ul class="cn">
+          <li>客户数量、单客户需求量、价格和渗透率。</li>
+          <li>存量替换、新增需求与技术降本。</li>
+          <li>行业处于导入、成长、放量、周期还是主题交易。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">Technology</div>
+        <div class="card-title cn">技术路线与产业化</div>
+        <ul class="cn">
+          <li>原理、性能、成本、功耗和可靠性。</li>
+          <li>制造、测试、维护和生态成熟度。</li>
+          <li>区分技术可行、工程可制造和商业可规模化。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">Task Design</div>
+        <div class="card-title cn">按完整问题划分研究模块</div>
+        <ul class="cn">
+          <li>需求与系统变化。</li>
+          <li>完整技术路线或核心组件组。</li>
+          <li>制造、封装、测试和量产。</li>
+          <li>供给、价格和利润池。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>研究深度要求：</b>技术介绍完整并不代表行业研究完成。团队还必须能够解释客户行为、市场空间、供需、价格和利润形成。</p>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>06</span></div>
+</section>
+
+<section class="page" id="industry-research-depth">
+  <div class="header"><span class="en">Industry Economics</span><span class="cn">产业链、供给与利润</span></div>
+  <div class="content">
+    <div class="kicker en">Industry Economics</div>
+    <h2 class="cn">从产业链结构走向行业经济判断</h2>
+    <div class="grid-2">
+      <div class="card blue">
+        <div class="card-label en">Supply</div>
+        <div class="card-title cn">有效供给与价格</div>
+        <ul class="cn">
+          <li>区分规划、建成、名义、有效产能与实际出货。</li>
+          <li>检查良率、设备、原料、认证和交付限制。</li>
+          <li>判断结构性短缺、旧产品过剩和库存风险。</li>
+          <li>解释价格变化如何影响毛利率。</li>
+        </ul>
+      </div>
+      <div class="card gold">
+        <div class="card-label en">Value Pool</div>
+        <div class="card-title cn">价值量、议价权与利润池</div>
+        <ul class="cn">
+          <li>哪些环节掌握客户接口、标准权或定价权。</li>
+          <li>高价值量能否转化为毛利润和现金流。</li>
+          <li>技术升级、集成和降本使价值向哪里迁移。</li>
+          <li>客户自研或纵向一体化会压缩哪些环节。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">External Constraints</div>
+        <div class="card-title cn">政策、标准与行业结构</div>
+        <ul class="cn">
+          <li>政策是否形成真实订单，还是只形成主题交易。</li>
+          <li>标准、准入、监管和贸易限制如何影响竞争。</li>
+          <li>集中度、进入壁垒、替代技术和平台整合。</li>
+        </ul>
+      </div>
+      <div class="card warm">
+        <div class="card-label en">Validation</div>
+        <div class="card-title cn">验证与反证</div>
+        <ul class="cn">
+          <li>哪些指标领先于财报。</li>
+          <li>哪些数据确认需求与商业化兑现。</li>
+          <li>什么事实出现后必须推翻当前行业判断。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Formal Outputs</div>
+      <div class="output-main cn">行业研究主文档 · 研究模块文档 · 技术路线对比表 · 产业链图 · 下一阶段交接说明</div>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>进入公司覆盖的标志：</b>团队已经能够解释真实客户、市场假设、技术成熟度、有效供给、价格机制、利润池，以及需要覆盖的产业链节点与公司检索关键词。</p>
+    </div>
+    <span class="file-ref">详细规范：3_技术与产业链拆解及研究_V2.1.0.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>07</span></div>
+</section>
+
+<section class="page" id="company-coverage">
+  <div class="header"><span class="en">Company Universe &amp; Coverage</span><span class="cn">标的池与公司全覆盖</span></div>
+  <div class="content">
+    <div class="stage-hero gold">
+      <div class="stage-tag en">Company Universe & Standard Coverage</div>
+      <div class="stage-title cn">标的池建立与公司标准化全覆盖</div>
+      <div class="stage-message cn">把行业逻辑落实到具体公司：谁真正相关，谁具备竞争优势，谁已经把优势转化为经营和财务结果。</div>
+    </div>
+    <div class="grid-2">
+      <div class="card gold">
+        <div class="card-label en">Company Universe</div>
+        <div class="card-title cn">建立完整标的池</div>
+        <ul class="cn">
+          <li>按产业链节点和业务关键词发现公司。</li>
+          <li>覆盖主要上市市场，并记录关键非上市参与者。</li>
+          <li>处理母子公司、品牌、经营主体和多地上市证券。</li>
+          <li>明确正式入池、参考、待确认和排除。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">Industry Mapping</div>
+        <div class="card-title cn">确认公司与行业的真实关系</div>
+        <ul class="cn">
+          <li>公司位于什么产业链节点。</li>
+          <li>相关产品和商业模式是什么。</li>
+          <li>行业需求如何传导到订单、收入和利润。</li>
+          <li>相关业务是否足以影响公司整体。</li>
+        </ul>
+      </div>
+    </div>
+    <h3 class="cn">商业化证据链</h3>
+    <div class="flow">
+      <div class="node">技术储备</div><div class="arrow">→</div>
+      <div class="node">送样与验证</div><div class="arrow">→</div>
+      <div class="node">供应商准入</div><div class="arrow">→</div>
+      <div class="node gold">正式订单</div><div class="arrow">→</div>
+      <div class="node gold">批量交付</div><div class="arrow">→</div>
+      <div class="node brand">收入与复购</div>
+    </div>
+    <div class="callout gold">
+      <p class="cn"><b>边界要求：</b>战略合作、框架协议、意向订单和规划产能不能直接视为正式订单、有效供给或收入兑现。</p>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Primary Outputs</div>
+      <div class="output-main cn">《行业标的主表》与池内每家公司的《公司标准化研究报告》</div>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>08</span></div>
+</section>
+
+<section class="page" id="company-coverage-depth">
+  <div class="header"><span class="en">Standard Company Research</span><span class="cn">公司标准化研究深度</span></div>
+  <div class="content">
+    <div class="kicker en">Standard Company Research</div>
+    <h2 class="cn">公司报告必须同时覆盖业务、竞争、财务与估值</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-label en">Business & Competition</div>
+        <div class="card-title cn">行业映射与竞争格局</div>
+        <ul class="cn">
+          <li>公司本质、商业模式和收入重复性。</li>
+          <li>直接竞争、替代技术和客户自研。</li>
+          <li>技术、客户、产能、良率、成本与供应链控制。</li>
+          <li>优势是否已经进入客户、订单、份额和毛利率。</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-label en">Financial Verification</div>
+        <div class="card-title cn">用财务验证产业逻辑</div>
+        <ul class="cn">
+          <li>收入来源、增长驱动和毛利润贡献。</li>
+          <li>费用、研发、扣非利润与非经常性损益。</li>
+          <li>应收、存货、合同资产和经营现金流。</li>
+          <li>扩产、资本开支、折旧、ROE与ROIC。</li>
+        </ul>
+      </div>
+      <div class="card gold">
+        <div class="card-label en">Governance</div>
+        <div class="card-title cn">管理层与资本配置</div>
+        <ul class="cn">
+          <li>管理层执行记录和历史指引可信度。</li>
+          <li>股权、激励、关联交易和治理风险。</li>
+          <li>融资、并购、扩产、分红和回购是否创造回报。</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-label en">Valuation Baseline</div>
+        <div class="card-title cn">当前估值与市场理解</div>
+        <ul class="cn">
+          <li>当前、历史和可比公司估值。</li>
+          <li>一致预期与盈利预测上修或下修。</li>
+          <li>市场当前交易什么叙事。</li>
+          <li>当前价格隐含什么收入、利润或份额。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <p class="cn"><b>核心判断：</b>哪些业务贡献规模，哪些业务真正贡献毛利润和现金流；哪些竞争优势已经兑现，哪些仍停留在产品和叙事层面。</p>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>进入团队判断的标志：</b>所有正式入池公司至少达到统一最低覆盖标准，能够解释行业传导、竞争位置、商业化状态、财务兑现和当前市场定价。</p>
+    </div>
+    <span class="file-ref">详细规范：4_标的池建立与全覆盖_V2.1.0.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>09</span></div>
+</section>
+
+<section class="page" id="investment-thesis">
+  <div class="header"><span class="en">Team View &amp; Investment Thesis</span><span class="cn">团队判断与投资命题</span></div>
+  <div class="content">
+    <div class="stage-hero red">
+      <div class="stage-tag en">Team View & Investment Thesis</div>
+      <div class="stage-title cn">团队假设、行业综合判断与投资命题</div>
+      <div class="stage-message cn">不再补基础资料，而是把行业和公司底稿转化为团队假设、情景盈利、市场隐含预期、合理估值和可证伪命题。</div>
+    </div>
+    <div class="flow">
+      <div class="node">事实底稿</div><div class="arrow">→</div>
+      <div class="node">团队假设</div><div class="arrow">→</div>
+      <div class="node tech">情景盈利</div><div class="arrow">→</div>
+      <div class="node gold">隐含预期</div><div class="arrow">→</div>
+      <div class="node brand">预期差</div><div class="arrow">→</div>
+      <div class="node green">投资命题</div>
+    </div>
+    <div class="grid-2">
+      <div class="card warm">
+        <div class="card-label en">Team Assumptions</div>
+        <div class="card-title cn">形成共同假设</div>
+        <ul class="cn">
+          <li>需求、资本开支、渗透率和产品价格。</li>
+          <li>供给释放、市场份额、毛利率和现金流。</li>
+          <li>区分事实、公司指引、市场预期和团队判断。</li>
+          <li>建立悲观、基准和乐观路径。</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-label en">Market Pricing</div>
+        <div class="card-title cn">理解市场正在交易什么</div>
+        <ul class="cn">
+          <li>主流叙事与关键经营指标。</li>
+          <li>盈利预测上修、下修或分歧扩大。</li>
+          <li>估值扩张、收缩或行业内分化。</li>
+          <li>财报、订单和产品事件后的价格反应。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <p class="cn"><b>重要区分：</b>“公司很好”不是投资命题。投资命题必须建立在当前价格尚未完全反映的预期差之上。</p>
+    </div>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>10</span></div>
+</section>
+
+<section class="page" id="investment-thesis-depth">
+  <div class="header"><span class="en">Scenario Valuation &amp; Thesis</span><span class="cn">情景估值与命题形成</span></div>
+  <div class="content">
+    <div class="kicker en">Scenario Valuation & Thesis</div>
+    <h2 class="cn">判断回报来自哪里，以及什么会证明判断错误</h2>
+    <div class="grid-2">
+      <div class="card blue">
+        <div class="card-label en">Earnings Mapping</div>
+        <div class="card-title cn">从行业变量映射到公司盈利</div>
+        <ul class="cn">
+          <li>销量、价格、份额和产品结构。</li>
+          <li>毛利率、费用率、利润和现金流。</li>
+          <li>资本开支、净现金和股本变化。</li>
+          <li>预测必须回到可观察的经营指标。</li>
+        </ul>
+      </div>
+      <div class="card gold">
+        <div class="card-label en">Scenario Valuation</div>
+        <div class="card-title cn">三情景估值与反向校验</div>
+        <ul class="cn">
+          <li>根据商业模式选择PE、PS、EV/EBITDA、DCF或分部估值。</li>
+          <li>反推当前市值要求的收入、利润、份额和回报。</li>
+          <li>同时展示上行、下行、敏感变量和实现时间。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-label en">Cross-Company Comparison</div>
+        <div class="card-title cn">横向比较全部正式标的</div>
+        <ul class="cn">
+          <li>行业暴露、竞争位置和财务质量。</li>
+          <li>盈利弹性、当前估值与团队估值。</li>
+          <li>盈利修订、催化、下行风险和收益来源。</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-label en">Falsifiable Thesis</div>
+        <div class="card-title cn">形成可证伪投资命题</div>
+        <ul class="cn">
+          <li>市场预期与团队预期差。</li>
+          <li>事实、推断和关键假设。</li>
+          <li>验证期限、催化剂和重新定价指标。</li>
+          <li>悲观情景、下行空间与反证条件。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Formal Outputs</div>
+      <div class="output-main cn">《行业综合投资判断》 · 《公司比较与估值矩阵》 · 《投资命题卡》</div>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>进入结项的标志：</b>团队已经形成行业整体判断、主要公司情景盈利和估值、市场隐含预期，以及明确的投资命题或否定性结论。</p>
+    </div>
+    <span class="file-ref">详细规范：5_团队假设_行业综合判断与投资命题_V1.1.0.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>11</span></div>
+</section>
+
+<section class="page" id="closure">
+  <div class="header"><span class="en">Closure, Tracking &amp; Review</span><span class="cn">结项、跟踪与复盘</span></div>
+  <div class="content">
+    <div class="stage-hero">
+      <div class="stage-tag en">Closure, Tracking & Review</div>
+      <div class="stage-title cn">研究结项、资产沉淀、动态跟踪与复盘</div>
+      <div class="stage-message cn">报告提交不是项目终点。最终目标是把一次性研究转化为可复用、可更新和可持续跟踪的长期资产。</div>
+    </div>
+    <div class="grid-2">
+      <div class="card warm">
+        <div class="card-label en">Closure</div>
+        <div class="card-title cn">正式结项</div>
+        <ul class="cn">
+          <li>对照立项卡复核核心问题和交付物。</li>
+          <li>记录未解决问题、当前置信度和重新启动条件。</li>
+          <li>确认持续跟踪、等待验证、暂停、归档或重新立项。</li>
+        </ul>
+      </div>
+      <div class="card gold">
+        <div class="card-label en">Asset Management</div>
+        <div class="card-title cn">沉淀研究资产</div>
+        <ul class="cn">
+          <li>归档行业报告、标的池、公司报告、估值矩阵和命题卡。</li>
+          <li>更新产业地图、资产链接、版本和状态。</li>
+          <li>一个事实只保留一个主要维护位置。</li>
+        </ul>
+      </div>
+      <div class="card blue">
+        <div class="card-label en">Dynamic Tracking</div>
+        <div class="card-title cn">建立轻量跟踪机制</div>
+        <ul class="cn">
+          <li>只跟踪会改变假设、盈利、估值或命题的指标。</li>
+          <li>每项指标有来源、频率、负责人和触发动作。</li>
+          <li>跟踪触发后先更新研究，不自动变成交易信号。</li>
+        </ul>
+      </div>
+      <div class="card red">
+        <div class="card-label en">Review</div>
+        <div class="card-title cn">复盘判断与执行</div>
+        <ul class="cn">
+          <li>哪些假设被验证、证伪或仍待验证。</li>
+          <li>分工、会议、资料和自动化是否有效。</li>
+          <li>形成可执行的流程、Prompt和工具改进项。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="output-box">
+      <div class="output-title en">Primary Output</div>
+      <div class="output-main cn">《项目结项与跟踪包》</div>
+      <p class="cn small">结项摘要、资产清单、动态跟踪表、未解决问题、项目复盘及资产更新结果。</p>
+    </div>
+    <div class="finish-box">
+      <p class="cn"><b>项目完成的标志：</b>最终结论和后续状态明确，资产已经归档，关键指标进入跟踪，命题状态得到更新，复盘形成改进行动。</p>
+    </div>
+    <span class="file-ref">详细规范：6_研究结项_V1.0.0.md</span>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>12</span></div>
+</section>
+
+<section class="page" id="final-criteria">
+  <div class="header"><span class="en">Final Quality Standard</span><span class="cn">最终质量标准</span></div>
+  <div class="content">
+    <div class="kicker en">What Good Research Looks Like</div>
+    <h2 class="cn">不是形成长报告，而是形成完整认知闭环</h2>
+    <div class="grid-2">
+      <div class="card"><div class="card-title cn">产业位置清楚</div><p class="cn">问题属于长期产业地图的什么位置，相关资产如何归档和复用。</p></div>
+      <div class="card"><div class="card-title cn">研究问题清楚</div><p class="cn">为什么现在研究，最终要回答什么，边界和完成标准是什么。</p></div>
+      <div class="card blue"><div class="card-title cn">行业机制清楚</div><p class="cn">客户、技术、供给、价格、成本和利润池如何运作。</p></div>
+      <div class="card gold"><div class="card-title cn">公司兑现清楚</div><p class="cn">哪些公司真正具备业务、竞争和财务兑现能力。</p></div>
+      <div class="card red"><div class="card-title cn">市场定价清楚</div><p class="cn">市场已经相信什么，当前价格隐含什么，预期正在如何变化。</p></div>
+      <div class="card red"><div class="card-title cn">投资命题清楚</div><p class="cn">团队与市场的差异是什么，何时验证，什么情况会证明判断错误。</p></div>
+      <div class="card warm"><div class="card-title cn">后续管理清楚</div><p class="cn">结论如何更新、跟踪、复盘，以及何时需要重新立项。</p></div>
+      <div class="card green"><div class="card-title cn">人机边界清楚</div><p class="cn">AI负责检索、结构化和检查，人类负责事实确认、判断、估值和验收。</p></div>
+    </div>
+    <div class="callout gold" style="margin-top:7mm;">
+      <p class="cn"><b>最终原则：</b>只有产业位置、研究问题、行业机制、公司兑现、市场定价、投资命题和后续管理形成闭环，研究才真正从资料整理转化为可用于判断的长期资产。</p>
+    </div>
+    <div class="rule"></div>
+    <p class="cn small">本文件是日常执行主线。六份详细规范用于阶段验收、异常处理、模板设计、Prompt开发和AI底层规则。</p>
+  </div>
+  <div class="footer"><span class="en">HKUST-MAFM Quant Trading Society · Research Workflow</span><span>13</span></div>
+</section>
+
+</body>
+</html>
