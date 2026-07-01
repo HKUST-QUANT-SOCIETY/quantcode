@@ -3,7 +3,7 @@
 > **Owner**: 用户（Lead）  
 > **模式**: Pattern 1 (Orchestrator-Worker)  
 > **评审时长**: 5 分钟  
-> **状态**: 待评审
+> **状态**: 已评审
 
 ---
 
@@ -16,6 +16,7 @@
 ## 为什么需要它
 
 **问题**：
+
 - 因子组的 `factor:autoeval` 完成后要把结果传给 `factor:merge-main`，两个 skill 之间的**输入输出格式**必须一致
 - 前端 Compose 视图要画任务树、任务卡片、状态条，前端只认一种数据结构
 - CI / 验收 runner / Memory 查询、日志追踪，全部围绕 `task_id` 拉数据
@@ -26,25 +27,25 @@
 
 ## 核心字段
 
-| 字段 | 类型 | 必填 | 用途 |
-|---|---|---|---|
-| `task_id` | `str` (T1.2.3) | ✅ | 人类可读的层级 ID，**就是树路径**（不另设 tree_path） |
-| `internal_id` | `UUID` | ✅ | 稳定引用（重命名后不变） |
-| `session_id` | `str` (S[0-9a-f]{16}) | ✅ | 会话隔离 |
-| `parent_task_id` | `str \| None` | ❌ | 父任务 ID（root 为 None） |
-| `root_task_id` | `str` | ✅ | 树的根（runner 用来 fan checkpoint） |
-| `depth` | `int` (0-4) | ✅ | 树深度，root = 0，最大 4 |
-| `group` | `GroupName` | ✅ | 6 组之一（fundamental/factor/model/risk/strategy/options） |
-| `status` | `TaskStatus` | ✅ | 5 状态：open / in_progress / blocked / done / abandoned |
-| `outcome` | `TaskOutcome \| None` | ❌ | terminal-only：success / failure / cancelled / rejected |
-| `summary` | `str` | ✅ | 任务一句话描述（≤512 字符） |
-| `input` | `TIn` (泛型) | ✅ | 类型化输入（如 FactorSpec） |
-| `output` | `TOut \| None` (泛型) | ❌ | 类型化输出（如 FactorReport） |
-| `dispatch_count` | `int` (0-100) | ✅ | 分发次数（重试计数） |
-| `last_error` | `str \| None` | ❌ | 失败时的错误信息 |
-| `created_at` | `datetime` | ✅ | 创建时间（JSON 序列化成 Unix epoch int） |
-| `started_at` | `datetime \| None` | ❌ | 开始时间 |
-| `finished_at` | `datetime \| None` | ❌ | 结束时间 |
+| 字段             | 类型                  | 必填 | 用途                                                       |
+| ---------------- | --------------------- | ---- | ---------------------------------------------------------- |
+| `task_id`        | `str` (T1.2.3)        | ✅   | 人类可读的层级 ID，**就是树路径**（不另设 tree_path）      |
+| `internal_id`    | `UUID`                | ✅   | 稳定引用（重命名后不变）                                   |
+| `session_id`     | `str` (S[0-9a-f]{16}) | ✅   | 会话隔离                                                   |
+| `parent_task_id` | `str \| None`         | ❌   | 父任务 ID（root 为 None）                                  |
+| `root_task_id`   | `str`                 | ✅   | 树的根（runner 用来 fan checkpoint）                       |
+| `depth`          | `int` (0-4)           | ✅   | 树深度，root = 0，最大 4                                   |
+| `group`          | `GroupName`           | ✅   | 6 组之一（fundamental/factor/model/risk/strategy/options） |
+| `status`         | `TaskStatus`          | ✅   | 5 状态：open / in_progress / blocked / done / abandoned    |
+| `outcome`        | `TaskOutcome \| None` | ❌   | terminal-only：success / failure / cancelled / rejected    |
+| `summary`        | `str`                 | ✅   | 任务一句话描述（≤512 字符）                                |
+| `input`          | `TIn` (泛型)          | ✅   | 类型化输入（如 FactorSpec）                                |
+| `output`         | `TOut \| None` (泛型) | ❌   | 类型化输出（如 FactorReport）                              |
+| `dispatch_count` | `int` (0-100)         | ✅   | 分发次数（重试计数）                                       |
+| `last_error`     | `str \| None`         | ❌   | 失败时的错误信息                                           |
+| `created_at`     | `datetime`            | ✅   | 创建时间（JSON 序列化成 Unix epoch int）                   |
+| `started_at`     | `datetime \| None`    | ❌   | 开始时间                                                   |
+| `finished_at`    | `datetime \| None`    | ❌   | 结束时间                                                   |
 
 ---
 
@@ -56,6 +57,7 @@
    - 最大深度 4（MAX_TREE_DEPTH）
 
 2. **状态机**（5 状态，MimoCode-aligned）：
+
    ```
    open → in_progress → {blocked, done, abandoned}
    blocked → {in_progress, abandoned}
@@ -105,6 +107,7 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
 ```
 
 **JSON 序列化后**（时间戳变 int）：
+
 ```json
 {
   "task_id": "T1.2",
@@ -117,8 +120,8 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
   "status": "done",
   "outcome": "success",
   "summary": "Evaluate PB×ROE factor",
-  "input": {"name": "pb_roe", "universe": "CSI1000"},
-  "output": {"ic_mean": 0.05, "ir": 0.7},
+  "input": { "name": "pb_roe", "universe": "CSI1000" },
+  "output": { "ic_mean": 0.05, "ir": 0.7 },
   "dispatch_count": 1,
   "created_at": 1719734400,
   "started_at": 1719734401,
@@ -166,11 +169,13 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
 ## 依赖关系
 
 **ComposeTask 被以下 schema 依赖**：
+
 - `HumanGate` (杨欣琳) — 引用 `task_id` 触发人审
 - `ModelSpec` / `RiskProfile` / `FactorSpec` / `ResearchSpec` (业务 schema) — 作为 `ComposeTask[TIn, TOut]` 的类型参数
 - `ComposeTaskEvent` (审计日志) — 记录 task 生命周期
 
 **ComposeTask 依赖**：
+
 - `BlackboardState` (下一个评审项) — task 通过 blackboard 读写状态
 
 ---
@@ -178,6 +183,7 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
 ## 测试覆盖
 
 ✅ 29 个测试全过（`tests/test_compose_task.py`）：
+
 - 树结构约束（root 不能有 parent、root_task_id 前缀、深度上限）
 - 状态/outcome 门控（DONE→SUCCESS、ABANDONED→{FAILURE,CANCELLED,REJECTED}、非 terminal 禁 outcome）
 - 泛型类型流（`ComposeTask[FactorSpec, FactorReport]` 实例化）
@@ -187,12 +193,12 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
 
 ## 决策记录（评审会后填写）
 
-| 决策点 | 决策 | 理由 | 反对意见 |
-|---|---|---|---|
-| Q1: dispatch_count 上限 | ？ | ？ | ？ |
-| Q2: session_id 分配方 | ？ | ？ | ？ |
-| Q3: task_id 生成策略 | ？ | ？ | ？ |
-| Q4: 状态机是否扩展 | ？ | ？ | ？ |
+| 决策点                  | 决策                                  | 理由                                                              | 反对意见                                      |
+| ----------------------- | ------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------- |
+| Q1: dispatch_count 上限 | 保持 100                              | schema 只给硬上限，具体重试预算由 runner/skill 策略控制           | 无                                            |
+| Q2: session_id 分配方   | QuantCode wrapper / orchestrator 生成 | 统一会话隔离入口，格式保持 `S[0-9a-f]{16}`                        | 需和 OpenCode session 映射时在 wrapper 层适配 |
+| Q3: task_id 生成策略    | orchestrator 维护 `next_child_index`  | 保证 `T1.2` 的子任务稳定生成 `T1.2.1`，UUID 只做内部稳定引用      | 无                                            |
+| Q4: 状态机是否扩展      | MVP 不扩展                            | `open` 覆盖 pending，`dispatch_count + in_progress` 覆盖 retrying | 后续如 UI 需要可加派生展示态，不改协议态      |
 
 ---
 
@@ -202,4 +208,4 @@ task.output = FactorReport(ic_mean=0.05, ir=0.7)
 - [ ] 陈镇鸿
 - [ ] 杨欣琳
 - [ ] 刘炽
-- [ ] 肖骥超
+- [√] 肖骥超
