@@ -1,5 +1,5 @@
 ---
-name: model-lit-review
+name: model:lit-review
 description: 文献分享结构化（解决会议纪要散乱问题）
 group: model
 owner: 陈镇鸿
