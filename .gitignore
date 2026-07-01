@@ -24,6 +24,7 @@ opencode.local.jsonc
 
 # 构建产物
 artifacts/
+.quantcode/
 *.pdf
 !templates/**/*.pdf
 
