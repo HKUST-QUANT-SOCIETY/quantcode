@@ -90,43 +90,60 @@
 
 ## 3. 架构
 
-### 3.1 三层架构
+### 3.1 三层架构（控制平面 / 编排平面 / 执行平面）
+
+QuantCode 采用**语言边界即职责边界**的三层设计：接入与交互层用 TypeScript（复用 OpenCode 生态），核心推理编排层用 Python（LangGraph 有状态图 + 自研运行时加固），两层通过 HTTP API 契约解耦。工具执行层同为 Python，作为编排层可调度的能力池。
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                      前端层（面向人）                              │
+│  控制平面 · Control Plane（TypeScript / OpenCode fork）            │
 │                                                                  │
-│  桌面 App（Electron）+ Web UI                                     │
-│  ★ Compose 视图（核心面板）                                       │
-│  - Idea 输入 · Schema 卡片 · 任务树 · Subagent 监控               │
-│  - Memory 浏览 · Dog Food · 跨组通知 · 会话 Resume                │
+│  职责：身份与会话、意图分派、可视化、轻量编排                       │
+│  - SSH key ⟶ 组身份长期绑定（会话内不可变）                       │
+│  - Idea 文本 ⟶ 执行模式分派（compose / plan / build）             │
+│  - Compose 视图：DAG 实时状态 · Schema 卡片 · 任务树 · HumanGate  │
+│  - Memory 浏览 · 跨组通知 · 会话 Resume                          │
+│  - 轻量编排：仅编排 API 调用与 UI 状态，不承载核心推理            │
 └──────────────────────┬───────────────────────────────────────────┘
-                       │ HTTP / SSE / WebSocket
+                       │ HTTP API（无状态请求 / SSE 状态流）
+                       │ 语言与进程边界 —— 契约化解耦
 ┌──────────────────────▼───────────────────────────────────────────┐
-│            Agent 引擎层（OpenCode fork + 移植 + 自建）              │
+│  编排平面 · Orchestration Plane（Python / LangGraph + 自研运行时） │
 │                                                                  │
-│  Layer 1: OpenCode 原生                                          │
-│    multi-agent / plugin / tool / 多 provider                     │
+│  ★ 核心推理编排的唯一归属，Node.js 不参与                         │
 │                                                                  │
-│  Layer 2: 从 MimoCode 移植                                       │
-│    Memory 系统 · 自动 checkpoint · 上下文重建                     │
-│    树状任务 · Subagent 编排 · Goal/Judge                          │
-│    Compose Mode 的 15 个内置 skill                                │
-│    Dream · Distill                                               │
+│  运行时内核（基于 LangGraph ReAct Agent）                        │
+│    ReAct 循环：LLM 推理→调 tool→观察→再推理（Agent 自主决策）    │
+│    Tool Registry · Permission(allow/deny/ask) 人审               │
+│    SqliteSaver checkpoint · interrupt/resume                     │
 │                                                                  │
-│  Layer 3: QuantCode 自建（业务层）                                 │
-│    6 套垂直 Compose 流（按组分发）                                 │
-│    idea-router agent（核心）                                      │
-│    Pydantic 动态 Schema 生成器                                    │
-│    10+ 自定义 tool                                                │
+│  复用 MimoCode 的 15 个 compose skill（markdown）                │
+│    brainstorm / plan / execute / tdd / review / debug ...       │
+│    引擎无关的工作流知识，作为 prompt/context 喂给 Agent          │
+│                                                                  │
+│  自研运行时加固（MimoCode 有基础版，我们做更细）                  │
+│    死循环检测 · 迭代步数上限 · 状态指纹循环检测                    │
+│    RLHF / 微调 / 评估的算法侧接入点                               │
+│                                                                  │
+│  平台服务（Day 2 已建）                                           │
+│    Memory FTS5 + 5-scope 权限 · Blackboard 共享状态               │
+│    内部模型服务与资源权限（COS / 各组服务器）· 监控告警           │
 └──────────────────────┬───────────────────────────────────────────┘
-                       │
+                       │ 进程内调用（编排平面调度能力池）
 ┌──────────────────────▼───────────────────────────────────────────┐
-│                       集成层（外部系统）                            │
-│  AutoFactorEvaluation · Server A SSH · Server B SSH · GitHub     │
-│  ChromaDB · 爬虫（GH Trending / Twitter / Reddit）                │
+│  执行平面 · Execution Plane（Python tools/ + 外部系统）            │
+│                                                                  │
+│  职责：无状态的副作用执行，不参与决策                              │
+│  AutoFactorEvaluation · Server A/B SSH · COS · GitHub PR         │
+│  ChromaDB 时点检索 · 爬虫 · RLHF 训练数据收集                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+**三条架构铁律**：
+
+1. **核心推理编排只在编排平面（Python/LangGraph）**。TypeScript 控制平面只做接入、可视化，不承载任何推理调度逻辑。
+2. **控制平面与编排平面职责分离**，可独立演进——当前阶段团队集中于编排平面，控制平面复用 OpenCode 现有能力（session/tool/memory），互不阻塞。
+3. **LangGraph 是内核不是终点**。我们在其 ReAct 循环之上做自研运行时加固（死循环 / 迭代上限 / 循环检测）、复用 MimoCode 的 15 个 compose skill、接入算法侧能力（RLHF / 微调 / 评估），既保证长任务鲁棒性，也沉淀组员在 LangGraph Python 高级用法上的工程能力。
 
 ### 3.2 三大生产模式（架构基石）
 
@@ -202,17 +219,21 @@ QuantCode 采用业界 2026 年生产生存率最高的最小组合（Pattern 1 
 
 ---
 
-### 3.3 Compose Mode 是产品中枢
+### 3.3 Compose 流：编排平面的核心产品
 
-Compose 不是辅助工具，是**第三种 primary agent**：
+Compose 不是辅助工具，是 QuantCode 的**主战场**——每个组的工作流（fundamental / factor / model / risk / strategy / options）均表达为一条 **Compose 流**，本质是编排平面（Python/LangGraph）的一个 **ReAct Agent 实例**。
+
+控制平面（TS 前端）提供三种执行模式的入口：
 
 ```
-build    → 默认编程模式（写代码）
-plan     → 只读分析模式
-compose  → specs-driven 工作流编排模式（QuantCode 的主战场）
+build    → 默认编程模式（直接生成/修改代码）
+plan     → 只读分析模式（不落地代码）
+compose  → 工作流编排模式（QuantCode 主战场，调用编排平面 API）
 ```
 
-每个组的工作流 = 一组 SKILL.md 文件 + 调度规则。Compose 自动按 skill 间的依赖关系编排，跑完一个进入下一个。Compose 实现 Pattern 1 的中心 Orchestrator 角色。
+用户选择 `compose` 时，控制平面通过 HTTP API 调起编排平面，传入组标识 + 流名称 + idea 文本。编排平面加载对应流的配置（system prompt + tool 白名单 + permission 规则），启动 ReAct 循环：**Agent 自己推理下一步该调哪个 tool**，执行后观察结果，再推理下一步，循环往复直到任务完成。全程 checkpoint，遇 permission 规则为 `ask` 的 tool 时 interrupt 等人审。
+
+**关键点**：6 套 Compose 流 = **同一个 ReAct 循环 + 6 套不同配置**。流程不是预定义的 DAG，而是 Agent 在运行时推理产生。这是从 OpenCode 调研学到的核心设计——解耦和自主决策的根本。控制平面只负责触发调用与可视化 Agent 当前状态。这是 §3.1 第一条铁律（核心推理编排只在编排平面）的直接体现。
 
 ---
 
@@ -323,17 +344,21 @@ def github_pr_comment(commit_sha: str, msg: str):
 | **Compose 流自动加载** | 进入对应组的 `.opencode/groups/<group>/` 配置 |
 | **Memory 隔离** | 每组有独立 MEMORY.md，跨组只看共享部分 |
 
-#### 4.2.2 idea-router（核心 agent）
+#### 4.2.2 组绑定与模式分派（控制平面）
 
-任何 idea 进入系统后由 idea-router 决定：
+组身份由 **SSH key 长期绑定**决定，不随 idea 文本动态路由——登录即确定用户所属组，会话内不可变，对应组的 Compose 流配置随之加载。
 
-| 路由动作 | 触发条件 |
+Idea 文本的作用是**在既定流内分派执行模式**，而非选择进入哪条流：
+
+| 分派动作 | 触发条件 |
 |---|---|
-| 进入因子 Compose 流 | idea 涉及因子定义、回测、IC 评估 |
-| 进入研报 Compose 流 | idea 涉及公司、行业研究、估值 |
-| 进入风控 Compose 流 | idea 涉及 PR 审批、风险评估 |
-| 进入跨组 Compose 流 | idea 涉及多组协作 |
-| 兜底：通用 Compose | 其他 |
+| `compose` 模式 | idea 描述多步骤工作流，需按 skill 依赖编排 |
+| `plan` 模式 | idea 为只读分析、调研，不落地代码 |
+| `build` 模式 | idea 为明确的代码实现 / 修改 |
+| 新 idea 入流 | idea 为待验证的研究想法，走 Compose 流的 brainstorm 起点 |
+
+**要点**：流由组（SSH key）决定，模式由 idea 决定。跨组协作通过 Blackboard PROJECT scope 达成，不改变组身份。
+
 
 #### 4.2.3 Schema 动态生成
 
@@ -361,84 +386,55 @@ def github_pr_comment(commit_sha: str, msg: str):
 
 ### 4.3 6 套垂直 Compose 流
 
-每套流 = 一组 SKILL.md + 调度规则 + 默认 tool 集 + MEMORY.md。
+每套流 = **一个 ReAct Agent 配置**（system prompt + tool 白名单 + permission 规则 + MEMORY.md）。Agent 自己推理执行顺序，不预定义流程图。
 
 #### 4.3.1 基本面组（fundamental）
 
-```
-fundamental:brainstorm   →   聊清楚研究主题（公司/行业/宏观）
-fundamental:fetch         →   拉年报、公告、纪要（含 RAG）
-fundamental:extract       →   财报结构化提取（MD&A / 经营讨论 / 风险披露）
-fundamental:dcf           →   DCF 估值
-fundamental:draft         →   LLM 生成各章节
-fundamental:render        →   Typst 渲染 PDF（中金风格）
-fundamental:review        →   研究员人工 review
-fundamental:publish       →   发邮件 / 上传内部
-```
+**System Prompt 核心**：围绕公司/行业/宏观问题，检索语料（时点安全），提取财报，做估值，产出研报 PDF，走人工验收。
 
-默认 tool：`rag_search` `extract_financial` `dcf_model` `typst_render`
+**Available Tools**：`pit_rag_search` `extract_financial` `dcf_valuation` `render_report` `request_human_review`
+
+**Permission 规则**：`render_report` → ask（PDF 需人审），`publish` → ask（发邮件需审批）
 
 #### 4.3.2 因子组（factor）
 
-```
-factor:brainstorm   →   聊清楚要测什么因子
-factor:match-main    →   匹配主线代码，提取算子白名单
-factor:gen-schema    →   动态生成 FactorSpec Pydantic 类
-factor:execute       →   用户填代码 + 跑回测
-factor:autoeval      →   调 AutoFactorEvaluation 服务
-factor:risk-check    →   风控阈值验收
-factor:merge-main    →   PR 自动接入主线
-```
+**System Prompt 核心**：接到因子 idea，匹配主线因子库，生成因子定义 schema，调用 AutoEval 回测，产出 IC/IR/换手率报告，指标达标建议合入主线。
 
-默认 tool：`autoeval_submit` `autoeval_query` `read_main_factor` `github_pr`
+**Available Tools**：`match_main` `gen_factor_schema` `run_autoeval` `check_factor_gate` `merge_to_main`
+
+**Permission 规则**：`merge_to_main` → ask（合入主线需审批）
 
 #### 4.3.3 模型组（model）
 
-```
-model:brainstorm    →   聊清楚要做什么模型
-model:lit-review     →   文献分享结构化（解决会议纪要散乱问题）
-model:plan           →   生成模型设计 spec
-model:execute        →   实现 + 训练
-model:pr-submit      →   提 PR（自动填风控元数据）
-model:cross-handoff  →   触发风控组 Compose 流
-```
+**System Prompt 核心**：围绕模型 idea，做文献综述，生成设计 spec，实现训练，提 PR 时自动填风控元数据，触发风控组 Agent（跨组 handoff）。
 
-默认 tool：`rag_search` `github_pr` `paper_extract`
+**Available Tools**：`read_pr` `extract_metadata` `generate_model_spec` `write_blackboard` `trigger_risk_flow`
+
+**Permission 规则**：`trigger_risk_flow` → allow（跨组协作自动触发）
 
 #### 4.3.4 风控组（risk）
 
-```
-risk:detect         →   检测到模型组 PR
-risk:analyze         →   分析策略代码 + 跑历史回测
-risk:schema-gen      →   填充 RiskProfile Schema
-risk:ci-gate         →   程序化阈值校验
-risk:feedback        →   返回审批结论 + 改进建议
-```
+**System Prompt 核心**：读取 model 组提交的元数据（Blackboard），调用风控计算，生成 RiskProfile，VaR 超阈值触发人审，最终把分析结果写回 PR。
 
-默认 tool：`github_pr` `backtest_run` `risk_metrics`
+**Available Tools**：`read_blackboard` `calc_risk` `generate_risk_profile` `check_gate` `write_pr_comment`
+
+**Permission 规则**：`check_gate` → ask（VaR 超阈值需人审）
 
 #### 4.3.5 策略组（strategy）
 
-```
-strategy:brainstorm  →   聊清楚组合方向
-strategy:select       →   从因子池/策略池选标的
-strategy:combine      →   组合权重优化
-strategy:backtest     →   组合回测
-strategy:deploy       →   接入 Server B 主线
-```
+**System Prompt 核心**：从因子池/策略池筛选标的，组合权重优化，回测组合表现，达标后建议部署到生产主线。
 
-默认 tool：`read_main_strategy` `portfolio_opt` `backtest_run`
+**Available Tools**：`select_signals` `combine_signals` `run_strategy_backtest` `deploy_strategy`
+
+**Permission 规则**：`deploy_strategy` → ask（部署到生产需审批）
 
 #### 4.3.6 期权组（options）
 
-```
-options:brainstorm   →   聊清楚期权策略
-options:vol-surface   →   隐波曲面 fitting
-options:greeks        →   Greeks 计算
-options:execute       →   下单 / 回测
-```
+**System Prompt 核心**：围绕期权策略 idea，构建波动率曲面，计算风险敞口（Greeks），执行策略回测。
 
-默认 tool：`vol_surface` `greeks_calc`
+**Available Tools**：`build_vol_surface` `calc_greeks` `run_options_backtest`
+
+**Permission 规则**：默认 allow（期权回测风险较低）
 
 ### 4.4 前端功能（Compose 视图为核心）
 

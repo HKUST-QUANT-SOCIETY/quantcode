@@ -141,11 +141,24 @@
 **用户故事**：
 > 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，不用等风控组人工 review 就知道哪里要改。
 
-**核心 skill**：`risk:detect → analyze → schema-gen → ci-gate → feedback`
+**Available Tools**（Agent 可调用）：
+- `read_blackboard(key)` - 读取 model 组写入的 ModelSpec
+- `calc_risk(returns)` - 计算风控指标（VaR/MaxDD/Sharpe 等）
+- `generate_risk_profile(metrics)` - 生成结构化的 RiskProfile
+- `check_gate(profile)` - 判断是否需要触发 HumanGate
+- `write_pr_comment(pr_number, comment)` - 写风控分析结果到 PR
 
-**输入**：PR diff + `ModelSpec`（模型组 PR 元数据）
+**System Prompt**（核心指令）：
+> 你是 risk 组的风控分析 Agent。当接到任务时，你需要：
+> 1. 读取 model 组提交的模型元数据（从 Blackboard）
+> 2. 调用风控计算工具获得各项指标
+> 3. 生成符合 RiskProfile schema 的结构化报告
+> 4. 如果 VaR/MaxDD 超阈值，触发人工审批
+> 5. 最终把分析结果写回 PR
 
-**输出**：符合 `schemas/risk-profile.schema.json` 的 `RiskProfile`
+**输入**：任务描述（"分析 PR #123 的风控"）+ Blackboard key（`model.pr.123`）
+
+**输出**：符合 `schemas/risk-profile.schema.json` 的 `RiskProfile`，写入 PR comment
 
 **验收标准**：
 ```python
@@ -156,13 +169,19 @@ assert risk_json["tail_risk_var_99"] is not None
 # 越过阈值时自动触发 HumanGate
 ```
 
-**Owner**：杨欣琳（T2）；统计公式由肖骥超提供
-
 #### 4.1.2 fundamental Compose 流（基本面 + PIT-RAG）
 
-**核心 skill**：`fundamental:brainstorm → fetch → extract → dcf → draft → render → review → publish`
+**Available Tools**（Agent 可调用）：
+- `pit_rag_search(query, as_of_date)` - 时点安全的语料检索（强制 `published_at <= as_of_date`）
+- `extract_financials(doc)` - 财报结构化提取
+- `dcf_valuation(financials)` - DCF 估值计算
+- `render_report(spec)` - 渲染研报 PDF（Typst）
+- `request_human_review(pdf)` - 提交研究员人工验收
 
-**关键约束**：`pit-rag` 强制 `published_at <= as_of_date`，杜绝 lookahead bias
+**System Prompt**（核心指令）：
+> 你是基本面研究 Agent。围绕用户给定的公司/行业问题，检索时点安全的语料，提取财务数据，做估值，产出结构化研报。所有检索必须遵守时点约束，杜绝 lookahead bias。研报渲染后走人工验收。
+
+**关键约束**：`pit_rag_search` 强制 `published_at <= as_of_date`
 
 **输入**：`PITQuery`（query + as_of_date + corpus）
 **输出**：`PITResult` → `ResearchSpec` → research.pdf
@@ -174,11 +193,17 @@ for doc in result["documents"]:
 # 渲染 PDF 后人工验收：研究员愿意发出去 = 通过（走 HumanGate）
 ```
 
-**Owner**：用户（Lead，T3a）；PDF 副手 刘炽
-
 #### 4.1.3 factor Compose 流（因子评估）
 
-**核心 skill**：`factor:brainstorm → match-main → gen-schema → execute → autoeval → risk-check → merge-main`
+**Available Tools**（Agent 可调用）：
+- `match_main(idea)` - 匹配主线因子库，判断兼容性
+- `gen_factor_schema(idea)` - 动态生成因子 Pydantic schema
+- `run_autoeval(factor)` - 调用 AutoFactorEvaluation 执行回测
+- `check_factor_gate(report)` - 判断因子指标是否达标
+- `merge_to_main(factor)` - 合入主线（需 HumanGate）
+
+**System Prompt**（核心指令）：
+> 你是因子评估 Agent。接到因子 idea 后，匹配主线因子库，生成因子定义 schema，调用 AutoEval 回测，产出 IC/IR/换手率等指标报告。指标达标才建议合入主线。
 
 **接入**：HKUST-QUANT-SOCIETY/auto_factor_evaluation
 
@@ -192,27 +217,40 @@ assert report["turnover"]["monthly"] <= 0.8
 assert report["ic_metrics"]["t_stat"] >= 2.0
 ```
 
-**Owner**：肖骥超（T4）
-
 #### 4.1.4 model Compose 流（模型 / 跨组发起）
 
-**核心 skill**：`model:brainstorm → lit-review → plan → execute → pr-submit → cross-handoff`
+**Available Tools**（Agent 可调用）：
+- `read_pr(pr_number)` - 读取模型 PR diff
+- `extract_metadata(diff)` - 提取模型元数据（类型/超参/训练区间）
+- `generate_model_spec(metadata)` - 生成 ModelSpec
+- `write_blackboard(key, value)` - 写入共享状态层（PROJECT scope）
+- `trigger_risk_flow(key)` - 触发 risk 组 Agent（跨组 handoff）
 
-**关键**：`model:pr-submit` 自动填风控元数据，`model:cross-handoff` 触发 risk Compose 流
+**System Prompt**（核心指令）：
+> 你是模型组 Agent。当研究员提交模型 PR 时，你读取 PR 内容，提取模型元数据并填充风控所需信息，写入共享状态层，然后触发风控组的分析流程。
 
-**Owner**：陈镇鸿（T1）；同时实现 `tools/utils/dedupe.py` 装饰器（杨欣琳依赖）
+**关键**：写 Blackboard 时自动填风控元数据；`trigger_risk_flow` 发起跨组协作
 
 #### 4.1.5 options Compose 流
 
-**核心 skill**：`options:brainstorm → vol-surface → greeks → execute`
+**Available Tools**（Agent 可调用）：
+- `build_vol_surface(market_data)` - 构建波动率曲面
+- `calc_greeks(position)` - 计算希腊字母
+- `run_options_backtest(strategy)` - 期权策略回测
 
-**Owner**：刘炽（T3b）
+**System Prompt**（核心指令）：
+> 你是期权组 Agent。围绕用户的期权策略 idea，构建波动率曲面，计算风险敞口（Greeks），执行策略回测。
 
 #### 4.1.6 strategy Compose 流
 
-**核心 skill**：`strategy:brainstorm → select → combine → backtest → deploy`
+**Available Tools**（Agent 可调用）：
+- `select_signals(candidates)` - 从候选信号中筛选
+- `combine_signals(signals)` - 组合多信号
+- `run_strategy_backtest(combined)` - 组合策略回测
+- `deploy_strategy(strategy)` - 部署到生产（需 HumanGate）
 
-**Owner**：待定（暂未分配）
+**System Prompt**（核心指令）：
+> 你是策略组 Agent。从多个候选信号中筛选、组合，回测组合策略表现，达标后建议部署到生产主线。
 
 ### 4.2 三大生产模式契约
 
@@ -300,31 +338,42 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 
 ## 6. 技术架构
 
-### 6.1 三层架构（详见 Design §3.1）
+### 6.1 三层架构（详见 `docs/Architecture_Spec.md`）
+
+**语言边界即职责边界**：控制平面用 TypeScript（复用 OpenCode 生态），核心推理编排用 Python（LangGraph ReAct Agent + 自研运行时加固），执行层为 Python tools。三层跑在同一个 MimoCode/OpenCode 运行环境里。
 
 ```
-                  ┌────────────────────────┐
-                  │       前端层（人）        │
-                  │ OpenCode desktop UI fork│
-                  │ + Compose 视图 + 任务树  │
-                  └───────────┬────────────┘
-                              │ HTTP / SSE
-                  ┌───────────▼────────────┐
-                  │     Agent 引擎层         │
-                  │ Layer 1: OpenCode 原生  │
-                  │ Layer 2: MimoCode 移植   │
-                  │ Layer 3: QuantCode 自建  │
-                  │   6 套 Compose 流        │
-                  │   idea-router agent      │
-                  │   Pydantic Schema 生成器  │
-                  └───────────┬────────────┘
-                              │
-                  ┌───────────▼────────────┐
-                  │       集成层             │
-                  │ AutoEval · Server A/B   │
-                  │ GitHub · ChromaDB · 爬虫 │
-                  └────────────────────────┘
+        ┌──────────────────────────────────────┐
+        │  控制平面（TypeScript / OpenCode fork）│
+        │  SSH key⟶组绑定 · idea⟶模式分派        │
+        │  触发 compose 流 · Agent 状态可视化    │
+        └───────────────┬──────────────────────┘
+                        │ 触发 compose 流
+        ┌───────────────▼──────────────────────┐
+        │  编排平面（Python / LangGraph）        │
+        │  ★核心推理编排唯一归属，Node.js 不参与 │
+        │  ReAct 循环（Agent 自主推理，非预设DAG)│
+        │  复用 MimoCode 的 15 个 compose skill  │
+        │  Tool Registry · Permission(allow/ask) │
+        │  checkpoint · interrupt/resume         │
+        │  自研加固：死循环/迭代上限/循环检测    │
+        │  算法侧接入：RLHF / 微调 / 评估        │
+        │  Memory FTS5 · Blackboard · 监控       │
+        └───────────────┬──────────────────────┘
+                        │ 调用 tool
+        ┌───────────────▼──────────────────────┐
+        │  执行平面（Python tools/ + 外部系统）  │
+        │  解耦的独立 tool 函数                   │
+        │  AutoEval · SSH · COS · GitHub · RAG   │
+        └──────────────────────────────────────┘
 ```
+
+**四条铁律**：
+1. 核心推理编排只在编排平面（Python/LangGraph），TS 控制平面不承载推理调度。
+2. **Agent 自主推理，不预定义工作流 DAG**：编排平面是 ReAct 循环（LLM 推理下一步→调 tool→观察→再推理），流程由 Agent 推理产生，不是执行预设拓扑。"6 套 Compose 流" = 同一个 ReAct 循环 + 6 套 system prompt(skill) + 6 套 tool 白名单 + 6 套 permission 规则。
+3. **compose 落地口径**：编排层是我们自己的 Python/LangGraph 层，但**复用 MimoCode 的 15 个 compose skill**（brainstorm/plan/execute/tdd/review… 是 markdown 文本，引擎无关，直接喂给 LangGraph Agent）、**借鉴其 compose 设计**（skill 加载、tool registry、permission 人审）。我们不改 MimoCode 源码，是复用 + 借鉴。
+4. LangGraph 是内核不是终点——其上自研运行时加固（死循环 / 迭代上限 / 循环检测）与算法侧接入（RLHF / 微调 / 评估），既保长任务鲁棒性，也沉淀组员 LangGraph 高级用法工程能力。
+
 
 ### 6.2 数据流
 
