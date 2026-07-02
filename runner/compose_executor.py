@@ -179,7 +179,6 @@ def execute_compose_flow(
     thread_id: str | None = None,
     inject_memory: Callable[[str], Any] | None = None,
     config: dict[str, Any] | None = None,
-    resume: bool = False,
 ) -> dict[str, Any]:
     """执行一条 Compose 流，返回标准化结果。
 
@@ -187,15 +186,10 @@ def execute_compose_flow(
         group: 6 组之一。
         flow_name: 流名。
         input_data: 传给首节点的 dict（Pydantic schema 的 model_dump() 输出）。
-                    当 ``resume=True`` 时忽略（从 checkpoint 恢复已有 state）。
         thread_id: 可显式指定，否则按 ``make_thread_id(group, flow_name)`` 生成。
-                   ``resume=True`` 时必须显式传入（指向要恢复的 checkpoint）。
         inject_memory: 一个 ``(group) -> MemoryService`` 的工厂；
                        传 None 时不注入 ``_memory``。Day 3+ 由 Memory 模块提供。
         config: 透传给 ``app.invoke`` 的额外 config。
-        resume: 若 True，从 thread_id 对应的 checkpoint 恢复执行
-                （调用 ``app.invoke(None, ...)``），已完成的节点不重跑。
-                Day 2 下午新增：支持失败节点重试。
 
     Returns:
         包含以下键的 dict：
@@ -207,14 +201,12 @@ def execute_compose_flow(
 
     Raises:
         KeyError: flow 未注册。
-        ValueError: 入参类型错，或 resume=True 但未传 thread_id。
+        ValueError: 入参类型错。
     """
     if not isinstance(group, str) or not isinstance(flow_name, str):
         raise ValueError("execute_compose_flow: group/flow_name 必须是字符串")
-    if not resume and not isinstance(input_data, dict):
+    if not isinstance(input_data, dict):
         raise ValueError("execute_compose_flow: input_data 必须是 dict")
-    if resume and not thread_id:
-        raise ValueError("execute_compose_flow: resume=True 时必须传 thread_id")
 
     g = group.strip().lower()
     f = flow_name.strip()
@@ -228,53 +220,43 @@ def execute_compose_flow(
 
     tid = thread_id or make_thread_id(g, f)
 
-    # 构造 initial state（resume 时为 None，LangGraph 从 checkpoint 恢复）
-    init_state: dict[str, Any] | None
-    if resume:
-        init_state = None
-    else:
-        init_state = {
-            "group": g,
-            "flow_name": f,
-            "thread_id": tid,
-            "input_data": input_data,
-            "output_data": None,
-            "artifacts": [],
-            "errors": [],
-        }
+    # 构造 initial state
+    init_state: dict[str, Any] = {
+        "group": g,
+        "flow_name": f,
+        "thread_id": tid,
+        "input_data": input_data,
+        "output_data": None,
+        "artifacts": [],
+        "errors": [],
+    }
 
     # Memory 注入
     # 注意：state["_memory"] 放纯 dict 包装（msgpack 可序列化），
     # 真实 svc 走 _MEMORY_BY_TID[tid]；详见模块顶部 docstring。
-    # resume 时 _memory 包装已在 checkpoint 里，只需重新注册真实 svc 到 registry。
     memory_svc: Any = None
     if inject_memory is not None:
         memory_svc = inject_memory(g)
         if memory_svc is not None:
             with _MEMORY_LOCK:
                 _MEMORY_BY_TID[tid] = memory_svc
-            if init_state is not None:
-                init_state["_memory"] = {"_tid": tid, "_role": "memory"}
+            init_state["_memory"] = {"_tid": tid, "_role": "memory"}
 
-    # 跑用户钩子（resume 时跳过，state 已在 checkpoint 里）
-    if init_state is not None:
-        for hook in PRE_INVOKE_HOOKS:
-            try:
-                extra = hook(g, f, dict(init_state))
-                if isinstance(extra, dict):
-                    init_state.update(extra)
-            except Exception as exc:  # 钩子出错仅记日志，不阻塞主流程
-                logger.warning("pre_invoke hook 失败：%s", exc)
+    # 跑用户钩子
+    for hook in PRE_INVOKE_HOOKS:
+        try:
+            extra = hook(g, f, dict(init_state))
+            if isinstance(extra, dict):
+                init_state.update(extra)
+        except Exception as exc:  # 钩子出错仅记日志，不阻塞主流程
+            logger.warning("pre_invoke hook 失败：%s", exc)
 
     # 装配 LangGraph config
     cfg: dict[str, Any] = {"configurable": {"thread_id": tid}}
     if config:
         cfg.update(config)
 
-    logger.info(
-        "execute_compose_flow start group=%s flow=%s thread_id=%s resume=%s",
-        g, f, tid, resume,
-    )
+    logger.info("execute_compose_flow start group=%s flow=%s thread_id=%s", g, f, tid)
     final_state: dict[str, Any] = {}
     try:
         final_state = app.invoke(init_state, config=cfg)
