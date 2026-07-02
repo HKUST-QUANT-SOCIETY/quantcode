@@ -232,6 +232,39 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - **Schema 校验**（`runner/schema_validator.py`）：所有 Compose 流的输入输出强制校验
 - **CI gate**（`.github/workflows/risk-gate.yml`）：PR 触发 → OpenCode skill → schema → runner → PR 评论（去重）
 
+### 4.4 核心引擎功能实现路线
+
+> **背景**：QuantCode 需要 Memory、Checkpoint、Workflow 等引擎能力支撑长任务执行。MimoCode (`vendor/mimo-code/`) 已实现类似功能，我们参考其设计并实现 Python 版本。
+
+| 功能 | 用户价值 | 技术实现 | 参考资源（MimoCode 路径） | 优先级 | 状态 | 负责人 |
+|------|---------|---------|--------------------------|--------|------|--------|
+| **Memory 全文检索** | 跨会话知识复用，搜索历史结论 | SQLite FTS5 + BM25 + CJK 分词 | `packages/opencode/src/memory/` | P0 | ✅ Day 2 | 尹一帆 |
+| **Workflow 跨组编排** | model→risk 自动触发，无需手动协调 | 跨 flow 触发 + 状态传递 | `src/workflow/runtime.ts`<br>`src/workflow/events.ts` | P0 | 🔧 Day 3 | 尹一帆 |
+| **Compose 模式声明** | SKILL.md 声明 node 拓扑，自动编排 | frontmatter + node 提取 | `src/skill/compose/` | P0 | 🔧 Day 3 | 陈镇鸿 |
+| **任务树管理** | 并行任务监控、单独 kill | 任务 registry + gate 状态机 | `src/task/task.sql.ts`<br>`src/task/gate.ts` | P1 | 🔲 Week 2 | Lead |
+| **自动 Checkpoint** | context > 70% 自动快照，长任务不丢失 | snapshot 触发器 | `src/snapshot/` | P1 | 🔲 Week 2 | TBD |
+| **上下文重建** | context > 90% 从 Memory 重组，避免重头来过 | checkpoint + MEMORY 合成 | `src/session/` | P1 | 🔲 Week 2 | TBD |
+| **Subagent 监控** | 查看子任务状态，单独中止失控任务 | subagent 生命周期追踪 | `src/agent/` + `src/task/` | P1 | 🔲 Week 2 | TBD |
+| **Dream 知识提取** | 每周自动从 trace 提取知识到 MEMORY.md | trace 扫描 + LLM 总结 | 🔍 需自行设计 | P0 原型 | 🔲 Day 4 | 尹一帆 |
+| **Distill 自动化识别** | 识别重复操作，自动生成 SKILL.md | 操作序列聚类 | 🔍 需自行设计 | P2 | 🔲 Week 3+ | TBD |
+| **Goal + Judge** | 设定目标，自动评估任务完成度 | Goal DSL + Judge 模型 | 🔍 需自行设计 | P2 | 🔲 Week 3+ | TBD |
+
+**图例**：
+- ✅ 已完成 | 🔧 进行中 | 🔲 待开始 | 🔍 MimoCode 代码库未找到，需自行设计
+
+**关键发现**（2026-07-03 代码库验证）：
+1. ✅ Memory 功能已实现（Day 2），5-scope + FTS5 + CJK 分词完整
+2. ✅ Workflow 编排机制在 MimoCode 有完整实现，Day 3 可参考设计
+3. ✅ Compose 模式在 MimoCode 已验证，SKILL.md frontmatter 设计可复用
+4. ❌ Dream/Distill/Goal 在 MimoCode 未找到独立模块（可能未开源），需自行设计原型
+5. ⚠️ 风控统计（VaR/MaxDD/Sharpe）是 QuantCode 业务逻辑，MimoCode 是通用平台不含此类计算
+
+**实现原则**：
+- 功能语义对标 MimoCode（用户体验一致）
+- Python 实现遵循 Python idiom，不逐字翻译 TypeScript
+- 遇到依赖小米服务（MiMo Auto/ASR）的部分，手动重写
+- 保持 MIT 协议，注明参考出处
+
 ---
 
 ## 5. 非功能性需求
@@ -255,42 +288,6 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - 任何 task 带 ID 可以 `quantcode replay <task_id>`
 - Checkpoint：context > 70% 自动 snapshot；> 90% 触发上下文重建
 - 长任务（10h+）context 不丢失，可断点续跑
-
-#### 5.3.1 核心引擎功能实现路线（2026-07-03 更新）
-
-> **背景**：QuantCode 需要 Memory、Checkpoint、Workflow 等引擎能力支撑长任务执行。MimoCode (`vendor/mimo-code/`) 已实现类似功能，我们参考其设计并实现 Python 版本，避免重复造轮子。
-
-| 功能 | 用户价值 | 技术实现 | 参考资源（MimoCode 路径） | 优先级 | 状态 | 负责人 |
-|------|---------|---------|--------------------------|--------|------|--------|
-| **Memory 全文检索** | 跨会话知识复用，搜索历史结论 | SQLite FTS5 + BM25 + CJK 分词 | `packages/opencode/src/memory/` | P0 | ✅ Day 2 | 尹一帆 |
-| **Workflow 跨组编排** | model→risk 自动触发，无需手动协调 | 跨 flow 触发 + 状态传递 | `src/workflow/runtime.ts`<br>`src/workflow/events.ts` | P0 | 🔧 Day 3 | 尹一帆 |
-| **Compose 模式声明** | SKILL.md 声明 node 拓扑，自动编排 | frontmatter + node 提取 | `src/skill/compose/` | P0 | 🔧 Day 3 | 陈镇鸿 |
-| **任务树管理** | 并行任务监控、单独 kill | 任务 registry + gate 状态机 | `src/task/task.sql.ts`<br>`src/task/gate.ts` | P1 | 🔲 Week 2 | Lead |
-| **自动 Checkpoint** | context > 70% 自动快照，长任务不丢失 | snapshot 触发器 | `src/snapshot/` | P1 | 🔲 Week 2 | TBD |
-| **上下文重建** | context > 90% 从 Memory 重组，避免重头来过 | checkpoint + MEMORY 合成 | `src/session/` | P1 | 🔲 Week 2 | TBD |
-| **Subagent 监控** | 查看子任务状态，单独中止失控任务 | subagent 生命周期追踪 | `src/agent/` + `src/task/` | P1 | 🔲 Week 2 | TBD |
-| **Dream 知识提取** | 每周自动从 trace 提取知识到 MEMORY.md | trace 扫描 + LLM 总结 | 🔍 未找到，需自行设计 | P0 原型 | 🔲 Day 4 | 尹一帆 |
-| **Distill 自动化识别** | 识别重复操作，自动生成 SKILL.md | 操作序列聚类 | 🔍 未找到，需自行设计 | P2 | 🔲 Week 3+ | TBD |
-| **Goal + Judge** | 设定目标，自动评估任务完成度 | Goal DSL + Judge 模型 | 🔍 未找到，需自行设计 | P2 | 🔲 Week 3+ | TBD |
-
-**图例**：
-- ✅ 已完成
-- 🔧 进行中
-- 🔲 待开始
-- 🔍 MimoCode 代码库未找到，需自行设计
-
-**关键发现**（2026-07-03 实际代码库验证）：
-1. ✅ **Memory 功能已实现**（Day 2），5-scope + FTS5 + CJK 分词完整
-2. ✅ **Workflow 编排机制**在 MimoCode 有完整实现，Day 3 可参考设计
-3. ✅ **Compose 模式**在 MimoCode 已验证，SKILL.md frontmatter 设计可复用
-4. ❌ **Dream/Distill/Goal** 在 MimoCode 未找到独立模块（可能未开源），需自行设计原型
-5. ⚠️ **风控统计**（VaR/MaxDD/Sharpe）是 QuantCode 业务逻辑，MimoCode 是通用平台不含此类计算
-
-**实现原则**：
-- 功能语义对标 MimoCode（用户体验一致）
-- Python 实现遵循 Python idiom，不直逐翻译 TypeScript
-- 遇到依赖小米服务的部分（MiMo Auto/ASR），手动重写
-- 保持 MIT 协议，注明参考出处
 
 ### 5.4 安全性
 
