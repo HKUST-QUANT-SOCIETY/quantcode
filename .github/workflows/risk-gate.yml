@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write  # Required for posting PR comments via /issues/{number}/comments API
 
 # Owner: 杨欣琳（T2 风控 / 跨组接收）
 # 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
