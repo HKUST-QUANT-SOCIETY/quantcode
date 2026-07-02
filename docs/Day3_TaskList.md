@@ -48,7 +48,7 @@ Day 2 我们跑通了 factor:autoeval（factor 组内闭环）。Day 3 要打通
 - Day 2 回顾：4 个 PR 合并（factor:autoeval + Memory FTS5 + dedupe + checkpoint resume）
 - Day 3 目标确认：model→risk 跨组跑通，真实 PR 上有 risk comment
 - **依赖关系对齐**（关键）：
-  - 杨欣琳的 risk-gate **依赖** 肖继超的风控统计函数
+  - 杨欣琳的 risk-gate **依赖** 俞高磊的风控统计函数
   - 陈镇鸿的 model flow **依赖** 尹一帆的跨 graph 触发机制
   - 三条链路必须在**下午 3 点前**完成各自单测，才能做集成
 
@@ -114,7 +114,7 @@ Day 2 我们跑通了 factor:autoeval（factor 组内闭环）。Day 3 要打通
 | Node | 输入 | 输出 | 说明 |
 |---|---|---|---|
 | `read_model_spec` | blackboard key | ModelSpec | 从 PROJECT scope 读 model 组写的数据 |
-| `calc_risk_metrics` | ModelSpec + returns | dict（max_dd/VaR/ES） | 调用肖继超的统计函数 |
+| `calc_risk_metrics` | ModelSpec + returns | dict（max_dd/VaR/ES） | 调用俞高磊的统计函数 |
 | `generate_risk_profile` | metrics | `RiskProfile` schema | 需 Day 3 新建 RiskProfile schema |
 | `check_human_gate` | RiskProfile | interrupt or pass | VaR 超阈值 → 构造 HumanGate → interrupt |
 | `write_pr_comment` | RiskProfile | comment id | 用 dedupe，写 risk.json 到 PR |
@@ -140,9 +140,11 @@ Day 2 我们跑通了 factor:autoeval（factor 组内闭环）。Day 3 要打通
 
 ---
 
-## 4. 肖继超 · 风控统计函数库 + factor 深化（全天）
+## 4. 俞高磊 · 风控统计函数库 + factor 深化（全天）
 
-> **工程量提示**：Day 2 你交付了 factor:autoeval 全链路（~1000 行）。Day 3 上午做风控统计库（杨欣琳依赖），下午深化 factor 分层回测。
+> **新人背景**：俞高磊（东南大学强基计划数学学院），机器学习/深度学习经验，数学竞赛全国一等奖。熟悉PyTorch、优化算法、数值计算。Day 3 主攻风控统计函数库（为杨欣琳的 risk-gate 提供依赖）+ factor 量化分析。
+
+> **工程量提示**：上午风控统计库是杨欣琳的阻塞依赖（优先级最高），预计 250 行代码 + 15 个测试。下午 factor 分层回测预计 200 行 + 8 个测试。总计 ~450 行。
 
 ### 4.1 上午：风控统计函数库（杨欣琳的依赖，优先级最高）
 
@@ -245,7 +247,7 @@ Day 2 只测了 groups scope。Day 3 要覆盖全部 5 个 scope 的权限矩阵
 
 ### 6.3 协调职责
 
-- **上午 11 点 checkpoint**：确认肖继超的风控统计库完成（杨欣琳在等）
+- **上午 11 点 checkpoint**：确认俞高磊的风控统计库完成（杨欣琳在等）
 - **下午 2 点 checkpoint**：确认三条 flow 各自单测通过，可以开始集成
 - **下午 4 点**：主持集成联调，解决 flow 之间的接口 mismatch
 - 更新架构图：Blackboard 5-scope + 跨组 trigger 时序图
@@ -290,7 +292,7 @@ Day 2 只测了 groups scope。Day 3 要覆盖全部 5 个 scope 的权限矩阵
 ### 各组交付
 - [ ] 陈镇鸿：`runner/blackboard.py` + model flow + `test_model_flow.py`（8+ 测试）
 - [ ] 杨欣琳：eval 修复 + risk flow + HumanGate 集成 + `test_risk_flow.py`（10+ 测试）
-- [ ] 肖继超：`runner/risk_stats.py`（15+ 测试）+ factor 分层回测
+- [ ] 俞高磊：`runner/risk_stats.py`（15+ 测试）+ factor 分层回测
 - [ ] 尹一帆：`chain_flows` + Blackboard↔Memory 集成（13+ 测试）
 - [ ] Lead：5-scope 权限矩阵（12+ 测试）+ 跨组 handoff 集成（4 场景）
 - [ ] 刘炽：RiskProfile schema + 测试数据集 + risk 报告模板
@@ -307,7 +309,7 @@ Day 2 只测了 groups scope。Day 3 要覆盖全部 5 个 scope 的权限矩阵
 
 ```
 上午：
-  肖继超 risk_stats ──────┐
+  俞高磊 risk_stats ──────┐
                           ├──→ 杨欣琳 risk flow（依赖统计函数）
   刘炽 RiskProfile schema ─┘
 
@@ -323,7 +325,7 @@ Day 2 只测了 groups scope。Day 3 要覆盖全部 5 个 scope 的权限矩阵
   model→risk 端到端跑通（收工）
 ```
 
-**关键路径**：肖继超的 risk_stats 必须**上午完成**，否则杨欣琳的 risk flow 卡住。
+**关键路径**：俞高磊的 risk_stats 必须**上午完成**，否则杨欣琳的 risk flow 卡住。
 
 ---
 
