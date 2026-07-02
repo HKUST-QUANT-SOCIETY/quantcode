@@ -5,7 +5,8 @@
 """
 
 from .acceptance import run_acceptance
+from .human_gate import should_interrupt
 from .schema_validator import validate_against_schema
 
-__all__ = ["run_acceptance", "validate_against_schema"]
+__all__ = ["run_acceptance", "should_interrupt", "validate_against_schema"]
 __version__ = "0.0.1"

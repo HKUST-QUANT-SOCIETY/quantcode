@@ -25,6 +25,15 @@ from .compose_task import (
     TaskStatus,
     WritePolicy,
 )
+from .human_gate import (
+    HumanGate,
+    HumanGateDecision,
+    HumanGateDecisionAction,
+    HumanGateStatus,
+    HumanGateTrigger,
+    NotifyChannel,
+    RiskMetrics,
+)
 from .model import ModelRiskMetadata, ModelSpec, ModelType
 
 __all__ = [
@@ -41,6 +50,13 @@ __all__ = [
     "TaskOutcome",
     "TaskStatus",
     "WritePolicy",
+    "HumanGate",
+    "HumanGateDecision",
+    "HumanGateDecisionAction",
+    "HumanGateStatus",
+    "HumanGateTrigger",
+    "NotifyChannel",
+    "RiskMetrics",
     "ModelRiskMetadata",
     "ModelSpec",
     "ModelType",
