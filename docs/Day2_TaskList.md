@@ -103,14 +103,14 @@ def get_checkpointer():
 
 ### 1.2 尹一帆 · Memory FTS5 实现（上午 4 小时）
 
-> 从 MimoCode 移植 Memory 系统（`vendor/mimo-code/packages/opencode/src/memory/`，461 行 TS），重写为 Python。
+> 从 MimoCode 移植 Memory 系统（参考代码已入库到 `docs/mimocode-reference/memory/`，461 行 TS，MIT），重写为 Python。
 
 | 任务 | 说明 | 验收 |
 |---|---|---|
 | 创建 `runner/memory/fts.py` | SQLite FTS5 表结构（照抄 MimoCode schema，加 QuantCode 扩展）：<br>```sql<br>CREATE TABLE memory_fts (<br>  id INTEGER PRIMARY KEY,<br>  path TEXT UNIQUE,<br>  scope TEXT,        -- global/projects/groups/sessions/tasks<br>  scope_id TEXT,     -- project_hash/"fundamental"/thread_id/task_uuid<br>  type TEXT,         -- memory/checkpoint/progress/notes/feedback/...<br>  body TEXT,<br>  fingerprint TEXT,  -- size-mtime for change detection<br>  last_indexed_at INTEGER<br>);<br>CREATE INDEX memory_fts_scope_idx ON memory_fts(scope, scope_id);<br>CREATE VIRTUAL TABLE memory_fts_search USING fts5(body);<br>```| 表创建成功 |
 | 创建 `runner/memory/paths.py` | 路径解析 + QuantCode 扩展：<br>- 加 `groups` scope（MimoCode 没有）<br>- 加 `tasks` scope（MimoCode 没有）<br>- Type 检测（memory/checkpoint/progress/notes/...）<br>- 路径安全检查（防 `..` 穿越） | 能解析 `.quantcode/groups/factor/memory/last-run.md` |
-| 创建 `runner/memory/query.py` | buildFtsQuery（照抄 MimoCode fts-query.ts）：<br>- 自由文本 → FTS5 MATCH 安全转换<br>- CJK 支持（`\p{L}\p{N}_` Unicode regex）<br>- OR-join 保证召回 | `"PB-ROE因子"` → `'"PB" OR "ROE" OR "因子"'` |
-| 创建 `runner/memory/service.py` | Search API（照抄 MimoCode service.ts）：<br>- `search(query, scope, scope_id, type, limit)`<br>- BM25 排序<br>- 相对 floor（0.15 * top_score）过滤噪音<br>- **GROUP 隔离权限检查**（QuantCode 核心） | CJK 查询能返回结果 |
+| 创建 `runner/memory/query.py` | buildFtsQuery（照抄 `docs/mimocode-reference/memory/fts-query.ts`）：<br>- 自由文本 → FTS5 MATCH 安全转换<br>- CJK 支持（`\p{L}\p{N}_` Unicode regex）<br>- OR-join 保证召回 | `"PB-ROE因子"` → `'"PB" OR "ROE" OR "因子"'` |
+| 创建 `runner/memory/service.py` | Search API（照抄 `docs/mimocode-reference/memory/service.ts`）：<br>- `search(query, scope, scope_id, type, limit)`<br>- BM25 排序<br>- 相对 floor（0.15 * top_score）过滤噪音<br>- **GROUP 隔离权限检查**（QuantCode 核心） | CJK 查询能返回结果 |
 | 创建 `runner/memory/reconcile.py` | 磁盘 ↔ SQLite 双向同步：<br>- 扫描 `.quantcode/` 下所有 `.md` 文件<br>- 用 fingerprint（size + mtime）判断是否需要重新索引<br>- 自动 prune 已删除的文件 | LangGraph node 写 `.md` 后，reconcile 能自动索引 |
 | GROUP 隔离权限 | `groups` scope 的 read 必须检查 requester_group：<br>```python<br>def search(query, scope, scope_id, requester_group):<br>    if scope == "groups" and scope_id != requester_group:<br>        raise PermissionError(...)<br>``` | 测试：factor 组读不到 model 组的 memory |
 | 写单元测试 | `tests/test_memory.py` - 覆盖 5 scope + 8 type + 权限 | `pytest tests/test_memory.py -v` 全部通过 |

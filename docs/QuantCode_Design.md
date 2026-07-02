@@ -271,7 +271,7 @@ quantcode/
 
 ### 4.1 引擎能力（从 MimoCode 移植）
 
-参考实现：`vendor/mimo-code/packages/opencode/src/memory/`（461 行 TypeScript，MIT）。
+参考实现：`docs/mimocode-reference/memory/`（461 行 TypeScript，MIT license，已入库）。
 
 | 功能 | 描述 | 优先级 |
 |---|---|---|
@@ -498,7 +498,7 @@ options:execute       →   下单 / 回测
 
 #### Memory System 架构（从 MimoCode 移植 + QuantCode 扩展）
 
-**SQLite FTS5 表结构**（参考 `vendor/mimo-code/packages/opencode/src/memory/fts.sql.ts`）：
+**SQLite FTS5 表结构**（参考 `docs/mimocode-reference/memory/fts.sql.ts`）：
 
 ```sql
 CREATE TABLE memory_fts (
