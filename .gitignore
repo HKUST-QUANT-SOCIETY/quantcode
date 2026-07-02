@@ -5,6 +5,9 @@
 # Claude
 .claude/
 
+# Editor
+.vscode/
+
 # Python
 __pycache__/
 *.py[cod]

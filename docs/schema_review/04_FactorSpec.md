@@ -131,6 +131,37 @@ label/route_record.json
 
 当前 formal entry 是本地 batch process，不存在 HTTP job id polling。
 
+## Server A smoke 验证
+
+2026-07-02 已用 `xiaojichao` 登录 Server A，并验证：
+
+```text
+host = qs-data-ingest-hk-01
+workspace = /srv/quant/data/agent
+group = quant-agent
+factor_artifact_api healthz = {"ok": true, "service": "factor_artifact_api"}
+```
+
+Server A 上可见的评估入口：
+
+```text
+/srv/quant/repos/quantsociety_backend/factor_layer/factor_evaluation/run_from_config.py
+```
+
+已用公共 venv 跑通合成数据 smoke：
+
+```text
+/srv/quant/envs/quantsociety_backend/bin/python
+module = factor_layer.factor_evaluation.config_runner.run_from_config
+tmp base = /srv/quant/data/agent/data/tmp/xiaojichao_autoeval_smoke_20260702T005851Z
+output_dir = .../evaluations/pb_roe_combo_smoke/day1_t4_smoke_eval
+result = summary.csv / summary.json / daily_ic.parquet / quantile_backtest.parquet 等产物生成成功
+```
+
+该 smoke 验证的是单因子评估 runtime，不等同于完整生产路由链路。
+完整 `candidate_pool -> Gateway -> Assetization -> Purification -> Evaluation -> tier`
+仍需正式 AutoFactorEvaluation pipeline 入口和配置。
+
 ---
 
 ## 测试覆盖
@@ -144,3 +175,4 @@ label/route_record.json
 - PROJECT scope + `shared.*` blackboard 共享
 - Pydantic JSON Schema 导出
 - AutoFactorEvaluation `Evaluation` 段到 `FactorReport` 的字段映射
+- Server A 单因子评估 smoke 已跑通

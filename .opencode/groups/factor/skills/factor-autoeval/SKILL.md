@@ -55,6 +55,43 @@ def factor_func(panel: pd.DataFrame) -> pd.Series:
 
 见 `schemas/factor-report.schema.json`。
 
+## Day2 Compose Executor 调用方式
+
+Day 2 起，本 skill 通过统一 Compose executor 触发，不直接在调用方手写
+`app.invoke()`。当前需要先注册已编译的 LangGraph app，再调用
+`execute_compose_flow()`：
+
+```python
+from flows.factor_autoeval import build_workflow
+from runner.compose_executor import execute_compose_flow, register_flow
+
+register_flow(
+    "factor",
+    "factor:autoeval",
+    build_workflow(),
+    overwrite=True,
+)
+
+result = execute_compose_flow(
+    group="factor",
+    flow_name="factor:autoeval",
+    input_data=factor_spec.model_dump(mode="json"),
+)
+```
+
+返回值约定：
+
+- `result["output_data"]` 是标准 `schemas.factor.FactorReport` dict。
+- `result["artifacts"]` 包含生成的 factor report JSON 路径。
+- `result["thread_id"]` 是本次 LangGraph checkpoint 线程 id。
+- `result["state"]` 保留完整 final state，供 Day2 调试使用。
+
+Day2 当前走 mock AutoEval 路径，用于证明 LangGraph Compose + Schema +
+Artifact 闭环。真实 AutoFactorEvaluation 生产链路
+`candidate_pool -> Gateway -> Assetization -> Purification -> Evaluation ->
+tier2/tier3/tier4` 仍按 Day3 接入。checkpoint resume 目前还不是
+`execute_compose_flow()` 的稳定接口，本 skill 不承诺统一 resume API。
+
 ## 跨组接口
 
 - 评估通过的因子，向风控组提供统计公式（max_drawdown / VaR 计算口径）
