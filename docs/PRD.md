@@ -256,6 +256,42 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - Checkpoint：context > 70% 自动 snapshot；> 90% 触发上下文重建
 - 长任务（10h+）context 不丢失，可断点续跑
 
+#### 5.3.1 MimoCode 吸收模块盘点（2026-07-03 实际验证）
+
+> **背景**：MimoCode (`vendor/mimo-code/`) 是小米开源的 agent 平台，我们从中 cherry-pick 7 个核心模块代码到 QuantCode，避免重复造轮子。
+
+| 模块 | MimoCode 实际路径 | 功能描述 | QuantCode 实现 | 优先级 | 状态 | 负责人 |
+|------|------------------|----------|---------------|--------|------|--------|
+| **Memory FTS5** | `packages/opencode/src/memory/` | SQLite FTS5 全文检索 + BM25 排序 + CJK 分词 + reconcile 磁盘同步 | `runner/memory/` (1209 行) | P0 | ✅ Day 2 | 尹一帆 |
+| **Workflow 编排** | `packages/opencode/src/workflow/runtime.ts`<br>`packages/opencode/src/workflow/events.ts`<br>`packages/opencode/src/workflow/persistence.ts` | 跨 flow 触发、workflow 持久化、事件系统 | `runner/compose_executor.py` (部分) | P0 | 🔧 Day 3 | 尹一帆 |
+| **Task 系统** | `packages/opencode/src/task/task.sql.ts`<br>`packages/opencode/src/task/registry.ts`<br>`packages/opencode/src/task/gate.ts` | 任务树、gate 状态管理、子任务编排 | 待移植 | P1 | 🔲 Week 2 | Lead |
+| **Compose 模式** | `packages/opencode/src/skill/compose/bundle.macro.ts`<br>`packages/opencode/src/skill/compose/extract.ts` | SKILL.md 的 Compose 模式声明和提取 | `.opencode/groups/*/skills/*/SKILL.md` (frontmatter) | P0 | 🔧 Day 3 | 陈镇鸿 |
+| **Snapshot** | `packages/opencode/src/snapshot/` | context 占用自动 checkpoint | 待移植 | P1 | 🔲 Week 2 | TBD |
+| **Session 重建** | `packages/opencode/src/session/` | 从 checkpoint + MEMORY 重组 context | 待移植 | P1 | 🔲 Week 2 | TBD |
+| **Subagent 监控** | `packages/opencode/src/agent/` + `packages/opencode/src/task/` | subagent 生命周期追踪、单独 kill | 待移植 | P1 | 🔲 Week 2 | TBD |
+| **Dream** 🔍 | （未找到专门模块，可能在 `session/` 或 `agent/` 里） | 扫描 trace 提取知识到 MEMORY.md | 待设计 | P0 原型 | 🔲 Day 4 | 尹一帆 |
+| **Distill** 🔍 | （未找到，可能未开源或内部功能） | 识别重复操作打包成 SKILL.md | 待设计 | P2 | 🔲 Week 3+ | TBD |
+| **Goal + Judge** 🔍 | （未找到 `/goal` 命令实现） | Goal 设定 + Judge 模型评估 | 待设计 | P2 | 🔲 Week 3+ | TBD |
+
+**图例**：
+- ✅ 已完成
+- 🔧 进行中
+- 🔲 待开始
+- 🔍 MimoCode 代码库未找到，需进一步探索或自行设计
+
+**关键发现**（2026-07-03）：
+1. ✅ **Memory FTS5** 已完整移植（Day 2），路径验证正确
+2. ✅ **Workflow 模块存在**，Day 3 尹一帆的跨 graph 触发可参考 `runtime.ts` + `events.ts`
+3. ✅ **Compose 模式**在 MimoCode 里有完整实现，陈镇鸿写 SKILL.md 可参考
+4. ❌ **Dream/Distill/Goal** 在 MimoCode 代码库未找到专门模块（可能未开源或分散在其他模块），需自行设计
+5. ⚠️ **风控统计不在 MimoCode**：VaR/MaxDD/Sharpe 等量化金融计算是 QuantCode 业务逻辑，MimoCode 是通用 agent 平台不含此类计算
+
+**移植原则**（从 Design §6.4）：
+- 优先复用 MimoCode 已验证的工程化能力（Memory/Workflow/Task）
+- 遇到依赖小米服务（MiMo Auto/ASR）的部分，手动重写，不引入外部依赖
+- 保持 MIT 协议，注明出处
+- Python 移植 TypeScript 时，保持接口语义一致，但遵循 Python idiom
+
 ### 5.4 安全性
 
 - 敏感配置（API key / 数据库密码）不入库
