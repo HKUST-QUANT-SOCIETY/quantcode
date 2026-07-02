@@ -117,7 +117,7 @@
 
 ---
 
-## 3. 编排平面职责（LangGraph 改写的 compose 引擎）
+## 3. 编排平面职责（Python / LangGraph）
 
 ### 3.1 ReAct Agent 主循环
 
@@ -155,7 +155,181 @@ for chunk in agent.stream({"messages": [("user", task)]}, config):
 - **GoalGate**：用独立模型评估目标是否满足
 - **迭代上限**：MAX_ITERATIONS（默认 100）
 
-### 3.2 自研运行时加固
+### 3.2 路由设计（Agent Loop 的真正开关）
+
+**定位**：路由是 ReAct 循环的心脏。`create_react_agent` 内部靠 **conditional edges + 路由函数**决定"每一步之后去哪"——loop 能转起来、能在正确的点分叉/暂停/结束，全靠它。路由函数读当前 state，返回下一个节点名，是 LangGraph 层最核心的自研补充点。
+
+**两个层次的路由（不要混淆）**：
+
+| 层次 | 位置 | 谁决定 | 作用 |
+|---|---|---|---|
+| **外层路由**（组/流入口） | 控制平面（TS） | SSH key → 组；idea → 模式 | 决定加载哪个 Agent（哪套 prompt+tools） |
+| **内层路由**（Loop 开关） | 编排平面（LangGraph） | 路由函数读 state | 决定 Agent 每一步之后去哪个节点 |
+
+外层路由见 §2.1/§2.2（一次性，进入时定）。**本节讲内层路由——它在 loop 里每一步都在运行，是真正的执行开关。**
+
+**内层路由的核心节点**：
+
+```
+        ┌──────────────┐
+        │ LLM 推理节点  │
+        └──────┬───────┘
+               │ route_after_llm(state)  ← 路由函数（开关）
+      ┌────────┼──────────┬─────────────┐
+      ▼        ▼          ▼             ▼
+  [调 tool]  [触发人审]  [完成结束]   [错误恢复]
+      │        │          │             │
+      ▼        ▼          ▼             ▼
+   tool节点  interrupt   END         retry节点
+      │
+      │ route_after_tool(state)  ← 路由函数（开关）
+      ▼
+  回 LLM 推理节点（继续循环）/ 或 gate 检查
+```
+
+**四个关键路由决策点**：
+
+| 路由函数 | 在哪触发 | 读什么 state | 分支去向 |
+|---|---|---|---|
+| `route_after_llm` | LLM 推理后 | 有无 tool_call / 是否 final | tool节点 / END / 错误恢复 |
+| `route_after_tool` | tool 执行后 | tool 结果 / permission 判定 | 回 LLM / interrupt人审 / END |
+| `route_gate` | check_gate 后 | taskGate / goalGate 结果 | 继续循环 / END |
+| `route_safety` | 每步前置 | 死循环/迭代计数/state指纹 | 正常 / 强制中止 |
+
+#### 路由函数实现示例
+
+**1. route_after_llm（最核心）**
+
+```python
+def route_after_llm(state: AgentState) -> Literal["tools", "human_gate", "end", "error"]:
+    """LLM 推理后，决定去哪"""
+    last_message = state["messages"][-1]
+    
+    # 检查是否有 tool call
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        tool_call = last_message.tool_calls[0]
+        
+        # 检查 permission
+        permission = check_permission(tool_call.name, tool_call.args, state["group"])
+        if permission == "ask":
+            return "human_gate"  # 触发 interrupt
+        elif permission == "deny":
+            return "error"
+        else:
+            return "tools"  # allow，去执行 tool
+    
+    # 没有 tool call，检查是否终止
+    if is_final_answer(last_message):
+        return "end"
+    
+    # 其他情况：可能是 LLM 输出格式错误
+    return "error"
+```
+
+**2. route_after_tool（工具执行后）**
+
+```python
+def route_after_tool(state: AgentState) -> Literal["continue", "human_gate", "end"]:
+    """tool 执行后，决定去哪"""
+    last_tool_result = state["messages"][-1]
+    
+    # 检查 gate（任务完成条件）
+    if state.get("task_gate_triggered"):
+        return "end"
+    if state.get("goal_gate_triggered"):
+        return "end"
+    
+    # 检查是否需要跨组触发（如 trigger_risk_flow）
+    if last_tool_result.name == "trigger_risk_flow":
+        # 跨组触发后，本组流程结束
+        return "end"
+    
+    # 默认：继续循环，回到 LLM 推理
+    return "continue"
+```
+
+**3. route_gate（Gate 检查）**
+
+```python
+def route_gate(state: AgentState) -> Literal["continue", "end"]:
+    """gate 检查后决定循环还是结束"""
+    # TaskGate：所有任务是否完成
+    if state.get("pending_tasks") and len(state["pending_tasks"]) == 0:
+        return "end"
+    
+    # GoalGate：目标是否满足（独立模型评估）
+    if evaluate_goal(state["goal"], state["current_output"]):
+        return "end"
+    
+    # 迭代上限
+    if state["step_count"] >= MAX_ITERATIONS:
+        return "end"
+    
+    return "continue"
+```
+
+**4. route_safety（死循环 / 安全检查）**
+
+```python
+def route_safety(state: AgentState) -> Literal["continue", "abort"]:
+    """每步前置安全检查"""
+    # 死循环检测（§3.3）
+    if detect_loop(state["recent_tool_calls"]):
+        return "abort"
+    
+    # 状态指纹循环（state hash 重复）
+    state_fp = compute_state_fingerprint(state)
+    if state_fp in state["seen_fingerprints"]:
+        return "abort"
+    
+    return "continue"
+```
+
+#### 跨组路由（特殊情况）
+
+model 组 Agent 调 `trigger_risk_flow` → 触发 risk 组 Agent，这是跨组路由：
+
+```python
+def trigger_risk_flow(blackboard_key: str) -> str:
+    """跨组触发：启动另一个 Agent"""
+    # 方式 1（同步）：直接 invoke risk Agent
+    risk_agent = load_agent_for_group("risk")
+    result = risk_agent.invoke({
+        "messages": [("user", f"分析 {blackboard_key}")],
+        "group": "risk",
+    })
+    return result
+    
+    # 方式 2（异步，Day 4+）：写 task queue，risk Agent 监听队列
+    task_queue.publish({"group": "risk", "task": f"分析 {blackboard_key}"})
+    return "已触发 risk 流程"
+```
+
+**关键点**：跨组触发后，model 组的路由返回 `end`（本组流程结束）；risk 组是独立的 Agent 循环，有自己的路由。
+
+#### 路由与 Checkpoint 的配合
+
+路由决策必须写入 state，因为 checkpoint 恢复时需要知道"下一步应该去哪"：
+
+```python
+# 路由决策写入 state
+state["next_route"] = route_after_llm(state)
+
+# checkpoint 保存（LangGraph 自动）
+# 恢复时，从 state["next_route"] 读取，继续走
+
+# 人审场景：
+# 1. route 返回 "human_gate" → 触发 interrupt
+# 2. checkpoint 保存当前 state（含 next_route="human_gate"）
+# 3. 人审 approve 后 → 修改 state["next_route"] = "continue"
+# 4. 从 checkpoint 恢复 → 按新路由继续
+```
+
+---
+
+**路由设计总结**：路由是 LangGraph 编排层的"神经中枢"，每个路由函数是一个决策开关。我们自研的路由补充（permission 判断、gate 检查、死循环检测、跨组触发）是相对 `create_react_agent` 默认行为的核心扩展点。
+
+### 3.3 自研运行时加固
 
 #### 3.2.1 死循环检测
 
@@ -244,7 +418,7 @@ for chunk in agent.stream(...):
         collector.record(state=chunk["state"], action=chunk["action"], reward=reward)
 ```
 
-### 3.3 Tool Registry（照抄 OpenCode 设计）
+### 3.4 Tool Registry（照抄 OpenCode 设计）
 
 **Tool 定义接口**：
 ```python
@@ -304,7 +478,7 @@ tools = registry.get_tools_for_group("model")
 agent = create_react_agent(model=llm, tools=tools, ...)
 ```
 
-### 3.4 Permission 规则与 HumanGate
+### 3.5 Permission 规则与 HumanGate
 
 **简化设计**：不需要复杂状态机，Permission 的 `ask` 就是 interrupt。
 
@@ -342,7 +516,7 @@ elif action == "ask":
     wait_for_approval()  # 阻塞，等待 /api/task/{id}/approve
 ```
 
-### 3.5 Memory 与 Blackboard
+### 3.6 Memory 与 Blackboard
 
 **Memory**（Day 2 已完成）：
 - SQLite FTS5 + BM25 ranking
