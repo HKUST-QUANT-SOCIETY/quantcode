@@ -172,18 +172,72 @@ ic_metrics.t_stat >= 2.0
 Public cross-group handoff should write this report to PROJECT-scope blackboard
 under `shared.factor_autoeval_results.<factor_name>`.
 
-## Day 1 status
+## Server A smoke result
 
-真实调用方式已确认：
+2026-07-02 已在 Server A `qs-data-ingest-hk-01` 上验证单因子评估入口：
 
 ```text
-AutoFactorEvaluation invocation = CLI pipeline
-entrypoint = python -m pipeline
-input = candidate_pool/{campaign_id}/{candidate_id}/manifest.json
-output = tier*/.../afv.json + Evaluation artifacts
-sync/async = local batch process; no HTTP job_id polling in current formal entry
+ssh xiaojichao@43.154.17.120
+cd /srv/quant/repos/quantsociety_backend
+/srv/quant/envs/quantsociety_backend/bin/python -m factor_layer.factor_evaluation.run_from_config --help
 ```
 
-Day 1 尚未在本仓库中执行生产 pipeline，因为需要 AutoFactorEvaluation 仓库、配置目录、
-行情 parquet、DeepSeek runtime key 和 tier/temp/cache 目录。当前 T4 交付完成的是
-调用方式确认、schema 对齐和结果映射口径。
+实际 smoke 使用合成 factor lake、合成 market parquet 和临时 YAML config，写入：
+
+```text
+/srv/quant/data/agent/data/tmp/xiaojichao_autoeval_smoke_20260702T005851Z/
+```
+
+输出目录：
+
+```text
+/srv/quant/data/agent/data/tmp/xiaojichao_autoeval_smoke_20260702T005851Z/evaluations/pb_roe_combo_smoke/day1_t4_smoke_eval
+```
+
+已确认生成：
+
+```text
+config_snapshot.yaml
+daily_ic.parquet
+daily_rank_ic.parquet
+long_short_returns.parquet
+manifest.json
+quantile_backtest.parquet
+quantile_period_returns.parquet
+quantile_summary.parquet
+summary.csv
+summary.json
+```
+
+`summary.json` 核心结果：
+
+```text
+factor_id = pb_roe_combo_smoke
+run_id = day1_t4_smoke_eval
+primary_horizon = 1
+horizon 1 rank_ic_mean = 1.0
+horizon 1 top_minus_bottom_mean = 0.03
+horizon 1 long_short_total_return = 0.19405229652900013
+```
+
+## Day 1 status
+
+已确认：
+
+```text
+Server A SSH access = ok
+factor_artifact_api healthz = ok
+single-factor evaluation entrypoint = ok
+synthetic run_from_config smoke = ok
+QuantCode schema mapping = ok
+```
+
+仍未验证：
+
+```text
+candidate_pool -> Gateway -> Assetization -> Purification -> Evaluation -> tier2/tier3/tier4
+```
+
+原因：Server A 当前可见入口是 `factor_layer.factor_evaluation.run_from_config`；
+完整 `candidate_pool` 总编排需要 AutoFactorEvaluation 对应仓库/配置或正式 pipeline
+入口。当前 T4 已完成 Server A 单因子评估 smoke、调用方式确认、schema 对齐和结果映射口径。
