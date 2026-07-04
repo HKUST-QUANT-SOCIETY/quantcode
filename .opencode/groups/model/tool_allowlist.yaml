@@ -1,0 +1,13 @@
+# model 组 tool 白名单 — Day 3 尹一帆
+# 由 tools/registry.py::load_group_config 读取
+allowlist:
+  - read_pr
+  - extract_metadata
+  - generate_model_spec
+  - write_blackboard
+  - trigger_risk_flow
+  # 共享工具
+  - search_memory
+  - read_file
+  - write_file
+  - bash

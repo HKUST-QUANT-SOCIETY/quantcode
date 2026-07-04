@@ -1,0 +1,9 @@
+# options 组 tool 白名单 — Day 3
+# 由 tools/registry.py::load_group_config 读取
+# 暂无专属 tool,仅使用共享工具
+allowlist:
+  # 共享工具
+  - search_memory
+  - read_file
+  - write_file
+  - bash
