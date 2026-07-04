@@ -26,6 +26,86 @@
 
 ---
 
+## 1.5 落地检验环节（必做，不是写完测试就算完）
+
+**核心要求**：所有功能必须**在本地 OpenCode 里配置好并跑通测试**，不是"Python 里写个单测 mock 一下"就完事。
+
+### 落地检验是什么
+你写的 Python tools（如 model 组的 read_pr / extract_metadata）要能被 **OpenCode（TS）调起来**，在 OpenCode 的 compose 模式下，Agent 真的能调用你的 Python tools 完成任务。
+
+### 具体步骤（每个人写完功能后都要做）
+
+#### Step 1：配置你的 tools 到 OpenCode
+根据你选择的解耦方式（MCP 或直接调用）：
+
+**如果用 MCP Server**（推荐）：
+```json
+// .opencode/mimocode.json
+{
+  "mcp": {
+    "quantcode_model_tools": {
+      "type": "local",
+      "command": ["python", "-m", "quantcode.tools.model"],
+      "enabled": true
+    }
+  }
+}
+```
+
+**如果直接写 TS wrapper**：
+在 `.opencode/tools/` 下写 TS wrapper 调你的 Python 函数。
+
+#### Step 2：启动 OpenCode
+```bash
+cd vendor/mimo-code/packages/opencode
+npm run dev  # 或者你们的启动命令
+```
+
+#### Step 3：验证 tools 能被发现
+- 启动后，OpenCode 应该能看到你注册的 tools
+- 在 compose 模式下，Agent 能调用你的 tools
+
+#### Step 4：跑一个端到端任务
+**model 组举例**：
+```bash
+# 在 OpenCode CLI 或 UI 输入
+/compose "处理 PR #123"
+
+# Agent 应该：
+# 1. 自主推理：我需要读 PR
+# 2. 调用你的 read_pr tool（Python）
+# 3. 自主推理：我需要提取元数据
+# 4. 调用你的 extract_metadata tool
+# 5. ...完成整个流程
+```
+
+**验证通过标准**：
+- [ ] OpenCode 启动时能发现你的 tools（日志里有）
+- [ ] Agent 能调用你的 tools（不报错）
+- [ ] tools 返回的结果符合预期（schema 校验通过）
+- [ ] 整个流程跑完，产出 artifact（如 ModelSpec.json）
+
+### 常见问题排查
+| 问题 | 可能原因 | 解决方案 |
+|---|---|---|
+| OpenCode 找不到 tool | MCP 配置路径错误 | 检查 `command` 能否在命令行直接运行 |
+| tool 调用报错 | Python 环境不对 | 检查 virtualenv 是否激活 |
+| Agent 不调你的 tool | tool description 不清楚 | 改 description，让 LLM 知道什么时候该调 |
+| 返回格式不对 | schema 不匹配 | 用 Pydantic 严格校验 |
+
+### 不及格的"伪落地"
+❌ 只写了 Python 函数 + 单测，没配置到 OpenCode
+❌ 配置了但没真的启动 OpenCode 验证
+❌ 启动了但"好像不太对，算了先这样"
+❌ 写了一堆 mock，实际 OpenCode 里跑不通
+
+### 及格的"真落地"
+✅ Python tool 写完 → 配置到 OpenCode → 启动验证 → Agent 能调 → 产出 artifact 符合预期
+✅ 有 demo 录屏/截图证明"在 OpenCode 里真的跑起来了"
+✅ 遇到问题了，排查日志，改配置，最终跑通
+
+---
+
 ## 2. 尹一帆 · Agent 引擎 + Tool 系统 + 并发
 
 **功能目标**：搭出能跑的 ReAct Agent 引擎——给定 system prompt + 一组 tool，Agent 能自主推理、调 tool、完成多步任务，中断能恢复，多个 Agent 能并发跑不打架。这是全组的底座，优先出一个能用的版本给大家接。
@@ -221,6 +301,7 @@
 - [ ] **Lead**：match_main + gen_schema 原型（factor 组）
 
 ### 质量门槛
+- [ ] **OpenCode 落地验证（硬性）**：所有功能必须在本地 OpenCode 里配置好并跑通，不是写完 Python 测试就算。至少 model/risk 两组能在 OpenCode compose 模式下真的调起 Python tools 完成任务。
 - [ ] 全量测试通过（Day 1-3 累计 ≥80 个测试）
 - [ ] CI 全绿
 - [ ] 每个交付物有 README 或注释
