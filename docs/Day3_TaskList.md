@@ -1,318 +1,259 @@
-# Day 3 任务清单
+# Day 3 任务分配
 
-> **里程碑**：First Agent Flow（第一条自主推理的 Agent 流跑通）
-> **一句话目标**：用 LangGraph 改写 MimoCode compose 引擎的核心循环，跑通第一条流（model 组），验证能自主推理、能调用 tools、能 checkpoint。
-
----
-
-## 0. 核心共识（全员必读）
-
-经过架构调研和讨论，我们达成的技术路线：
-
-**我们在做什么**：
-- 改进 MimoCode 的 compose 模式，让它能做量化场景的"idea → 主线匹配 → 动态 Schema → 程序化验收 → 接入生产"
-- 用 **LangGraph 改写 compose 的 ReAct 引擎**（MimoCode 手写的 loop → LangGraph 的标准化图），同时补齐生产级配套（checkpoint / 权限 / 错误处理 / 自研加固）
-- **复用 MimoCode 的 15 个 compose skill**（brainstorm / plan / execute / tdd / review…），它们是 markdown 文本，引擎无关，直接喂给 LangGraph Agent
-- **加我们的量化能力**：match_main（主线匹配）、gen_schema（动态 Schema）、程序化验收、跨组协作（Blackboard）、RLHF 接入
-
-**技术兼容性**：
-- MimoCode compose 的核心 = while 循环（推理 → 调 tool → 观察 → 再推理）
-- LangGraph = 把这个循环做范式化封装的图框架（`create_react_agent` 就是这个 loop）
-- 两者本质相同，LangGraph 改写 MimoCode loop 是技术上自然的选择
-
-**Day 3 的验证目标**：
-1. LangGraph 能不能把 MimoCode compose 的核心 loop 改写起来
-2. 15 个 skill 的 markdown 能不能直接喂给 LangGraph Agent 使用
-3. 第一条业务流（model 组）能不能在改写后的引擎上跑通
+> **里程碑**：多 Agent 自主协作 —— 引擎跑起来，5 个组的 Agent 各自能自主推理，跨组能协作，关键点能人审，长任务不失控。
+> **工作方式**：任务导向，不规定时间线。下面给的是**功能目标 + 验收标准**，怎么实现、用什么方案、先做哪步，你自己判断。遇到设计选择先自己查资料/读源码做决定，卡住了（超过 30 分钟）就拉群讨论。
 
 ---
 
-## 1. Day 3 架构目标
+## 0. 先读文档，再动手
 
-```
-改写前（MimoCode 原版）          改写后（我们的版本）
-┌─────────────────────┐         ┌─────────────────────────┐
-│ compose 手写 loop    │   →    │ LangGraph StateGraph     │
-│ (prompt.ts runLoop) │         │ (create_react_agent)    │
-│                     │         │                          │
-│ while not done:     │         │ nodes: [推理, 执行, 检查] │
-│   llm推理           │         │ edges: [条件路由]        │
-│   tool执行          │         │ checkpoint: SqliteSaver  │
-│   观察结果          │         │ + 自研加固（死循环检测）  │
-└─────────────────────┘         └─────────────────────────┘
-         │                                │
-    调用 15 个 skill                 调用 15 个 skill
-    (markdown 文本)                  (同样的 markdown)
-         │                                │
-         ↓                                ↓
-    MimoCode tools                  MimoCode tools
-    (TS tool registry)              + 我们的量化 tools
-                                    (通过 MCP 或 TS 接入)
-```
+动手前把这三份读明白：
+- `docs/PRD.md` —— 产品是什么、6 套流的功能
+- `docs/Architecture_Spec.md` —— 三层架构 + §3.2 路由设计（重点）
+- `docs/QuantCode_Design.md` —— 项目定位、三大模式、Compose 流
 
-**关键点**：
-- **引擎层**：从手写 loop 改为 LangGraph（范式化、可扩展、有 checkpoint）
-- **skill 层**：15 个 skill markdown 原封不动复用
-- **tool 层**：MimoCode 原有 tools 保留 + 我们加量化 tools（read_pr / extract_metadata / match_main / ...）
+**一句话讲清我们在做什么**：QuantCode 是量化投研 Agent 系统，6 个组各有一套工作流（Compose 流），核心是"idea → 主线匹配 → 动态 Schema → 程序化验收 → 接入生产"。编排层用 Python/LangGraph，Agent 自主推理该调哪个 tool，不预定义流程图。
 
 ---
 
-## 2. 全员 Standup（15 分钟）
+## 1. Day 3 要证明的五件事
 
-- Day 2 回顾：Memory FTS5、checkpoint、dedupe 已完成，为 Day 3 打好地基
-- **架构共识确认**：LangGraph 改写 compose 引擎 + 复用 15 个 skill + 加量化 tools
-- Day 3 目标：跑通第一条流（model 组），验证改写后的引擎能用
-- **依赖关系**：尹一帆的引擎改写是所有人的底座（最高优先级）
-
----
-
-## 3. 尹一帆 · LangGraph 改写 compose 引擎（全天，核心底座）
-
-> **工程量提示**：这是 Day 3 最关键的任务——把 MimoCode compose 的手写 loop 改写成 LangGraph。预计 500-800 行。
-
-### 3.1 上午：最小 LangGraph 改写实验（验证可行性）
-
-**目标**：用最简单的场景验证"LangGraph 能改写 MimoCode compose loop"。
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 选一个最简单的 skill | 从 MimoCode 的 15 个 skill 选一个（推荐 `plan` 或 `brainstorm`），读它的 SKILL.md | markdown 内容理解清楚 |
-| 用 LangGraph 实现基础 loop | `create_react_agent(llm, tools, system_prompt=skill_md)` | Agent 能跑起来 |
-| 喂入 skill markdown | 把 SKILL.md 内容作为 system_prompt 或 state_modifier | Agent 的行为符合 skill 指导 |
-| 调用 1-2 个 tool | 注册 MimoCode 已有的 tool（如 Read / Write），验证 Agent 能调 | tool 执行成功 |
-| checkpoint 集成 | `SqliteSaver` 自动保存，中断后恢复 | 单测：kill → resume |
-
-**验收标准**：
-- 能跑通一个完整的 task："写一个实现计划" → Agent 读代码 → 生成计划
-- 中断后能从 checkpoint 恢复
-- **输出报告**：LangGraph 改写 MimoCode loop 缺了哪些配套（权限？taskGate？goalGate？），列出来
-
-### 3.2 下午：完整引擎封装（生产级配套）
-
-根据上午发现的"缺失配套"，逐一补齐：
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 封装 `QuantCodeAgent` | 把 `create_react_agent` 包装成我们的 Agent 类，统一接口 | API 清晰 |
-| 权限集成（Permission） | tool 执行前检查权限（allow/deny/ask），`ask` 触发 interrupt | 单测：permission=ask → 暂停 |
-| taskGate / goalGate | 检查任务完成条件，Agent 自己判断"做完了吗" | 单测：完成条件触发终止 |
-| 错误恢复 | 捕获常见错误（tool 报错、LLM invalid output），重试或中止 | 单测：tool 报错 → 重试 |
-| 迭代上限 | 最多 N 步（默认 100），防失控 | 单测：超步数 → 中止 |
-| SSE 流式输出 | 把 Agent 的 thought / tool_call / tool_result 转成 SSE | 前端（或测试）能实时看 |
-
-**验收标准**：
-- `runner/quantcode_agent.py`：封装完整，接口稳定
-- `tests/test_quantcode_agent.py`：至少 8 个测试（权限/gate/错误/迭代上限/checkpoint）
-- 一个完整示例能跑通：给 task → Agent 自主推理完成 → checkpoint 可恢复
+1. **Agent 自主推理**：给任务 + tool + prompt，Agent 自己决定怎么做完，不是走写死的流程图
+2. **跨组协作**：model 组把结果写进 Blackboard，risk 组能读到；组内私有数据别的组读不到
+3. **人审断点**：风险超阈值时 Agent 暂停等人审批，批了再继续
+4. **长任务不失控**：死循环 / 迭代过多 / 陷入循环时能自动中止
+5. **主线匹配 + 动态 Schema**：Agent 读懂主线代码，判断一个 idea 该怎么兼容地接进去，现场生成校验 schema（核心壁垒，Lead 攻坚）
 
 ---
 
-## 4. 陈镇鸿 · model 组 tools + Blackboard（全天，600-700 行）
+## 2. 尹一帆 · Agent 引擎 + Tool 系统 + 并发
 
-### 4.1 上午：Blackboard 服务（跨组共享数据层）
+**功能目标**：搭出能跑的 ReAct Agent 引擎——给定 system prompt + 一组 tool，Agent 能自主推理、调 tool、完成多步任务，中断能恢复，多个 Agent 能并发跑不打架。这是全组的底座，优先出一个能用的版本给大家接。
 
-**背景**：量化场景需要跨组协作（model → risk），Blackboard 是共享数据层。
+**自己去研究/决策的点**：
+- `create_react_agent` 直接够用，还是用 `StateGraph` 自己搭以便插路由/gate？读 LangGraph 文档 + 试。
+- tool 的统一接口怎么定义？可借鉴 MimoCode 的 `Tool.Def`（`vendor/mimo-code/.../src/tool/tool.ts`），也可直接用 LangChain tool。
+- 怎么按组过滤 tool（model 组只看到 model 的 tool）？
+- 拿一个 MimoCode 的 skill markdown（如 `plan`/`brainstorm`）喂进去当 system prompt，看 Agent 认不认——验证"复用 skill 作为工作流知识"这条路。
+- checkpoint 怎么接（Day 2 已有基础）？
+- **并发**：多个组的 Agent 同时跑，怎么隔离（thread_id？独立 state？），SQLite 会不会竞态（WAL 模式？）。
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 新建 `runner/blackboard.py` | 实现 `BlackboardService`：<br>- `write(scope, key, value)`<br>- `read(scope, key)` | 单测：write → read |
-| 5-scope 支持 | PROJECT（跨组可读）、GROUP（组内私有）| 单测：跨组读取权限正确 |
-| 持久化到 SQLite | 存 `.quantcode/blackboard.db` | 重启后数据仍在 |
+**验收标准（硬性）**：
+- [ ] 一个 Agent 能自主完成 ≥3 步任务（自己决定 tool 顺序）
+- [ ] tool 能按组隔离
+- [ ] 至少 1 个 MimoCode skill markdown 能喂进去被使用
+- [ ] Agent 中断后能从 checkpoint 恢复
+- [ ] 多个 Agent 并发跑不冲突（至少 2 个同时跑通）
+- [ ] 有测试覆盖
 
-### 4.2 下午：model 组 5 个 tools
-
-每个 tool 是独立函数，注册到 tool registry（参考 MimoCode 的 `Tool.Def` 格式）。
-
-| Tool | 输入 | 输出 | 说明 |
-|---|---|---|---|
-| `read_pr` | pr_number | diff 文本 | 从 fixture 或 GitHub API 读 PR diff |
-| `extract_metadata` | diff | dict | 正则提取模型类型/超参/训练区间 |
-| `generate_model_spec` | metadata | ModelSpec | 构造并校验 Day 1 schema |
-| `write_blackboard` | key, value | success | 写 PROJECT scope |
-| `trigger_risk_flow` | key | task_id | 触发 risk Agent（简单版：直接调用）|
-
-**验收标准**：
-- `tools/model_tools.py`：5 个 tool 定义
-- `tests/test_model_tools.py`：每个 tool 单测
-- 注册到 MimoCode 兼容的 tool registry（或我们自己的，能被 LangGraph Agent 调用）
+**交付**：能被 import 的 Agent 引擎 + 最小 demo + 一份"LangGraph 改写 MimoCode loop 缺了哪些配套"的清单（权限？gate？错误恢复？）。
 
 ---
 
-## 5. 杨欣琳 · risk 组 tools + HumanGate 集成（全天，500-600 行）
+## 3. 陈镇鸿 · Blackboard + model 组 Agent
 
-### 5.1 上午 Part A：修复 PR #12 的 eval() 问题（P0，先做）
+**功能目标**：搭好跨组共享数据层（Blackboard），让 model 组 Agent 能完成"读 PR → 提取元数据 → 生成 ModelSpec → 写 Blackboard → 触发风控"。
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 移除 `eval` | 改为 `match/case` 判断 | 无 eval，测试通过 |
-| rebase 到最新 main | 合入最新改动 | CI 通过 |
+**自己去研究/决策的点**：
+- model 组需要哪些 tool？至少：read_pr / extract_metadata / generate_model_spec / write_blackboard / trigger_risk_flow，缺什么你补。
+- Blackboard 用什么存？跟 Day 2 的 Memory 共用 SQLite 还是独立？
+- 5-scope 怎么映射？PROJECT 跨组可读，GROUP 组内私有，权限检查在哪做？
+- 跨组触发（trigger_risk_flow）怎么实现？直接 invoke risk Agent？还是写队列？
+- **MCP 探索**（有余力）：TS 和 Python 怎么解耦？试试把 model tools 做成 Python MCP server，看 OpenCode 能不能调起来。
 
-### 5.2 上午 Part B：risk 组 5 个 tools
+**验收标准（硬性）**：
+- [ ] model 组 Agent 完整跑通：读 PR → 提取 → 生成 spec → 写 Blackboard
+- [ ] Blackboard 跨组读：model 写 PROJECT，别组能读；写 GROUP，别组读不到
+- [ ] Blackboard 持久化（重启还在）
+- [ ] ModelSpec 通过 Day 1 schema 校验
+- [ ] 有测试覆盖每个 tool + 集成
 
-| Tool | 输入 | 输出 | 说明 |
-|---|---|---|---|
-| `read_blackboard` | key | value | 从 PROJECT scope 读 model 数据 |
-| `calc_risk` | returns | RiskMetrics | 调用俞高磊的 stub |
-| `generate_risk_profile` | metrics | RiskProfile | 用刘炽的 schema |
-| `check_gate` | profile | bool | VaR 是否超阈值 |
-| `write_pr_comment` | pr_number, comment | comment_id | 写 PR 评论（dedupe）|
-
-### 5.3 下午：HumanGate 与 permission 集成
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| Permission 规则定义 | `.quantcode/permissions/risk.yaml`：`check_gate: ask` | 规则可解析 |
-| interrupt 触发 | permission=ask → 抛 `NodeInterrupt` → Agent 暂停 | 单测：interrupt 触发 |
-| approve/reject API | 人审后恢复执行 | 单测：approve → 恢复 |
-
-**验收标准**：
-- `tools/risk_tools.py`：5 个 tool
-- `tests/test_risk_agent.py`：至少 8 个测试
-- Demo：VaR 超阈值 → interrupt → 日志"⏸️" → approve → 恢复
+**交付**：Blackboard 服务 + model 组 tools + 端到端测试。有余力：MCP server 可行性验证报告。
 
 ---
 
-## 6. 俞高磊 · RiskTool stub + 自研加固（全天，400-500 行）
+## 4. 杨欣琳 · risk 组 Agent + 人审
 
-### 6.1 上午：RiskTool stub
+**功能目标**：让 risk 组 Agent 完成"读 Blackboard → 算风控 → 生成 RiskProfile → 写 PR 评论"，并且风险超阈值时能暂停等人审。
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| `tools/risk_tool.py` | 接口 `calc_metrics(returns) -> RiskMetrics` | 接口清晰 |
-| Stub 实现 | 从 fixture 读预设值返回 | 单测通过 |
-| 注册到 tool registry | risk Agent 能调用 | 集成测试 |
+**自己去研究/决策的点**：
+- risk 组需要哪些 tool？至少：read_blackboard / calc_risk(用俞高磊的 stub) / generate_risk_profile / check_gate / write_pr_comment。
+- permission 规则怎么定义（YAML？代码？）？参考 Architecture_Spec §3.5。
+- `check_gate` 超阈值时怎么触发 interrupt？LangGraph 的 `NodeInterrupt` 怎么用？
+- approve/reject 后怎么恢复（改 state + checkpoint 恢复）？
+- 错误重试：tool 报错后 Agent 该重试还是换方案？设计一个策略。
+- PR #12 的 eval() 顺便修了（改 match/case）。
 
-### 6.2 下午：死循环检测（自研加固）
+**验收标准（硬性）**：
+- [ ] risk 组 Agent 完整跑通：读 Blackboard → 算风控 → 生成 profile → 写 PR
+- [ ] 人审场景：VaR 超阈值 → 暂停 → 日志"⏸️ 等待人工审批" → approve → 恢复 → 完成
+- [ ] 正常场景：VaR 未超 → 直接写 PR，不暂停
+- [ ] dedupe 生效：同一 PR 触发 2 次，只有 1 条评论
+- [ ] RiskProfile 通过 schema 校验
+- [ ] PR #12 eval() 移除，CI 通过
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| `runner/loop_detector.py` | 滑动窗口检测同一 tool 高频调用 | 单测：模拟死循环 |
-| 集成到 Agent | tool 执行前检查，触发时中止 | 端到端：死循环 → 自动中止 |
-
----
-
-## 7. 刘炽 · Schema + fixture + SKILL.md（全天）
-
-### 7.1 上午：RiskProfile schema + fixture
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| `schemas/risk_profile.py` | 与杨欣琳共建 | schema 冻结 |
-| `tests/fixtures/risk_metrics.json` | 两组数据（正常+超阈值）| 俞高磊能用 |
-
-### 7.2 下午：model 流的 SKILL.md
-
-**背景**：MimoCode 的 15 个 skill 是 markdown，我们的量化流也写成这个格式，喂给 LangGraph Agent。
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 参考 MimoCode skill 格式 | 读 `vendor/mimo-code/.../skills/` 下的 SKILL.md，理解格式 | 格式清楚 |
-| 写 `model/SKILL.md` | 放 `.opencode/skills/model/SKILL.md`，描述 model 组工作流 | markdown 格式正确 |
-| frontmatter | 至少含 `name` + `description` + `tools`（可用 tool 列表）| 能被 Agent 加载 |
-
-**SKILL.md 示例结构**：
-```markdown
----
-name: model-pr-submit
-description: 处理模型 PR 并交给风控
-tools: [read_pr, extract_metadata, generate_model_spec, write_blackboard, trigger_risk_flow]
----
-
-# Model 组 PR 提交流程
-
-当你收到"处理 PR #123"这样的任务时，你需要：
-
-1. 读取 PR 内容（调用 read_pr）
-2. 提取模型元数据（调用 extract_metadata）
-3. 生成 ModelSpec（调用 generate_model_spec，校验 schema）
-4. 写入共享层（调用 write_blackboard，key=model.pr.{pr_number}）
-5. 触发风控流程（调用 trigger_risk_flow）
-
-每一步完成后检查结果，确保符合预期再继续。
-```
+**交付**：risk 组 tools + permission 集成 + 两个场景测试（正常 + 人审）。
 
 ---
 
-## 8. Lead · 协调 + 集成测试（全天）
+## 5. 俞高磊 · 路由函数 + 自研加固完整套件
 
-### 8.1 上午：协调与 checkpoint
+**功能目标**：探索路由机制（代码规则 vs AI 路由，你自己研究判断），实现完整的自研加固套件（死循环 / 迭代上限 / 状态指纹 / RLHF 接入点）。
 
-- **10:30**：确认尹一帆的最小改写实验完成，评估"缺失配套"清单
-- **11:30**：确认刘炽的 schema + fixture 完成
+**为什么是你**：Day 2 你做过算法 stub，理解接口与实现分离。路由是个开放题，需要想清楚"控制流该怎么决策"。自研加固是差异化能力，需要探索。
 
-### 8.2 下午：model 流端到端集成
+**自己去研究/决策的点（开放探索）**：
+- **路由函数是什么**？Architecture_Spec §3.2 写的是"代码规则"（permission 检查 / gate 检查 / 死循环检测），但你可以探索"AI 路由"可行性（用 LLM 判断下一步去哪）。读 LangGraph `add_conditional_edges` 文档，试两种方案，看哪个好。
+- **死循环怎么检测**？滑动窗口统计同一 tool 高频调用？state 指纹重复？构造一个会死循环的 Agent 测试。
+- **迭代上限**：MAX_ITERATIONS（100？200？），超了怎么办（中止？告警？）。
+- **状态指纹循环检测**：state hash 重复 → 判定循环。怎么 hash？哪些字段纳入指纹？
+- **RLHF 接入点**：每次 tool call 记录 `(state, action, reward)` 到 `.quantcode/rlhf_data.jsonl`，供后续微调/评估。reward 怎么定义（tool 成功=+1？gate 通过=+10？）。
 
-| 场景 | 验收标准 |
-|---|---|
-| 场景 1：model Agent 自主推理 | 给任务"处理 PR #123"，Agent 自己决定调哪些 tool，完成全流程 |
-| 场景 2：15 个 skill 复用验证 | 加载 MimoCode 的 1-2 个 skill（如 brainstorm），验证能用 |
-| 场景 3：checkpoint 恢复 | 中断 model Agent → 从 checkpoint 恢复 → 继续完成 |
-| 场景 4：Blackboard 写入 | model 写 PROJECT scope，数据持久化 |
+**验收标准（硬性）**：
+- [ ] 至少一种路由机制能跑（代码规则 or AI 路由，有对比更好）
+- [ ] 死循环检测能识别明显死循环并中止
+- [ ] 迭代上限生效（Agent 跑超步数自动中止）
+- [ ] 状态指纹循环检测能识别重复 state
+- [ ] RLHF 数据记录到 `.quantcode/rlhf_data.jsonl`，格式合法
+- [ ] RiskTool stub 提供两组数据（正常 + 超阈值），杨欣琳能用
+- [ ] 有测试覆盖每个加固机制
 
-**交付**：`tests/test_model_flow_e2e.py`，至少 4 个端到端测试。
+**交付**：路由函数实现 + 完整自研加固套件 + RiskTool stub + 一份"代码规则 vs AI 路由"对比报告（如果你试了两种）。
 
 ---
 
-## 9. Day 3 收工标准（验收清单）
+## 6. 刘炽 · Schema + SKILL.md（支持所有组）
 
-### 核心里程碑
-- [ ] **LangGraph 改写验证**：最小实验跑通，证明 LangGraph 能改写 MimoCode compose loop
-- [ ] **15 个 skill 复用**：至少 1 个 MimoCode skill（如 plan）能在 LangGraph 引擎上使用
-- [ ] **model Agent 自主推理**：给任务"处理 PR #123"，Agent 自己决定调哪些 tool，完成 5 步流程
-- [ ] **checkpoint 可恢复**：中断后能从断点恢复，不重跑已完成步骤
-- [ ] **Blackboard 跨组数据**：model 写 PROJECT scope，数据持久化（为 Day 4 risk 读取做准备）
+**功能目标**：把 6 个组的 schema 定下来，给大家造测试数据，写至少 3 个组的 SKILL.md（参考 MimoCode 格式）。
 
-### 各组交付
-- [ ] 尹一帆：LangGraph 改写引擎 + 生产级配套（`runner/quantcode_agent.py`，8+ 测试）
-- [ ] 陈镇鸿：Blackboard + model 组 5 个 tools（`runner/blackboard.py` + `tools/model_tools.py`，5+ 测试）
-- [ ] 杨欣琳：risk 组 5 个 tools + permission 集成（`tools/risk_tools.py`，8+ 测试）
-- [ ] 俞高磊：RiskTool stub + 死循环检测（`tools/risk_tool.py` + `runner/loop_detector.py`，5+ 测试）
-- [ ] 刘炽：RiskProfile schema + model SKILL.md（`schemas/` + `.opencode/skills/model/SKILL.md`）
-- [ ] Lead：model 流端到端集成（4 场景）
+**自己去研究/决策的点**：
+- 6 个组各需要什么 schema？Day 1 有 ModelSpec，还缺 RiskProfile / FactorSpec / FundamentalSpec / OptionsSpec / StrategySpec。跟各组对接定字段。
+- fixtures 准备什么？至少：sample_pr.diff / risk_metrics.json（两组：正常 + 超阈值）/ factor_backtest_result.json。
+- SKILL.md 格式是什么？读 MimoCode 的 skill 文件（`vendor/mimo-code/.../skills/`），理解 frontmatter（name/description/tools）+ 正文（给 LLM 的指导）。
+- 至少写 3 个组的 SKILL.md：model / risk / factor（其他 3 个组可后补）。描述各组 Agent 职责、可用 tool、工作流 tips。
+
+**验收标准（硬性）**：
+- [ ] 6 个组 schema 全部定义（用 Pydantic），各组能直接用
+- [ ] fixtures 齐全：sample_pr.diff / risk_metrics.json / factor_backtest_result.json 等
+- [ ] 至少 3 个组的 SKILL.md 完成（model/risk/factor），格式正确，能被 Agent 加载
+- [ ] 所有 schema 有测试覆盖（校验能过）
+
+**交付**：`schemas/*.py`（6 个）+ `tests/fixtures/*` + `.opencode/skills/{model,risk,factor}/SKILL.md`。
+
+---
+
+## 7. factor / fundamental / options 组的 Agent（分配待定）
+
+**功能目标**：让这 3 个组的 Agent 也能各自跑通。早期可以用 stub 数据（Day 4 再接真实 API）。
+
+**factor 组**：
+- Tools：match_main_stub（简化版，读 fixture）/ gen_factor_schema / run_autoeval_stub / check_factor_gate / merge_to_main_stub
+- 验收：Agent 能完成"idea → 生成 FactorSpec → 回测（stub）→ 阈值检查"
+
+**fundamental 组**：
+- Tools：pit_rag_search_stub（读 fixture）/ extract_financial / dcf_valuation / render_report_stub / request_human_review
+- 验收：Agent 能完成"查语料（stub）→ 提取财报 → 估值 → 生成研报（stub）"
+
+**options 组**：
+- Tools：build_vol_surface / calc_greeks / run_options_backtest_stub
+- 验收：Agent 能完成"构建波动率曲面 → 计算 Greeks → 回测（stub）"
+
+**分配方案（你们商量）**：
+- 陈镇鸿可以多做一个组（model + factor？）
+- 杨欣琳可以多做一个组（risk + fundamental？）
+- 新来的同学做 options
+- 或者这 3 个组先做最小 stub，Day 4 补完整
+
+**验收标准（硬性）**：
+- [ ] 3 个组各有至少 3 个 tool（可以是 stub）
+- [ ] 3 个组各能跑通一个完整流程（产出 artifact 通过 schema 校验）
+
+---
+
+## 8. Lead · match_main + gen_schema（核心壁垒）+ 跨组集成
+
+**功能目标**：攻坚最初愿景的核心——让 Agent 能读主线代码，判断一个 idea 该怎么兼容地接进去，并现场生成校验 schema。第一阶段先做 factor 组（因子库相对简单）。
+
+**match_main（主线匹配）**：
+- Agent 读主线因子库代码（`factors/`），提取算子白名单
+- 判断用户 idea（如"PB-ROE 因子"）是否兼容主线
+- 给建议："可以接入，建议用 `fundamental_ratio` 算子"或"需要新增 `divide_fundamental` 算子"
+
+**gen_schema（动态 Schema）**：
+- 读了 idea + 主线后，LLM 现场生成一个 Pydantic schema（`PB_ROE_FactorSpec`）
+- schema 包含参数定义（window / universe / numerator / denominator）+ validator（窗口太短拒绝）
+- 生成的 schema 能校验用户后续填的参数
+
+**跨组集成（有余力）**：
+- 在各模块出来后，把 model→risk 跨组流打通
+- 端到端测试：model Agent 写 Blackboard → risk Agent 被触发 → 算风控 → 写 PR
+
+**验收标准（硬性）**：
+- [ ] match_main 原型：Agent 能读 factor 主线库，判断"PB-ROE 因子"兼容性，给出接入建议
+- [ ] gen_schema 原型：Agent 能为"PB-ROE 因子"现场生成 `FactorSpec` Pydantic 代码，代码合法、能 import
+- [ ] （可选）model→risk 跨组流端到端打通
+
+**交付**：match_main + gen_schema 原型（factor 组）+ demo + 技术报告（难点 / 解决方案 / 可扩展性）。
+
+---
+
+## 9. Dream 原型（有余力，可选）
+
+**功能目标**：扫描 checkpoint 里的 execution trace，用 LLM 提取知识（重复 pattern / 教训 / 高频操作），写入 Memory。
+
+**谁做**：有余力的人（或 Lead 协调）。
+
+**验收**：
+- [ ] 能扫一个 checkpoint trace，产出至少 1 条 memory 条目
+- [ ] 写入的 memory 能被 `memory.search` 检索到
+
+---
+
+## 10. 收工验收（今晚汇报时对照）
+
+### 核心里程碑（必须达成）
+- [ ] **尹一帆**：Agent 引擎能跑，至少 1 个 MimoCode skill 能用，多 Agent 并发不冲突
+- [ ] **陈镇鸿**：model 流端到端跑通，Blackboard 跨组权限正确
+- [ ] **杨欣琳**：risk 流人审场景跑通（超阈值 → interrupt → approve → 恢复）
+- [ ] **俞高磊**：完整自研加固套件（死循环/迭代上限/状态指纹/RLHF），至少一种路由机制能跑
+- [ ] **刘炽**：6 个组 schema 冻结 + 至少 3 个组 SKILL.md
+- [ ] **factor/fundamental/options**：3 个组各能跑通（可用 stub）
+- [ ] **Lead**：match_main + gen_schema 原型（factor 组）
 
 ### 质量门槛
-- [ ] 全量测试通过（Day 1-3 总数 80+）
+- [ ] 全量测试通过（Day 1-3 累计 ≥80 个测试）
 - [ ] CI 全绿
-- [ ] 所有 PR 经过 Lead review
+- [ ] 每个交付物有 README 或注释
+
+### 加分项（有余力）
+- [ ] model→risk 跨组流端到端打通
+- [ ] MCP server 可行性验证
+- [ ] Dream 原型能跑
+- [ ] 代码规则 vs AI 路由对比报告
 
 ---
 
-## 10. 依赖关系图（关键路径）
+## 11. 自主发挥的边界
 
-```
-上午：
-  尹一帆 最小改写实验（10:30 前）──→ 评估"缺失配套"清单
-        ↓
-  所有人看清楚要补哪些（权限/gate/错误处理）
-        ↓
-  刘炽 schema + fixture（11:30 前）──→ 俞高磊 stub ──→ 杨欣琳 risk tools
-        ↓
-  尹一帆 完整引擎封装 ──→ 陈镇鸿集成 model tools
+**鼓励的**：
+- 查资料、读源码决定技术选型
+- 设计你觉得合理的接口、数据结构
+- 卡 30 分钟就拉群问，不要憋
 
-下午：
-  尹一帆引擎完成（2 点前）
-        ↓
-  陈镇鸿 model tools 注册到引擎
-        ↓
-  Lead 主持端到端集成测试（4 点）
-        ↓
-  model 流跑通（收工）
-```
-
-**关键路径**：尹一帆的最小改写实验（10:30）和完整引擎（下午 2 点）是所有人的依赖。
+**不鼓励的**：
+- 闷头干一整天不说话，最后对不上
+- 改了架构核心设计（如把 LangGraph 换掉）没确认
 
 ---
 
-## 11. 与原计划的差异（给团队的说明）
+## 12. 今晚汇报（每人 5 分钟）
 
-| 原计划（Day 2 后） | Day 3 实际 | 为什么变 |
-|---|---|---|
-| 预定义 5-node StateGraph | LangGraph 改写 compose loop | MimoCode compose 本质就是 loop，LangGraph 是范式化封装，改写是自然选择 |
-| 自己写 ReAct 循环 | 用 `create_react_agent` | 不重复造轮子，LangGraph 官方实现更稳定 |
-| 不确定 MimoCode skill 怎么用 | 15 个 skill 直接复用 | skill 是 markdown 文本，引擎无关，喂给 LangGraph 就能用 |
-
-**Day 2 的东西没白做**：Memory、checkpoint、dedupe 全部复用，它们是 Agent 的配套服务，跟引擎实现无关。
+1. **功能达成**：用 demo 展示（能跑的代码 > PPT）
+2. **最大坑 + 怎么解决**：技术坑还是协作坑
+3. **明天继续什么**：未完成 / 要改进的
+4. **对架构/文档反馈**：哪里不清楚、哪里有问题
 
 ---
 
-**Day 3 一句话总结**：用 LangGraph 改写 MimoCode compose 引擎，复用它的 15 个 skill，跑通第一条量化流（model 组），验证改写后的引擎能自主推理、能调 tools、能 checkpoint。
+**Day 3 一句话**：证明 Agent 能自主推理、能跨组协作、关键点能人审、长任务不失控，并攻坚核心壁垒（match_main + 动态 Schema）。
+
