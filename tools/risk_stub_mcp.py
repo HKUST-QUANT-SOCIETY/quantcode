@@ -43,8 +43,9 @@ async def list_tools() -> list[Tool]:
 async def call_calc_risk_stub(name: str, arguments: dict) -> list[TextContent]:
     if name != "calc_risk_stub":
         raise ValueError(f"Unknown tool: {name}")
+    import json
     result = calc_risk_stub(arguments["scenario"])
-    return [TextContent(type="text", text=str(result))]
+    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
 
 async def main():
