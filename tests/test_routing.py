@@ -1,7 +1,7 @@
 """Tests for runner.routing.router — rule-based routing decisions."""
 from __future__ import annotations
 
-import pytest
+# import pytest
 
 from runner.routing.router import (
     RouteDecision,
