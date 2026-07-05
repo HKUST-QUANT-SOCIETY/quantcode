@@ -1,7 +1,7 @@
 """Tests for runner.routing.guards — loop detection + max-iteration limit."""
 from __future__ import annotations
 
-import pytest
+# import pytest
 
 from runner.routing.guards import (
     MAX_CONSECUTIVE_SAME_TOOL,
