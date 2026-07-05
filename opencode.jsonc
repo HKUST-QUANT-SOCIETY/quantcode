@@ -30,5 +30,11 @@
   },
 
   // MCP servers（按需添加）
-  "mcp": {}
+  "mcp": {
+    "quantcode_model_tools": {
+      "type": "local",
+      "command": ["python", "-m", "tools.model", "--mcp"],
+      "enabled": true
+    }
+  }
 }
