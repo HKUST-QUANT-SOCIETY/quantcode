@@ -32,20 +32,34 @@ jobs:
           pip install -e .
           pip install jsonschema
 
-      - name: Comment hello on PR
+      - name: Post formal risk profile comment
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          QUANTCODE_POST_RISK_COMMENT: "1"
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          COMMENT_BODY: hello
-        run: python -m pipelines.risk_gate.comment_hello
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: >
+          python scripts/run_risk_gate_tool.py
+          --scenario normal
+          --pr-number "$PR_NUMBER"
+          --head-sha "$HEAD_SHA"
+          --pr-url "$PR_URL"
 
-      - name: Repeat same comment to verify dedupe
+      - name: Repeat formal risk profile comment to verify dedupe
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          QUANTCODE_POST_RISK_COMMENT: "1"
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          COMMENT_BODY: hello
-        run: python -m pipelines.risk_gate.comment_hello
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: >
+          python scripts/run_risk_gate_tool.py
+          --scenario normal
+          --pr-number "$PR_NUMBER"
+          --head-sha "$HEAD_SHA"
+          --pr-url "$PR_URL"

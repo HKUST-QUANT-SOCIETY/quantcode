@@ -127,3 +127,50 @@ def test_write_pr_comment_writes_artifact(tmp_path):
 
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     assert payload["risk_profile"]["strategy_id"] == "pb_roe_ranker"
+
+
+def test_write_pr_comment_posts_formal_github_comment(tmp_path, monkeypatch):
+    model_spec = _sample_model_spec()
+    profile = generate_risk_profile(model_spec, calc_risk(model_spec, "normal"))
+    calls = []
+
+    def fake_github_request(method, repo, path, token, payload=None):
+        calls.append({
+            "method": method,
+            "repo": repo,
+            "path": path,
+            "token": token,
+            "payload": payload,
+        })
+        if method == "GET":
+            return []
+        return {
+            "id": 12345,
+            "html_url": "https://github.com/example/repo/issues/42#issuecomment-12345",
+        }
+
+    monkeypatch.setattr("tools.risk.risk_tools._github_request", fake_github_request)
+
+    result = write_pr_comment(
+        profile,
+        pr_number="42",
+        head_sha="abcdef1234567890",
+        pr_url="https://github.com/example/repo/pull/42",
+        artifacts_root=tmp_path,
+        dedupe_db_path=tmp_path / "dedupe.sqlite",
+        github_repo="example/repo",
+        github_token="test-token",
+        post_to_github=True,
+    )
+
+    assert result["comment_id"] == "comment-42-abcdef1"
+    assert result["github_comment_id"] == "12345"
+    assert result["github_comment_url"].endswith("issuecomment-12345")
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["path"] == "/issues/42/comments?per_page=100"
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["path"] == "/issues/42/comments"
+    body = calls[1]["payload"]["body"]
+    assert "QuantCode Risk Gate Report" in body
+    assert "RiskProfile JSON" in body
+    assert "<!-- quantcode:risk-gate:profile:abcdef1234567890:" in body
