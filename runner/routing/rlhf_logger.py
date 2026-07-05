@@ -35,13 +35,27 @@ RLHF_PATH = _repo_root() / ".quantcode" / "rlhf_data.jsonl"
 # ---------------------------------------------------------------------------
 
 REWARD = {
-    "tool_success":           +1,
-    "tool_failure":           -1,
-    "human_gate_approved":   +10,
-    "human_gate_rejected":    -5,
-    "loop_detected":         -10,
+    # -- Gate feedback --
+    "gate_correct":           +10,  # gate 正确，人审确认高风险
+    "gate_false_positive":     -5,  # gate 误报，人审放行
+    "gate_miss":              -20,  # gate 漏报，事后发现应该拦
+
+    # -- Abort feedback --
+    "abort_correct":           +5,  # abort 正确，人审确认停滞
+    "abort_wrong":            -10,  # abort 误报，Agent 正常探索
+
+    # -- Normal flow --
+    "continue_correct":        +1,  # continue 决策正确
+    "finish_correct":          +5,  # finish 判断正确
+
+    # -- Legacy (kept for backward compat) --
+    "tool_success":            +1,
+    "tool_failure":            -1,
+    "human_gate_approved":    +10,
+    "human_gate_rejected":     -5,
+    "loop_detected":          -10,
     "max_iterations_exceeded": -10,
-    "task_finished":          +5,
+    "task_finished":           +5,
 }
 
 

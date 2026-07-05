@@ -1,6 +1,7 @@
 """Routing and guard modules — execution control layer for Agent orchestration.
 
 Day 3 俞高磊：代码规则路由 + 死循环检测 + 迭代上限 + 状态指纹 + RLHF 记录。
+Day 3+: AI 路由 (LLM trace analysis) + ML 门控分类器 + 组合路由。
 """
 
 from .router import RouteDecision, RouteResult, route_next_step
@@ -27,9 +28,23 @@ from .rlhf_logger import (
     log_rlhf_entry,
     make_rlhf_entry,
 )
+from .gate_classifier import (
+    FEATURE_NAMES,
+    GateClassifier,
+    extract_features,
+)
+from .ai_router import (
+    TraceAnalysis,
+    ai_analyze_trace,
+)
+from .combined_router import (
+    RouterMode,
+    get_router,
+    route,
+)
 
 __all__ = [
-    # Router
+    # Router (rule)
     "RouteDecision",
     "RouteResult",
     "route_next_step",
@@ -53,4 +68,15 @@ __all__ = [
     "RLHF_PATH",
     "log_rlhf_entry",
     "make_rlhf_entry",
+    # Gate classifier
+    "FEATURE_NAMES",
+    "GateClassifier",
+    "extract_features",
+    # AI router
+    "TraceAnalysis",
+    "ai_analyze_trace",
+    # Combined router
+    "RouterMode",
+    "get_router",
+    "route",
 ]

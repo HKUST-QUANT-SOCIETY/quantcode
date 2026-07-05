@@ -2,8 +2,8 @@
 RiskTool Stub — 风控数据 stub，给杨欣琳的 risk 组 Agent 提供测试数据。
 
 提供两种场景：
-- normal:    所有风险指标在阈值以内，should_trigger_gate = False
-- high_risk: 风险指标超阈值，should_trigger_gate = True
+- normal:    所有风险指标在阈值以内
+- high_risk: 风险指标超阈值
 
 用法：
     python -m tools.risk_stub normal
@@ -22,7 +22,7 @@ from typing import Literal
 
 VAR_99_LIMIT = 0.05
 MAX_DRAWDOWN_LIMIT = 0.15
-POSITION_LIMIT_USAGE_LIMIT = 0.8
+POSITION_LIMIT_LIMIT = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -35,23 +35,21 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
 
     normal 场景：
         - 所有指标都在阈值以内
-        - should_trigger_gate = False
 
     high_risk 场景：
         - 多个指标超出阈值
-        - should_trigger_gate = True
 
     阈值为 HumanGate 常量：
         - tail_risk_var_99  > VAR_99_LIMIT               → gate triggered
         - max_drawdown      > MAX_DRAWDOWN_LIMIT          → gate triggered
-        - position_limit_usage > POSITION_LIMIT_USAGE_LIMIT → gate triggered
+        - position_limit > POSITION_LIMIT_LIMIT → gate triggered
     """
     today = date.today().isoformat()
 
     thresholds = {
         "VAR_99_LIMIT": VAR_99_LIMIT,
         "MAX_DRAWDOWN_LIMIT": MAX_DRAWDOWN_LIMIT,
-        "POSITION_LIMIT_USAGE_LIMIT": POSITION_LIMIT_USAGE_LIMIT,
+        "POSITION_LIMIT_LIMIT": POSITION_LIMIT_LIMIT,
     }
 
     if scenario == "normal":
@@ -64,8 +62,6 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
             "capacity_estimate_usd": 50_000_000,
             "tail_risk_var_99": 0.025,
             "volatility": 0.12,
-            "position_limit_usage": 0.45,
-            "should_trigger_gate": False,
             "thresholds": thresholds,
         }
 
@@ -79,8 +75,6 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
             "capacity_estimate_usd": 50_000_000,
             "tail_risk_var_99": 0.085,
             "volatility": 0.35,
-            "position_limit_usage": 0.92,
-            "should_trigger_gate": True,
             "thresholds": thresholds,
         }
 

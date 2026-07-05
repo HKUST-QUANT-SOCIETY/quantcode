@@ -22,7 +22,7 @@ from .guards import detect_loop
 from tools.risk_stub import (
     VAR_99_LIMIT,
     MAX_DRAWDOWN_LIMIT,
-    POSITION_LIMIT_USAGE_LIMIT,
+    POSITION_LIMIT_LIMIT,
 )
 
 
@@ -114,12 +114,12 @@ def _risk_exceeds_threshold(metrics: dict[str, Any]) -> bool:
     thresholds = metrics.get("thresholds") or {}
     var_limit = thresholds.get("VAR_99_LIMIT", VAR_99_LIMIT)
     dd_limit = thresholds.get("MAX_DRAWDOWN_LIMIT", MAX_DRAWDOWN_LIMIT)
-    pos_limit = thresholds.get("POSITION_LIMIT_USAGE_LIMIT", POSITION_LIMIT_USAGE_LIMIT)
+    pos_limit = thresholds.get("POSITION_LIMIT_LIMIT", POSITION_LIMIT_LIMIT)
 
     if metrics.get("tail_risk_var_99", 0) > var_limit:
         return True
     if metrics.get("max_drawdown", 0) > dd_limit:
         return True
-    if metrics.get("position_limit_usage", 0) > pos_limit:
+    if metrics.get("position_limit", 0) > pos_limit:
         return True
     return False
