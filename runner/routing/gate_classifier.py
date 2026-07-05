@@ -158,6 +158,7 @@ class GateClassifier:
         target = Path(path).resolve()
         payload = {
             "version": 1,
+            "algorithm": "logistic",
             "features": FEATURE_NAMES,
             "weights": self.weights,
             "bias": self.bias,

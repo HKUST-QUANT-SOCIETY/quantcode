@@ -39,7 +39,7 @@ def _resolve_gate_classifier(
 
     Priority:
       1. Explicit classifier passed by caller (already trained)
-      2. GATE_MODEL_PATH env var → load from file
+      2. GATE_MODEL_PATH env var → load from file (auto-detect LR vs XGBoost)
       3. DEFAULT_GATE_MODEL_PATH exists → load from file
       4. None (ML gate skipped)
     """
@@ -48,22 +48,34 @@ def _resolve_gate_classifier(
     if gate_classifier is not None:
         return gate_classifier
 
+    def _load(path: Path) -> Any | None:
+        """Load classifier from file, auto-detecting LR vs XGBoost."""
+        raw = _json.loads(path.read_text(encoding="utf-8"))
+        algorithm = raw.get("algorithm", "logistic")
+
+        if algorithm == "xgboost":
+            from .xgb_classifier import XGBGateClassifier
+            clf = XGBGateClassifier()
+            clf.load(path)
+            return clf
+
+        # Default: logistic regression
+        from .gate_classifier import GateClassifier
+        clf = GateClassifier()
+        clf.load(path)
+        return clf
+
     # Check env var first……
-    from .gate_classifier import GateClassifier
     env_path = os.environ.get("GATE_MODEL_PATH", "")
     if env_path:
         p = Path(env_path)
         if p.exists():
-            clf = GateClassifier()
-            clf.load(p)
-            return clf
+            return _load(p)
 
     # …then default path
     default = _repo_root() / DEFAULT_GATE_MODEL_PATH
     if default.exists():
-        clf = GateClassifier()
-        clf.load(default)
-        return clf
+        return _load(default)
 
     return None
 
