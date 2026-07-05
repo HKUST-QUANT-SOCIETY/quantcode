@@ -59,7 +59,7 @@ def log_rlhf_entry(
 
     Returns the absolute path written to.
     """
-    target = path or RLHF_PATH
+    target = (path or RLHF_PATH).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
 
     with open(target, "a", encoding="utf-8") as f:
