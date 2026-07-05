@@ -118,12 +118,6 @@ def test_get_unknown_raises_with_available_list():
     assert "read_pr" in msg and "write_pr" in msg
 
 
-def test_has():
-    registry.register(make_mock_tool("a"))
-    assert registry.has("a") is True
-    assert registry.has("b") is False
-
-
 def test_list_all_and_list_ids_sorted():
     registry.register(make_mock_tool("z"))
     registry.register(make_mock_tool("a"))
@@ -138,11 +132,15 @@ def test_list_all_and_list_ids_sorted():
 
 
 def test_register_tool_decorator():
-    """register_tool 接受一个 ToolDef 实例并注册，返回原对象。"""
+    """register_tool 接受一个 ToolDef 实例并注册，返回原对象。
+
+    Day 3 评审修复：``registry.has()`` 已删除（死代码，仅 test 使用），存在性
+    改用 ``get()`` + ``KeyError`` 检验或 ``list_ids()`` 检查。
+    """
     tool = make_mock_tool("decorated")
     result = register_tool(tool)
     assert result is tool
-    assert registry.has("decorated")
+    assert "decorated" in registry.list_ids()
     assert registry.get("decorated").id == "decorated"
 
 

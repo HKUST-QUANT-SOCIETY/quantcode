@@ -168,62 +168,196 @@ def test_generate_model_spec_requires_metadata():
 
 
 # ---------------------------------------------------------------------------
-# write_blackboard（含 dedupe）
+# write_blackboard（含 dedupe）— Day 3 评审后改造：调真 BlackboardService
 # ---------------------------------------------------------------------------
 
 
-def test_write_blackboard_returns_confirmation(tmp_path, monkeypatch):
-    # 把 dedupe DB 重定向到 tmp_path，避免污染仓库
-    monkeypatch.setattr(
-        "tools.model.write_blackboard.write_blackboard_wrapped_execute.__wrapped__",
-        write_blackboard_tool.execute.__wrapped__,
-        raising=False,
-    )
-    # 直接走 tool 实例，但 db_path 是装饰器创建时绑定——绕开：单独测一次即可
-    # 不再 monkeypatch 装饰器内部，直接覆盖工具的 execute 用 raw 函数
-    raw_tool = write_blackboard_tool
-    # 重置 dedupe db：直接复用默认 path 不理想，改用 raw execute 走一次
-    raw_execute = raw_tool.execute
-    # 通过把 execute 替换成原函数来避开缓存（仅测试返回结构）
-    raw_tool.execute = raw_tool.execute.__wrapped__
-    try:
-        result = registry.call(
-            "write_blackboard",
-            {"key": "model_spec_1", "value": {"model_id": "m1"}},
-        )
-    finally:
-        raw_tool.execute = raw_execute
-
-    assert result["key"] == "model_spec_1"
-    assert result["written"] is True
-    assert isinstance(result["timestamp"], str)
-
-
-def test_write_blackboard_dedupes_within_window(tmp_path, monkeypatch):
-    """同一 key 在 300 秒窗口内重复调用应得到同一时间戳（缓存命中）。"""
+def test_write_blackboard_creates_project_and_group_entries(tmp_path, monkeypatch):
+    """Day 3 评审修复（leader 指令 2）：write_blackboard 改写为调 BlackboardService，
+    写入 PROJECT（跨组共享）+ GROUP（owner private）双 scope。
+    """
+    db_path = tmp_path / "blackboard.sqlite"
     from tools.model import write_blackboard as wb_module
 
-    # 用 fresh sqlite db 重启装饰器状态
+    # 强制 raw execute 跑（绕开 dedupe 缓存），并把 db_path 注入 ctx
+    raw_execute = wb_module.write_blackboard_execute
+    args = wb_module.WriteBlackboardArgs(key="model_spec_1", value={"model_id": "m1"})
+    ctx = {
+        "thread_id": "model-agent-1700000000",
+        "group": "model",
+        "blackboard_db_path": str(db_path),
+    }
+    result = raw_execute(args, ctx)
+
+    # 双 scope 都有 entry
+    assert "project_entry" in result
+    assert "group_entry" in result
+    assert result["project_entry"]["scope"] == "project"
+    assert result["project_entry"]["key"] == "shared.model_entries.model_spec_1"
+    assert result["project_entry"]["value"] == {"model_id": "m1"}
+
+    assert result["group_entry"]["scope"] == "group"
+    assert result["group_entry"]["key"] == "model_spec_1"
+    assert result["group_entry"]["value"] == {"model_id": "m1"}
+    assert result["group_entry"]["group"] == "model"
+
+    # 都是 v=1 (新写)
+    assert result["project_entry"]["version"] == 1
+    assert result["group_entry"]["version"] == 1
+
+
+def test_write_blackboard_increments_version_on_overwrite(tmp_path):
+    """同一 key 第二次写入，version 应递增（BlackboardService 自动语义）。"""
+    db_path = tmp_path / "blackboard.sqlite"
+    from tools.model import write_blackboard as wb_module
+
+    raw_execute = wb_module.write_blackboard_execute
+    ctx = {
+        "thread_id": "model-agent-1700000001",
+        "group": "model",
+        "blackboard_db_path": str(db_path),
+    }
+
+    # 第一次写
+    first = raw_execute(
+        wb_module.WriteBlackboardArgs(key="same", value={"v": 1}), ctx=ctx
+    )
+    # 第二次写同一 key
+    second = raw_execute(
+        wb_module.WriteBlackboardArgs(key="same", value={"v": 2}), ctx=ctx
+    )
+
+    assert first["group_entry"]["version"] == 1
+    assert second["group_entry"]["version"] == 2
+    assert second["group_entry"]["value"] == {"v": 2}
+
+
+def test_write_blackboard_dedupes_within_window(tmp_path):
+    """同一 key 在 300 秒窗口内通过 wrapped_execute 重复调用，第二次走 dedupe 缓存。"""
     db_path = tmp_path / "dedupe.sqlite"
-    monkeypatch.setattr(wb_module, "write_blackboard_wrapped_execute", None)
+    from tools.model import write_blackboard as wb_module
 
     fresh = wb_module.dedupe_within(
         seconds=300,
-        key=lambda args, ctx: f"{args.key}",
+        key=lambda args, ctx: f"{ctx.get('thread_id', 'default')}::{args.key}",
         db_path=db_path,
     )(wb_module.write_blackboard_execute)
 
-    first = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 1}), ctx={})
-    second = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 2}), ctx={})
+    ctx = {"thread_id": "model-agent-1700000099", "group": "model"}
+    first = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 1}), ctx=ctx)
+    second = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 2}), ctx=ctx)
 
+    # 第二次走 dedupe 缓存，返回与第一次完全一致
     assert first == second
-    assert first["key"] == "dup_key"
-    assert first["written"] is True
+    assert first["project_entry"]["value"] == {"v": 1}
 
 
 def test_write_blackboard_requires_key():
     with pytest.raises(ValueError, match="Invalid arguments"):
         registry.call("write_blackboard", {"value": {"x": 1}})
+
+
+def test_synthesize_task_id_is_deterministic_and_distinct():
+    """🟢P2-8：_synthesize_task_id 单测。
+
+    验证：
+    1. 稳定：相同 thread_id 两次调用返回相同 task_id
+    2. 区分：不同 thread_id 返回不同 task_id
+    3. 严格满足 TASK_ID_PATTERN (``^T\\d+(\\.\\d+){0,4}$``)
+    """
+    from tools.model.write_blackboard import _synthesize_task_id
+
+    # 1. 稳定
+    assert _synthesize_task_id("model-agent-1700000000") == _synthesize_task_id(
+        "model-agent-1700000000"
+    )
+
+    # 2. 区分
+    assert _synthesize_task_id("model-agent-1700000000") != _synthesize_task_id(
+        "model-agent-1700000001"
+    )
+
+    # 3. 严格匹配 TASK_ID_PATTERN
+    import re
+    from schemas import TASK_ID_PATTERN
+
+    samples = [
+        "model-agent-1700000000",
+        "risk-flow-abc12345",
+        "factor-1700000099-xyz",
+        "x",  # edge case: 极短输入
+    ]
+    for tid in samples:
+        tid_out = _synthesize_task_id(tid)
+        assert re.match(TASK_ID_PATTERN, tid_out), (
+            f"{tid!r} -> {tid_out!r} 不满足 TASK_ID_PATTERN"
+        )
+
+
+def test_write_blackboard_via_registry_call_chain(monkeypatch, tmp_path):
+    """Day 3 评审修复（审查报告 P1-6）：通过 ``registry.call`` 全链路调用 write_blackboard。
+
+    之前的测试直接调 wb_module.write_blackboard_execute，绕过了：
+    1. ToolDef schema 校验
+    2. registry.call 自身的 ctx 注入路径
+    3. production shipped write_blackboard_wrapped_execute（含 dedupe_within）
+
+    本测试保证 tool 实际的 production 链路（registry → ToolDef.execute → wrapped_execute
+    → BlackboardService.write_value → SQLite）能跑通，并验证 dedupe 缓存也实际生效。
+    """
+    db_path = tmp_path / "chain_blackboard.sqlite"
+    dedupe_db = tmp_path / "chain_dedupe.sqlite"
+
+    # 把 blackboard db 路径注入 ctx
+    monkeypatch.setattr(
+        "tools.model.write_blackboard.write_blackboard_execute",
+        __import__("tools.model.write_blackboard", fromlist=["write_blackboard_execute"]).write_blackboard_execute,
+    )
+    # 重绑 dedupe DB（写到 tmp_path，避免污染 repo）
+    from tools.model import write_blackboard as wb_module
+    import tools.utils.dedupe as dedupe_module
+
+    original_factory = dedupe_module.dedupe_within
+
+    def _isolated_dedupe(seconds, key, **kwargs):
+        kwargs.setdefault("db_path", dedupe_db)
+        return original_factory(seconds, key, **kwargs)
+
+    monkeypatch.setattr(wb_module, "dedupe_within", _isolated_dedupe)
+
+    ctx = {
+        "thread_id": "model-agent-1700111111",
+        "group": "model",
+        "blackboard_db_path": str(db_path),
+    }
+
+    # 1. 第一次调用：走全链路 registry.call
+    result1 = registry.call(
+        "write_blackboard",
+        {"key": "chain_test_key", "value": {"v": "first"}},
+        ctx=ctx,
+    )
+    assert "project_entry" in result1
+    assert "group_entry" in result1
+    assert result1["group_entry"]["value"] == {"v": "first"}
+    assert result1["group_entry"]["version"] == 1
+
+    # 2. 第二次调用同 key（在 dedupe 窗口内）—— 应走 wrapped_execute 缓存
+    #    返回 *cached* 上一次结果（value 不变）
+    result2 = registry.call(
+        "write_blackboard",
+        {"key": "chain_test_key", "value": {"v": "second"}},
+        ctx=ctx,
+    )
+    assert result2["group_entry"]["value"] == {"v": "first"}, (
+        "dedupe_within 在 300s 窗口内应短路，第二次 value 不该更新到 v=second"
+    )
+    # 同时验证 SQLite 中 GROUP entry 没被改 — version 应仍为 1
+    assert result2["group_entry"]["version"] == 1
+
+    # 3. schema 校验：缺 key 应被 registry 转成 ValueError
+    with pytest.raises(ValueError, match="Invalid arguments"):
+        registry.call("write_blackboard", {"value": {"x": 1}}, ctx=ctx)
 
 
 # ---------------------------------------------------------------------------

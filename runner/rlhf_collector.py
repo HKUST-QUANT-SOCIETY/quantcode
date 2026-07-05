@@ -24,9 +24,8 @@ from typing import Any
 # 常量
 # ---------------------------------------------------------------------------
 
-#: 每写入多少条记录后强制 flush 一次。Day 3 简化为每条都 flush，保证崩溃时不丢数据。
-#: 后续如出现性能瓶颈，可调高此值（须同时调整 ``RLHFCollector.record`` 逻辑）。
-MAX_RECORDS_PER_FLUSH: int = 1
+# Day 3 评审修复（🟡#5e）：每条 ``record()`` 都 flush，
+# 保留逐条强制 flush 的语义，移除简化为 1 的阈值常量与计数器。
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +118,6 @@ class RLHFCollector:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         # newline="" 保证 Windows 下不插入多余 \r —— json.dumps 已写入 \n
         self._fp = open(self._path, "a", encoding="utf-8", newline="")
-        self._records_since_flush: int = 0
 
     # -- 写入 --------------------------------------------------------------
 
@@ -142,22 +140,8 @@ class RLHFCollector:
         }
         line = json.dumps(entry, ensure_ascii=False, default=_json_default)
         self._fp.write(line + "\n")
-        self._records_since_flush += 1
-
-        if self._records_since_flush >= MAX_RECORDS_PER_FLUSH:
-            self._fp.flush()
-            self._records_since_flush = 0
-
-    def record_many(self, entries: list[tuple[dict, dict, float]]) -> None:
-        """批量写入多条 ``(state, action, reward)`` 记录。
-
-        内部每条仍按 :meth:`record` 写入并触发 flush（Day 3 简单策略）。
-
-        Args:
-            entries: 形如 ``[(state, action, reward), ...]`` 的列表。
-        """
-        for state, action, reward in entries:
-            self.record(state, action, reward)
+        # 每条立即 flush，避免进程崩溃时丢数据（Day 3 简单优先）
+        self._fp.flush()
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -186,6 +170,5 @@ class RLHFCollector:
 
 
 __all__ = [
-    "MAX_RECORDS_PER_FLUSH",
     "RLHFCollector",
 ]

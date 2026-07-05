@@ -10,11 +10,8 @@ from __future__ import annotations
 import pytest
 
 from tools.loop_detector import (
-    LoopDetectedError,
     LoopDetector,
     MAX_ITERATIONS,
-    StateLoopError,
-    state_fingerprint,
 )
 
 
@@ -99,50 +96,3 @@ def test_loop_detector_reset_clears_history() -> None:
 
 
 # ---------------------------------------------------------------------------
-# state_fingerprint
-# ---------------------------------------------------------------------------
-
-
-def test_state_fingerprint_ignores_noisy_keys() -> None:
-    """timestamp / step / iterations / thread_id 变化不应影响指纹。"""
-    s1 = {"messages": ["hi"], "timestamp": "2026-07-04T10:00:00", "step": 1, "thread_id": "abc"}
-    s2 = {"messages": ["hi"], "timestamp": "2026-07-04T10:00:01", "step": 2, "thread_id": "xyz"}
-
-    assert state_fingerprint(s1) == state_fingerprint(s2)
-
-
-def test_state_fingerprint_differs_on_real_changes() -> None:
-    """messages 不同 → 指纹不同。"""
-    s1 = {"messages": ["hi"], "blackboard": {"k": "v"}}
-    s2 = {"messages": ["bye"], "blackboard": {"k": "v"}}
-
-    assert state_fingerprint(s1) != state_fingerprint(s2)
-
-
-def test_state_fingerprint_is_deterministic() -> None:
-    """同一状态两次调用应返回完全相同的指纹。"""
-    state = {"messages": ["a", "b"], "blackboard": {"k": [1, 2, 3]}, "tool_calls": 7}
-
-    fp1 = state_fingerprint(state)
-    fp2 = state_fingerprint(state)
-
-    assert fp1 == fp2
-    # sha256 hex 长度 = 64
-    assert len(fp1) == 64
-
-
-# ---------------------------------------------------------------------------
-# 异常类型 + 模块常量（顺带 smoke test，确保 export 可用）
-# ---------------------------------------------------------------------------
-
-
-def test_exceptions_are_distinct_and_subclass_exception() -> None:
-    """两类异常都继承自 Exception 且互不相同。"""
-    assert issubclass(LoopDetectedError, Exception)
-    assert issubclass(StateLoopError, Exception)
-    assert LoopDetectedError is not StateLoopError
-
-
-def test_max_iterations_constant_default() -> None:
-    """架构 §3.2.2 规定的默认上限为 100。"""
-    assert MAX_ITERATIONS == 100

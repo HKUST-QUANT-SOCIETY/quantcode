@@ -24,10 +24,10 @@ from typing import Annotated, Any, Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.langgraph_base import BaseFlowState
+from runner.routing.fingerprint import compute_state_fingerprint
 from tools.loop_detector import (
     MAX_ITERATIONS,
     LoopDetector,
-    state_fingerprint,
 )
 from tools.registry import ToolRegistry
 
@@ -47,7 +47,8 @@ class AgentState(BaseFlowState, total=False):
 
     **不放进 state 的字段**（通过闭包注入）：
     - tools         — ToolDef 列表（Pydantic 模型，msgpack 不支持）
-    - seen_states   — 状态指纹检测（外部 set 更安全）
+    注：``seen_states`` 由 ``make_post_tool_check`` 闭包内部维护，
+    不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
     """
 
     messages: Annotated[list[Any], operator.add]  # 累积所有 node 返回的新消息
@@ -142,8 +143,21 @@ def make_tool_node(
                 output = registry.call(c["name"], c["args"], ctx=ctx)
                 content = output if isinstance(output, str) else str(output)
             except Exception as e:
-                # 工具执行失败 → 返回错误 message，让 LLM 自己决定重试还是换方案
-                content = f"Tool '{c['name']}' failed: {type(e).__name__}: {e}"
+                # Day 3 评审修复（🟢#7）：异常脱敏，避免 SSH 凭据 / API key
+                # 等敏感信息随异常原文进入 LLM 上下文。
+                # 读类工具（read_/list_）一般不带凭据，可保留详细错误。
+                if c["name"].startswith(("read_", "list_")):
+                    # 读类工具一般不带凭据，保留详细错误
+                    content = (
+                        f"Tool '{c['name']}' failed: {type(e).__name__}: {e}. "
+                        "请改用其他方案或向用户报告。"
+                    )
+                else:
+                    # 其他工具（可能涉及凭据）只保留异常类名，避免敏感信息外泄
+                    content = (
+                        f"Tool '{c['name']}' failed: {type(e).__name__}. "
+                        "请改用其他方案或向用户报告。"
+                    )
             results.append(
                 ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
             )
@@ -185,7 +199,6 @@ def make_should_continue(
 
 def make_post_tool_check(
     loop_detector: LoopDetector,
-    seen_states: set[str],
 ) -> Callable[[AgentState], str]:
     """构造 ``post_tool_check`` 条件边函数。
 
@@ -193,7 +206,14 @@ def make_post_tool_check(
     - "loop"       — 死循环检测触发（同一 tool+args 反复调用）
     - "state_loop" — 状态指纹重复（绕圈）
     - "rlhf"       — 正常 → 进入 rlhf_collect_node → 回到 llm_node
+
+    Day 3 评审修复：
+        ``seen_states`` set 移到闭包内，每次 build 新建，
+        避免跨任务指纹污染。原先 ``AgentRunner`` 实例级持有同一 set，
+        任务 A 的指纹会污染任务 B。
     """
+
+    seen_states: set[str] = set()
 
     def post_tool_check(state: AgentState) -> str:
         messages = state.get("messages", [])
@@ -209,7 +229,7 @@ def make_post_tool_check(
                     return "loop"
 
         # 状态指纹
-        fp = state_fingerprint(dict(state))
+        fp = compute_state_fingerprint(dict(state))
         if fp in seen_states:
             return "state_loop"
         seen_states.add(fp)
@@ -244,10 +264,12 @@ def make_rlhf_collect_node(
             else {}
         )
         # 拷贝 state，去掉不可序列化的字段
+        # 注：``seen_states`` 已不再入 AgentState（Day 3 评审修复，由
+        # make_post_tool_check 闭包持有），从过滤列表中移除。
         serializable_state = {
             k: v
             for k, v in state.items()
-            if k not in ("messages", "tools", "seen_states", "_memory")
+            if k not in ("messages", "tools", "_memory")
         }
         rlhf_collector.record(state=serializable_state, action=action, reward=0.0)
         return {}  # 不修改 state
@@ -283,7 +305,7 @@ def init_agent_state(
         iterations=0,
         tools=tools,
         system_prompt=system_prompt,
-        seen_states=set(),
+        # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
 

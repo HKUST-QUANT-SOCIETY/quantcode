@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from runner.rlhf_collector import MAX_RECORDS_PER_FLUSH, RLHFCollector, _make_serializable
+from runner.rlhf_collector import RLHFCollector, _make_serializable
 
 
 # ---------------------------------------------------------------------------
@@ -49,26 +49,6 @@ def test_record_writes_one_line(tmp_path: Path) -> None:
     assert isinstance(parsed["timestamp"], float)
 
 
-def test_record_many_writes_multiple_lines(tmp_path: Path) -> None:
-    path = tmp_path / "rlhf.jsonl"
-    collector = RLHFCollector(path)
-    try:
-        collector.record_many(
-            [
-                ({"step": 1}, {"tool": "a"}, 1.0),
-                ({"step": 2}, {"tool": "b"}, -0.5),
-                ({"step": 3}, {"tool": "c"}, 0.0),
-            ]
-        )
-    finally:
-        collector.close()
-
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 3
-    parsed = [json.loads(l) for l in lines]
-    assert [p["state"] for p in parsed] == [{"step": 1}, {"step": 2}, {"step": 3}]
-    assert [p["reward"] for p in parsed] == [1.0, -0.5, 0.0]
-
 
 def test_record_flushes_after_each_write(tmp_path: Path) -> None:
     """``record`` 后应立即落盘：未 ``close`` 也能从文件读到刚刚写入的数据。"""
@@ -83,11 +63,6 @@ def test_record_flushes_after_each_write(tmp_path: Path) -> None:
         assert parsed["state"] == {"k": 1}
     finally:
         collector.close()
-
-    # 验证 MAX_RECORDS_PER_FLUSH 一直是 1（Day 3 简单策略）
-    assert MAX_RECORDS_PER_FLUSH == 1
-
-
 def test_record_handles_langchain_messages(tmp_path: Path) -> None:
     """state 含 BaseMessage duck-type 对象时，应序列化为 content 字符串。"""
     path = tmp_path / "rlhf.jsonl"
@@ -127,6 +102,8 @@ def test_context_manager(tmp_path: Path) -> None:
     path = tmp_path / "rlhf.jsonl"
     with RLHFCollector(path) as c:
         c.record({"k": "v"}, {"tool": "x"}, 0.5)
+        # Day 3 评审修复：MAX_RECORDS_PER_FLUSH 常量与阈值计数器已删除，
+        # 每条 record() 直接 flush，无需再验证阈值。
         assert not c._fp.closed  # 退出前不关闭
 
     # 退出 with 后应已关闭

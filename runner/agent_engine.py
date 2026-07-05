@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import END, START, StateGraph
@@ -34,7 +34,8 @@ from runner.agent_nodes import (
     make_tool_node,
 )
 from runner.langgraph_base import get_checkpointer, make_thread_id
-from tools.loop_detector import LoopDetector, MAX_ITERATIONS, state_fingerprint
+from runner.routing.fingerprint import compute_state_fingerprint
+from tools.loop_detector import LoopDetector, MAX_ITERATIONS
 from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
 
@@ -78,8 +79,8 @@ class AgentRunner:
         self.loop_detector = loop_detector or LoopDetector()
         self.max_iterations = max_iterations
         self.checkpoint_db = Path(checkpoint_db) if checkpoint_db else None
-        # 状态指纹检测用：跨 build 调用共享（每个 build 单独 set）
-        self._seen_states: set[str] = set()
+        # Day 3 评审修复：seen_states 移到 make_post_tool_check 闭包内，
+        # 每次 build 新建 set，避免跨任务指纹污染。
 
     # ----- 构造 StateGraph -----
     def build(
@@ -90,6 +91,9 @@ class AgentRunner:
         system_prompt: str | None = None,
     ) -> Any:
         """构造并 compile StateGraph，返回 ``CompiledStateGraph``。
+
+        Day 3 评审修复：跨任务复用 runner 实例时清空 LoopDetector 滑动窗口，
+        避免上一次任务的循环检测窗口影响下一次任务。
 
         Args:
             skill_name: 主 skill 名（业务或元）。
@@ -103,6 +107,9 @@ class AgentRunner:
         Returns:
             编译后的 StateGraph app，调 ``.invoke()`` / ``.stream()``。
         """
+        # Day 3 评审修复：每次 build 新建 task，前一次循环检测窗口清空
+        self.loop_detector.reset()
+
         # 1. 准备 system prompt
         if system_prompt is None and skill_name is not None:
             # 默认按业务 skill 加载；skill_name 不带冒号 → 业务；带冒号 → 元
@@ -131,7 +138,7 @@ class AgentRunner:
             else None
         )
         should_continue = make_should_continue(max_iterations=self.max_iterations)
-        post_tool_check = make_post_tool_check(self.loop_detector, self._seen_states)
+        post_tool_check = make_post_tool_check(self.loop_detector)
 
         # 4. 构造 StateGraph
         workflow = StateGraph(AgentState)
@@ -231,44 +238,6 @@ class AgentRunner:
             final = app.invoke(init_state, config=config)
 
         return final
-
-    def stream(
-        self,
-        task: str,
-        *,
-        skill_name: str | None = None,
-        meta_skills: list[str] | None = None,
-        system_prompt: str | None = None,
-        thread_id: str | None = None,
-        flow_name: str = "agent",
-    ) -> Iterator[dict]:
-        """流式跑任务，每次返回一个 chunk。"""
-        thread_id = self._generate_thread_id(thread_id, flow_name)
-        if system_prompt is None and skill_name is not None:
-            if ":" in skill_name or self._is_meta_skill(skill_name):
-                system_prompt = load_skill(skill_name, meta_skills=meta_skills)
-            else:
-                system_prompt = load_skill(
-                    skill_name, group=self.group, meta_skills=meta_skills
-                )
-        elif system_prompt is None:
-            system_prompt = ""
-
-        app = self.build(
-            skill_name=skill_name,
-            meta_skills=meta_skills,
-            system_prompt=system_prompt,
-        )
-        init_state = init_agent_state(
-            group=self.group,
-            flow_name=flow_name,
-            thread_id=thread_id,
-            system_prompt=system_prompt,
-            tools=[],  # tools 已通过闭包注入 llm_node，不入 state
-            input_data={"task": task},
-        )
-        config = {"configurable": {"thread_id": thread_id}}
-        yield from app.stream(init_state, config=config)
 
     # ----- 内部工具 -----
     def _generate_thread_id(self, thread_id: str | None, flow_name: str) -> str:

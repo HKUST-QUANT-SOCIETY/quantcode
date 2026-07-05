@@ -29,6 +29,7 @@ OpenCode 配置（``opencode.jsonc`` 的 ``mcp`` 段）::
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools.registry import registry, ToolDef
+
+# Day 3 评审修复（🟢#6）：MCP server 暴露的 tool 集合受 ``QUANTCODE_GROUP`` 环境变量过滤。
+# 默认（未设置）保持原行为：返回所有已注册 tool（兼容 day3-merge 后尚未分组的 tool）。
+# 设置如 ``QUANTCODE_GROUP=model`` 后只返回该组 allowlist 内的 tool，避免泄漏
+# 尚未上线或跨组的内部 tool。
+_MCP_GROUP: str | None = os.environ.get("QUANTCODE_GROUP", "").strip() or None
+
 from tools.model._register import (  # noqa: F401  触发 model tool 注册
     read_pr_tool,
     extract_metadata_tool,
@@ -77,9 +85,17 @@ def tool_def_to_mcp(tool: ToolDef) -> dict:
 
 
 def list_tools() -> dict:
-    """实现 MCP 的 ``tools/list``：返回所有已注册 tool。"""
+    """实现 MCP 的 ``tools/list``：返回 QUANTCODE_GROUP 过滤后的 tool。
+
+    未设置 ``QUANTCODE_GROUP`` 环境变量时保持原行为（返回全部已注册 tool）。
+    设置后仅返回该组 ``.opencode/groups/<group>/tool_allowlist.yaml`` 内的 tool。
+    """
+    if _MCP_GROUP:
+        tools = registry.get_tools_for_group(_MCP_GROUP)
+    else:
+        tools = registry.list_all()
     return {
-        "tools": [tool_def_to_mcp(t) for t in registry.list_all()],
+        "tools": [tool_def_to_mcp(t) for t in tools],
     }
 
 

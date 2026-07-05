@@ -107,7 +107,8 @@ def test_init_agent_state_with_task():
     assert len(state["messages"]) == 1
     assert isinstance(state["messages"][0], HumanMessage)
     assert state["messages"][0].content == "Read PR #42"
-    assert state["seen_states"] == set()
+    # Day 3 评审修复：seen_states 已从 instance 移到 make_post_tool_check 闭包，
+    # 不再进 init_agent_state 返回的 dict
 
 
 def test_init_agent_state_without_task():
@@ -256,6 +257,96 @@ def test_tool_node_handles_unknown_tool_with_friendly_error(registry_with_echo):
     assert "failed" in out["messages"][0].content
 
 
+# ---------------------------------------------------------------------------
+# Day 3 评审修复（🟢#7）：tool_node 异常脱敏测试
+# ---------------------------------------------------------------------------
+
+
+def test_tool_node_sanitizes_api_key_in_exception(registry_with_echo):
+    """🟢#7: 非 read_/list_ 工具抛含 API key 的异常时，ToolMessage.content 不应包含 key。
+
+    模拟 SSH / API 凭据泄露场景：tool 抛 RuntimeError("failed: API_KEY=sk-real-secret-12345")，
+    验证 tool_node 不会把这个 key 注入 LLM 上下文。
+    """
+    from pydantic import BaseModel
+
+    class LeakyArgs(BaseModel):
+        pass
+
+    sensitive_msg = "API_KEY=sk-real-secret-12345"
+
+    def _leaky_execute(args: LeakyArgs, ctx: dict) -> str:
+        raise RuntimeError(f"connection failed: {sensitive_msg}")
+
+    leaky_tool = ToolDef(
+        id="api_client",
+        description="Calls an external API (leaky in test)",
+        schema=LeakyArgs,
+        execute=_leaky_execute,
+    )
+    registry_with_echo.register(leaky_tool)
+
+    node = make_tool_node(registry_with_echo)
+    state: AgentState = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "api_client", "args": {}, "id": "c1"}],
+            )
+        ],
+        "group": "model",
+        "thread_id": "t-1",
+    }
+    out = node(state)
+    content = out["messages"][0].content
+    # 关键断言：API key 不出现在 ToolMessage content 里
+    assert sensitive_msg not in content, (
+        f"敏感凭据泄漏到 LLM 上下文: {content!r}"
+    )
+    # 异常类名应保留（让 LLM 能识别失败类型）
+    assert "RuntimeError" in content
+    # 工具名应保留（让 LLM 知道是哪个 tool 失败）
+    assert "api_client" in content
+
+
+def test_tool_node_preserves_detail_for_read_like_tools(registry_with_echo):
+    """🟢#7 白名单例外：read_/list_ 前缀工具可保留详细错误（一般不带凭据）。"""
+    from pydantic import BaseModel
+
+    class ReadArgs(BaseModel):
+        path: str
+
+    detail_msg = "PermissionError: file mode 0o600 expected"
+
+    def _read_execute(args: ReadArgs, ctx: dict) -> str:
+        raise PermissionError(detail_msg)
+
+    read_tool = ToolDef(
+        id="read_secret",
+        description="A read-prefixed tool",
+        schema=ReadArgs,
+        execute=_read_execute,
+    )
+    registry_with_echo.register(read_tool)
+
+    node = make_tool_node(registry_with_echo)
+    state: AgentState = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "read_secret", "args": {"path": "/etc/x"}, "id": "c1"}],
+            )
+        ],
+        "group": "model",
+        "thread_id": "t-1",
+    }
+    out = node(state)
+    content = out["messages"][0].content
+    # read_ 前缀 → 详细异常信息保留
+    assert detail_msg in content
+    assert "PermissionError" in content
+
+
 def test_tool_node_no_tool_calls_returns_empty(registry_with_echo):
     node = make_tool_node(registry_with_echo)
     state: AgentState = {
@@ -333,9 +424,9 @@ def test_should_continue_empty_messages_returns_end():
 
 
 def test_post_tool_check_returns_rlhf_on_normal_call():
+    """Day 3 评审修复：seen_states 不再从外部传入；由工厂闭包内部维护。"""
     detector = LoopDetector(window=10, threshold=5)
-    seen = set()
-    fn = make_post_tool_check(detector, seen)
+    fn = make_post_tool_check(detector)
     state: AgentState = {
         "messages": [
             AIMessage(content="", tool_calls=[{"name": "echo", "args": {"msg": "hi"}, "id": "c1"}])
@@ -343,19 +434,21 @@ def test_post_tool_check_returns_rlhf_on_normal_call():
         "iterations": 1,
     }
     assert fn(state) == "rlhf"
-    assert len(seen) == 1  # fingerprint recorded
 
 
 def test_post_tool_check_triggers_loop_on_repeated_call():
     """同一 tool+args 在窗口内出现 3 次 → 触发 loop。
 
-    state 每次 messages 增长（模拟真实迭代），让 fingerprint 保持不同。
+    Day 3 评审修复（采纳 PR #16 白名单 fingerprint）：只 hash 5 个特定业务字段
+    （current_step / last_tool / tool_args / output_data / errors），测试需用
+    字段之一（这里是 ``output_data``）来让 fingerprint 每轮不同，避免先触发
+    state_loop。
     """
     detector = LoopDetector(window=10, threshold=3)
-    seen = set()
-    fn = make_post_tool_check(detector, seen)
+    fn = make_post_tool_check(detector)
 
-    # 调 3 次：messages 每次追加（fingerprint 不同），但 tool_call 完全一样
+    # 调 3 次：tool_call 完全一样（让 loop_detector 触发），但用 output_data
+    # 保证 fingerprint 每轮不同（避免先触发 state_loop）
     for i in range(3):
         state: AgentState = {
             "messages": [
@@ -366,6 +459,7 @@ def test_post_tool_check_triggers_loop_on_repeated_call():
                 ),
             ],
             "iterations": i + 1,
+            "output_data": {"step": i},  # PR #16 白名单字段之一，每轮变化
         }
         result = fn(state)
         if i < 2:
@@ -375,10 +469,14 @@ def test_post_tool_check_triggers_loop_on_repeated_call():
 
 
 def test_post_tool_check_triggers_state_loop_on_repeated_state():
-    """state 整体重复（无 tool_calls 触发 loop）→ 触发 state_loop。"""
+    """state 整体重复（无 tool_calls 触发 loop）→ 触发 state_loop。
+
+    Day 3 评审修复：messages 是噪音（已加进 _NOISY_STATE_KEYS），
+    fingerprint 与 messages 长度无关 —— 即便 messages 累积、业务态不变，
+    第二次进入仍会触发 state_loop。
+    """
     detector = LoopDetector(window=10, threshold=10)
-    seen = set()
-    fn = make_post_tool_check(detector, seen)
+    fn = make_post_tool_check(detector)
     # 两次完全相同的 state，没有 tool_calls 触发 loop detector
     state: AgentState = {
         "messages": [HumanMessage(content="same content")],

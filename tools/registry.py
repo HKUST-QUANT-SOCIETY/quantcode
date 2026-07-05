@@ -109,9 +109,6 @@ class ToolRegistry:
             )
         return self._tools[tool_id]
 
-    def has(self, tool_id: str) -> bool:
-        return tool_id in self._tools
-
     def list_all(self) -> list[ToolDef]:
         """所有已注册 tool（按 id 排序，deterministic）。"""
         return sorted(self._tools.values(), key=lambda t: t.id)
