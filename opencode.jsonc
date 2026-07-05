@@ -7,7 +7,7 @@
   "provider": {},
 
   // Plugins
-  "plugins": ["@dietrichgebert/ponytail"],
+  "plugin": ["@dietrichgebert/ponytail"],
 
   // 让 OpenCode 递归发现 .opencode/groups/**/SKILL.md
   "skills": {

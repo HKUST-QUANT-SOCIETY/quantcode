@@ -25,7 +25,14 @@ from .compose_task import (
     TaskStatus,
     WritePolicy,
 )
+from .human_gate import (
+    HumanGate,
+    HumanGateDecision,
+    HumanGateDecisionAction,
+    HumanGateStatus,
+)
 from .model import ModelRiskMetadata, ModelSpec, ModelType
+from .risk_profile import RiskGateVerdict, RiskProfile, RiskThresholds
 
 __all__ = [
     "BlackboardEntry",
@@ -41,9 +48,16 @@ __all__ = [
     "TaskOutcome",
     "TaskStatus",
     "WritePolicy",
+    "HumanGate",
+    "HumanGateDecision",
+    "HumanGateDecisionAction",
+    "HumanGateStatus",
     "ModelRiskMetadata",
     "ModelSpec",
     "ModelType",
+    "RiskGateVerdict",
+    "RiskProfile",
+    "RiskThresholds",
 ]
 
 # T4 factor schemas (肖骥超).
