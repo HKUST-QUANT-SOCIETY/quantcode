@@ -40,8 +40,19 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
     high_risk 场景：
         - 多个指标超出阈值
         - should_trigger_gate = True
+
+    阈值为 HumanGate 常量：
+        - tail_risk_var_99  > VAR_99_LIMIT               → gate triggered
+        - max_drawdown      > MAX_DRAWDOWN_LIMIT          → gate triggered
+        - position_limit_usage > POSITION_LIMIT_USAGE_LIMIT → gate triggered
     """
     today = date.today().isoformat()
+
+    thresholds = {
+        "VAR_99_LIMIT": VAR_99_LIMIT,
+        "MAX_DRAWDOWN_LIMIT": MAX_DRAWDOWN_LIMIT,
+        "POSITION_LIMIT_USAGE_LIMIT": POSITION_LIMIT_USAGE_LIMIT,
+    }
 
     if scenario == "normal":
         return {
@@ -55,6 +66,7 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
             "volatility": 0.12,
             "position_limit_usage": 0.45,
             "should_trigger_gate": False,
+            "thresholds": thresholds,
         }
 
     if scenario == "high_risk":
@@ -69,6 +81,7 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
             "volatility": 0.35,
             "position_limit_usage": 0.92,
             "should_trigger_gate": True,
+            "thresholds": thresholds,
         }
 
     raise ValueError(f"Unknown scenario: {scenario!r}")

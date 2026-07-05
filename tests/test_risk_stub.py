@@ -27,6 +27,7 @@ class TestRiskStubNormal:
             "volatility",
             "position_limit_usage",
             "should_trigger_gate",
+            "thresholds",
         ]
         for field in required:
             assert field in result, f"缺少字段: {field}"
@@ -40,6 +41,13 @@ class TestRiskStubNormal:
         assert result["tail_risk_var_99"] <= VAR_99_LIMIT
         assert result["max_drawdown"] <= MAX_DRAWDOWN_LIMIT
         assert result["position_limit_usage"] <= POSITION_LIMIT_USAGE_LIMIT
+
+    def test_thresholds_match_constants(self):
+        result = calc_risk_stub("normal")
+        t = result["thresholds"]
+        assert t["VAR_99_LIMIT"] == VAR_99_LIMIT
+        assert t["MAX_DRAWDOWN_LIMIT"] == MAX_DRAWDOWN_LIMIT
+        assert t["POSITION_LIMIT_USAGE_LIMIT"] == POSITION_LIMIT_USAGE_LIMIT
 
 
 class TestRiskStubHighRisk:
@@ -58,6 +66,7 @@ class TestRiskStubHighRisk:
             "volatility",
             "position_limit_usage",
             "should_trigger_gate",
+            "thresholds",
         ]
         for field in required:
             assert field in result, f"缺少字段: {field}"
