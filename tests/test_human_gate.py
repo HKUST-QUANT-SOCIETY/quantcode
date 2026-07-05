@@ -17,7 +17,7 @@ from tools.risk.statistics_stub import calc_risk_stub
 
 def _profile_from_stub(scenario: str) -> RiskProfile:
     raw = calc_risk_stub(scenario)  # type: ignore[arg-type]
-    for extra in ("volatility", "position_limit_usage", "should_trigger_gate"):
+    for extra in ("volatility", "position_limit_usage", "thresholds"):
         raw.pop(extra, None)
     return RiskProfile(**raw)
 

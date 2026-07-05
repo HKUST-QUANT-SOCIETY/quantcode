@@ -12,7 +12,7 @@ from tools.risk.statistics_stub import calc_risk_stub
 from tools.utils.dedupe import dedupe_within
 
 _SCENARIO = Literal["normal", "high_risk"]
-_STUB_EXTRA_FIELDS = frozenset({"volatility", "position_limit_usage", "should_trigger_gate"})
+_STUB_EXTRA_FIELDS = frozenset({"volatility", "position_limit_usage", "thresholds"})
 _DEDUPE_SECONDS = 300
 _DEDUPED_WRITERS: dict[str, Callable[..., dict[str, str]]] = {}
 

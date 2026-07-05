@@ -51,19 +51,23 @@ def test_read_blackboard_raises_when_missing():
 def test_calc_risk_normal_scenario():
     model_spec = _sample_model_spec()
     metrics = calc_risk(model_spec, scenario="normal")
+    profile = generate_risk_profile(model_spec, metrics)
+    gate = check_gate(profile, RiskThresholds())
 
     assert metrics["strategy_id"] == "pb_roe_ranker"
-    assert metrics["should_trigger_gate"] is False
     assert metrics["max_drawdown"] == 0.08
+    assert gate["requires_human"] is False
 
 
 def test_calc_risk_high_risk_scenario():
     model_spec = _sample_model_spec()
     metrics = calc_risk(model_spec, scenario="high_risk")
+    profile = generate_risk_profile(model_spec, metrics)
+    gate = check_gate(profile, RiskThresholds())
 
     assert metrics["strategy_id"] == "pb_roe_ranker"
-    assert metrics["should_trigger_gate"] is True
     assert metrics["max_drawdown"] == 0.22
+    assert gate["requires_human"] is True
 
 
 def test_calc_risk_rejects_unknown_scenario():
