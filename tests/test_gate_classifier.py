@@ -7,6 +7,7 @@ from runner.routing.gate_classifier import (
     FEATURE_NAMES,
     GateClassifier,
     extract_features,
+    load_rlhf_dataset,
 )
 
 
@@ -176,3 +177,79 @@ class TestRLHFIntegration:
 
         # Predict should be directionally correct
         assert clf.predict(_high_risk_features())[0] > clf.predict(_low_risk_features())[0]
+
+
+# ---------------------------------------------------------------------------
+# load_rlhf_dataset
+# ---------------------------------------------------------------------------
+
+class TestLoadRlhfDataset:
+    """End-to-end: write RLHF JSONL → load → train."""
+
+    def test_loads_labeled_data(self, tmp_path):
+        import json
+        lines = [
+            {"reward_key": "gate_correct", "risk_features": _high_risk_features(),
+             "metadata": {"risk_features": _high_risk_features()}},
+            {"reward_key": "continue_correct", "risk_features": _low_risk_features(),
+             "metadata": {"risk_features": _low_risk_features()}},
+            {"reward_key": "gate_false_positive", "risk_features": _low_risk_features(),
+             "metadata": {"risk_features": _low_risk_features()}},
+            {"reward_key": "gate_miss", "risk_features": _high_risk_features(),
+             "metadata": {"risk_features": _high_risk_features()}},
+        ]
+        path = tmp_path / "rlhf_data.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for rec in lines:
+                f.write(json.dumps(rec) + "\n")
+
+        dataset = load_rlhf_dataset(str(path))
+        assert len(dataset) == 4
+        assert dataset[0]["label"] == 1
+        assert dataset[1]["label"] == 0
+
+    def test_skips_non_gate_events(self, tmp_path):
+        import json
+        lines = [
+            {"reward_key": "tool_success", "risk_features": _low_risk_features(),
+             "metadata": {"risk_features": _low_risk_features()}},
+            {"reward_key": "unknown_event", "risk_features": _high_risk_features(),
+             "metadata": {"risk_features": _high_risk_features()}},
+        ]
+        path = tmp_path / "rlhf_data.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for rec in lines:
+                f.write(json.dumps(rec) + "\n")
+        dataset = load_rlhf_dataset(str(path))
+        assert dataset[0]["label"] == 0  # tool_success → 0
+        assert len(dataset) == 1           # unknown_event skipped
+
+    def test_empty_file(self, tmp_path):
+        path = tmp_path / "empty.jsonl"
+        path.write_text("", encoding="utf-8")
+        dataset = load_rlhf_dataset(str(path))
+        assert dataset == []
+
+    def test_can_train_from_loaded_data(self, tmp_path):
+        import json
+        samples = (
+            [{"reward_key": "continue_correct", "risk_features": _low_risk_features(),
+              "metadata": {"risk_features": _low_risk_features()}}] * 15
+            + [{"reward_key": "gate_correct", "risk_features": _high_risk_features(),
+                "metadata": {"risk_features": _high_risk_features()}}] * 15
+        )
+        path = tmp_path / "rlhf_data.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for rec in samples:
+                f.write(json.dumps(rec) + "\n")
+
+        dataset = load_rlhf_dataset(str(path))
+        assert len(dataset) == 30
+
+        clf = GateClassifier()
+        report = clf.train(dataset)
+        assert report["accuracy"] > 0.8
+
+    def test_missing_file_raises(self):
+        with pytest.raises(FileNotFoundError):
+            load_rlhf_dataset("/nonexistent/path/rlhf.jsonl")

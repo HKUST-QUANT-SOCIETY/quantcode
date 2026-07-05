@@ -9,10 +9,16 @@ Training labels (4 types from RLHF feedback):
   - gate + human override approved       → label = 0  (false positive)
   - no gate + outcome OK                 → label = 0  (correct pass)
   - no gate + post-hoc should have gated → label = 1  (miss)
+
+Persistence:
+  clf.save("model.json")      # ── weights + bias + metadata → JSON
+  clf.load("model.json")      # ── restore from file
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any
 
 
@@ -139,8 +145,42 @@ class GateClassifier:
         }
 
     # ------------------------------------------------------------------
-    # Predict
+    # Persist / load
     # ------------------------------------------------------------------
+
+    def save(self, path: str | Path) -> Path:
+        """Save trained weights, bias and metadata to a JSON file.
+
+        Returns the absolute path written to.
+        """
+        if not self._trained:
+            raise RuntimeError("Classifier not trained. Nothing to save.")
+        target = Path(path).resolve()
+        payload = {
+            "version": 1,
+            "features": FEATURE_NAMES,
+            "weights": self.weights,
+            "bias": self.bias,
+        }
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def load(self, path: str | Path) -> None:
+        """Restore weights and bias from a previously saved model JSON file."""
+        target = Path(path).resolve()
+        payload = json.loads(target.read_text(encoding="utf-8"))
+
+        stored_features = payload.get("features", [])
+        if stored_features != FEATURE_NAMES:
+            raise ValueError(
+                f"Feature mismatch: model expects {FEATURE_NAMES}, "
+                f"file contains {stored_features}"
+            )
+
+        self.weights = payload["weights"]
+        self.bias = payload["bias"]
+        self._trained = True
 
     def predict(self, risk_features: dict[str, Any]) -> tuple[float, str]:
         """
@@ -162,3 +202,69 @@ class GateClassifier:
         reason = "GateClassifier: " + (", ".join(contributors[:5]) if contributors else "all features nominal")
 
         return prob, reason
+
+
+# ---------------------------------------------------------------------------
+# Label extraction helpers
+# ---------------------------------------------------------------------------
+
+def _reward_key_to_label(reward_key: str) -> int | None:
+    """Map RLHF reward keys to binary labels. Returns None for non-gate events."""
+    mapping = {
+        "gate_correct": 1,
+        "gate_false_positive": 0,
+        "gate_miss": 1,
+        "continue_correct": 0,
+        "tool_success": 0,
+        "tool_failure": 0,
+        "human_gate_approved": 1,
+        "human_gate_rejected": 0,
+    }
+    return mapping.get(reward_key)
+
+
+def load_rlhf_dataset(
+    rlhf_path: str | Path,
+) -> list[dict[str, Any]]:
+    """Load labeled training data from an RLHF JSONL log file.
+
+    Each line is a JSON object written by ``rlhf_logger.log_rlhf_entry``.
+    Lines whose ``reward_key`` maps to a label (0 or 1) AND whose
+    ``metadata.risk_features`` are present are included.
+
+    Returns a list of ``{"risk_features": dict, "label": int}`` dicts
+    suitable for ``GateClassifier.train()``.
+    """
+    target = Path(rlhf_path).resolve()
+    if not target.exists():
+        raise FileNotFoundError(f"RLHF data file not found: {target}")
+
+    dataset: list[dict[str, Any]] = []
+    with open(target, "r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            reward_key = record.get("reward_key", "")
+            label = _reward_key_to_label(reward_key)
+            if label is None:
+                continue
+
+            # risk_features may live under metadata.risk_features
+            # or directly under the record root
+            risk_features = (
+                record.get("metadata", {}).get("risk_features")
+                or record.get("risk_features")
+                or {}
+            )
+            if not risk_features:
+                continue
+
+            dataset.append({"risk_features": risk_features, "label": label})
+
+    return dataset

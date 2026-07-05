@@ -11,16 +11,71 @@ Usage:
 
 The router is designed to be used as a LangGraph conditional edge function:
     app.add_conditional_edges("agent_node", route, {...})
+
+Model persistence:
+    Pass a pre-trained GateClassifier via ``gate_classifier=clf``, or set
+    ``GATE_MODEL_PATH`` env var to auto-load a saved model at startup.
 """
 from __future__ import annotations
 
+import os
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Callable
 
 from .router import RouteDecision, RouteResult
 from .guards import MAX_ITERATIONS
 
 RouterFunc = Callable[[dict[str, Any]], RouteResult]
+
+# Default path for auto-loaded / saved GateClassifier model.
+DEFAULT_GATE_MODEL_PATH = Path(".quantcode/gate_classifier_model.json")
+
+
+def _resolve_gate_classifier(
+    gate_classifier: Any,
+) -> Any | None:
+    """Resolve the GateClassifier to use.
+
+    Priority:
+      1. Explicit classifier passed by caller (already trained)
+      2. GATE_MODEL_PATH env var → load from file
+      3. DEFAULT_GATE_MODEL_PATH exists → load from file
+      4. None (ML gate skipped)
+    """
+    import json as _json
+
+    if gate_classifier is not None:
+        return gate_classifier
+
+    # Check env var first……
+    from .gate_classifier import GateClassifier
+    env_path = os.environ.get("GATE_MODEL_PATH", "")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            clf = GateClassifier()
+            clf.load(p)
+            return clf
+
+    # …then default path
+    default = _repo_root() / DEFAULT_GATE_MODEL_PATH
+    if default.exists():
+        clf = GateClassifier()
+        clf.load(default)
+        return clf
+
+    return None
+
+
+def _repo_root() -> Path:
+    """Walk up from this file to find repo root."""
+    here = Path(__file__).resolve().parent
+    for _ in range(6):
+        if (here / ".git").exists() or (here / "pyproject.toml").exists():
+            return here
+        here = here.parent
+    return Path.cwd()
 
 
 # ---------------------------------------------------------------------------
@@ -124,27 +179,8 @@ def route(
 
         # 3. ML gate classifier — safety check
         if risk_features:
-            clf = gate_classifier
-            if clf is None:
-                from .gate_classifier import GateClassifier
-                clf = GateClassifier()
-                if not clf._trained:
-                    # Untrained classifier → skip ML gate, always continue
-                    pass
-                else:
-                    prob, gate_reason = clf.predict(risk_features)
-                    if prob > 0.5:
-                        return RouteResult(
-                            decision=RouteDecision.HUMAN_GATE,
-                            reason="risk_gate_uncertain",
-                            detail={
-                                "trigger": "risk_gate_uncertain",
-                                "score": prob,
-                                "reason": gate_reason,
-                                "source": "gate_classifier",
-                            },
-                        )
-            else:
+            clf = _resolve_gate_classifier(gate_classifier)
+            if clf is not None:
                 prob, gate_reason = clf.predict(risk_features)
                 if prob > 0.5:
                     return RouteResult(
