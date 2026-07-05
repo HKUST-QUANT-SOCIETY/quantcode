@@ -19,7 +19,7 @@ from .fingerprint import compute_state_fingerprint
 # ---------------------------------------------------------------------------
 
 WINDOW_SIZE = 10               # sliding window for tool-call history
-MAX_SAME_TOOL_IN_WINDOW = 8    # same tool ≤8 times in the window
+MAX_SAME_TOOL_IN_WINDOW = 8    # same tool ≤7 times in the window (>=8 triggers abort)
 MAX_CONSECUTIVE_SAME_TOOL = 5  # same tool ≤4 consecutive calls
 MAX_FINGERPRINT_REPEAT = 3     # same fingerprint ≤2 repeats before abort
 MAX_ITERATIONS = 100           # hard iteration cap
