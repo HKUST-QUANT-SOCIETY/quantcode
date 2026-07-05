@@ -6,8 +6,8 @@
   // Provider 配置由各成员本地 opencode.local.jsonc 提供，不入库
   "provider": {},
 
-  // Plugins
-  "plugins": ["@dietrichgebert/ponytail"],
+  // Plugins — 注意用 plugin 单数，不是 plugins，对应 opencode config schema
+  "plugin": ["@dietrichgebert/ponytail"],
 
   // 让 OpenCode 递归发现 .opencode/groups/**/SKILL.md
   "skills": {
@@ -30,5 +30,10 @@
   },
 
   // MCP servers（按需添加）
-  "mcp": {}
+  "mcp": {
+    "quantcode-risk-stub": {
+      "type": "local",
+      "command": ["python", "tools/risk_stub_mcp.py"]
+    }
+  }
 }
