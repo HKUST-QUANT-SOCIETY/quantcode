@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .fingerprint import compute_state_fingerprint
+# from .fingerprint import compute_state_fingerprint
 
 # ---------------------------------------------------------------------------
 # Thresholds
