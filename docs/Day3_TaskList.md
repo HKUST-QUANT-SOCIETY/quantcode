@@ -1,350 +1,340 @@
-# Day 3 任务清单
+# Day 3 任务分配
 
-> **日期**：开发第三日
-> **总体目标**：跑通第一个**跨组协作流程** model→risk，验证 Blackboard PROJECT scope 数据传递 + HumanGate 人审断点触发。
-> **核心理念**：Day 2 证明了单组闭环，Day 3 要证明**跨组 handoff** 可行——这是"千组千流"协作的第一块基石。
-> **里程碑**：Cross-Group Handoff
+> **里程碑**：多 Agent 自主协作 —— 引擎跑起来，5 个组的 Agent 各自能自主推理，跨组能协作，关键点能人审，长任务不失控。
+> **工作方式**：任务导向，不规定时间线。下面给的是**功能目标 + 验收标准**，怎么实现、用什么方案、先做哪步，你自己判断。遇到设计选择先自己查资料/读源码做决定，卡住了（超过 30 分钟）就拉群讨论。
 
 ---
 
-## 0. Day 3 架构目标
+## 0. 先读文档，再动手
 
-### 从"单组闭环"到"跨组协作"
+动手前把这三份读明白：
+- `docs/PRD.md` —— 产品是什么、6 套流的功能
+- `docs/Architecture_Spec.md` —— 三层架构 + §3.2 路由设计（重点）
+- `docs/QuantCode_Design.md` —— 项目定位、三大模式、Compose 流
 
-Day 2 我们跑通了 factor:autoeval（factor 组内闭环）。Day 3 要打通两个组之间的数据流：
+**一句话讲清我们在做什么**：QuantCode 是量化投研 Agent 系统，6 个组各有一套工作流（Compose 流），核心是"idea → 主线匹配 → 动态 Schema → 程序化验收 → 接入生产"。编排层用 Python/LangGraph，Agent 自主推理该调哪个 tool，不预定义流程图。
 
+---
+
+## 1. Day 3 要证明的五件事
+
+1. **Agent 自主推理**：给任务 + tool + prompt，Agent 自己决定怎么做完，不是走写死的流程图
+2. **跨组协作**：model 组把结果写进 Blackboard，risk 组能读到；组内私有数据别的组读不到
+3. **人审断点**：风险超阈值时 Agent 暂停等人审批，批了再继续
+4. **长任务不失控**：死循环 / 迭代过多 / 陷入循环时能自动中止
+5. **主线匹配 + 动态 Schema**：Agent 读懂主线代码，判断一个 idea 该怎么兼容地接进去，现场生成校验 schema（核心壁垒，Lead 攻坚）
+
+---
+
+## 1.5 落地检验环节（必做，不是写完测试就算完）
+
+**核心要求**：所有功能必须**在本地 OpenCode 里配置好并跑通测试**，不是"Python 里写个单测 mock 一下"就完事。
+
+### 落地检验是什么
+你写的 Python tools（如 model 组的 read_pr / extract_metadata）要能被 **OpenCode（TS）调起来**，在 OpenCode 的 compose 模式下，Agent 真的能调用你的 Python tools 完成任务。
+
+### 具体步骤（每个人写完功能后都要做）
+
+#### Step 1：配置你的 tools 到 OpenCode
+根据你选择的解耦方式（MCP 或直接调用）：
+
+**如果用 MCP Server**（推荐）：
+```json
+// .opencode/mimocode.json
+{
+  "mcp": {
+    "quantcode_model_tools": {
+      "type": "local",
+      "command": ["python", "-m", "quantcode.tools.model"],
+      "enabled": true
+    }
+  }
+}
 ```
-陈镇鸿的 model 组                    杨欣琳的 risk 组
-┌─────────────────────┐            ┌──────────────────────┐
-│ model:pr-submit     │            │ risk:gate            │
-│                     │  Blackboard│                      │
-│ read_pr_diff        │  PROJECT   │ read_model_spec      │
-│ extract_metadata    │  scope     │ calc_risk_metrics    │
-│ generate_ModelSpec  │──写入──────→│ generate_RiskProfile │
-│ write_blackboard    │  model.pr. │ check_human_gate     │
-│ trigger_risk_gate   │  {pr_num}  │ write_pr_comment     │
-└─────────────────────┘            └──────────────────────┘
-         │                                    │
-         │ 直接 risk_app.invoke()             │ VaR超阈值
-         └────────────────────────────────────┘
-                                              ↓
-                                    ┌──────────────────┐
-                                    │ HumanGate        │
-                                    │ interrupt_before │
-                                    │ 暂停 → 人审 →恢复 │
-                                    └──────────────────┘
+
+**如果直接写 TS wrapper**：
+在 `.opencode/tools/` 下写 TS wrapper 调你的 Python 函数。
+
+#### Step 2：启动 OpenCode
+```bash
+cd vendor/mimo-code/packages/opencode
+npm run dev  # 或者你们的启动命令
 ```
 
-### 三个关键验证点
+#### Step 3：验证 tools 能被发现
+- 启动后，OpenCode 应该能看到你注册的 tools
+- 在 compose 模式下，Agent 能调用你的 tools
 
-1. **Blackboard PROJECT scope 数据传递**：model 写，risk 读，跨组可见
-2. **跨 graph 触发**：model flow 结束自动 invoke risk flow（不用 Event Bus）
-3. **HumanGate 断点**：VaR 超阈值 → interrupt → checkpoint → 人审 → resume
+#### Step 4：跑一个端到端任务
+**model 组举例**：
+```bash
+# 在 OpenCode CLI 或 UI 输入
+/compose "处理 PR #123"
+
+# Agent 应该：
+# 1. 自主推理：我需要读 PR
+# 2. 调用你的 read_pr tool（Python）
+# 3. 自主推理：我需要提取元数据
+# 4. 调用你的 extract_metadata tool
+# 5. ...完成整个流程
+```
+
+**验证通过标准**：
+- [ ] OpenCode 启动时能发现你的 tools（日志里有）
+- [ ] Agent 能调用你的 tools（不报错）
+- [ ] tools 返回的结果符合预期（schema 校验通过）
+- [ ] 整个流程跑完，产出 artifact（如 ModelSpec.json）
+
+### 常见问题排查
+| 问题 | 可能原因 | 解决方案 |
+|---|---|---|
+| OpenCode 找不到 tool | MCP 配置路径错误 | 检查 `command` 能否在命令行直接运行 |
+| tool 调用报错 | Python 环境不对 | 检查 virtualenv 是否激活 |
+| Agent 不调你的 tool | tool description 不清楚 | 改 description，让 LLM 知道什么时候该调 |
+| 返回格式不对 | schema 不匹配 | 用 Pydantic 严格校验 |
+
+### 不及格的"伪落地"
+❌ 只写了 Python 函数 + 单测，没配置到 OpenCode
+❌ 配置了但没真的启动 OpenCode 验证
+❌ 启动了但"好像不太对，算了先这样"
+❌ 写了一堆 mock，实际 OpenCode 里跑不通
+
+### 及格的"真落地"
+✅ Python tool 写完 → 配置到 OpenCode → 启动验证 → Agent 能调 → 产出 artifact 符合预期
+✅ 有 demo 录屏/截图证明"在 OpenCode 里真的跑起来了"
+✅ 遇到问题了，排查日志，改配置，最终跑通
 
 ---
 
-## 1. 全员 Standup（15 分钟）
+## 2. 尹一帆 · Agent 引擎 + Tool 系统 + 并发
 
-- Day 2 回顾：4 个 PR 合并（factor:autoeval + Memory FTS5 + dedupe + checkpoint resume）
-- Day 3 目标确认：model→risk 跨组跑通，真实 PR 上有 risk comment
-- **依赖关系对齐**（关键）：
-  - 杨欣琳的 risk-gate **依赖** 俞高磊的风控统计函数
-  - 陈镇鸿的 model flow **依赖** 尹一帆的跨 graph 触发机制
-  - 三条链路必须在**下午 3 点前**完成各自单测，才能做集成
+**功能目标**：搭出能跑的 ReAct Agent 引擎——给定 system prompt + 一组 tool，Agent 能自主推理、调 tool、完成多步任务，中断能恢复，多个 Agent 能并发跑不打架。这是全组的底座，优先出一个能用的版本给大家接。
 
----
+**自己去研究/决策的点**：
+- `create_react_agent` 直接够用，还是用 `StateGraph` 自己搭以便插路由/gate？读 LangGraph 文档 + 试。
+- tool 的统一接口怎么定义？可借鉴 MimoCode 的 `Tool.Def`（`vendor/mimo-code/.../src/tool/tool.ts`），也可直接用 LangChain tool。
+- 怎么按组过滤 tool（model 组只看到 model 的 tool）？
+- 拿一个 MimoCode 的 skill markdown（如 `plan`/`brainstorm`）喂进去当 system prompt，看 Agent 认不认——验证"复用 skill 作为工作流知识"这条路。
+- checkpoint 怎么接（Day 2 已有基础）？
+- **并发**：多个组的 Agent 同时跑，怎么隔离（thread_id？独立 state？），SQLite 会不会竞态（WAL 模式？）。
 
-## 2. 陈镇鸿 · model:pr-submit Flow（全天，重头戏）
+**验收标准（硬性）**：
+- [ ] 一个 Agent 能自主完成 ≥3 步任务（自己决定 tool 顺序）
+- [ ] tool 能按组隔离
+- [ ] 至少 1 个 MimoCode skill markdown 能喂进去被使用
+- [ ] Agent 中断后能从 checkpoint 恢复
+- [ ] 多个 Agent 并发跑不冲突（至少 2 个同时跑通）
+- [ ] 有测试覆盖
 
-> **工程量提示**：Day 2 你的 dedupe 测试是 167 行。Day 3 这是一条**完整的 5-node flow + BlackboardService + 集成测试**，预计 600-800 行。这是 Day 3 最核心的交付之一。
-
-### 2.1 上午：BlackboardService 实现（PROJECT scope 数据层）
-
-**背景**：Day 2 的 `compose_executor` 只有 in-memory state，没有跨 flow 的持久化 Blackboard。Day 3 需要真正的 Blackboard 让 model 写、risk 读。
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 新建 `runner/blackboard.py` | 实现 5-scope Blackboard（复用 Memory FTS5 的 scope 模型）：<br>- `write(scope, scope_id, key, value)` <br>- `read(scope, scope_id, key)` <br>- `list_keys(scope, scope_id)` <br>- PROJECT scope：所有组可读，写入记录 `written_by_group` | 单测：model 组写 PROJECT，risk 组能读到 |
-| 复用 `schemas/compose_task.py` 的 `BlackboardEntry` | Day 1 已定义 `BlackboardEntry`、`BlackboardScope`、`WritePolicy`，直接用，不要重复造 | import 成功，字段对齐 |
-| 持久化到 SQLite | Blackboard entries 存 `.quantcode/blackboard.db`，重启不丢 | kill 进程后 read 仍能拿到之前写的 |
-| **写入权限校验** | GROUP scope 只有 owner 能写；PROJECT scope 记录 `written_by_group` 但所有组可写（GROUP_APPEND policy） | 单测：factor 组不能写 model 组的 GROUP entry |
-
-### 2.2 下午：model:pr-submit 5-node flow
-
-| Node | 输入 | 输出 | 说明 |
-|---|---|---|---|
-| `read_pr_diff` | pr_number | diff 文本 | 用 `gh pr diff` 或读 `tests/fixtures/sample_model_pr.diff` |
-| `extract_model_metadata` | diff | dict（模型类型/超参/训练区间） | 正则或规则提取，不用 LLM |
-| `generate_model_spec` | metadata | `ModelSpec`（Day 1 schema） | 构造并校验 ModelSpec，含 `as_of_date` 时点约束 |
-| `write_to_blackboard` | ModelSpec | blackboard key | 写 PROJECT scope，key=`model.pr.{pr_number}` |
-| `trigger_risk_gate` | blackboard key | risk flow result | 调用尹一帆的跨 graph 触发（`risk_app.invoke`） |
-
-**验收标准**：
-- `tests/test_model_flow.py`：至少 8 个测试
-  - 每个 node 单测（4 个）
-  - ModelSpec 时点校验（training_range.end <= as_of_date）
-  - Blackboard 写入验证
-  - 完整 flow 集成测试（app.invoke）
-  - checkpoint 恢复测试（用 Lead 的 resume API）
-- Demo：`python scripts/demo_model_flow.py` 从 sample PR 生成 ModelSpec 并写 Blackboard
-
-### 2.3 fixture 准备
-
-- 造一个 `tests/fixtures/sample_model_pr.diff`（模拟一个提交 LSTM 模型的 PR）
-- 内含：模型类型、训练区间、超参数、预期 Sharpe
+**交付**：能被 import 的 Agent 引擎 + 最小 demo + 一份"LangGraph 改写 MimoCode loop 缺了哪些配套"的清单（权限？gate？错误恢复？）。
 
 ---
 
-## 3. 杨欣琳 · risk:gate Flow + HumanGate 集成（全天，重头戏）
+## 3. 陈镇鸿 · Blackboard + model 组 Agent
 
-> **工程量提示**：Day 2 你的 HumanGate 是 449 行。Day 3 要把它**接进真实的 LangGraph flow**，还要修复 Day 2 review 提的 eval() 问题，预计 500-700 行。
+**功能目标**：搭好跨组共享数据层（Blackboard），让 model 组 Agent 能完成"读 PR → 提取元数据 → 生成 ModelSpec → 写 Blackboard → 触发风控"。
 
-### 3.1 上午 Part A：修复 PR #12 的 eval() 安全问题（P0）
+**自己去研究/决策的点**：
+- model 组需要哪些 tool？至少：read_pr / extract_metadata / generate_model_spec / write_blackboard / trigger_risk_flow，缺什么你补。
+- Blackboard 用什么存？跟 Day 2 的 Memory 共用 SQLite 还是独立？
+- 5-scope 怎么映射？PROJECT 跨组可读，GROUP 组内私有，权限检查在哪做？
+- 跨组触发（trigger_risk_flow）怎么实现？直接 invoke risk Agent？还是写队列？
+- **MCP 探索**（有余力）：TS 和 Python 怎么解耦？试试把 model tools 做成 Python MCP server，看 OpenCode 能不能调起来。
 
-**背景**：Day 2 Lead review 发现 `runner/human_gate.py:97` 用了 `eval()`，有安全风险。
+**验收标准（硬性）**：
+- [ ] model 组 Agent 完整跑通：读 PR → 提取 → 生成 spec → 写 Blackboard
+- [ ] Blackboard 跨组读：model 写 PROJECT，别组能读；写 GROUP，别组读不到
+- [ ] Blackboard 持久化（重启还在）
+- [ ] ModelSpec 通过 Day 1 schema 校验
+- [ ] 有测试覆盖每个 tool + 集成
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 移除 `_build_trigger_expression` + `eval` | 改为 `match/case` 直接判断（Lead review 已给出示例代码） | 无 eval，测试仍全过 |
-| 补充 timeout 检查 | `should_interrupt` 增加：pending 超过 `timeout_minutes` → 返回 escalate 信号 | 单测：超时场景 |
-| rebase 到最新 main | 合入 Lead 的 checkpoint resume API（PR #13） | CI 通过 |
-
-### 3.2 上午 Part B：risk:gate 5-node flow
-
-| Node | 输入 | 输出 | 说明 |
-|---|---|---|---|
-| `read_model_spec` | blackboard key | ModelSpec | 从 PROJECT scope 读 model 组写的数据 |
-| `calc_risk_metrics` | ModelSpec + returns | dict（max_dd/VaR/ES） | 调用俞高磊的统计函数 |
-| `generate_risk_profile` | metrics | `RiskProfile` schema | 需 Day 3 新建 RiskProfile schema |
-| `check_human_gate` | RiskProfile | interrupt or pass | VaR 超阈值 → 构造 HumanGate → interrupt |
-| `write_pr_comment` | RiskProfile | comment id | 用 dedupe，写 risk.json 到 PR |
-
-### 3.3 下午：HumanGate 与 LangGraph interrupt 集成
-
-**这是 Day 3 最难的部分**——把 HumanGate 接进 LangGraph 的 `interrupt_before`。
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 新建 `schemas/risk_profile.py` | `RiskProfile` Pydantic 模型：max_drawdown/var_99/es_99/verdict/breached_thresholds | 单测覆盖 |
-| workflow 配置 interrupt | `app.compile(interrupt_before=["human_review"])` | VaR 超阈值时 flow 在此暂停 |
-| 实现 resume 后继续 | 人审 approve（改 HumanGate.status）→ `resume=True` 恢复 → workflow 继续到 write_pr_comment | 端到端测试：暂停→approve→恢复→完成 |
-| mock 通知 | HumanGate 触发时打 log "⏸️ 等待人工审批 gate_id=..." | log 可见 |
-
-**验收标准**：
-- `tests/test_risk_flow.py`：至少 10 个测试
-  - eval 修复后的 should_interrupt（3 个：超阈值/未超/已决议）
-  - RiskProfile schema 校验（2 个）
-  - 每个 node 单测（3 个）
-  - **HumanGate 暂停→恢复端到端**（2 个）：这是核心
-- Demo：`python scripts/demo_risk_flow.py` 展示 VaR 超阈值 → 暂停 → 模拟 approve → 恢复 → PR comment
+**交付**：Blackboard 服务 + model 组 tools + 端到端测试。有余力：MCP server 可行性验证报告。
 
 ---
 
-## 4. 俞高磊 · 风控统计函数库 + factor 深化（全天）
+## 4. 杨欣琳 · risk 组 Agent + 人审
 
-> **新人背景**：俞高磊（东南大学强基计划数学学院），机器学习/深度学习经验，数学竞赛全国一等奖。熟悉PyTorch、优化算法、数值计算。Day 3 主攻风控统计函数库（为杨欣琳的 risk-gate 提供依赖）+ factor 量化分析。
+**功能目标**：让 risk 组 Agent 完成"读 Blackboard → 算风控 → 生成 RiskProfile → 写 PR 评论"，并且风险超阈值时能暂停等人审。
 
-> **工程量提示**：上午风控统计库是杨欣琳的阻塞依赖（优先级最高），预计 250 行代码 + 15 个测试。下午 factor 分层回测预计 200 行 + 8 个测试。总计 ~450 行。
+**自己去研究/决策的点**：
+- risk 组需要哪些 tool？至少：read_blackboard / calc_risk(用俞高磊的 stub) / generate_risk_profile / check_gate / write_pr_comment。
+- permission 规则怎么定义（YAML？代码？）？参考 Architecture_Spec §3.5。
+- `check_gate` 超阈值时怎么触发 interrupt？LangGraph 的 `NodeInterrupt` 怎么用？
+- approve/reject 后怎么恢复（改 state + checkpoint 恢复）？
+- 错误重试：tool 报错后 Agent 该重试还是换方案？设计一个策略。
+- PR #12 的 eval() 顺便修了（改 match/case）。
 
-### 4.1 上午：风控统计函数库（杨欣琳的依赖，优先级最高）
+**验收标准（硬性）**：
+- [ ] risk 组 Agent 完整跑通：读 Blackboard → 算风控 → 生成 profile → 写 PR
+- [ ] 人审场景：VaR 超阈值 → 暂停 → 日志"⏸️ 等待人工审批" → approve → 恢复 → 完成
+- [ ] 正常场景：VaR 未超 → 直接写 PR，不暂停
+- [ ] dedupe 生效：同一 PR 触发 2 次，只有 1 条评论
+- [ ] RiskProfile 通过 schema 校验
+- [ ] PR #12 eval() 移除，CI 通过
 
-**背景**：Day 1 的 `docs/risk_metrics_formula_checklist.md` 定义了公式，Day 3 要实现成可调用的库。
-
-| 函数 | 签名 | 说明 |
-|---|---|---|
-| `calc_max_drawdown` | `(returns: list[float]) -> float` | 最大回撤，返回正数（如 0.15 表示 -15%） |
-| `calc_var_99` | `(returns: list[float], horizon: int = 1) -> float` | 99% 历史 VaR，支持 horizon 缩放（√t 规则） |
-| `calc_expected_shortfall_99` | `(returns: list[float]) -> float` | 99% ES（CVaR），尾部平均损失 |
-| `calc_sharpe` | `(returns: list[float], rf: float = 0.0, periods: int = 252) -> float` | 年化 Sharpe |
-| `calc_sortino` | `(returns: list[float], rf: float = 0.0) -> float` | 只惩罚下行波动 |
-| `calc_calmar` | `(returns: list[float]) -> float` | 年化收益 / 最大回撤 |
-
-**关键要求**（不能只写 happy path）：
-- 边界处理：空列表、单元素、全零、全负
-- 数值稳定性：大数组不溢出
-- 与 `numpy` 结果交叉验证（如果装了 numpy）
-
-**验收标准**：
-- `runner/risk_stats.py`（~250 行）
-- `tests/test_risk_stats.py`：至少 15 个测试
-  - 每个函数 2-3 个正常 case
-  - 每个函数 1 个边界 case
-  - VaR horizon 缩放验证
-  - 与已知答案对拍（造几组手算过的 returns）
-
-### 4.2 下午：factor:autoeval 分层回测 + 衰减分析
-
-在 Day 2 的 factor flow 基础上增加真实计算（替换部分 mock）：
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 实现 `LayeredBacktest` 计算 | 分 5/10 层，计算各层收益、多空对冲收益、单调性 | 用 sample_factor 跑出真实分层结果 |
-| 实现 `DecayMetrics` 计算 | IC 在 1/3/5/10/20 日的衰减曲线 | 衰减曲线单调递减 |
-| 接入 factor flow | 替换 `_mock_autoeval_result` 的对应字段为真实计算 | factor flow 产出真实 LayeredBacktest |
-
-**验收标准**：
-- `runner/factor_stats.py`（~200 行）
-- `tests/test_factor_stats.py`：至少 8 个测试
+**交付**：risk 组 tools + permission 集成 + 两个场景测试（正常 + 人审）。
 
 ---
 
-## 5. 尹一帆 · 跨 Graph 触发机制 + Blackboard 集成（全天）
+## 5. 俞高磊 · 路由函数 + 自研加固完整套件
 
-> **工程量提示**：Day 2 你交付了 Memory FTS5（2400+ 行）。Day 3 做跨 graph 编排 + Blackboard 与 Memory 的集成，预计 400-600 行。
+**功能目标**：探索路由机制（代码规则 vs AI 路由，你自己研究判断），实现完整的自研加固套件（死循环 / 迭代上限 / 状态指纹 / RLHF 接入点）。
 
-### 5.1 上午：跨 Graph 触发机制（chain executor）
+**为什么是你**：Day 2 你做过算法 stub，理解接口与实现分离。路由是个开放题，需要想清楚"控制流该怎么决策"。自研加固是差异化能力，需要探索。
 
-**背景**：PRD 明确"6 人小团队不做 Event Bus"，所以 model→risk 用**直接 invoke**。但要做得优雅、可测试。
+**自己去研究/决策的点（开放探索）**：
+- **路由函数是什么**？Architecture_Spec §3.2 写的是"代码规则"（permission 检查 / gate 检查 / 死循环检测），但你可以探索"AI 路由"可行性（用 LLM 判断下一步去哪）。读 LangGraph `add_conditional_edges` 文档，试两种方案，看哪个好。
+- **死循环怎么检测**？滑动窗口统计同一 tool 高频调用？state 指纹重复？构造一个会死循环的 Agent 测试。
+- **迭代上限**：MAX_ITERATIONS（100？200？），超了怎么办（中止？告警？）。
+- **状态指纹循环检测**：state hash 重复 → 判定循环。怎么 hash？哪些字段纳入指纹？
+- **RLHF 接入点**：每次 tool call 记录 `(state, action, reward)` 到 `.quantcode/rlhf_data.jsonl`，供后续微调/评估。reward 怎么定义（tool 成功=+1？gate 通过=+10？）。
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 扩展 `compose_executor.py` | 新增 `chain_flows(flows: list[FlowStep])`：按顺序执行多个 flow，前一个的输出注入后一个的输入 | 单测：flow_a → flow_b 数据传递 |
-| 定义 `FlowStep` | `(group, flow_name, input_mapper: Callable)`，input_mapper 从上游 result 提取下游 input | 类型清晰 |
-| 处理跨 flow 的 thread_id | model flow 和 risk flow 用**关联的** thread_id（如 `chain-{uuid}-model` / `chain-{uuid}-risk`），便于追溯 | thread_id 可关联 |
-| **跨 flow 的错误传播** | 如果 model flow 失败，risk flow 不应触发；chain 返回失败原因 | 单测：上游失败，下游跳过 |
+**验收标准（硬性）**：
+- [ ] 至少一种路由机制能跑（代码规则 or AI 路由，有对比更好）
+- [ ] 死循环检测能识别明显死循环并中止
+- [ ] 迭代上限生效（Agent 跑超步数自动中止）
+- [ ] 状态指纹循环检测能识别重复 state
+- [ ] RLHF 数据记录到 `.quantcode/rlhf_data.jsonl`，格式合法
+- [ ] RiskTool stub 提供两组数据（正常 + 超阈值），杨欣琳能用
+- [ ] 有测试覆盖每个加固机制
 
-### 5.2 下午：Blackboard ↔ Memory 集成 + reconcile 增强
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| Blackboard 写入触发 Memory 索引 | 当 Blackboard 写 PROJECT scope 时，同步写一份到对应 Memory scope，可被 `memory.search` 检索到 | 单测：写 Blackboard 后能 search 到 |
-| reconcile 支持 Blackboard 目录 | 扩展 `reconcile.py` 扫描 `.quantcode/blackboard/` | reconcile 后 Blackboard 内容进 FTS5 |
-| 跨 flow 的 Memory 上下文传递 | risk flow 能通过 memory.search 读到 model flow 写的知识（如"这个模型之前被拒过"） | 端到端：model 写 memory → risk search 到 |
-
-**验收标准**：
-- `tests/test_chain_flows.py`：至少 8 个测试
-- `tests/test_blackboard_memory_integration.py`：至少 5 个测试
+**交付**：路由函数实现 + 完整自研加固套件 + RiskTool stub + 一份"代码规则 vs AI 路由"对比报告（如果你试了两种）。
 
 ---
 
-## 6. Lead · 跨组集成测试 + GROUP 隔离 + 协调（全天）
+## 6. 刘炽 · Schema + SKILL.md（支持所有组）
 
-### 6.1 上午：5-scope 权限矩阵完整测试
+**功能目标**：把 6 个组的 schema 定下来，给大家造测试数据，写至少 3 个组的 SKILL.md（参考 MimoCode 格式）。
 
-Day 2 只测了 groups scope。Day 3 要覆盖全部 5 个 scope 的权限矩阵。
+**自己去研究/决策的点**：
+- 6 个组各需要什么 schema？Day 1 有 ModelSpec，还缺 RiskProfile / FactorSpec / FundamentalSpec / OptionsSpec / StrategySpec。跟各组对接定字段。
+- fixtures 准备什么？至少：sample_pr.diff / risk_metrics.json（两组：正常 + 超阈值）/ factor_backtest_result.json。
+- SKILL.md 格式是什么？读 MimoCode 的 skill 文件（`vendor/mimo-code/.../skills/`），理解 frontmatter（name/description/tools）+ 正文（给 LLM 的指导）。
+- 至少写 3 个组的 SKILL.md：model / risk / factor（其他 3 个组可后补）。描述各组 Agent 职责、可用 tool、工作流 tips。
 
-| Scope | 读权限 | 写权限 | 测试 |
-|---|---|---|---|
-| global | 所有组 | 仅系统 | 2 |
-| projects | 所有组 | 所有组（记录 written_by） | 3 |
-| groups | 仅 owner | 仅 owner | 已有（Day 2） |
-| sessions | 仅 session owner | 仅 session owner | 3 |
-| tasks | 仅 task owner + 祖先 task | 仅 task owner | 3 |
+**验收标准（硬性）**：
+- [ ] 6 个组 schema 全部定义（用 Pydantic），各组能直接用
+- [ ] fixtures 齐全：sample_pr.diff / risk_metrics.json / factor_backtest_result.json 等
+- [ ] 至少 3 个组的 SKILL.md 完成（model/risk/factor），格式正确，能被 Agent 加载
+- [ ] 所有 schema 有测试覆盖（校验能过）
 
-**验收**：`tests/test_scope_permission_matrix.py`，覆盖全部 5×2 = 10 种权限组合，至少 12 个测试。
-
-### 6.2 下午：model→risk 端到端集成测试
-
-**这是 Day 3 收工验收的核心**——把三个人的产出串起来。
-
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 写 `tests/test_cross_group_handoff.py` | 完整 model→risk 链路集成测试 | 端到端跑通 |
-| 场景 1：正常通过 | model 生成 ModelSpec → risk 计算 VaR（未超阈值）→ 直接写 PR comment | flow 一次跑完 |
-| 场景 2：HumanGate 触发 | model → risk 计算 VaR（超阈值）→ interrupt → 模拟 approve → resume → 写 comment | 暂停+恢复正确 |
-| 场景 3：跨组数据隔离 | 验证 risk 能读 model 的 PROJECT 数据，但读不到 model 的 GROUP 私有数据 | 隔离正确 |
-| dedupe 验证 | 同一 PR 同一 commit 触发 2 次，只有 1 条 comment | dedupe 生效 |
-
-### 6.3 协调职责
-
-- **上午 11 点 checkpoint**：确认俞高磊的风控统计库完成（杨欣琳在等）
-- **下午 2 点 checkpoint**：确认三条 flow 各自单测通过，可以开始集成
-- **下午 4 点**：主持集成联调，解决 flow 之间的接口 mismatch
-- 更新架构图：Blackboard 5-scope + 跨组 trigger 时序图
+**交付**：`schemas/*.py`（6 个）+ `tests/fixtures/*` + `.opencode/skills/{model,risk,factor}/SKILL.md`。
 
 ---
 
-## 7. 刘炽 · RiskProfile schema + 集成测试数据 + Typst 深化（全天）
+## 7. factor / fundamental / options 组的 Agent（分配待定）
 
-> **工程量提示**：Day 2 你反映任务能 1 小时做完。Day 3 给你三块实打实的活。
+**功能目标**：让这 3 个组的 Agent 也能各自跑通。早期可以用 stub 数据（Day 4 再接真实 API）。
 
-### 7.1 上午：RiskProfile schema + risk 报告模板
+**factor 组**：
+- Tools：match_main_stub（简化版，读 fixture）/ gen_factor_schema / run_autoeval_stub / check_factor_gate / merge_to_main_stub
+- 验收：Agent 能完成"idea → 生成 FactorSpec → 回测（stub）→ 阈值检查"
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 与杨欣琳共建 `schemas/risk_profile.py` | RiskProfile 字段设计：所有风控指标 + verdict + breached_thresholds + 时点信息 | schema 冻结，单测覆盖 |
-| Typst risk 报告模板 | `templates/typst/risk-report.md` 版式：风控指标表格 + VaR 曲线占位 + HumanGate 状态 | 版式文档完整 |
+**fundamental 组**：
+- Tools：pit_rag_search_stub（读 fixture）/ extract_financial / dcf_valuation / render_report_stub / request_human_review
+- 验收：Agent 能完成"查语料（stub）→ 提取财报 → 估值 → 生成研报（stub）"
 
-### 7.2 下午：集成测试数据集 + 数据校验工具
+**options 组**：
+- Tools：build_vol_surface / calc_greeks / run_options_backtest_stub
+- 验收：Agent 能完成"构建波动率曲面 → 计算 Greeks → 回测（stub）"
 
-**背景**：跨组集成测试需要真实感的测试数据，不能都用 mock。
+**分配方案（你们商量）**：
+- 陈镇鸿可以多做一个组（model + factor？）
+- 杨欣琳可以多做一个组（risk + fundamental？）
+- 新来的同学做 options
+- 或者这 3 个组先做最小 stub，Day 4 补完整
 
-| 任务 | 说明 | 验收 |
-|---|---|---|
-| 造 `tests/fixtures/sample_returns.py` | 生成有真实统计特征的收益序列：<br>- 正常序列（Sharpe~1.5）<br>- 高回撤序列（触发 HumanGate）<br>- 尾部风险序列（VaR 超标） | 3 组数据，各有明确特征 |
-| 造 `tests/fixtures/sample_model_pr.diff` | 配合陈镇鸿，造一个真实感的模型 PR diff | 陈镇鸿能用 |
-| 数据校验工具 `tools/validate_returns.py` | 检查收益序列合法性：无 NaN、长度足够、方差非零 | 单测覆盖 |
-
-### 7.3 机动：补充图表
-
-- 为 Day 4 fundamental flow 准备 2-3 个示例图表（延续 Day 2 未完成的）
+**验收标准（硬性）**：
+- [ ] 3 个组各有至少 3 个 tool（可以是 stub）
+- [ ] 3 个组各能跑通一个完整流程（产出 artifact 通过 schema 校验）
 
 ---
 
-## 8. Day 3 收工标准（验收清单）
+## 8. Lead · match_main + gen_schema（核心壁垒）+ 跨组集成
 
-### 核心里程碑
-- [ ] **model→risk 完整跑通**：真实 PR 上有 risk comment
-- [ ] **HumanGate 触发**：VaR 超阈值 → workflow 暂停 → 日志"⏸️ 等待人工审批" → approve → resume → 完成
-- [ ] **Blackboard 跨组**：model 写 PROJECT scope，risk 读到
-- [ ] **dedupe 验证**：5 分钟内重复 trigger，PR 只有 1 条评论
+**功能目标**：攻坚最初愿景的核心——让 Agent 能读主线代码，判断一个 idea 该怎么兼容地接进去，并现场生成校验 schema。第一阶段先做 factor 组（因子库相对简单）。
 
-### 各组交付
-- [ ] 陈镇鸿：`runner/blackboard.py` + model flow + `test_model_flow.py`（8+ 测试）
-- [ ] 杨欣琳：eval 修复 + risk flow + HumanGate 集成 + `test_risk_flow.py`（10+ 测试）
-- [ ] 俞高磊：`runner/risk_stats.py`（15+ 测试）+ factor 分层回测
-- [ ] 尹一帆：`chain_flows` + Blackboard↔Memory 集成（13+ 测试）
-- [ ] Lead：5-scope 权限矩阵（12+ 测试）+ 跨组 handoff 集成（4 场景）
-- [ ] 刘炽：RiskProfile schema + 测试数据集 + risk 报告模板
+**match_main（主线匹配）**：
+- Agent 读主线因子库代码（`factors/`），提取算子白名单
+- 判断用户 idea（如"PB-ROE 因子"）是否兼容主线
+- 给建议："可以接入，建议用 `fundamental_ratio` 算子"或"需要新增 `divide_fundamental` 算子"
+
+**gen_schema（动态 Schema）**：
+- 读了 idea + 主线后，LLM 现场生成一个 Pydantic schema（`PB_ROE_FactorSpec`）
+- schema 包含参数定义（window / universe / numerator / denominator）+ validator（窗口太短拒绝）
+- 生成的 schema 能校验用户后续填的参数
+
+**跨组集成（有余力）**：
+- 在各模块出来后，把 model→risk 跨组流打通
+- 端到端测试：model Agent 写 Blackboard → risk Agent 被触发 → 算风控 → 写 PR
+
+**验收标准（硬性）**：
+- [ ] match_main 原型：Agent 能读 factor 主线库，判断"PB-ROE 因子"兼容性，给出接入建议
+- [ ] gen_schema 原型：Agent 能为"PB-ROE 因子"现场生成 `FactorSpec` Pydantic 代码，代码合法、能 import
+- [ ] （可选）model→risk 跨组流端到端打通
+
+**交付**：match_main + gen_schema 原型（factor 组）+ demo + 技术报告（难点 / 解决方案 / 可扩展性）。
+
+---
+
+## 9. Dream 原型（有余力，可选）
+
+**功能目标**：扫描 checkpoint 里的 execution trace，用 LLM 提取知识（重复 pattern / 教训 / 高频操作），写入 Memory。
+
+**谁做**：有余力的人（或 Lead 协调）。
+
+**验收**：
+- [ ] 能扫一个 checkpoint trace，产出至少 1 条 memory 条目
+- [ ] 写入的 memory 能被 `memory.search` 检索到
+
+---
+
+## 10. 收工验收（今晚汇报时对照）
+
+### 核心里程碑（必须达成）
+- [ ] **尹一帆**：Agent 引擎能跑，至少 1 个 MimoCode skill 能用，多 Agent 并发不冲突
+- [ ] **陈镇鸿**：model 流端到端跑通，Blackboard 跨组权限正确
+- [ ] **杨欣琳**：risk 流人审场景跑通（超阈值 → interrupt → approve → 恢复）
+- [ ] **俞高磊**：完整自研加固套件（死循环/迭代上限/状态指纹/RLHF），至少一种路由机制能跑
+- [ ] **刘炽**：6 个组 schema 冻结 + 至少 3 个组 SKILL.md
+- [ ] **factor/fundamental/options**：3 个组各能跑通（可用 stub）
+- [ ] **Lead**：match_main + gen_schema 原型（factor 组）
 
 ### 质量门槛
-- [ ] 全量测试通过（预计新增 60+ 测试，总数 150+）
+- [ ] **OpenCode 落地验证（硬性）**：所有功能必须在本地 OpenCode 里配置好并跑通，不是写完 Python 测试就算。至少 model/risk 两组能在 OpenCode compose 模式下真的调起 Python tools 完成任务。
+- [ ] 全量测试通过（Day 1-3 累计 ≥80 个测试）
 - [ ] CI 全绿
-- [ ] 无 eval/exec 等安全隐患
-- [ ] 所有 PR 经过 Lead review
+- [ ] 每个交付物有 README 或注释
+
+### 加分项（有余力）
+- [ ] model→risk 跨组流端到端打通
+- [ ] MCP server 可行性验证
+- [ ] Dream 原型能跑
+- [ ] 代码规则 vs AI 路由对比报告
 
 ---
 
-## 9. 依赖关系图（关键路径）
+## 11. 自主发挥的边界
 
-```
-上午：
-  俞高磊 risk_stats ──────┐
-                          ├──→ 杨欣琳 risk flow（依赖统计函数）
-  刘炽 RiskProfile schema ─┘
+**鼓励的**：
+- 查资料、读源码决定技术选型
+- 设计你觉得合理的接口、数据结构
+- 卡 30 分钟就拉群问，不要憋
 
-  尹一帆 chain_flows ──────→ 陈镇鸿 model flow（依赖跨graph触发）
-
-  陈镇鸿 BlackboardService ─→ 杨欣琳 read_model_spec（依赖Blackboard）
-
-下午：
-  三条flow单测完成（2点前）
-        ↓
-  Lead 主持集成联调（4点）
-        ↓
-  model→risk 端到端跑通（收工）
-```
-
-**关键路径**：俞高磊的 risk_stats 必须**上午完成**，否则杨欣琳的 risk flow 卡住。
+**不鼓励的**：
+- 闷头干一整天不说话，最后对不上
+- 改了架构核心设计（如把 LangGraph 换掉）没确认
 
 ---
 
-## 10. 与 Day 2 的工程量对比
+## 12. 今晚汇报（每人 5 分钟）
 
-| 指标 | Day 2 实际 | Day 3 目标 |
-|---|---|---|
-| 新增代码 | ~6,000 行 | ~4,000 行（更聚焦） |
-| 新增测试 | ~30 个 | ~60 个（翻倍） |
-| 跨组集成 | 无 | model→risk |
-| 新增 schema | 0 | RiskProfile |
-| 新增基础设施 | Memory/LangGraph | Blackboard/chain_flows |
-
-**难度提升点**：
-1. Day 2 是单组闭环，Day 3 是跨组协作（接口对齐更难）
-2. HumanGate 的 interrupt→resume 是 LangGraph 最复杂的机制
-3. Blackboard 的持久化 + 权限 + Memory 集成是新的一层
-4. 测试从单元测试为主，转向**集成测试**为主
+1. **功能达成**：用 demo 展示（能跑的代码 > PPT）
+2. **最大坑 + 怎么解决**：技术坑还是协作坑
+3. **明天继续什么**：未完成 / 要改进的
+4. **对架构/文档反馈**：哪里不清楚、哪里有问题
 
 ---
 
-**Day 3 目标一句话**：让两个组通过 Blackboard 对话，让 HumanGate 真正暂停一次 workflow。
+**Day 3 一句话**：证明 Agent 能自主推理、能跨组协作、关键点能人审、长任务不失控，并攻坚核心壁垒（match_main + 动态 Schema）。
+
