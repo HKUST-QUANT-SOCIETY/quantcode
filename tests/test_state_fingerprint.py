@@ -1,7 +1,7 @@
 """Tests for runner.routing.fingerprint — state fingerprinting."""
 from __future__ import annotations
 
-import pytest
+# import pytest
 
 from runner.routing.fingerprint import compute_state_fingerprint
 
