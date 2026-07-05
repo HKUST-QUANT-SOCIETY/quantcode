@@ -1,0 +1,35 @@
+{
+  "factor_name": "pb_roe_combo",
+  "factor_version": "day3-fixture",
+  "evaluation_period": {
+    "start": "2023-01-01",
+    "end": "2025-12-31"
+  },
+  "universe": "CSI1000",
+  "ic_metrics": {
+    "ic_mean": 0.05,
+    "ic_std": 0.08,
+    "ir": 0.625,
+    "t_stat": 2.5,
+    "ic_method": "spearman"
+  },
+  "turnover": {
+    "monthly": 0.5,
+    "annual": 6.0
+  },
+  "decay": {
+    "ic_1d": 0.06,
+    "ic_5d": 0.05,
+    "ic_20d": 0.02
+  },
+  "layered_backtest": {
+    "top_decile_annual_return": 0.12,
+    "bottom_decile_annual_return": -0.02,
+    "long_short_annual_return": 0.14,
+    "long_short_sharpe": 1.1
+  },
+  "verdict": "pass",
+  "eval_run_id": "eval-run-fixture-001",
+  "route_recommendation": "tier3b_satellite",
+  "target_tier": "Tier3B"
+}
