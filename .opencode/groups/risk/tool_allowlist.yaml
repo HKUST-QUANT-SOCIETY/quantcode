@@ -1,0 +1,13 @@
+# risk 组 tool 白名单 — Day 3 俞高磊
+# 由 tools/registry.py::load_group_config 读取
+allowlist:
+  - read_blackboard
+  - calc_risk
+  - generate_risk_profile
+  - check_gate
+  - write_pr_comment
+  # 共享工具
+  - search_memory
+  - read_file
+  - write_file
+  - bash
