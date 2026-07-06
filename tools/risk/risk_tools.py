@@ -4,13 +4,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from schemas import BlackboardScope, ModelSpec
 from schemas.risk_profile import RiskProfile, RiskThresholds
+from tools.github_comments import find_existing_comment, github_request, post_pr_comment
 from tools.risk.statistics_stub import calc_risk_stub
 from tools.utils.dedupe import dedupe_within
 
@@ -21,7 +21,31 @@ _DEDUPED_WRITERS: dict[str, Callable[..., dict[str, Any]]] = {}
 
 
 def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
-    """读取 model_spec（Day3：input_data 或 blackboard 嵌套）。"""
+    """读取 ModelSpec。
+
+    生产路径：通过 BlackboardService 从 PROJECT scope 读取（PR #18 接口）。
+    test/demo fallback：input_data[\"model_spec\"] 或嵌套 blackboard（非生产路径）。
+    """
+    blackboard_key = input_data.get("blackboard_key", "model_spec")
+    project_id = input_data.get("project_id")
+    blackboard_db_path = input_data.get("blackboard_db_path")
+
+    if project_id is not None or blackboard_db_path is not None:
+        from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
+
+        service = BlackboardService(
+            db_path=blackboard_db_path,
+            session_id=project_id or DEFAULT_SESSION_ID,
+            requester_group="risk",
+        )
+        entry = service.get_entry(BlackboardScope.PROJECT, None, blackboard_key)
+        if entry is not None:
+            value = entry.value
+            if isinstance(value, dict) and "model_spec" in value:
+                return {"model_spec": value["model_spec"]}
+            return {"model_spec": value}
+
+    # test/demo fallback — not the production path
     if "model_spec" in input_data:
         return {"model_spec": input_data["model_spec"]}
 
@@ -30,8 +54,9 @@ def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
         return {"model_spec": blackboard["model_spec"]}
 
     raise KeyError(
-        "model_spec not found in input_data['model_spec'] "
-        "or input_data['blackboard']['model_spec']"
+        "model_spec not found: set project_id/blackboard_db_path for BlackboardService, "
+        "or provide input_data['model_spec'] / input_data['blackboard']['model_spec'] "
+        "(test/demo fallback only)"
     )
 
 
@@ -74,7 +99,6 @@ def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, An
 
 
 def _profile_hash(profile: RiskProfile) -> str:
-    """Stable hash for dedupe keys."""
     return hashlib.sha256(profile.model_dump_json().encode()).hexdigest()
 
 
@@ -93,56 +117,8 @@ def _pr_comment_dedupe_key(
     return f"pr_comment:{pr_url}:{head_sha}:{_profile_hash(profile)}"
 
 
-def _github_request(
-    method: str,
-    repo: str,
-    path: str,
-    token: str,
-    payload: dict[str, Any] | None = None,
-) -> Any:
-    api_base = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
-    url = f"{api_base}/repos/{repo}{path}"
-    data = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            body = response.read().decode("utf-8")
-            return json.loads(body) if body else {}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API {method} {url} failed: {exc.code} {detail}") from exc
-
-
 def _risk_comment_marker(head_sha: str, profile: RiskProfile) -> str:
     return f"<!-- quantcode:risk-gate:profile:{head_sha}:{_profile_hash(profile)} -->"
-
-
-def _find_existing_github_comment(
-    repo: str,
-    pr_number: str,
-    token: str,
-    marker: str,
-) -> dict[str, Any] | None:
-    comments = _github_request(
-        "GET",
-        repo,
-        f"/issues/{pr_number}/comments?per_page=100",
-        token,
-    )
-    if not isinstance(comments, list):
-        return None
-
-    for comment in comments:
-        body = str(comment.get("body", ""))
-        if marker in body:
-            return comment
-    return None
 
 
 def _pct(value: float | None) -> str:
@@ -155,12 +131,13 @@ def _status(ok: bool) -> str:
     return "PASS" if ok else "NEEDS REVIEW"
 
 
-def _format_risk_comment(
+def format_risk_comment(
     profile: RiskProfile,
     *,
     pr_number: str,
     head_sha: str,
 ) -> str:
+    """生成 QuantCode Risk Gate Report Markdown（含 dedupe marker）。"""
     thresholds = RiskThresholds()
     breaches = set(profile.breached_thresholds(thresholds))
     verdict = profile.evaluate_verdict(thresholds)
@@ -229,7 +206,9 @@ def _post_github_risk_comment(
     token: str,
 ) -> dict[str, str]:
     marker = _risk_comment_marker(head_sha, profile)
-    existing = _find_existing_github_comment(repo, pr_number, token, marker)
+    body = format_risk_comment(profile, pr_number=pr_number, head_sha=head_sha)
+    # body already contains marker at the end
+    existing = find_existing_comment(repo, pr_number, token, marker)
     if existing is not None:
         return {
             "github_comment_id": str(existing.get("id", "")),
@@ -237,12 +216,12 @@ def _post_github_risk_comment(
             "deduped_by": "github_comment_marker",
         }
 
-    created = _github_request(
+    created = github_request(
         "POST",
         repo,
         f"/issues/{pr_number}/comments",
         token,
-        {"body": _format_risk_comment(profile, pr_number=pr_number, head_sha=head_sha)},
+        {"body": body},
     )
     return {
         "github_comment_id": str(created.get("id", "")),
@@ -278,7 +257,6 @@ def _write_pr_comment_impl(
     github_token: str | None = None,
     post_to_github: bool | None = None,
 ) -> dict[str, Any]:
-    """Write a risk PR comment artifact and optionally post it to GitHub."""
     root = Path(artifacts_root)
     root.mkdir(parents=True, exist_ok=True)
 
@@ -342,11 +320,7 @@ def write_pr_comment(
     github_token: str | None = None,
     post_to_github: bool | None = None,
 ) -> dict[str, Any]:
-    """Write a risk PR comment artifact and optionally post it to GitHub.
-
-    GitHub posting is explicit to avoid accidental comments during local tests.
-    Set ``post_to_github=True`` or ``QUANTCODE_POST_RISK_COMMENT=1`` in CI.
-    """
+    """Write a risk PR comment artifact and optionally post it to GitHub."""
     resolved_url = pr_url or profile.pr_url
     if not resolved_url:
         raise ValueError("pr_url must be provided or set on profile")
@@ -371,3 +345,8 @@ def write_pr_comment(
         github_token=github_token,
         post_to_github=post_to_github,
     )
+
+
+def validate_model_spec(model_spec: dict[str, Any]) -> dict[str, Any]:
+    """校验并规范化 ModelSpec（供 tool registry 使用）。"""
+    return ModelSpec(**model_spec).model_dump(mode="json")

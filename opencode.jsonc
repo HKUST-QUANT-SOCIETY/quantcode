@@ -32,14 +32,13 @@
   // MCP servers（Day 3 尹一帆）
   // quantcode: 暴露 model/risk/factor 等组的量化 tool 给 OpenCode，
   // 入口 quantcode/mcp_server.py（stdin/stdout JSON-RPC）
+  // 切换组：修改 QUANTCODE_GROUP 为 model | risk | factor ...
   "mcp": {
     "quantcode": {
       "type": "local",
       "command": ["python", "-m", "quantcode.mcp_server"],
       "environment": {
-        // 第一版硬编码 model 组；Day 4 改成从 SSH key 注入（架构 §2.1）
         "QUANTCODE_GROUP": "model",
-        // 显式 PYTHONPATH 防止 command 直接调用时找不到 quantcode 包
         "PYTHONPATH": "."
       },
       "enabled": true

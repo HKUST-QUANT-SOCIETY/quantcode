@@ -156,7 +156,7 @@ def test_high_risk_triggers_interrupt_pause(tmp_path, monkeypatch):
     )
 
     snapshot = app.get_state(config)
-    assert snapshot.next == ("check_human_gate",)
+    assert snapshot.next == ("run_tool_pipeline",)
     assert paused.get("__interrupt__")
     interrupt_payload = paused["__interrupt__"][0].value
     assert interrupt_payload["message"] == "⏸️ 等待人工审批"

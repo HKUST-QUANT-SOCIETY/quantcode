@@ -29,6 +29,7 @@ from .human_gate import (
     HumanGate,
     HumanGateDecision,
     HumanGateDecisionAction,
+    HumanGateInterruptPayload,
     HumanGateStatus,
 )
 from .model import ModelRiskMetadata, ModelSpec, ModelType
@@ -51,6 +52,7 @@ __all__ = [
     "HumanGate",
     "HumanGateDecision",
     "HumanGateDecisionAction",
+    "HumanGateInterruptPayload",
     "HumanGateStatus",
     "ModelRiskMetadata",
     "ModelSpec",

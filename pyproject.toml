@@ -17,6 +17,7 @@ dependencies = [
   "jsonschema>=4.20",
   "langgraph>=0.2",
   "langgraph-checkpoint-sqlite>=2.0",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +28,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["runner*", "pipelines*", "tools*", "schemas*", "flows*"]
+include = ["runner*", "pipelines*", "tools*", "schemas*", "flows*", "quantcode*"]
 exclude = ["vendor*", "templates*", "docs*", "tests*"]
 
 [tool.ruff]

@@ -149,7 +149,8 @@ def test_write_pr_comment_posts_formal_github_comment(tmp_path, monkeypatch):
             "html_url": "https://github.com/example/repo/issues/42#issuecomment-12345",
         }
 
-    monkeypatch.setattr("tools.risk.risk_tools._github_request", fake_github_request)
+    monkeypatch.setattr("tools.risk.risk_tools.github_request", fake_github_request)
+    monkeypatch.setattr("tools.risk.risk_tools.find_existing_comment", lambda *a, **k: None)
 
     result = write_pr_comment(
         profile,
@@ -166,11 +167,10 @@ def test_write_pr_comment_posts_formal_github_comment(tmp_path, monkeypatch):
     assert result["comment_id"] == "comment-42-abcdef1"
     assert result["github_comment_id"] == "12345"
     assert result["github_comment_url"].endswith("issuecomment-12345")
-    assert calls[0]["method"] == "GET"
-    assert calls[0]["path"] == "/issues/42/comments?per_page=100"
-    assert calls[1]["method"] == "POST"
-    assert calls[1]["path"] == "/issues/42/comments"
-    body = calls[1]["payload"]["body"]
+    assert len(calls) == 1
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["path"] == "/issues/42/comments"
+    body = calls[0]["payload"]["body"]
     assert "QuantCode Risk Gate Report" in body
     assert "RiskProfile JSON" in body
     assert "<!-- quantcode:risk-gate:profile:abcdef1234567890:" in body

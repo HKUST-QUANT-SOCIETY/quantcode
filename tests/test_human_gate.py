@@ -53,6 +53,14 @@ def test_should_interrupt_normal_profile():
     assert should_interrupt(profile, thresholds, gate=_gate(HumanGateStatus.PENDING)) is False
 
 
+def test_make_gate_id_uses_uuid_suffix():
+    from runner.human_gate import make_gate_id
+
+    gate_id = make_gate_id("risk:risk:gate:demo")
+    assert gate_id.startswith("hg_risk_risk_gate_demo_")
+    assert len(gate_id.split("_")[-1]) == 12
+
+
 def test_should_interrupt_high_risk_profile():
     profile = _profile_from_stub("high_risk")
     thresholds = RiskThresholds()

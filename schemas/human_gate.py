@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,3 +41,15 @@ class HumanGate(BaseModel):
     gate_id: str = Field(min_length=1)
     status: HumanGateStatus
     decision: HumanGateDecision | None = None
+
+
+class HumanGateInterruptPayload(BaseModel):
+    """LangGraph interrupt/resume 时传递的结构化 HumanGate payload（单一真相源）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gate_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    risk_profile: dict[str, Any]
+    reasons: list[str]
+    decision: str | None = None

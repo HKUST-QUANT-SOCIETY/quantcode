@@ -54,6 +54,7 @@ from tools.model._register import (  # noqa: F401  触发 model tool 注册
     write_blackboard_tool,
     trigger_risk_flow_tool,
 )
+import tools.risk._register  # noqa: F401  触发 risk tool 注册
 
 
 # ---------------------------------------------------------------------------

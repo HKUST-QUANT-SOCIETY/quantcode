@@ -1,13 +1,7 @@
 """
-RiskTool Stub — 风控数据 stub，给杨欣琳的 risk 组 Agent 提供测试数据。
+RiskTool Stub — 风控数据 stub，给 risk 组 Agent 提供测试数据。
 
-提供两种场景：
-- normal:    所有风险指标在阈值以内
-- high_risk: 风险指标超阈值
-
-用法：
-    python -m tools.risk_stub normal
-    python -m tools.risk_stub high_risk
+阈值定义权归 schemas.risk_profile.RiskThresholds（PR #17），本 stub 不重复定义常量。
 """
 from __future__ import annotations
 
@@ -16,41 +10,23 @@ import sys
 from datetime import date
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# HumanGate 阈值常量
-# ---------------------------------------------------------------------------
-
-VAR_99_LIMIT = 0.05
-MAX_DRAWDOWN_LIMIT = 0.15
-POSITION_LIMIT_USAGE_LIMIT = 0.8
+from schemas.risk_profile import RiskThresholds
 
 
-# ---------------------------------------------------------------------------
-# 主入口
-# ---------------------------------------------------------------------------
+def _threshold_snapshot() -> dict[str, float]:
+    limits = RiskThresholds()
+    return {
+        "max_drawdown": limits.max_drawdown,
+        "position_limit_usage": limits.position_limit_usage,
+        "tail_risk_var_99": limits.tail_risk_var_99,
+        "correlation_limit": limits.correlation_limit,
+    }
+
 
 def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
-    """
-    返回风控评估数据，输出结构对齐 schemas/risk-profile.schema.json。
-
-    normal 场景：
-        - 所有指标都在阈值以内
-
-    high_risk 场景：
-        - 多个指标超出阈值
-
-    阈值为 HumanGate 常量：
-        - tail_risk_var_99  > VAR_99_LIMIT               → gate triggered
-        - max_drawdown      > MAX_DRAWDOWN_LIMIT          → gate triggered
-        - position_limit_usage > POSITION_LIMIT_USAGE_LIMIT → gate triggered
-    """
+    """返回风控评估数据，输出结构对齐 RiskProfile schema。"""
     today = date.today().isoformat()
-
-    thresholds = {
-        "VAR_99_LIMIT": VAR_99_LIMIT,
-        "MAX_DRAWDOWN_LIMIT": MAX_DRAWDOWN_LIMIT,
-        "POSITION_LIMIT_USAGE_LIMIT": POSITION_LIMIT_USAGE_LIMIT,
-    }
+    thresholds = _threshold_snapshot()
 
     if scenario == "normal":
         return {
@@ -83,13 +59,9 @@ def calc_risk_stub(scenario: Literal["normal", "high_risk"]) -> dict:
     raise ValueError(f"Unknown scenario: {scenario!r}")
 
 
-# ---------------------------------------------------------------------------
-# CLI 入口
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python -m tools.risk_stub <normal|high_risk>", file=sys.stderr)
+        print("Usage: python -m tools.risk.statistics_stub <normal|high_risk>", file=sys.stderr)
         sys.exit(1)
 
     scenario = sys.argv[1]
