@@ -6,7 +6,7 @@
   // Provider 配置由各成员本地 opencode.local.jsonc 提供，不入库
   "provider": {},
 
-  // Plugins
+  // Plugins（opencode config schema 用 plugin 单数）
   "plugin": ["@dietrichgebert/ponytail"],
 
   // 让 OpenCode 递归发现 .opencode/groups/**/SKILL.md
@@ -30,9 +30,9 @@
   },
 
   // MCP servers（Day 3 尹一帆）
-  // quantcode: 暴露 model/risk/factor 等组的量化 tool 给 OpenCode，
+  // quantcode: 暴露 model/risk/factor/options 等组的量化 tool 给 OpenCode，
   // 入口 quantcode/mcp_server.py（stdin/stdout JSON-RPC）
-  // 切换组：修改 QUANTCODE_GROUP 为 model | risk | factor ...
+  // 切换组：修改 QUANTCODE_GROUP 为 model | risk | factor | options ...
   "mcp": {
     "quantcode": {
       "type": "local",
