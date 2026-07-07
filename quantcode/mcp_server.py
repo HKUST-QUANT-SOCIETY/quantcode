@@ -59,6 +59,7 @@ from tools.options._register import (  # noqa: F401  触发 options tool 注册
     calc_greeks_tool,
     run_options_backtest_stub_tool,
 )
+import tools.risk._register  # noqa: F401  触发 risk tool 注册
 
 
 # ---------------------------------------------------------------------------

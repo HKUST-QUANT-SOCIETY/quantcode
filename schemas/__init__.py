@@ -46,6 +46,13 @@ from .fundamental import (
     SectionType,
     TargetType,
 )
+from .human_gate import (
+    HumanGate,
+    HumanGateDecision,
+    HumanGateDecisionAction,
+    HumanGateInterruptPayload,
+    HumanGateStatus,
+)
 from .model import ModelRiskMetadata, ModelSpec, ModelType
 from .options import (
     GreeksProfile,
@@ -103,6 +110,11 @@ __all__ = [
     "ResearchSpec",
     "SectionType",
     "TargetType",
+    "HumanGate",
+    "HumanGateDecision",
+    "HumanGateDecisionAction",
+    "HumanGateInterruptPayload",
+    "HumanGateStatus",
     "RiskGateVerdict",
     "RiskProfile",
     "RiskThresholds",
