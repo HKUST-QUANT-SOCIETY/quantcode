@@ -54,6 +54,11 @@ from tools.model._register import (  # noqa: F401  触发 model tool 注册
     write_blackboard_tool,
     trigger_risk_flow_tool,
 )
+from tools.options._register import (  # noqa: F401  触发 options tool 注册
+    build_vol_surface_tool,
+    calc_greeks_tool,
+    run_options_backtest_stub_tool,
+)
 
 
 # ---------------------------------------------------------------------------

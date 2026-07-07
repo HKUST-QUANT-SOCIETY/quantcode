@@ -25,7 +25,49 @@ from .compose_task import (
     TaskStatus,
     WritePolicy,
 )
+from .factor import (
+    DateRange,
+    DecayMetrics,
+    FactorReport,
+    FactorSpec,
+    FactorVerdict,
+    ICMetrics,
+    ICMethod,
+    LayeredBacktest,
+    TurnoverMetrics,
+)
+from .fundamental import (
+    CorpusType,
+    PITDocument,
+    PITQuery,
+    PITResult,
+    ResearchResult,
+    ResearchSpec,
+    SectionType,
+    TargetType,
+)
 from .model import ModelRiskMetadata, ModelSpec, ModelType
+from .options import (
+    GreeksProfile,
+    GreeksSnapshot,
+    OptionSide,
+    OptionsBacktestReport,
+    OptionsDataSource,
+    OptionsPosition,
+    OptionsPositionLeg,
+    OptionsSpec,
+    OptionsStrategySpec,
+    VolSurfacePoint,
+    VolSurfaceResult,
+)
+from .risk_profile import RiskGateVerdict, RiskProfile, RiskThresholds
+from .strategy import (
+    BacktestSummary,
+    SignalCandidate,
+    StrategyReport,
+    StrategySpec,
+    StrategyVerdict,
+)
 
 __all__ = [
     "BlackboardEntry",
@@ -44,22 +86,6 @@ __all__ = [
     "ModelRiskMetadata",
     "ModelSpec",
     "ModelType",
-]
-
-# T4 factor schemas (肖骥超).
-from .factor import (  # noqa: E402
-    DateRange,
-    DecayMetrics,
-    FactorReport,
-    FactorSpec,
-    FactorVerdict,
-    ICMetrics,
-    ICMethod,
-    LayeredBacktest,
-    TurnoverMetrics,
-)
-
-__all__.extend([
     "DateRange",
     "DecayMetrics",
     "FactorReport",
@@ -69,4 +95,31 @@ __all__.extend([
     "ICMethod",
     "LayeredBacktest",
     "TurnoverMetrics",
-])
+    "CorpusType",
+    "PITDocument",
+    "PITQuery",
+    "PITResult",
+    "ResearchResult",
+    "ResearchSpec",
+    "SectionType",
+    "TargetType",
+    "RiskGateVerdict",
+    "RiskProfile",
+    "RiskThresholds",
+    "OptionSide",
+    "OptionsDataSource",
+    "OptionsSpec",
+    "VolSurfacePoint",
+    "VolSurfaceResult",
+    "OptionsPositionLeg",
+    "OptionsPosition",
+    "GreeksSnapshot",
+    "GreeksProfile",
+    "OptionsStrategySpec",
+    "OptionsBacktestReport",
+    "SignalCandidate",
+    "StrategySpec",
+    "BacktestSummary",
+    "StrategyReport",
+    "StrategyVerdict",
+]
