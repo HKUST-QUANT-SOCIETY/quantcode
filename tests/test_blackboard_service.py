@@ -1,3 +1,4 @@
+"""Tests for the persistent Blackboard service."""
 from __future__ import annotations
 
 import pytest
