@@ -5,12 +5,11 @@ group: model
 owner: 陈镇鸿
 pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
 tools:
-  - rag_search
-  - paper_extract
-  - github_pr_create
-  - cross_team_notify
-  - memory_read
-  - memory_write
+  - read_pr
+  - extract_metadata
+  - generate_model_spec
+  - write_blackboard
+  - trigger_risk_flow
 flows:
   - model:lit-review
   - model:pr-submit
@@ -32,15 +31,17 @@ schema_out: schemas.model.ModelSpec
 - 任务涉及：文献整理、模型设计、训练实现、提 PR、触发风控
 - 下游需要结构化 `ModelSpec`（PR body 或 Blackboard）
 
-## 可用 tool
+## 可用 tool（Day 3 ToolRegistry）
 
 | Tool | 用途 | 注意 |
 |------|------|------|
-| `rag_search` | 检索论文、内部笔记、历史模型文档 | 基本面 PIT 语料走 fundamental 组 skill |
-| `paper_extract` | PDF / arXiv 结构化摘要 | 输出写入 GROUP `MEMORY.md` |
-| `github_pr_create` | 创建 PR | **必须** `@dedupe_within`，key=`{commit_sha}:{sha256(pr_body)}` |
-| `cross_team_notify` | 通知 risk 组有新 PR | key=`model:risk:{pr_url}:{commit_sha}`，300s 去重 |
-| `memory_read` / `memory_write` | 读写组级 MEMORY | 私密细节写 GROUP；跨组摘要写 PROJECT `shared.*` |
+| `read_pr` | 读取 PR diff | mock 实现，返回 diff 文本 |
+| `extract_metadata` | 从 diff 提取元数据 | 输出 ticker / factor 等 |
+| `generate_model_spec` | 生成 `ModelSpec` | 必须过 Pydantic 校验 |
+| `write_blackboard` | 写入 Blackboard | GROUP / PROJECT scope |
+| `trigger_risk_flow` | 触发 risk 组 Agent | 跨组 handoff |
+
+加载路径：`.opencode/groups/model/tool_allowlist.yaml`
 
 ## Compose 子 skill（按依赖顺序）
 
@@ -68,20 +69,32 @@ model:cross-handoff→ 显式 handoff 给 risk:gate（可与 pr-submit 合并）
 
 PR body 中附 fenced JSON，标题 `ModelSpec`。
 
+## AgentRunner 调用示例
+
+```python
+from runner.agent_engine import AgentRunner
+
+runner = AgentRunner(group="model", model=llm)
+result = runner.run(
+    task="处理 PR #123 并 handoff 风控",
+    skill_name="model-pr-submit",  # 或本组级 skill: skill_name="model"
+)
+```
+
 ## 工作流 tips
 
 1. **先 schema 后代码**：`ModelSpec` 校验不过不要创建 PR。
 2. **风控元数据不能空**：`risk_metadata` 是 risk 组唯一可信的结构化输入；缺字段用 `notes` 说明原因。
 3. **Blackboard 分工**：训练细节、超参 sweep 写 GROUP scope；待审 PR 列表写 PROJECT `shared.pending_risk_reviews`。
-4. **副作用去重**：同一 commit + 同一 PR body 5 分钟内不重复 `github_pr_create` / `cross_team_notify`。
+4. **副作用去重**：同一 commit + 同一 PR body 5 分钟内不重复写 Blackboard / 触发 risk。
 5. **HumanGate**：写主线、发外部通知、超 API 预算时暂停等人审批（Pattern 5）。
 
 ## 验收标准（组级）
 
 - [ ] `ModelSpec` 通过 Pydantic 校验
-- [ ] PR 创建成功且 body 含 JSON block
-- [ ] risk 组 `risk-gate` 被触发（或 `shared.pending_risk_reviews` 有记录）
-- [ ] 副作用 tool 在 dedupe 窗口内不重复执行
+- [ ] Blackboard 写入成功
+- [ ] risk 组 flow 被触发（或 `shared.pending_risk_reviews` 有记录）
+- [ ] AgentRunner 能加载 skill 并完成 ≥3 步 tool 调用
 
 ## 跨组接口
 
