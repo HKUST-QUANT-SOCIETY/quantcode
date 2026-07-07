@@ -3,14 +3,14 @@
 Day 3 评审后改造（leader 指令 2）：
 - tools/model/ 内的 mock 实现不再完善；底座（ToolDef/Registry/MCP）保持
 - 真持久化交给从 PR #18 (shawchen5242) cherry-pick 的 runner/blackboard.py
-- 写入双 scope：PROJECT（跨组可见 handoff）+ GROUP（同组私有持久化）
+- 写入 PROJECT scope：跨组可见 handoff。GROUP 私有持久化由需要私有状态的
+  group tool 另行显式写入，model handoff 不再无条件双写。
 
 写入流程：
 1. 用 ctx 里的 thread_id 当 session_id，group 当 requester_group
 2. 构造 BlackboardService（默认 db_path = .quantcode/blackboard.db）
 3. 调 write_value 写 PROJECT scope（cross-group 共享）
-4. 再调 write_value 写 GROUP scope（owner group 私有）
-5. 返回 BlackboardEntry.model_dump() 两份
+4. 返回 BlackboardEntry.model_dump()
 
 注：BlackboardEntry.written_by_task_id 受 schemas.compose_task 的 TASK_ID_PATTERN
 约束（``^T\\d+(\\.\\d+){0,4}$``）。ReAct loop 暂无真正的 task_id，这里从 thread_id
@@ -24,7 +24,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from runner.blackboard import BlackboardService
-from schemas import BlackboardEntry, BlackboardScope, GroupName
+from schemas import BlackboardEntry, BlackboardScope, GroupName, WritePolicy
 from tools.registry import ToolDef
 from tools.utils.dedupe import dedupe_within
 
@@ -49,7 +49,7 @@ def _synthesize_task_id(thread_id: str) -> str:
 
 
 def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
-    """写一个 dict 值到 blackboard 的 PROJECT + GROUP 双 scope。
+    """写一个 dict 值到 blackboard 的 PROJECT scope。
 
     读自 ctx：
     - ``thread_id`` (或 ``session_id``) — 会话 ID
@@ -59,11 +59,10 @@ def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
 
     构造 BlackboardService，调 ``write_value``：
     - PROJECT scope：key 前缀 ``shared.model_entries.``，跨组可读
-    - GROUP scope：key 原样，owner group 私有
 
     返回：
-        ``{"project_entry": {...}, "group_entry": {...}}`` 两份 BlackboardEntry
-        的 dict 形式（含 scope/group/key/value/version/created_at 等）。
+        ``{"project_entry": {...}}``，即 BlackboardEntry 的 dict 形式
+        （含 scope/key/value/version/created_at 等）。
     """
     thread_id = (
         ctx.get("thread_id")
@@ -88,20 +87,12 @@ def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
         scope=BlackboardScope.PROJECT,
         key=f"shared.model_entries.{args.key}",
         value=args.value,
+        write_policy=WritePolicy.GROUP_APPEND,
         written_by_task_id=task_id,
         written_by_group=group,
-    )
-    group_entry: BlackboardEntry = service.write_value(
-        scope=BlackboardScope.GROUP,
-        key=args.key,
-        value=args.value,
-        written_by_task_id=task_id,
-        written_by_group=group,
-        group=group,
     )
     return {
         "project_entry": project_entry.model_dump(mode="json"),
-        "group_entry": group_entry.model_dump(mode="json"),
     }
 
 
@@ -118,7 +109,7 @@ write_blackboard_tool = ToolDef(
     description=(
         "Write a value dict to the blackboard under the given key. "
         "Persists via BlackboardService (cherry-picked from PR #18 shawchen5242) "
-        "to both PROJECT (cross-group handoff) and GROUP (owner-group private) scopes."
+        "to PROJECT scope for cross-group handoff."
     ),
     schema=WriteBlackboardArgs,
     execute=write_blackboard_wrapped_execute,

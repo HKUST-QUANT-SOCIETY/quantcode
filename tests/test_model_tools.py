@@ -1,4 +1,4 @@
-"""Tests for the model group's 5 mock tools — Day 3 尹一帆。
+"""Tests for the model group's 5 ToolDef tools — Day 3 尹一帆。
 
 覆盖：
 - import 副作用 ``tools.model._register`` 把 5 个 tool 全部注册进全局 registry
@@ -9,14 +9,17 @@
 """
 from __future__ import annotations
 
-import re
+import json
+from pathlib import Path
 
 import pytest
 
+from runner.blackboard import BlackboardService
+from schemas import BlackboardScope, GroupName, WritePolicy
 from tools.registry import registry
 
 # 让 ``tools.model._register`` 的 import 副作用把所有 5 个 tool 注册进去
-import tools.model._register  # noqa: F401
+import tools.model._register as model_register
 from tools.model.extract_metadata import extract_metadata_tool
 from tools.model.generate_model_spec import generate_model_spec_tool
 from tools.model.read_pr import read_pr_tool
@@ -32,6 +35,15 @@ EXPECTED_TOOL_IDS = {
     "trigger_risk_flow",
 }
 
+VALID_SESSION = "S0123456789abcdef"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+SAMPLE_PR = FIXTURES_DIR / "sample_model_pr" / "README.md"
+SAMPLE_MODEL_SPEC = FIXTURES_DIR / "sample_model" / "model_spec.json"
+
+
+def _sample_model_spec() -> dict:
+    return json.loads(SAMPLE_MODEL_SPEC.read_text(encoding="utf-8"))
+
 
 @pytest.fixture(autouse=True)
 def _ensure_model_tools_registered():
@@ -42,9 +54,7 @@ def _ensure_model_tools_registered():
     """
     import importlib
 
-    import tools.model._register  # noqa: F401
-
-    importlib.reload(tools.model._register)
+    importlib.reload(model_register)
     yield
 
 
@@ -59,7 +69,7 @@ def test_model_tools_all_registered():
 
 
 def test_each_tool_def_has_required_fields():
-    """每个 tool 的 ToolDef 应当填充 id/description/schema/execute 四个必填字段。"""
+    """每个 tool 的 ToolDef 应当填充 id/description/schema/execute。"""
     for tool in (
         read_pr_tool,
         extract_metadata_tool,
@@ -78,20 +88,81 @@ def test_each_tool_def_has_required_fields():
 # ---------------------------------------------------------------------------
 
 
-def test_read_pr_returns_mock_diff():
-    result = registry.call("read_pr", {"pr_number": 42})
-    assert result["pr_number"] == 42
-    assert "fake line 42" in result["diff"]
-    assert result["title"] == "[MOCK] PR #42"
-    assert result["author"] == "mock-user"
+def test_read_pr_reads_model_pr_fixture():
+    result = registry.call("read_pr", {"pr_path": str(SAMPLE_PR)})
+    assert result["source"] == str(SAMPLE_PR)
+    assert "## ModelSpec" in result["body"]
+    assert result["pr_url"] is None
 
 
-def test_read_pr_validates_pr_number_type():
+def test_read_pr_fetches_github_pr(monkeypatch):
+    from tools.model import read_pr as read_pr_module
+
+    model_spec = _sample_model_spec()
+    model_spec.pop("commit_sha")
+    body = "## ModelSpec\n\n```json\n" + json.dumps(model_spec, indent=2) + "\n```"
+    head_sha = "abcdef1234567890abcdef1234567890abcdef12"
+    calls = []
+
+    def fake_github_request(method, repo, path, token, payload=None):
+        calls.append((method, repo, path, token, payload))
+        assert method == "GET"
+        assert repo == "HKUST-QUANT-SOCIETY/opencode"
+        assert token == "test-token"
+        if path == "/pulls/7":
+            return {
+                "html_url": "https://github.com/HKUST-QUANT-SOCIETY/opencode/pull/7",
+                "title": "Add pb roe ranker",
+                "body": body,
+                "head": {"sha": head_sha},
+                "base": {"sha": "1234567890abcdef1234567890abcdef12345678"},
+                "user": {"login": "chen-zhenhong"},
+            }
+        if path == "/pulls/7/files?per_page=100":
+            return [
+                {
+                    "filename": "models/pb_roe_ranker.py",
+                    "status": "modified",
+                    "additions": 12,
+                    "deletions": 2,
+                    "changes": 14,
+                    "patch": "@@ -1,2 +1,4 @@\n+MODEL_SPEC = {...}",
+                }
+            ]
+        raise AssertionError(f"unexpected GitHub path: {path}")
+
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "HKUST-QUANT-SOCIETY/opencode")
+    monkeypatch.setattr(read_pr_module, "github_request", fake_github_request)
+
+    result = registry.call("read_pr", {"pr_number": 7})
+
+    assert result["source"] == "github:HKUST-QUANT-SOCIETY/opencode#7"
+    assert result["pr_number"] == 7
+    assert result["pr_url"] == "https://github.com/HKUST-QUANT-SOCIETY/opencode/pull/7"
+    assert result["head_sha"] == head_sha
+    assert result["author"] == "chen-zhenhong"
+    assert "models/pb_roe_ranker.py" in result["diff"]
+    assert result["files"][0]["additions"] == 12
+    assert [call[2] for call in calls] == [
+        "/pulls/7",
+        "/pulls/7/files?per_page=100",
+    ]
+
+    metadata = registry.call("extract_metadata", {"pr": result})
+    assert metadata["pr_url"] == result["pr_url"]
+    assert metadata["commit_sha"] == head_sha
+    model_spec = registry.call("generate_model_spec", {"metadata": metadata})
+    assert model_spec["model_name"] == "pb_roe_ranker"
+    assert model_spec["commit_sha"] == head_sha
+
+
+def test_read_pr_validates_pr_path_type():
     with pytest.raises(ValueError, match="Invalid arguments"):
-        registry.call("read_pr", {"pr_number": "not-an-int"})
+        registry.call("read_pr", {"pr_path": 123})
 
 
-def test_read_pr_requires_pr_number():
+def test_read_pr_requires_source():
     with pytest.raises(ValueError, match="Invalid arguments"):
         registry.call("read_pr", {})
 
@@ -101,31 +172,16 @@ def test_read_pr_requires_pr_number():
 # ---------------------------------------------------------------------------
 
 
-def test_extract_metadata_parses_known_fields():
-    diff = (
-        "TICKER: AAPL\n"
-        "FACTOR_NAME: momentum_20d\n"
-        "FACTOR_TYPE: alpha\n"
-        "DATE_RANGE: 2021-01-01..2023-12-31\n"
-    )
-    result = registry.call("extract_metadata", {"diff": diff})
-    assert result == {
-        "ticker": "AAPL",
-        "factor_name": "momentum_20d",
-        "factor_type": "alpha",
-        "date_range": {"start": "2021-01-01", "end": "2023-12-31"},
-    }
+def test_extract_metadata_reads_model_spec_json_from_fixture():
+    pr = registry.call("read_pr", {"pr_path": str(SAMPLE_PR)})
+    result = registry.call("extract_metadata", {"pr": pr})
+    assert result["model_name"] == "pb_roe_ranker"
+    assert result["model_type"] == "boosting"
+    assert result["commit_sha"] == "abcdef1"
+    assert result["risk_metadata"]["universe"] == "CSI1000"
 
 
-def test_extract_metadata_defaults_for_missing_fields():
-    result = registry.call("extract_metadata", {"diff": "no markers here"})
-    assert result["ticker"] == "UNKNOWN"
-    assert result["factor_name"] == "unknown_factor"
-    assert result["factor_type"] == "alpha"
-    assert result["date_range"] == {"start": "2020-01-01", "end": "2024-12-31"}
-
-
-def test_extract_metadata_requires_diff():
+def test_extract_metadata_requires_source():
     with pytest.raises(ValueError, match="Invalid arguments"):
         registry.call("extract_metadata", {})
 
@@ -135,31 +191,20 @@ def test_extract_metadata_requires_diff():
 # ---------------------------------------------------------------------------
 
 
-def test_generate_model_spec_returns_expected_shape():
-    metadata = {
-        "ticker": "AAPL",
-        "factor_name": "momentum_20d",
-        "factor_type": "alpha",
-        "date_range": {"start": "2022-01-01", "end": "2024-06-30"},
-    }
+def test_generate_model_spec_validates_day1_schema():
+    pr = registry.call("read_pr", {"pr_path": str(SAMPLE_PR)})
+    metadata = registry.call("extract_metadata", {"pr": pr})
     result = registry.call("generate_model_spec", {"metadata": metadata})
-    assert result["model_type"] == "lightgbm"
-    assert result["training_window"] == {"start": "2022-01-01", "end": "2024-06-30"}
-    assert isinstance(result["model_id"], str) and result["model_id"].startswith("model-")
-    # parameters 应是个 dict
-    assert isinstance(result["parameters"], dict) and result["parameters"]
+    assert result["model_name"] == "pb_roe_ranker"
+    assert result["model_type"] == "boosting"
+    assert result["training_data_start"] == "2021-01-01"
+    assert result["training_data_end"] == "2023-12-31"
+    assert result["as_of_date"] == "2024-03-15"
 
 
-def test_generate_model_spec_is_deterministic_for_same_metadata():
-    metadata = {
-        "ticker": "MSFT",
-        "factor_name": "value_composite",
-        "factor_type": "risk",
-        "date_range": {"start": "2020-01-01", "end": "2024-12-31"},
-    }
-    a = registry.call("generate_model_spec", {"metadata": metadata})
-    b = registry.call("generate_model_spec", {"metadata": metadata})
-    assert a["model_id"] == b["model_id"]
+def test_generate_model_spec_rejects_invalid_schema():
+    with pytest.raises(Exception, match="training_data_start"):
+        registry.call("generate_model_spec", {"metadata": {"model_name": "missing_fields"}})
 
 
 def test_generate_model_spec_requires_metadata():
@@ -172,10 +217,8 @@ def test_generate_model_spec_requires_metadata():
 # ---------------------------------------------------------------------------
 
 
-def test_write_blackboard_creates_project_and_group_entries(tmp_path, monkeypatch):
-    """Day 3 评审修复（leader 指令 2）：write_blackboard 改写为调 BlackboardService，
-    写入 PROJECT（跨组共享）+ GROUP（owner private）双 scope。
-    """
+def test_write_blackboard_creates_project_entry(tmp_path):
+    """write_blackboard 写入 PROJECT scope，供 risk 组跨组读取。"""
     db_path = tmp_path / "blackboard.sqlite"
     from tools.model import write_blackboard as wb_module
 
@@ -188,22 +231,22 @@ def test_write_blackboard_creates_project_and_group_entries(tmp_path, monkeypatc
         "blackboard_db_path": str(db_path),
     }
     result = raw_execute(args, ctx)
-
-    # 双 scope 都有 entry
     assert "project_entry" in result
-    assert "group_entry" in result
     assert result["project_entry"]["scope"] == "project"
     assert result["project_entry"]["key"] == "shared.model_entries.model_spec_1"
     assert result["project_entry"]["value"] == {"model_id": "m1"}
-
-    assert result["group_entry"]["scope"] == "group"
-    assert result["group_entry"]["key"] == "model_spec_1"
-    assert result["group_entry"]["value"] == {"model_id": "m1"}
-    assert result["group_entry"]["group"] == "model"
-
-    # 都是 v=1 (新写)
     assert result["project_entry"]["version"] == 1
-    assert result["group_entry"]["version"] == 1
+
+    risk_board = BlackboardService(
+        db_path,
+        session_id="model-agent-1700000000",
+        requester_group=GroupName.RISK,
+    )
+    assert risk_board.get_entry(
+        BlackboardScope.PROJECT,
+        None,
+        "shared.model_entries.model_spec_1",
+    ) is not None
 
 
 def test_write_blackboard_increments_version_on_overwrite(tmp_path):
@@ -227,9 +270,9 @@ def test_write_blackboard_increments_version_on_overwrite(tmp_path):
         wb_module.WriteBlackboardArgs(key="same", value={"v": 2}), ctx=ctx
     )
 
-    assert first["group_entry"]["version"] == 1
-    assert second["group_entry"]["version"] == 2
-    assert second["group_entry"]["value"] == {"v": 2}
+    assert first["project_entry"]["version"] == 1
+    assert second["project_entry"]["version"] == 2
+    assert second["project_entry"]["value"] == {"v": 2}
 
 
 def test_write_blackboard_dedupes_within_window(tmp_path):
@@ -243,7 +286,11 @@ def test_write_blackboard_dedupes_within_window(tmp_path):
         db_path=db_path,
     )(wb_module.write_blackboard_execute)
 
-    ctx = {"thread_id": "model-agent-1700000099", "group": "model"}
+    ctx = {
+        "thread_id": "model-agent-1700000099",
+        "group": "model",
+        "blackboard_db_path": str(tmp_path / "blackboard.sqlite"),
+    }
     first = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 1}), ctx=ctx)
     second = fresh(wb_module.WriteBlackboardArgs(key="dup_key", value={"v": 2}), ctx=ctx)
 
@@ -308,22 +355,14 @@ def test_write_blackboard_via_registry_call_chain(monkeypatch, tmp_path):
     db_path = tmp_path / "chain_blackboard.sqlite"
     dedupe_db = tmp_path / "chain_dedupe.sqlite"
 
-    # 把 blackboard db 路径注入 ctx
-    monkeypatch.setattr(
-        "tools.model.write_blackboard.write_blackboard_execute",
-        __import__("tools.model.write_blackboard", fromlist=["write_blackboard_execute"]).write_blackboard_execute,
-    )
-    # 重绑 dedupe DB（写到 tmp_path，避免污染 repo）
     from tools.model import write_blackboard as wb_module
-    import tools.utils.dedupe as dedupe_module
 
-    original_factory = dedupe_module.dedupe_within
-
-    def _isolated_dedupe(seconds, key, **kwargs):
-        kwargs.setdefault("db_path", dedupe_db)
-        return original_factory(seconds, key, **kwargs)
-
-    monkeypatch.setattr(wb_module, "dedupe_within", _isolated_dedupe)
+    fresh_execute = wb_module.dedupe_within(
+        seconds=300,
+        key=lambda args, ctx: f"{ctx.get('thread_id', 'default')}::{args.key}",
+        db_path=dedupe_db,
+    )(wb_module.write_blackboard_execute)
+    monkeypatch.setattr(wb_module.write_blackboard_tool, "execute", fresh_execute)
 
     ctx = {
         "thread_id": "model-agent-1700111111",
@@ -338,9 +377,9 @@ def test_write_blackboard_via_registry_call_chain(monkeypatch, tmp_path):
         ctx=ctx,
     )
     assert "project_entry" in result1
-    assert "group_entry" in result1
-    assert result1["group_entry"]["value"] == {"v": "first"}
-    assert result1["group_entry"]["version"] == 1
+    assert "group_entry" not in result1
+    assert result1["project_entry"]["value"] == {"v": "first"}
+    assert result1["project_entry"]["version"] == 1
 
     # 2. 第二次调用同 key（在 dedupe 窗口内）—— 应走 wrapped_execute 缓存
     #    返回 *cached* 上一次结果（value 不变）
@@ -349,11 +388,10 @@ def test_write_blackboard_via_registry_call_chain(monkeypatch, tmp_path):
         {"key": "chain_test_key", "value": {"v": "second"}},
         ctx=ctx,
     )
-    assert result2["group_entry"]["value"] == {"v": "first"}, (
+    assert result2["project_entry"]["value"] == {"v": "first"}, (
         "dedupe_within 在 300s 窗口内应短路，第二次 value 不该更新到 v=second"
     )
-    # 同时验证 SQLite 中 GROUP entry 没被改 — version 应仍为 1
-    assert result2["group_entry"]["version"] == 1
+    assert result2["project_entry"]["version"] == 1
 
     # 3. schema 校验：缺 key 应被 registry 转成 ValueError
     with pytest.raises(ValueError, match="Invalid arguments"):
@@ -365,22 +403,61 @@ def test_write_blackboard_via_registry_call_chain(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_trigger_risk_flow_returns_flow_id_format():
+def test_trigger_risk_flow_writes_project_queue(tmp_path):
+    db_path = tmp_path / "risk_queue.sqlite"
+    from tools.model import write_blackboard as wb_module
+
+    wb_module.write_blackboard_execute(
+        wb_module.WriteBlackboardArgs(
+            key="model_spec_1",
+            value={
+                "model_name": "pb_roe_ranker",
+                "commit_sha": "abcdef1",
+                "pr_url": None,
+            },
+        ),
+        ctx={
+            "thread_id": VALID_SESSION,
+            "group": "model",
+            "blackboard_db_path": str(db_path),
+        },
+    )
+
     raw_execute = trigger_risk_flow_tool.execute
     trigger_risk_flow_tool.execute = raw_execute.__wrapped__
     try:
         result = registry.call(
-            "trigger_risk_flow", {"blackboard_key": "model_spec_1"}
+            "trigger_risk_flow",
+            {"blackboard_key": "shared.model_entries.model_spec_1"},
+            ctx={
+                "thread_id": VALID_SESSION,
+                "group": "model",
+                "blackboard_db_path": str(db_path),
+            },
         )
     finally:
         trigger_risk_flow_tool.execute = raw_execute
 
-    assert re.fullmatch(r"risk-flow-[0-9a-f]{8}", result["flow_id"])
-    assert isinstance(result["triggered_at"], str)
+    assert result["risk_queue_key"] == "shared.pending_risk_reviews"
+    assert result["review_id"] == "abcdef1"
+    assert result["review"]["to_group"] == "risk"
+
+    risk_board = BlackboardService(
+        db_path,
+        session_id=VALID_SESSION,
+        requester_group=GroupName.RISK,
+    )
+    queue = risk_board.get_entry(
+        BlackboardScope.PROJECT,
+        None,
+        "shared.pending_risk_reviews",
+    )
+    assert queue is not None
+    assert "abcdef1" in queue.value["reviews"]
 
 
 def test_trigger_risk_flow_dedupes_within_window(tmp_path):
-    """同一 blackboard_key 在 600 秒窗口内多次触发应返回同一 flow_id。"""
+    """同一 blackboard_key 在 600 秒窗口内多次触发应返回同一 queue 写入结果。"""
     from tools.model import trigger_risk_flow as rf_module
 
     db_path = tmp_path / "dedupe.sqlite"
@@ -390,16 +467,134 @@ def test_trigger_risk_flow_dedupes_within_window(tmp_path):
         db_path=db_path,
     )(rf_module.trigger_risk_flow_execute)
 
+    ctx = {
+        "thread_id": VALID_SESSION,
+        "group": "model",
+        "blackboard_db_path": str(tmp_path / "blackboard.sqlite"),
+    }
     a = fresh(
-        rf_module.TriggerRiskFlowArgs(blackboard_key="same_key"), ctx={}
+        rf_module.TriggerRiskFlowArgs(blackboard_key="same_key"), ctx=ctx
     )
     b = fresh(
-        rf_module.TriggerRiskFlowArgs(blackboard_key="same_key"), ctx={}
+        rf_module.TriggerRiskFlowArgs(blackboard_key="same_key"), ctx=ctx
     )
     assert a == b
-    assert re.fullmatch(r"risk-flow-[0-9a-f]{8}", a["flow_id"])
+    assert a["risk_queue_key"] == "shared.pending_risk_reviews"
 
 
 def test_trigger_risk_flow_requires_blackboard_key():
     with pytest.raises(ValueError, match="Invalid arguments"):
         registry.call("trigger_risk_flow", {})
+
+
+# ---------------------------------------------------------------------------
+# model → risk cross-group flow
+# ---------------------------------------------------------------------------
+
+
+def test_blackboard_project_scope_visible_and_group_scope_hidden(tmp_path):
+    db_path = tmp_path / "permission.sqlite"
+    model_board = BlackboardService(
+        db_path,
+        session_id=VALID_SESSION,
+        requester_group=GroupName.MODEL,
+    )
+    model_spec = _sample_model_spec()
+    model_board.write_value(
+        scope=BlackboardScope.PROJECT,
+        key="shared.model_entries.visible_spec",
+        value=model_spec,
+        write_policy=WritePolicy.GROUP_APPEND,
+        written_by_task_id="T1.1",
+        written_by_group=GroupName.MODEL,
+    )
+    model_board.write_value(
+        scope=BlackboardScope.GROUP,
+        key="private_spec",
+        value=model_spec,
+        group=GroupName.MODEL,
+        written_by_task_id="T1.2",
+        written_by_group=GroupName.MODEL,
+    )
+
+    risk_board = BlackboardService(
+        db_path,
+        session_id=VALID_SESSION,
+        requester_group=GroupName.RISK,
+    )
+    assert risk_board.get_entry(
+        BlackboardScope.PROJECT,
+        None,
+        "shared.model_entries.visible_spec",
+    ) is not None
+    assert risk_board.get_entry(
+        BlackboardScope.GROUP,
+        GroupName.MODEL,
+        "private_spec",
+    ) is None
+
+
+def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("langgraph")
+    pytest.importorskip("langgraph.checkpoint.sqlite")
+
+    import tools.risk._register  # noqa: F401
+    from runner.compose_executor import execute_compose_flow, unregister_flow
+    from runner.langgraph_base import clear_checkpointer_cache
+    from runner.risk_agent import register_risk_gate_flow
+    from tools.model import trigger_risk_flow as rf_module
+    from tools.model import write_blackboard as wb_module
+    from tools.risk.risk_tools import clear_write_pr_comment_dedupe_cache
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "model_to_risk.sqlite"
+    pr = registry.call("read_pr", {"pr_path": str(SAMPLE_PR)})
+    metadata = registry.call("extract_metadata", {"pr": pr})
+    metadata["pr_url"] = "https://github.com/HKUST-QUANT-SOCIETY/opencode/pull/7"
+    model_spec = registry.call("generate_model_spec", {"metadata": metadata})
+    ctx = {
+        "thread_id": VALID_SESSION,
+        "group": "model",
+        "blackboard_db_path": str(db_path),
+    }
+    write_result = wb_module.write_blackboard_execute(
+        wb_module.WriteBlackboardArgs(key="model_spec_7", value=model_spec),
+        ctx=ctx,
+    )
+    blackboard_key = write_result["project_entry"]["key"]
+
+    trigger_result = rf_module.trigger_risk_flow_execute(
+        rf_module.TriggerRiskFlowArgs(blackboard_key=blackboard_key),
+        ctx=ctx,
+    )
+    assert trigger_result["review"]["status"] == "pending"
+    assert trigger_result["review"]["to_group"] == "risk"
+    assert trigger_result["review"]["blackboard_key"] == blackboard_key
+
+    try:
+        register_risk_gate_flow(checkpoint_db=tmp_path / "checkpoints.db")
+        result = execute_compose_flow(
+            group="risk",
+            flow_name="risk:gate",
+            input_data={
+                "scenario": "normal",
+                "project_id": VALID_SESSION,
+                "blackboard_db_path": str(db_path),
+                "blackboard_key": blackboard_key,
+                "pr_number": "7",
+                "head_sha": model_spec["commit_sha"],
+                "pr_url": model_spec["pr_url"],
+                "dedupe_db_path": str(tmp_path / "dedupe.sqlite"),
+                "artifacts_root": str(tmp_path / "pr-comments"),
+            },
+            thread_id="risk-model-to-risk-test",
+        )
+    finally:
+        unregister_flow("risk", "risk:gate")
+        clear_checkpointer_cache()
+        clear_write_pr_comment_dedupe_cache()
+
+    assert result["output_data"]["status"] == "completed"
+    assert result["output_data"]["risk_profile"]["strategy_id"] == "pb_roe_ranker"
+    assert result["output_data"]["pr_comment"] is not None
+    assert result["output_data"]["acceptance"]["verdict"] == "pass"
