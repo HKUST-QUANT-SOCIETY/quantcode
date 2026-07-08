@@ -1,18 +1,18 @@
-"""StateGraph 节点函数 — Day 3 尹一帆。
+"""StateGraph 节点函数 — Day 3 尹一帆 + Day 5 RLHF 重构。
 
-5 个节点函数（对应架构 §3.1 / §3.2）：
+节点函数（对应架构 §3.1 / §3.2）：
 
-| 节点                 | 类型        | 职责                                                |
-|----------------------|-------------|-----------------------------------------------------|
-| ``llm_node``         | 普通 node   | 调 LLM，返回 AIMessage（带 tool_calls 或 final）    |
-| ``tool_node``        | 普通 node   | 执行 tool_calls，返回 ToolMessage 列表              |
-| ``rlhf_collect_node``| 普通 node   | 记录 (state, action, reward) 到 RLHFCollector       |
-| ``should_continue``  | 条件边函数  | 路由: "tool" / "end" / "max_iter"                   |
-| ``post_tool_check``  | 条件边函数  | 路由: "rlhf" / "loop" / "state_loop"                |
+| 节点                    | 类型        | 职责                                                |
+|-------------------------|-------------|-----------------------------------------------------|
+| ``llm_node``            | 普通 node   | 调 LLM，返回 AIMessage（带 tool_calls 或 final）    |
+| ``tool_node``           | 普通 node   | 执行 tool_calls，返回 ToolMessage 列表              |
+| ``rlhf_collect_node``   | 普通 node   | 记录 RLHF 日志 — Day 5 重构：改用新格式 make_rlhf_entry() |
+| ``make_routing_edge``   | 条件边函数  | llm 后轻量路由: "continue" / "end"                  |
+| ``make_tool_routing_edge`` | 条件边   | tool 后路由: "rlhf" / "max_iter" / "human_gate" / "end" |
 
 设计要点：
 - 每个节点函数都是纯函数工厂（不持有状态），依赖通过闭包注入
-- 依赖（model / tools / registry / rlhf_collector / loop_detector）由 ``AgentRunner`` 接线
+- 依赖（model / tools / registry；rlhf_collector 已弃用仅保留兼容）由 ``AgentRunner`` 接线
 - tools 通过 ``make_llm_node(model, tools)`` 闭包注入，**不放入 state**（ToolDef 不可 msgpack 序列化）
 - 节点函数本身可单测（mock LLM + mock tool）
 """
@@ -25,10 +25,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from runner.langgraph_base import BaseFlowState
 from runner.routing.fingerprint import compute_state_fingerprint
-from tools.loop_detector import (
-    MAX_ITERATIONS,
-    LoopDetector,
-)
+from runner.routing.router import RouteDecision, route_next_step
+from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
 from tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
@@ -44,6 +42,11 @@ class AgentState(BaseFlowState, total=False):
     - messages      — LangChain BaseMessage 列表（**operator.add 累积**）
     - iterations    — 已执行步数（最后一次返回值覆盖）
     - system_prompt — SKILL.md 拼装出的系统提示（最后一次覆盖）
+    - risk_metrics  — 风控指标（由 calc_risk_stub 写入，router.py 消费）
+    - task_status   — 任务状态（"done" 触发 finish）
+    - human_review_result — 人工审核结果（"proceed"/"abort"，由 request_human_review tool 写入）
+    - task_goal     — 任务目标描述（取自 input_data.task）
+    - _gate_purpose — Day 5: risk/loop/max_iter, 内部追踪 gate 来源
 
     **不放进 state 的字段**（通过闭包注入）：
     - tools         — ToolDef 列表（Pydantic 模型，msgpack 不支持）
@@ -54,6 +57,11 @@ class AgentState(BaseFlowState, total=False):
     messages: Annotated[list[Any], operator.add]  # 累积所有 node 返回的新消息
     iterations: int
     system_prompt: str
+    risk_metrics: dict | None
+    task_status: str | None
+    human_review_result: str | None
+    task_goal: str
+    _gate_purpose: str | None  # Day 5: risk/loop/max_iter, 内部追踪 gate 来源
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +125,13 @@ def make_llm_node(
 def make_tool_node(
     registry: ToolRegistry,
 ) -> Callable[[AgentState], dict]:
-    """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。"""
+    """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
+
+    tool 返回的是非 str 数据且是 dict 时，会尝试注入 state：
+    - ``calc_risk_stub`` → ``risk_metrics``
+    - ``task_done`` / ``mark_complete`` → ``task_status="done"``
+    - ``request_human_review`` → ``human_review_result``
+    """
 
     def tool_node(state: AgentState) -> dict:
         messages = state.get("messages", [])
@@ -137,11 +151,16 @@ def make_tool_node(
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 
         results: list[ToolMessage] = []
+        # 收集需要注入 state 的字段
+        state_updates: dict[str, Any] = {}
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
                 output = registry.call(c["name"], c["args"], ctx=ctx)
                 content = output if isinstance(output, str) else str(output)
+                # 注入逻辑：非 str 的 dict 输出 → 根据 tool name 写入 state
+                if isinstance(output, dict):
+                    state_updates.update(_extract_state_fields(c["name"], output))
             except Exception as e:
                 # Day 3 评审修复（🟢#7）：异常脱敏，避免 SSH 凭据 / API key
                 # 等敏感信息随异常原文进入 LLM 上下文。
@@ -162,15 +181,223 @@ def make_tool_node(
                 ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
             )
 
-        return {"messages": results}
+        state_updates["messages"] = results
+        return state_updates
 
     return tool_node
 
 
+def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
+    """从 tool 输出中提取需要注入 AgentState 的字段。
+
+    当前注册的映射：
+    - calc_risk_stub → risk_metrics（完整 dict，含阈值）
+    - mark_task_done / task_done → task_status="done"
+    - request_human_review → human_review_result（"proceed"/"abort"，由 _human_gate_node 最终裁决）
+    """
+    updates: dict[str, Any] = {}
+
+    if tool_name in ("calc_risk_stub", "calc_risk"):
+        updates["risk_metrics"] = output
+
+    if tool_name in ("mark_task_done", "task_done", "mark_complete"):
+        updates["task_status"] = "done"
+
+    if tool_name in ("request_human_review", "human_review"):
+        # tool stub 返回 "proceed"/"abort"；_human_gate_node 做最终裁决
+        decision = output.get("decision", "abort")
+        updates["human_review_result"] = decision
+
+    return updates
+
+
+# ---------------------------------------------------------------------------
+# build execution trace helper (shared by routing edges + rlhf node)
+# ---------------------------------------------------------------------------
+
+
+def _build_execution_trace(messages: list) -> list[dict[str, Any]]:
+    """从 AIMessage + ToolMessage 对中构造 execution_trace。
+
+    按 ``tool_call_id`` 精确配对，而非依赖位置顺序，
+    避免 LangGraph ``operator.add`` 消息累积导致误配对。
+    """
+    # Collect all tool_calls from AIMessages → {call_id: info}
+    pending: dict[str, dict[str, Any]] = {}
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            for tc in (getattr(msg, "tool_calls", None) or []):
+                c = _to_tool_call_dict(tc)
+                cid = c.get("id", "")
+                if cid:
+                    pending[cid] = {"tool": c.get("name", "unknown"), "args": c.get("args", {})}
+
+    # Collect all ToolMessage results → {call_id: content}
+    results: dict[str, str] = {}
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            cid = getattr(msg, "tool_call_id", "")
+            if cid:
+                results[cid] = getattr(msg, "content", "")
+
+    # Pair by call_id
+    trace: list[dict[str, Any]] = []
+    for cid, call in pending.items():
+        content = results.get(cid, "")
+        has_error = "failed" in content.lower() or "error" in content.lower()
+        trace.append({
+            "tool": call["tool"],
+            "success": not has_error,
+            "result": content if not has_error else "",
+            "error": content if has_error else "",
+        })
+    return trace
+
+
+# ---------------------------------------------------------------------------
+# 条件边函数工厂
+# ---------------------------------------------------------------------------
+
+
+def _log_abort_rlhf(state: AgentState, system_decision: str) -> None:
+    """Write an RLHF entry for abort decisions (ABORT_MAX_ITERATIONS)."""
+    from runner.routing.rlhf_logger import make_rlhf_entry, log_rlhf_entry
+    from runner.routing.fingerprint import compute_state_fingerprint
+    entry = make_rlhf_entry(
+        thread_id=state.get("thread_id", ""),
+        group=state.get("group", ""),
+        state_fingerprint=compute_state_fingerprint(dict(state)),
+        system_decision=system_decision,
+        iteration=state.get("iterations", 0),
+        checkpoint_id=state.get("thread_id", ""),
+    )
+    log_rlhf_entry(entry)
+
+
+def make_routing_edge(
+    max_iterations: int = ROUTING_MAX_ITERATIONS,
+) -> Callable[[AgentState], str]:
+    """构造 ``llm`` 节点的条件边函数。
+
+    在 LLM 生成 AIMessage 之后调用。如果 AIMessage 有 tool_calls → "continue"，
+    否则 → "end"。
+
+    返回 LangGraph 条件边的目标名（str）：
+    - "continue"  — LLM 请求了 tool_calls，需要执行
+    - "end"       — LLM 给出了最终答案（无 tool_calls）
+    """
+
+    def routing_edge(state: AgentState) -> str:
+        messages = state.get("messages", [])
+        if not messages:
+            return "end"
+
+        # 迭代上限检查（尊重 AgentRunner 的 max_iterations 参数）
+        if state.get("iterations", 0) >= max_iterations:
+            return "end"
+
+        last = messages[-1]
+        if not isinstance(last, AIMessage):
+            return "end"
+
+        if not getattr(last, "tool_calls", None):
+            return "end"
+
+        return "continue"
+
+    return routing_edge
+
+
+def make_tool_routing_edge(
+    max_iterations: int = ROUTING_MAX_ITERATIONS,
+    fingerprint_history: list[str] | None = None,
+) -> Callable[[AgentState], str]:
+    """构造 ``tool`` 节点的条件边函数（接入 ``route_next_step``）。
+
+    在 tool_node 执行完 tool_calls 之后调用。汇总所有 AIMessage 的 tool_call
+    历史作为路由输入，委托 ``route_next_step`` 做出决策：
+
+    路由结果映射：
+    - 死循环 → "human_gate"
+    - max_iterations → "max_iter"
+    - risk threshold → "human_gate"
+    - finish → "end"
+    - 正常 → "rlhf"（继续循环，回到 rlhf 或 llm 节点）
+
+    ``fingerprint_history`` 由 ``AgentRunner.build()`` 创建并共享给
+    ``make_rlhf_collect_node``，确保两处使用相同的指纹历史。
+    如果调用方不传，在闭包内新建（单测兼容）。
+
+    返回 LangGraph 条件边的目标名（str）。
+    """
+    if fingerprint_history is None:
+        fingerprint_history = []
+
+    def tool_routing_edge(state: AgentState) -> str:
+        nonlocal fingerprint_history
+
+        messages = state.get("messages", [])
+        iterations = state.get("iterations", 0)
+
+        # 迭代上限检查（尊重 AgentRunner 的 max_iterations 参数）
+        if iterations >= max_iterations:
+            return "max_iter"
+
+        # 从所有 AIMessage 中提取 tool_call 历史
+        tool_call_history: list[str] = []
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                for tc in (getattr(msg, "tool_calls", None) or []):
+                    c = _to_tool_call_dict(tc)
+                    name = c.get("name", "")
+                    if name:
+                        tool_call_history.append(name)
+
+        # 计算指纹并累加到历史（闭包内跨迭代持久化）
+        fp = compute_state_fingerprint(dict(state))
+        fingerprint_history.append(fp)
+
+        routing_state = {
+            "iteration_count": iterations,
+            "tool_call_history": tool_call_history,
+            "fingerprint_history": list(fingerprint_history),
+            "risk_metrics": state.get("risk_metrics"),
+            "task_status": state.get("task_status"),
+            "execution_trace": _build_execution_trace(messages),
+            "task_goal": state.get("task_goal", "") or state.get("input_data", {}).get("task", ""),
+        }
+
+        result = route_next_step(routing_state)
+
+        if result.decision == RouteDecision.ABORT_LOOP:
+            return "human_gate"
+        elif result.decision == RouteDecision.ABORT_MAX_ITERATIONS:
+            # Write RLHF entry for max_iter abort before routing to END
+            _log_abort_rlhf(state, "abort_max_iterations")
+            return "max_iter"
+        elif result.decision == RouteDecision.HUMAN_GATE:
+            return "human_gate"
+        elif result.decision == RouteDecision.FINISH:
+            return "end"
+        # CONTINUE → 继续执行
+        return "rlhf"
+
+    return tool_routing_edge
+
+
+# ---------------------------------------------------------------------------
+# Deprecated: legacy condition edge factories (retained for backward compat)
+# ---------------------------------------------------------------------------
+
+
 def make_should_continue(
-    max_iterations: int = MAX_ITERATIONS,
+    max_iterations: int = ROUTING_MAX_ITERATIONS,
 ) -> Callable[[AgentState], str]:
     """构造 ``should_continue`` 条件边函数。
+
+    .. deprecated::
+        Day 3 评审后由 ``make_routing_edge`` 取代。
+        保留此函数以备回退和兼容性测试。
 
     路由：
     - "end"      — LLM 没有 tool_calls（已给 final answer）
@@ -198,9 +425,13 @@ def make_should_continue(
 
 
 def make_post_tool_check(
-    loop_detector: LoopDetector,
+    loop_detector: Any,
 ) -> Callable[[AgentState], str]:
     """构造 ``post_tool_check`` 条件边函数。
+
+    .. deprecated::
+        Day 3 评审后由 ``make_tool_routing_edge`` 取代。
+        保留此函数以备回退和兼容性测试。
 
     路由：
     - "loop"       — 死循环检测触发（同一 tool+args 反复调用）
@@ -239,39 +470,107 @@ def make_post_tool_check(
     return post_tool_check
 
 
+# ---------------------------------------------------------------------------
+# RLHF 收集节点
+# ---------------------------------------------------------------------------
+
+
 def make_rlhf_collect_node(
-    rlhf_collector: Any,  # RLHFCollector 类型（避免循环 import）
+    rlhf_collector: Any,  # 保留兼容（可为 None），但不再写入旧格式
+    fingerprint_history: list[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``rlhf_collect_node``。
 
-    记录 (state, action, reward=0.0) 到 RLHFCollector。
-    reward 默认 0；后续可接 TaskGate / 人工反馈。
+    Day 5 RLHF 重构：改用 ``make_rlhf_entry()`` + ``log_rlhf_entry()`` 新格式。
+    重算路由决策获取 system_decision，记录 risk_features / risk_score / label。
+    rlhf_collector 参数保留向后兼容但不再用于写日志。
+
+    ``fingerprint_history`` 由 ``AgentRunner.build()`` 创建并共享给
+    ``make_tool_routing_edge``，确保两处使用相同的指纹历史。
+    如果调用方不传，在闭包内新建（单测兼容）。
     """
+    if fingerprint_history is None:
+        fingerprint_history = []
 
     def rlhf_collect_node(state: AgentState) -> dict:
+        nonlocal fingerprint_history
+
         messages = state.get("messages", [])
         # 取最近一个 AIMessage（含 tool_calls 的）作为 action
         last_ai = next(
             (m for m in reversed(messages) if isinstance(m, AIMessage)),
             None,
         )
-        action = (
-            {
-                "tool_calls": [_to_tool_call_dict(c) for c in (last_ai.tool_calls or [])],
-                "content": getattr(last_ai, "content", ""),
-            }
+        tool_calls = (
+            [_to_tool_call_dict(c) for c in (last_ai.tool_calls or [])]
             if last_ai is not None
-            else {}
+            else []
         )
-        # 拷贝 state，去掉不可序列化的字段
-        # 注：``seen_states`` 已不再入 AgentState（Day 3 评审修复，由
-        # make_post_tool_check 闭包持有），从过滤列表中移除。
-        serializable_state = {
-            k: v
-            for k, v in state.items()
-            if k not in ("messages", "tools", "_memory")
+
+        # 若无 tool 调用，跳过记录（无 action 可分析，避免写入空日志）
+        if not tool_calls:
+            return {}  # 不修改 state
+
+        # ── Day 5: 用新格式写入 RLHF 日志 ──
+        from runner.routing.rlhf_logger import make_rlhf_entry, log_rlhf_entry
+
+        # 重建路由状态并重算 system_decision
+        # NOTE：使用 AgentRunner.build() 共享的 fingerprint_history，
+        # 而非 [compute_state_fingerprint(dict(state))] 单步快照。
+        tool_call_history: list[str] = []
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                for tc in (getattr(msg, "tool_calls", None) or []):
+                    c = _to_tool_call_dict(tc)
+                    name = c.get("name", "")
+                    if name:
+                        tool_call_history.append(name)
+
+        # 计算指纹并累加到共享历史
+        fp = compute_state_fingerprint(dict(state))
+        fingerprint_history.append(fp)
+
+        routing_state = {
+            "iteration_count": state.get("iterations", 0),
+            "tool_call_history": tool_call_history,
+            "fingerprint_history": list(fingerprint_history),
+            "risk_metrics": state.get("risk_metrics"),
+            "task_status": state.get("task_status"),
+            "execution_trace": _build_execution_trace(messages),
+            "task_goal": state.get("task_goal", "") or state.get("input_data", {}).get("task", ""),
         }
-        rlhf_collector.record(state=serializable_state, action=action, reward=0.0)
+        result = route_next_step(routing_state)
+        system_decision = result.decision.value  # RouteDecision→str
+
+        # 提取 tool 信息 + 执行状态
+        tool_name = tool_calls[0]["name"] if tool_calls else ""
+        tool_args = tool_calls[0]["args"] if tool_calls else {}
+
+        # 判断工具执行是否成功
+        last_tool_result = ""
+        success = True
+        for msg in reversed(messages):
+            if isinstance(msg, ToolMessage):
+                last_tool_result = getattr(msg, "content", "")
+                success = "failed" not in last_tool_result.lower() and "error" not in last_tool_result.lower()
+                break
+
+        entry = make_rlhf_entry(
+            thread_id=state.get("thread_id", ""),
+            group=state.get("group", ""),
+            state_fingerprint=fp,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            success=success,
+            summary=last_tool_result[:200] if last_tool_result else "",
+            system_decision=system_decision,
+            human_decision="",                 # continue 路径无人审，事后回填
+            risk_features=state.get("risk_metrics"),
+            checkpoint_id=state.get("thread_id", ""),
+            iteration=state.get("iterations", 0),
+        )
+        log_rlhf_entry(entry)
+
         return {}  # 不修改 state
 
     return rlhf_collect_node
@@ -305,6 +604,7 @@ def init_agent_state(
         iterations=0,
         tools=tools,
         system_prompt=system_prompt,
+        task_goal=user_msg,
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
@@ -316,5 +616,9 @@ __all__ = [
     "make_should_continue",
     "make_post_tool_check",
     "make_rlhf_collect_node",
+    "make_routing_edge",
+    "make_tool_routing_edge",
+    "_build_execution_trace",
+    "_log_abort_rlhf",
     "init_agent_state",
 ]

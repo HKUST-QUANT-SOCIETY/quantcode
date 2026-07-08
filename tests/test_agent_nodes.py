@@ -19,6 +19,7 @@ from runner.agent_nodes import (
     make_should_continue,
     make_tool_node,
 )
+from runner.routing.rlhf_logger import RLHF_PATH as _DEFAULT_RLHF_PATH
 from tools.loop_detector import LoopDetector, MAX_ITERATIONS
 from tools.registry import ToolDef, ToolRegistry, register_tool
 
@@ -75,15 +76,6 @@ class MockLLM:
         resp = self._responses[self._call_count]
         self._call_count += 1
         return resp
-
-
-# 一个 mock RLHFCollector
-class MockRLHFCollector:
-    def __init__(self):
-        self.entries: list[dict] = []
-
-    def record(self, state, action, reward):
-        self.entries.append({"state": state, "action": action, "reward": reward})
 
 
 # ---------------------------------------------------------------------------
@@ -491,9 +483,18 @@ def test_post_tool_check_triggers_state_loop_on_repeated_state():
 # ---------------------------------------------------------------------------
 
 
-def test_rlhf_collect_node_records_action_and_state():
-    collector = MockRLHFCollector()
-    node = make_rlhf_collect_node(collector)
+def test_rlhf_collect_node_writes_rlhf_log_to_file(tmp_path, monkeypatch):
+    """Day 5: rlhf_collect_node 使用新格式写入 RLHF JSONL，不再用旧 RLHFCollector。
+
+    验证节点写入了文件（测试用临时目录替换 RLHF_PATH）。"""
+    import json
+    rlhf_log_path = tmp_path / "rlhf_test.jsonl"
+
+    # 替换 RLHF_PATH 的默认路径，让测试写入临时文件
+    import runner.routing.rlhf_logger as rlogger_mod
+    monkeypatch.setattr(rlogger_mod, "RLHF_PATH", rlhf_log_path)
+
+    node = make_rlhf_collect_node(None)  # collector=None，走新格式
     state: AgentState = {
         "messages": [
             AIMessage(
@@ -506,25 +507,31 @@ def test_rlhf_collect_node_records_action_and_state():
     }
     out = node(state)
     assert out == {}  # 不修改 state
-    assert len(collector.entries) == 1
-    entry = collector.entries[0]
-    # state 不应包含 messages/tools/_memory 等不可序列化字段
-    assert "messages" not in entry["state"]
-    assert "tools" not in entry["state"]
-    assert "_memory" not in entry["state"]
-    assert entry["state"]["group"] == "model"
-    # action 包含 tool_calls 和 content
-    assert entry["action"]["tool_calls"] == [
-        {"name": "echo", "args": {"msg": "hi"}, "id": "c1"}
-    ]
-    assert entry["action"]["content"] == "thinking"
-    assert entry["reward"] == 0.0
+
+    # 文件被写入
+    assert rlhf_log_path.exists()
+    lines = rlhf_log_path.read_text().strip().split("\n")
+    assert len(lines) == 1
+    parsed = json.loads(lines[0])
+    assert parsed["action"]["tool_name"] == "echo"
+    assert parsed["group"] == "model"
+    assert "reward" not in parsed  # Day 5: no reward field
+    assert "system_decision" in parsed
+    assert "human_decision" in parsed
+    assert "gate_purpose" in parsed
+    assert "label" in parsed
+    assert "risk_score" in parsed
 
 
-def test_rlhf_collect_node_with_no_ai_message_records_empty_action():
-    collector = MockRLHFCollector()
-    node = make_rlhf_collect_node(collector)
+def test_rlhf_collect_node_with_no_ai_message_skips_logging(tmp_path, monkeypatch):
+    """没有 tool_calls 时，不写 RLHF 日志（避免空日志）。"""
+    import runner.routing.rlhf_logger as rlogger_mod
+    rlhf_log_path = tmp_path / "rlhf_test2.jsonl"
+    monkeypatch.setattr(rlogger_mod, "RLHF_PATH", rlhf_log_path)
+
+    node = make_rlhf_collect_node(None)
     state: AgentState = {"messages": [HumanMessage(content="hi")]}
     out = node(state)
     assert out == {}
-    assert collector.entries[0]["action"] == {}
+    # 没有 tool_calls → 不写日志
+    assert not rlhf_log_path.exists()

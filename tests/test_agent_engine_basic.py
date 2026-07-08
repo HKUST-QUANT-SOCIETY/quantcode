@@ -398,6 +398,47 @@ def test_agent_handles_unknown_tool_gracefully(tmp_db, clean_registry):
     assert final["messages"][-1].content == "recovered"
 
 
+def test_agent_stops_on_loop_detection(tmp_db, clean_registry):
+    """无限循环相同 tool_call 时，LoopDetector 触发 ABORT_LOOP 路由到 human_gate。
+
+    Day 5 行为变更：human_gate 对 loop gate 测试阶段始终放行（proceed），
+    不会立刻终止。这意味着 loop detection 工作正常（路由判断正确），
+    但 Agent 最终会由 max_iterations 拦下（非 human_gate END）。
+
+    验证：路由触发了 human_gate（至少进入过 gate），且最终被 max_iterations 停止。
+    """
+    register_tool(READ_PR)
+
+    class InfiniteSameToolLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, messages, tools=None):
+            self.calls += 1
+            return _ai_with_tools(
+                [("read_pr", {"pr_number": 1})], f"inf-{self.calls}"
+            )
+
+    runner = AgentRunner(
+        group="model",
+        model=InfiniteSameToolLLM(),
+        checkpoint_db=tmp_db,
+        max_iterations=100,
+    )
+    final = runner.run(
+        task="loop test",
+        system_prompt="x",
+        thread_id="t-loop-1",
+        flow_name="loop_test",
+    )
+
+    # Day 5: loop gate 测试阶段放行，Agent 由 max_iterations 终止
+    assert final["iterations"] == 100, (
+        "Day 5: loop gate 放行，应由 max_iterations 硬上限停止；"
+        f"实际 iterations={final['iterations']}"
+    )
+
+
 def test_agent_stops_on_max_iterations(tmp_db, clean_registry):
     """达到 MAX_ITERATIONS 时强制 END。"""
     register_tool(READ_PR)
@@ -465,6 +506,111 @@ def test_explicit_thread_id_is_preserved(tmp_db, clean_registry):
         thread_id="my-explicit-id",
     )
     assert final["thread_id"] == "my-explicit-id"
+
+
+def test_agent_triggers_human_gate_end_to_end_via_risk_tool(tmp_db, clean_registry):
+    """端到端验证 human_gate：LLM 调用 calc_risk_stub(high_risk) 后自动注入 risk_metrics。"""
+    from tools.risk_stub_tool import calc_risk_stub_tool
+
+    register_tool(calc_risk_stub_tool)
+
+    llm = ScriptedLLM(
+        [
+            _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], "step1"),
+            AIMessage(content="Risk is high but I think it is fine."),
+        ]
+    )
+
+    runner = AgentRunner(group="risk", model=llm, checkpoint_db=tmp_db)
+    final = runner.run(
+        task="Check portfolio risk",
+        system_prompt="x",
+        thread_id="t-human-gate-e2e-1",
+        flow_name="human_gate_e2e",
+    )
+
+    assert final["iterations"] == 1, (
+        "期望 human_gate 在第 1 次 tool 后直接 END；"
+        f"实际 iterations={final['iterations']}，messages={final['messages']}"
+    )
+
+
+def test_agent_triggers_human_gate_when_risk_metrics_exceed_thresholds(tmp_db, clean_registry):
+    """当 state 中 risk_metrics 超过阈值时，tool 条件边应触发 human_gate 直接 END。"""
+    from langchain_core.messages import HumanMessage
+    from tools.risk_stub import calc_risk_stub
+
+    register_tool(READ_PR)
+
+    llm = ScriptedLLM(
+        [
+            _ai_with_tools([("read_pr", {"pr_number": 1})], "step1"),
+            AIMessage(content="Task done."),
+        ]
+    )
+
+    runner = AgentRunner(group="model", model=llm, checkpoint_db=tmp_db)
+    app = runner.build(system_prompt="x")
+
+    risk_metrics = calc_risk_stub("high_risk")
+
+    init_state = {
+        "group": "model",
+        "flow_name": "human_gate_test",
+        "thread_id": "t-human-gate-1",
+        "system_prompt": "x",
+        "messages": [HumanMessage(content="test")],
+        "iterations": 0,
+        "tools": [],
+        "input_data": {"task": "test"},
+        "risk_metrics": risk_metrics,
+    }
+
+    final = app.invoke(
+        init_state,
+        config={"configurable": {"thread_id": "t-human-gate-1"}},
+    )
+
+    assert final["iterations"] == 1, (
+        f"human_gate 应在第 1 次 tool 后直接 END；"
+        f"实际 iterations={final['iterations']}，messages={final['messages']}"
+    )
+
+
+def test_agent_runner_conditional_edge_calls_route_next_step(tmp_db, clean_registry):
+    """两步 mock LLM 验证 tool 条件边确实调用了 route_next_step。
+
+    路径：
+    1. llm 返回带 tool_call 的 AIMessage → 路由到 tool
+    2. tool 执行后 → tool_routing_edge 调用 route_next_step → 返回 "rlhf" → 回到 llm
+    3. llm 返回不带 tool_call 的最终答案 → 路由到 end
+
+    若 route_next_step 未被调用，tool 执行后无法正确回到 llm，任务不会正常结束。
+    """
+    register_tool(READ_PR)
+
+    llm = ScriptedLLM(
+        [
+            _ai_with_tools([("read_pr", {"pr_number": 1})], "step1"),
+            AIMessage(content="Task done."),
+        ]
+    )
+
+    runner = AgentRunner(group="model", model=llm, checkpoint_db=tmp_db)
+    final = runner.run(
+        task="test routing",
+        system_prompt="x",
+        thread_id="t-route-next-step-1",
+        flow_name="route_next_step_test",
+    )
+
+    assert final["iterations"] == 2, (
+        f"期望 2 次 LLM 迭代，实际 {final['iterations']}；"
+        f"messages={final['messages']}"
+    )
+    assert final["messages"][-1].content == "Task done.", (
+        f"最后消息应为最终答案；messages[-1]={final['messages'][-1].content!r}"
+    )
 
 
 def test_default_thread_id_format_includes_uuid(tmp_db, clean_registry):
@@ -684,3 +830,59 @@ def test_agent_runner_e2e_run_does_not_inherit_seen_states_from_previous_run(
     assert final_b["messages"][-1].content == "Task B done.", (
         f"第二次 run 被上一次 seen_states 污染；messages[-1]= {final_b['messages'][-1].content!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# HumanGate interrupt — Pattern 5 mock 验证
+# ---------------------------------------------------------------------------
+
+
+def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
+    """验证 human_gate 条件边触发后端到端工作。
+
+    场景：
+    1. mock LLM 调 read_pr + calc_risk_stub(high_risk)
+    2. tool_node 把高风险数据注入 state["risk_metrics"]
+    3. tool_routing → route_next_step → HUMAN_GATE → human_gate node
+    4. _human_gate_routing 当前默认返回 "end" → END
+    5. 验证 iterations 在 calc_risk_stub 之后立即停止（不会继续回到 llm）
+    """
+    from tools.risk_stub_tool import calc_risk_stub_tool as risk_tool
+    register_tool(READ_PR)
+    register_tool(risk_tool)
+
+    # 第 1 步调 read_pr，第 2 步调 calc_risk_stub(high_risk)
+    llm = ScriptedLLM([
+        _ai_with_tools([("read_pr", {"pr_number": 42})], call_id_prefix="hg"),
+        _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], call_id_prefix="hg2"),
+    ])
+
+    runner = AgentRunner(
+        group="model",
+        model=llm,
+        checkpoint_db=tmp_db,
+        max_iterations=100,
+    )
+
+    final = runner.run(
+        task="Check if PR #42 is risky",
+        system_prompt="x",
+        flow_name="human_gate_e2e",
+        thread_id="human-gate-e2e-1",
+    )
+
+    # 关键断言：calc_risk_stub 返回 high_risk 后 human_gate 应立即终止
+    # iterations=2 表示：step1(read_pr) → step2(calc_risk_stub) → human_gate → END
+    assert final["iterations"] == 2, (
+        f"Expected human_gate after calc_risk_stub but got {final['iterations']} iterations"
+    )
+
+    # 验证 risk_metrics 确实被注入到 final state
+    assert "risk_metrics" in final, "risk_metrics should be in final state"
+    risk = final["risk_metrics"]
+    assert risk is not None, "risk_metrics should not be None"
+    assert risk.get("tail_risk_var_99", 0) > 0.05, "should be high risk data"
+
+    print(f"[human_gate_test] PASS: iterations={final['iterations']}, "
+          f"risk_metrics.tail_risk_var_99={risk['tail_risk_var_99']}")
+

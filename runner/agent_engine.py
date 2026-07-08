@@ -1,19 +1,21 @@
-"""AgentRunner — 自搭 StateGraph ReAct Agent 的入口 — Day 3 尹一帆。
+"""AgentRunner — 自搭 StateGraph ReAct Agent 的入口 — Day 3 尹一帆 + Day 5 RLHF 重构。
 
 按计划 §一研究点 1 决策：**自搭 StateGraph**，不绕道 create_react_agent。
 
 AgentRunner 负责：
 1. 加载 skill（业务 + 元）拼装 system prompt
 2. 按组过滤 tool（load_group_config + get_tools_for_group）
-3. 构造 5 个节点函数 + 2 个条件边
+3. 构造节点函数 + 条件边
 4. 编译 StateGraph + 接 SqliteSaver
 5. 提供 ``run()`` / ``stream()`` / ``resume()`` 三个执行入口
 
 设计要点：
-- 依赖全部通过构造器注入（registry / model / rlhf_collector / loop_detector）
+- 依赖全部通过构造器注入（registry / model；rlhf_collector 已弃用，仅保留兼容）
   便于测试时 mock，也便于 Day 4 替换 LLM / DB。
 - 不修改 ``compose_executor.py``：ReAct 是动态创建的，绕过它的固定 DAG 注册。
 - 复用 ``runner.langgraph_base`` 的 ``get_checkpointer`` + ``make_thread_id``。
+- Day 5: RLHF 格式重构 — 删 reward_key/REWARD，改为 system_decision + human_decision
+  + gate_purpose + risk_score + label。
 """
 from __future__ import annotations
 
@@ -21,21 +23,21 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from langchain_core.messages import AIMessage, BaseMessage
-from langgraph.graph import END, START, StateGraph
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, StateGraph
 
 from runner.agent_nodes import (
     AgentState,
     init_agent_state,
     make_llm_node,
-    make_post_tool_check,
     make_rlhf_collect_node,
-    make_should_continue,
+    make_routing_edge,
     make_tool_node,
+    make_tool_routing_edge,
 )
 from runner.langgraph_base import get_checkpointer, make_thread_id
-from runner.routing.fingerprint import compute_state_fingerprint
-from tools.loop_detector import LoopDetector, MAX_ITERATIONS
+from runner.routing.guards import MAX_ITERATIONS
+from tools.loop_detector import LoopDetector
 from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
 
@@ -67,7 +69,7 @@ class AgentRunner:
         *,
         model: Callable[..., AIMessage] | None = None,
         registry: ToolRegistry | None = None,
-        rlhf_collector: Any | None = None,
+        rlhf_collector: Any | None = None,  # Deprecated since Day 5 RLHF refactor (rlhf_collector.py deleted). Parameter retained for API compatibility, value is ignored.
         loop_detector: LoopDetector | None = None,
         max_iterations: int = MAX_ITERATIONS,
         checkpoint_db: str | Path | None = None,
@@ -79,8 +81,6 @@ class AgentRunner:
         self.loop_detector = loop_detector or LoopDetector()
         self.max_iterations = max_iterations
         self.checkpoint_db = Path(checkpoint_db) if checkpoint_db else None
-        # Day 3 评审修复：seen_states 移到 make_post_tool_check 闭包内，
-        # 每次 build 新建 set，避免跨任务指纹污染。
 
     # ----- 构造 StateGraph -----
     def build(
@@ -91,9 +91,6 @@ class AgentRunner:
         system_prompt: str | None = None,
     ) -> Any:
         """构造并 compile StateGraph，返回 ``CompiledStateGraph``。
-
-        Day 3 评审修复：跨任务复用 runner 实例时清空 LoopDetector 滑动窗口，
-        避免上一次任务的循环检测窗口影响下一次任务。
 
         Args:
             skill_name: 主 skill 名（业务或元）。
@@ -107,7 +104,7 @@ class AgentRunner:
         Returns:
             编译后的 StateGraph app，调 ``.invoke()`` / ``.stream()``。
         """
-        # Day 3 评审修复：每次 build 新建 task，前一次循环检测窗口清空
+        # Day 3 评审修复：每次 build 重置 LoopDetector 窗口
         self.loop_detector.reset()
 
         # 1. 准备 system prompt
@@ -132,41 +129,121 @@ class AgentRunner:
             )
         llm_node = make_llm_node(self.model, tools=tools)  # tools 通过闭包注入
         tool_node = make_tool_node(self.registry)
-        rlhf_node = (
-            make_rlhf_collect_node(self.rlhf_collector)
-            if self.rlhf_collector is not None
-            else None
+        # Day 5 RLHF 重构：rlhf_collect_node 始终添加到图中（不再依赖 rlhf_collector 参数）。
+        # rlhf_collector 仅用于向后兼容双写（可选）。
+        # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
+        # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
+        fingerprint_history: list[str] = []
+        rlhf_node = make_rlhf_collect_node(self.rlhf_collector, fingerprint_history)
+        # Day 3 评审后：llm 用轻量路由（有无 tool_calls），tool 用 route_next_step
+        llm_routing = make_routing_edge(max_iterations=self.max_iterations)
+        tool_routing = make_tool_routing_edge(
+            max_iterations=self.max_iterations,
+            fingerprint_history=fingerprint_history,
         )
-        should_continue = make_should_continue(max_iterations=self.max_iterations)
-        post_tool_check = make_post_tool_check(self.loop_detector)
+
+        # human_gate 节点：区分 risk gate 和 loop gate
+        def _human_gate_node(state: AgentState) -> dict:
+            """Determine gate purpose and set human_review_result.
+
+            Gate来源判断:
+              - risk_metrics 超过阈值 → risk gate（来自 calc_risk_stub 触发 HUMAN_GATE）
+              - 否则 → loop gate（ABORT_LOOP via system guard）
+                测试阶段始终放行（proceed），安全网不误杀任务。
+
+            human_review_result 值规则:
+              - "proceed" → 继续执行
+              - "abort" → 终止
+              - 空/未知 → 保守默认为 "abort"
+            """
+            from runner.routing.router import _risk_exceeds_threshold
+
+            risk = state.get("risk_metrics") or {}
+            is_risk_gate = _risk_exceeds_threshold(risk) if risk else False
+
+            human_result = state.get("human_review_result")
+            if is_risk_gate:
+                # Risk gate: "proceed" → proceed, anything else → abort (conservative)
+                normalized = "proceed" if human_result == "proceed" else "abort"
+                return {
+                    "_gate_purpose": "risk",
+                    "human_review_result": normalized,
+                }
+            else:
+                # Loop gate: 测试阶段始终放行
+                return {
+                    "_gate_purpose": "loop",
+                    "human_review_result": "proceed",
+                }
+
+        def _human_gate_routing(state: AgentState) -> str:
+            # 从 state 读人工审核结果（已归一化为 proceed/abort）
+            decision = state.get("human_review_result", "abort")
+            gate_purpose = state.get("_gate_purpose", "risk")
+
+            # ── Day 5 RLHF 记录 ──
+            # NOTE：这里写入的是 human_gate **路由决策点** 的记录
+            # （system/human 共同决定 proceed/abort）。
+            # rlhf_collect_node 随后写的另一条记录是 **每步执行决策点**
+            # （system_decision=continue + human_decision=""）。
+            # 两个不同的决策点，分开记录是正确的——前者反思 gate
+            # 准确性（label=0/1），后者记录 step-level 行为轨迹。
+            from runner.routing.rlhf_logger import make_rlhf_entry, log_rlhf_entry
+            from runner.routing.fingerprint import compute_state_fingerprint
+
+            system_decision = "human_gate" if gate_purpose == "risk" else "abort_loop"
+            entry = make_rlhf_entry(
+                thread_id=state.get("thread_id", ""),
+                group=state.get("group", ""),
+                state_fingerprint=compute_state_fingerprint(dict(state)),
+                system_decision=system_decision,
+                human_decision=decision,           # "proceed" or "abort" (already normalized)
+                risk_features=state.get("risk_metrics"),
+                checkpoint_id=state.get("thread_id", ""),
+                iteration=state.get("iterations", 0),
+            )
+            log_rlhf_entry(entry)
+
+            if decision == "proceed":
+                return "continue"
+            return "end"
 
         # 4. 构造 StateGraph
         workflow = StateGraph(AgentState)
 
         workflow.add_node("llm", llm_node)
         workflow.add_node("tool", tool_node)
-        if rlhf_node is not None:
-            workflow.add_node("rlhf", rlhf_node)
+        workflow.add_node("human_gate", _human_gate_node)
+        workflow.add_node("rlhf", rlhf_node)   # Day 5: rlhf 节点始终存在
 
         workflow.set_entry_point("llm")
+        # llm 之后：有 tool_calls → tool，否则 → end
         workflow.add_conditional_edges(
             "llm",
-            should_continue,
-            {"tool": "tool", "end": END, "max_iter": END},
+            llm_routing,
+            {"continue": "tool", "end": END},
         )
-        # post_tool_check 的 rlhf 路径：有 rlhf_node 就走它，没有就直接回 llm
-        rlhf_target = "rlhf" if rlhf_node is not None else "llm"
+        # tool 之后：route_next_step 综合判断
         workflow.add_conditional_edges(
             "tool",
-            post_tool_check,
+            tool_routing,
             {
-                "rlhf": rlhf_target,
-                "loop": END,
-                "state_loop": END,
+                "rlhf": "rlhf",
+                "max_iter": END,
+                "end": END,
+                "human_gate": "human_gate",
             },
         )
-        if rlhf_node is not None:
-            workflow.add_edge("rlhf", "llm")
+        # human_gate 之后：条件边
+        workflow.add_conditional_edges(
+            "human_gate",
+            _human_gate_routing,
+            {
+                "continue": "rlhf",       # 审核通过 → rlhf node → 回工作流
+                "end": END,                # 审核拒绝 → 终止
+            },
+        )
+        workflow.add_edge("rlhf", "llm")
 
         # 5. compile + 接 checkpointer
         checkpointer = get_checkpointer(self.checkpoint_db) if self.checkpoint_db else None
