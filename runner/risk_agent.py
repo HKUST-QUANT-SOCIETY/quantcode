@@ -141,14 +141,20 @@ def write_pr_comment_node(state: RiskAgentState) -> dict[str, Any]:
 
     input_data = state["input_data"]
     profile = RiskProfile(**state["risk_profile"])
-    comment = write_pr_comment_artifact(
-        profile,
-        pr_number=str(input_data.get("pr_number", "demo")),
-        head_sha=input_data.get("head_sha", "deadbeef"),
-        pr_url=input_data.get("pr_url"),
-        artifacts_root=input_data.get("artifacts_root", "artifacts/risk/pr-comments"),
-        dedupe_db_path=input_data.get("dedupe_db_path"),
-    )
+    comment_kwargs: dict[str, Any] = {
+        "pr_number": str(input_data.get("pr_number", "demo")),
+        "head_sha": input_data.get("head_sha", "deadbeef"),
+        "pr_url": input_data.get("pr_url"),
+        "artifacts_root": input_data.get("artifacts_root", "artifacts/risk/pr-comments"),
+        "dedupe_db_path": input_data.get("dedupe_db_path"),
+    }
+    if "post_to_github" in input_data:
+        comment_kwargs["post_to_github"] = input_data["post_to_github"]
+    if input_data.get("github_repo"):
+        comment_kwargs["github_repo"] = input_data["github_repo"]
+    if input_data.get("github_token"):
+        comment_kwargs["github_token"] = input_data["github_token"]
+    comment = write_pr_comment_artifact(profile, **comment_kwargs)
     return {
         "comment_id": comment["comment_id"],
         "pr_comment": comment,
