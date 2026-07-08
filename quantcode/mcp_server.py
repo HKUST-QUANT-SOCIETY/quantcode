@@ -40,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools.registry import registry, ToolDef
+from tools.schema_utils import pydantic_to_json_schema  # Day 4: 提取到公共模块
 
 # Day 3 评审修复（🟢#6）：MCP server 暴露的 tool 集合受 ``QUANTCODE_GROUP`` 环境变量过滤。
 # 默认（未设置）保持原行为：返回所有已注册 tool（兼容 day3-merge 后尚未分组的 tool）。
@@ -54,26 +55,15 @@ from tools.model._register import (  # noqa: F401  触发 model tool 注册
     write_blackboard_tool,
     trigger_risk_flow_tool,
 )
-from tools.options._register import (  # noqa: F401  触发 options tool 注册
-    build_vol_surface_tool,
-    calc_greeks_tool,
-    run_options_backtest_stub_tool,
-)
 import tools.risk._register  # noqa: F401  触发 risk tool 注册
+import tools.factor._register  # noqa: F401  触发 factor tool 注册(Day 4 尹一帆)
 
 
 # ---------------------------------------------------------------------------
-# Pydantic schema → JSON Schema
+# Pydantic schema → JSON Schema（已提取到 tools/schema_utils.py）
 # ---------------------------------------------------------------------------
 
-
-def pydantic_to_json_schema(schema: type) -> dict:
-    """把 Pydantic BaseModel 转成 JSON Schema dict（用于 MCP inputSchema）。
-
-    Pydantic v2 的 ``model_json_schema()`` 直接输出 JSON Schema 草案，
-    与 MCP 兼容。
-    """
-    return schema.model_json_schema()
+# pydantic_to_json_schema 从 tools.schema_utils import，保留此注释块作为文档锚点
 
 
 def tool_def_to_mcp(tool: ToolDef) -> dict:

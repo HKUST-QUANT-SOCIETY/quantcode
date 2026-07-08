@@ -1,9 +1,14 @@
-# factor 组 tool 白名单 — Day 3
+# factor 组 tool 白名单 — Day 4
 # 由 tools/registry.py::load_group_config 读取
-# 暂无专属 tool,仅使用共享工具
+# Day 4 起新增 3 个 factor 专属 tool(match_main / gen_schema / autoeval)
+# 配合共享工具 4 个,AgentRunner(group="factor") 可跑通 idea → match_main → gen_schema → autoeval
 allowlist:
   # 共享工具
   - search_memory
   - read_file
   - write_file
   - bash
+  # factor 专属 tool(Day 4 尹一帆)
+  - match_main
+  - gen_schema
+  - autoeval
