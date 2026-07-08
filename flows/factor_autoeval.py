@@ -138,15 +138,25 @@ def build_workflow(checkpoint_db: str | PathLike[str] | None = None):
 
 def _mock_autoeval_result(spec: FactorSpec) -> dict[str, Any]:
     """Deterministic mock AutoEval payload for the Day 2 demo path."""
-    return {
-        "factor_version": "day2-mock",
-        "eval_run_id": f"{spec.name}-day2-mock-eval",
-        "ic_mean": 0.045,
-        "ic_std": 0.05625,
-        "ir": 0.8,
-        "t_stat": 2.5,
-        "turnover_monthly": 0.25,
-        "turnover_annual": 3.0,
+    payload = dict(MOCK_AUTOEVAL_PAYLOAD_V1)
+    # spec 相关的动态字段
+    payload["eval_run_id"] = f"{spec.name}-day2-mock-eval"
+    payload["horizons"] = [1, spec.forward_return_horizon, 20]
+    return payload
+
+
+# Day 4 起:把 mock 字典提到模块级常量,供 tools/factor/autoeval_stub.py 共享,
+# 避免双维护。Lead 接真 AutoEval API 时只需替换 _mock_autoeval_result 函数体,
+# autoeval_stub 自动跟新(import 同一个常量)。
+MOCK_AUTOEVAL_PAYLOAD_V1: dict[str, Any] = {
+    "factor_version": "day2-mock",
+    "eval_run_id": "stub-eval",  # generic;_mock_autoeval_result(spec) 会用 spec.name 覆盖
+    "ic_mean": 0.045,
+    "ic_std": 0.05625,
+    "ir": 0.8,
+    "t_stat": 2.5,
+    "turnover_monthly": 0.25,
+    "turnover_annual": 3.0,
         "decay": {
             "ic_1d": 0.055,
             "ic_3d": 0.050,
@@ -162,7 +172,7 @@ def _mock_autoeval_result(spec: FactorSpec) -> dict[str, Any]:
         },
         "route_recommendation": "tier3b_satellite",
         "target_tier": "Tier3B",
-        "horizons": [1, spec.forward_return_horizon, 20],
+        "horizons": [1, 5, 20],  # generic;_mock_autoeval_result(spec) 会用 spec.forward_return_horizon 覆盖
         "performance_tags": ["day2_mock"],
         "action_tags": ["needs_real_autoeval_day3"],
         "semantic_label": "quality",
