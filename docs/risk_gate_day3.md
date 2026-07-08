@@ -137,6 +137,60 @@ risk 侧已经就绪：
 
 ---
 
+## 7. GitHub Token 与环境变量
+
+**不要把 token 写入仓库。** 本地用 shell 环境变量或 `.env`（确保已在 `.gitignore`），CI 用 GitHub Actions secrets。
+
+| 变量 | 必填场景 | 说明 |
+|------|----------|------|
+| `GITHUB_TOKEN` | 发正式 PR comment | PAT 或 Actions 内置 `secrets.GITHUB_TOKEN` |
+| `GITHUB_REPOSITORY` | 发正式 PR comment | `owner/repo`，如 `HKUST-QUANT-SOCIETY/quantcode` |
+| `QUANTCODE_POST_RISK_COMMENT` | 可选开关 | 设为 `1` / `true` / `yes` / `on` 时，即使未传 `post_to_github=True` 也会发帖 |
+| `GITHUB_API_URL` | 可选 | 默认 `https://api.github.com`；GitHub Enterprise 可覆盖 |
+
+也可在 tool / flow `input_data` 里显式传 `github_token`、`github_repo`、`post_to_github=True`（测试与 OpenCode 桥接常用）。
+
+### 本地运行
+
+```bash
+# 仅写本地 artifact（默认）
+.venv/bin/python scripts/run_risk_gate_tool.py --scenario normal
+
+# 向真实 PR 发帖（需有 issues:write / pull-requests:write 权限）
+export GITHUB_TOKEN="$(gh auth token)"          # 或你自己的 PAT，勿提交
+export GITHUB_REPOSITORY="owner/repo"
+export QUANTCODE_POST_RISK_COMMENT=1
+.venv/bin/python scripts/run_risk_gate_tool.py \
+  --scenario normal \
+  --pr-number 42 \
+  --head-sha "$(git rev-parse HEAD)" \
+  --pr-url "https://github.com/owner/repo/pull/42"
+```
+
+高风险人审（interrupt → resume）：
+
+```bash
+# 第一次：打印 interrupt payload，status=waiting_for_human
+.venv/bin/python scripts/run_risk_gate_tool.py --scenario high_risk --decision pending
+
+# approve 后继续写 comment
+.venv/bin/python scripts/run_risk_gate_tool.py --scenario high_risk --decision approve
+
+# reject：不写 comment，status=rejected
+.venv/bin/python scripts/run_risk_gate_tool.py --scenario high_risk --decision reject
+```
+
+### GitHub Actions
+
+见 `.github/workflows/risk-gate.yml`：`pull_request` 触发时注入 `GITHUB_TOKEN`、`GITHUB_REPOSITORY`、`QUANTCODE_POST_RISK_COMMENT=1`，并**连续跑两次**同场景以验证 marker dedupe（第二次不应新建评论）。
+
+### 去重两层
+
+1. **进程内 / SQLite**（`@dedupe_within`）：同 `pr_url` + `head_sha` + `RiskProfile` hash，短窗口内只执行一次副作用。
+2. **GitHub HTML marker**：评论末尾含 `<!-- quantcode:risk-gate:profile:{head_sha}:{profile_hash} -->`；发帖前先 `GET /issues/{n}/comments` 查重。
+
+---
+
 ## 快速命令
 
 ```bash
@@ -144,5 +198,11 @@ risk 侧已经就绪：
 .venv/bin/python scripts/demo_risk_flow.py
 
 # 测试
-.venv/bin/python -m pytest tests/test_risk_agent.py tests/test_risk_tools.py tests/test_risk_dedupe.py tests/test_human_gate.py -q
+.venv/bin/python -m pytest \
+  tests/test_risk_github_e2e.py \
+  tests/test_risk_react_ready.py \
+  tests/test_risk_agent.py \
+  tests/test_risk_tools.py \
+  tests/test_risk_dedupe.py \
+  tests/test_human_gate.py -q
 ```
