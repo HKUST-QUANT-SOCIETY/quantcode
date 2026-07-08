@@ -3,9 +3,11 @@
 Primary entry for risk:gate (PR #17). Tools are registered in tools/risk/_register.py
 and filtered by .opencode/groups/risk/tool_allowlist.yaml.
 
-CI / GitHub Actions 使用本模块的确定性 scripted pipeline（保留 interrupt/resume）。
-OpenCode ReAct 路径使用 runner.agent_engine.AgentRunner(group="risk") + 本 SKILL.md；
-HumanGate interrupt 仍由本模块的 LangGraph 图承载，待 AgentRunner 接入 route_gate。
+两条路径:
+- **CI / GitHub Actions**: 使用 ``build_risk_agent()`` + ``run_tool_pipeline`` 的确定性
+  scripted pipeline（保留 interrupt/resume），适合确定性环境。
+- **OpenCode ReAct**: 使用 ``run_risk_agent_react()``（基于 ``AgentRunner(group="risk")``），
+  让 LLM 自主决定 tool 调用顺序，HumanGate interrupt 仍由 LangGraph 承载。
 """
 from __future__ import annotations
 
@@ -286,3 +288,89 @@ def _acceptance_to_dict(result: AcceptanceResult) -> dict[str, Any]:
             for check in result.checks
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Day 4: ReAct 路径 — AgentRunner(group="risk") + HumanGate interrupt
+# ---------------------------------------------------------------------------
+
+
+def run_risk_agent_react(
+    task: str,
+    *,
+    model=None,
+    checkpoint_db: str | PathLike[str] | None = None,
+    thread_id: str | None = None,
+    max_iterations: int = 10,
+) -> dict:
+    """用 AgentRunner(group="risk") 自主 ReAct 跑 risk 流程。
+
+    与 ``build_risk_agent()`` 的 scripted pipeline 不同，本函数让 LLM 自主决定
+    tool 调用顺序，实现真正的 ReAct 推理。HumanGate interrupt 通过
+    ``route_gate_node`` 承载（当 LLM 调 check_gate 且返回 requires_human=True 时触发）。
+
+    Args:
+        task: 用户任务描述（如 "处理 PR #42 的风险检查"）。
+        model: LLM callable。不传则尝试从 config.json 创建 DeepSeek LLM。
+        checkpoint_db: SqliteSaver checkpoint 路径（必传，gate_tools 需要）。
+        thread_id: 显式指定 thread_id。
+        max_iterations: 最大迭代步数。
+
+    Returns:
+        AgentRunner.run() 的最终 state dict。
+
+    Raises:
+        ValueError: model=None 且 config.json 未配置。
+
+    Example::
+
+        final = run_risk_agent_react(
+            "处理 PR #42 的风险检查",
+            checkpoint_db=".quantcode/checkpoints.db",
+        )
+        if "__interrupt__" in final:
+            # 需要人审，在 UI 中展示 interrupt payload
+            ...
+    """
+    from runner.agent_engine import AgentRunner
+
+    if model is None:
+        try:
+            from runner.llm_provider import create_deepseek_llm
+
+            model = create_deepseek_llm()
+        except ValueError:
+            raise ValueError(
+                "run_risk_agent_react: model 未传且 config.json 未配置。"
+                "请传入 model 参数或配置 config.json（参考 config.example.json）。"
+            )
+
+    if checkpoint_db is None:
+        raise ValueError(
+            "run_risk_agent_react: checkpoint_db 必传（gate_tools 需要 SqliteSaver）。"
+        )
+
+    runner = AgentRunner(
+        group="risk",
+        model=model,
+        gate_tools=["check_gate"],
+        checkpoint_db=checkpoint_db,
+        max_iterations=max_iterations,
+    )
+
+    return runner.run(
+        task=task,
+        skill_name="risk-gate",
+        system_prompt=(
+            "You are a risk control agent. Your job is to:\n"
+            "1. Read the blackboard with read_blackboard(input_data)\n"
+            "2. Calculate risk metrics with calc_risk(model_spec, scenario)\n"
+            "3. Generate a risk profile with generate_risk_profile(model_spec, risk_metrics)\n"
+            "4. Check the gate with check_gate(risk_profile)\n"
+            "5. If gate requires human review, stop and wait for approval\n"
+            "6. If approved or no human review needed, write a PR comment with write_pr_comment\n\n"
+            "Always proceed step by step. Call tools in order. "
+            "If check_gate returns requires_human=True, stop and do NOT call write_pr_comment."
+        ),
+        thread_id=thread_id,
+    )

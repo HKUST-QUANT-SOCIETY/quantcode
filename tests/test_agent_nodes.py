@@ -528,3 +528,78 @@ def test_rlhf_collect_node_with_no_ai_message_records_empty_action():
     out = node(state)
     assert out == {}
     assert collector.entries[0]["action"] == {}
+
+# ---------------------------------------------------------------------------
+# Day 4 修复:fingerprint 必须在每次 tool_call 后变化(否则第二次 tool 就 state_loop 终止 Agent)
+# ---------------------------------------------------------------------------
+
+
+def test_post_tool_check_fingerprint_changes_per_tool_call():
+    """🟢Day 4 修复:post_tool_check 内部 fingerprint 必须在每次 tool_call 后变化。
+
+    Day 3 旧实现用 compute_state_fingerprint hash 5 个字段(current_step/last_tool/...
+    ),但 AgentState 里这些字段都不存在 → fingerprint 永远不变 → 第二次 tool 就
+    触发 state_loop 把 Agent 终止。Day 4 改用 last_tool/tool_args/iterations 重新算
+    fingerprint,确保每次 tool_call 后变化。
+    """
+    from runner.agent_nodes import make_post_tool_check
+    from tools.loop_detector import LoopDetector
+
+    fn = make_post_tool_check(LoopDetector())
+
+    # 模拟连续 3 次 tool_call 不同的 tool
+    state_v1 = {
+        "messages": [
+            HumanMessage(content="task"),
+            AIMessage(content="", tool_calls=[
+                {"name": "read_blackboard", "args": {"x": 1}, "id": "1"}
+            ]),
+        ],
+        "iterations": 1,
+    }
+    state_v2 = {
+        "messages": [
+            HumanMessage(content="task"),
+            AIMessage(content="", tool_calls=[
+                {"name": "read_blackboard", "args": {"x": 1}, "id": "1"}
+            ]),
+            ToolMessage(content="ok", tool_call_id="1", name="read_blackboard"),
+            AIMessage(content="", tool_calls=[
+                {"name": "calc_risk", "args": {"y": 2}, "id": "2"}
+            ]),
+        ],
+        "iterations": 2,
+    }
+    state_v3 = {
+        "messages": state_v2["messages"] + [
+            ToolMessage(content="ok", tool_call_id="2", name="calc_risk"),
+            AIMessage(content="", tool_calls=[
+                {"name": "check_gate", "args": {"z": 3}, "id": "3"}
+            ]),
+        ],
+        "iterations": 3,
+    }
+
+    # 同一 post_tool_check 实例(同 seen_states set)
+    r1 = fn(state_v1)
+    r2 = fn(state_v2)
+    r3 = fn(state_v3)
+
+    # 3 次都返 "rlhf"(没触发 loop / state_loop)
+    assert r1 == "rlhf", f"v1 应返 'rlhf', got {r1}"
+    assert r2 == "rlhf", f"v2 应返 'rlhf', got {r2}"
+    assert r3 == "rlhf", f"v3 应返 'rlhf', got {r3}"
+
+    # 🟢严格验收:同样的 fingerprint 检查,如果 fingerprint 不变,第二次会触发 state_loop
+    # 验证:跑一个用 "compute_state_fingerprint"(旧实现)的人,第二次应该返 "state_loop"
+    from runner.routing.fingerprint import compute_state_fingerprint
+
+    # 旧实现的 fingerprint:hash 5 个字段(都从 AgentState 拿不到)
+    fp_v1 = compute_state_fingerprint(dict(state_v1))
+    fp_v2 = compute_state_fingerprint(dict(state_v2))
+    fp_v3 = compute_state_fingerprint(dict(state_v3))
+    # 旧实现的 fingerprint 永远一样(因为字段都缺)
+    assert fp_v1 == fp_v2 == fp_v3, (
+        f"compute_state_fingerprint 对 AgentState 永远同值({fp_v1[:16]}...),"
+        f"这就是 Day 3 触发 state_loop 的根本原因"
+    )
