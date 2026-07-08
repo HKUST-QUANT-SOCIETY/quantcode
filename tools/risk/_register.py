@@ -40,6 +40,8 @@ class WritePrCommentArgs(BaseModel):
     artifacts_root: str = "artifacts/risk/pr-comments"
     dedupe_db_path: str | None = None
     post_to_github: bool | None = None
+    github_repo: str | None = None
+    github_token: str | None = None
 
 
 def _read_blackboard_execute(args: ReadBlackboardArgs, ctx: dict) -> dict[str, Any]:
@@ -64,6 +66,8 @@ def _check_gate_execute(args: CheckGateArgs, ctx: dict) -> dict[str, Any]:
 
 
 def _write_pr_comment_execute(args: WritePrCommentArgs, ctx: dict) -> dict[str, Any]:
+    if ctx.get("gate_decision") == "reject":
+        return {"skipped": True, "reason": "human_gate_rejected"}
     profile = RiskProfile(**args.risk_profile)
     kwargs: dict[str, Any] = {
         "pr_number": args.pr_number,
@@ -75,6 +79,10 @@ def _write_pr_comment_execute(args: WritePrCommentArgs, ctx: dict) -> dict[str, 
         kwargs["dedupe_db_path"] = args.dedupe_db_path
     if args.post_to_github is not None:
         kwargs["post_to_github"] = args.post_to_github
+    if args.github_repo is not None:
+        kwargs["github_repo"] = args.github_repo
+    if args.github_token is not None:
+        kwargs["github_token"] = args.github_token
     return risk_tools.write_pr_comment(profile, **kwargs)
 
 

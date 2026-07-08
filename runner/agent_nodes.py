@@ -196,6 +196,7 @@ def make_tool_node(
             "group": state.get("group", ""),
             "thread_id": state.get("thread_id", ""),
             "session_id": state.get("thread_id", ""),  # alias
+            "gate_decision": state.get("gate_decision"),
         }
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 

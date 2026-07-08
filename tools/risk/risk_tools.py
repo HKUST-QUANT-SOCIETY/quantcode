@@ -95,6 +95,7 @@ def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, An
     return {
         "requires_human": bool(reasons),
         "reasons": reasons,
+        "risk_profile": profile.model_dump(mode="json"),
     }
 
 
