@@ -83,9 +83,21 @@ class AgentRunner:
         checkpoint_db: str | Path | None = None,
         gate_tools: list[str] | None = None,
         truncate_tokens: int | None = None,
+        retry_max_retries: int = 0,  # Day 5:LLM 重试次数,0=不启用
+        retry_base_delay: float = 0.5,
     ) -> None:
         self.group = group
-        self.model = model  # 可选：build 时若不传则用占位（mock 用）
+        # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
+        if retry_max_retries > 0 and model is not None:
+            from runner.retry import RetryWrapper
+
+            self.model = RetryWrapper(
+                model,
+                max_retries=retry_max_retries,
+                base_delay=retry_base_delay,
+            )
+        else:
+            self.model = model  # 可选：build 时若不传则用占位（mock 用）
         self.registry = registry or default_registry
         self.rlhf_collector = rlhf_collector
         self.loop_detector = loop_detector or LoopDetector()

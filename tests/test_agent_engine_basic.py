@@ -684,3 +684,65 @@ def test_agent_runner_e2e_run_does_not_inherit_seen_states_from_previous_run(
     assert final_b["messages"][-1].content == "Task B done.", (
         f"第二次 run 被上一次 seen_states 污染；messages[-1]= {final_b['messages'][-1].content!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Day 5:AgentRunner 接入 RetryWrapper
+# ---------------------------------------------------------------------------
+
+
+def test_agent_runner_uses_retry_wrapper_when_enabled(tmp_db, clean_registry):
+    """Day 5 #A:AgentRunner(retry_max_retries=N) → 自动包装 RetryWrapper。
+
+    走整体逻辑闭环:用 flaky LLM + AgentRunner 跑真实 build + invoke,
+    验证 retry 生效 + 最终跑通。
+    """
+    call_count = {"n": 0}
+
+    class _FlakyLLM:
+        def __call__(self, messages, tools=None):
+            call_count["n"] += 1
+            if call_count["n"] < 2:
+                raise ConnectionError("mock 抖动")
+            return AIMessage(content="retry-ok")
+
+    runner = AgentRunner(
+        group="model",
+        model=_FlakyLLM(),
+        checkpoint_db=tmp_db,
+        retry_max_retries=2,
+    )
+    # 验证 model 被包装
+    assert hasattr(runner.model, "stats"), (
+        "AgentRunner(retry_max_retries>0) 应包装 model 为 RetryWrapper"
+    )
+    assert runner.model.max_retries == 2
+
+    # 端到端跑通
+    result = runner.run(
+        task="retry test",
+        skill_name=None,
+        system_prompt="x",
+        thread_id="retry-test",
+    )
+    assert call_count["n"] == 2, f"抖 1 次后应跑通,实际调 {call_count['n']} 次"
+    assert runner.model.stats.success_after_retry is True
+
+
+def test_agent_runner_no_retry_by_default(tmp_db, clean_registry):
+    """Day 5 #A:AgentRunner 默认 retry_max_retries=0 → 不包装,保持向后兼容。
+
+    验证现有调用方不受影响。
+    """
+    class _LLM:
+        def __call__(self, messages, tools=None):
+            return AIMessage(content="ok")
+
+    runner = AgentRunner(
+        group="model",
+        model=_LLM(),
+        checkpoint_db=tmp_db,
+    )
+    assert not hasattr(runner.model, "stats"), (
+        "默认 retry_max_retries=0 不应包装 model"
+    )
