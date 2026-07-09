@@ -71,6 +71,7 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
     execution_trace    = state.get("execution_trace") or []
     risk_metrics       = state.get("risk_metrics")
     task_status        = state.get("task_status")
+    human_review_result = state.get("human_review_result")
 
     # ---- 1. Guards (loop detection — always rule-based) ------------------
     guard = detect_loop(
@@ -94,8 +95,15 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
         )
 
     # ---- 2. Risk gating ---------------------------------------------------
-    # Rule-based threshold (always active)
-    if risk_metrics and _risk_exceeds_threshold(risk_metrics):
+    # Rule-based threshold (always active), but only before a human has already
+    # made a decision for this checkpoint. After approve/proceed the agent must
+    # be allowed to continue without re-triggering the same gate on unchanged
+    # risk_metrics; after reject/abort the human_gate routing will end safely.
+    if (
+        risk_metrics
+        and _risk_exceeds_threshold(risk_metrics)
+        and human_review_result not in ("proceed", "abort")
+    ):
         return RouteResult(
             decision=RouteDecision.HUMAN_GATE,
             reason="risk_threshold_exceeded",
@@ -129,6 +137,10 @@ def _risk_exceeds_threshold(metrics: dict[str, Any]) -> bool:
     if metrics.get("max_drawdown", 0) > dd_limit:
         return True
     if metrics.get("position_limit", 0) > pos_limit:
+        return True
+    # Day 4 俞高磊：加上 correlation_with_existing 检查（杨欣琳 RiskProfile 对齐）
+    # 使用 abs() — 负相关（如 -0.7）同样意味着与现有持仓高度相关，应触发人审
+    if abs(metrics.get("correlation_with_existing", 0)) > 0.6:
         return True
     return False
 

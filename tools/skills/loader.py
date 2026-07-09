@@ -119,7 +119,10 @@ def load_skill(
         mbody = _strip_frontmatter(mpath.read_text(encoding="utf-8"))
         parts.append(f"\n# 方法论补充：{m}\n\n{mbody}")
 
-    return "\n\n---\n\n".join(parts)
+    text = "\n\n---\n\n".join(parts)
+    # ★ Day 4 俞高磊：追加简短 tool-call 指令
+    _call_hint = "\n\n## RULES\n- Call tools. Do not describe them.\n"
+    return text + _call_hint
 
 
 __all__ = [

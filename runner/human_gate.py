@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from schemas.human_gate import (
     HumanGate,
@@ -16,6 +16,68 @@ _RESOLVED_STATUSES = {
     HumanGateStatus.APPROVED,
     HumanGateStatus.REJECTED,
 }
+
+# ---------------------------------------------------------------------------
+# Decision vocabulary normalization  (Day 7 OpenCode human-gate integration)
+# ---------------------------------------------------------------------------
+# OpenCode 对外的 approve/reject，对内映射为 ReAct 路径的 proceed/abort。
+# risk_agent 确定性路径继续使用 approve/reject，不需要转换。
+
+_EXTERNAL_TO_INTERNAL: dict[str, str] = {
+    "approve": "proceed",
+    "reject": "abort",
+    "proceed": "proceed",
+    "abort": "abort",
+}
+
+
+def normalize_external_decision(decision: str) -> Literal["approve", "reject"]:
+    """将任意变体映射为 OpenCode 可见的 approve/reject。
+
+    approve/proceed → "approve" ; reject/abort → "reject" ; 其他 → "reject"（fail-closed）。
+    """
+    normalized = _EXTERNAL_TO_INTERNAL.get(
+        str(decision).strip().lower() if decision else ""
+    )
+    if normalized in ("proceed",):
+        return "approve"
+    return "reject"
+
+
+def to_react_resume_payload(decision: str) -> dict[str, str]:
+    """将 OpenCode 决策转为 ReAct request_human_review 用的 resume payload。
+
+    approve → {"decision": "proceed"}  ;  reject → {"decision": "abort"}.
+    """
+    internal = _EXTERNAL_TO_INTERNAL.get(
+        str(decision).strip().lower() if decision else ""
+    )
+    return {"decision": internal or "abort"}
+
+
+def _gate_payload_for_opencode(
+    *,
+    thread_id: str,
+    gate_id: str,
+    message: str,
+    reasons: list[str],
+    risk_metrics: dict[str, Any] | None = None,
+    risk_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """构造 OpenCode 可直接展示的 gate 字段（从 interrupt payload 提取并标准化）。"""
+    return {
+        "kind": "human_gate",
+        "gate_id": gate_id,
+        "thread_id": thread_id,
+        "message": message,
+        "reasons": reasons,
+        "risk_metrics": risk_metrics or {},
+        "risk_profile": risk_profile or {},
+        "decision_schema": {
+            "allowed": ["approve", "reject"],
+            "default": "reject",
+        },
+    }
 
 
 def should_interrupt(
@@ -68,3 +130,59 @@ def parse_resume_decision(resume_payload: Any) -> str | None:
     if isinstance(resume_payload, dict):
         return resume_payload.get("decision")
     return None
+
+
+# ---------------------------------------------------------------------------
+# OpenCode interrupt 提取 / 格式化  (Day 7)
+# ---------------------------------------------------------------------------
+
+
+def extract_interrupt_payload(state: dict[str, Any]) -> dict[str, Any] | None:
+    """从 LangGraph 返回的 state 中提取 pending interrupt payload。
+
+    LangGraph interrupt 在 state["__interrupt__"] 列表中，每个元素有 .value。
+    返回 None 表示没有 pending interrupt。
+    """
+    interrupts = state.get("__interrupt__")
+    if not interrupts:
+        return None
+    try:
+        interrupt = interrupts[0]
+        value = getattr(interrupt, "value", interrupt)
+        if isinstance(value, dict):
+            return value
+    except (IndexError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def format_waiting_for_human(
+    *,
+    thread_id: str,
+    interrupt_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """构造 MCP run_agent "waiting_for_human" 结果。
+
+    从 interrupt payload 提取 gate_id、message、reasons 等字段，
+    调用 _gate_payload_for_opencode 组装 OpenCode 可展示的 gate。
+    """
+    gate_id = interrupt_payload.get("gate_id", "")
+    message = interrupt_payload.get("message", _GATE_MESSAGE)
+    reasons: list[str] = interrupt_payload.get("reasons", [])
+    risk_metrics = interrupt_payload.get("risk_profile", interrupt_payload.get("risk_metrics", {}))
+    risk_profile = interrupt_payload.get("risk_profile", {})
+
+    gate = _gate_payload_for_opencode(
+        thread_id=thread_id,
+        gate_id=gate_id,
+        message=message,
+        reasons=list(reasons) if isinstance(reasons, list) else [str(reasons)],
+        risk_metrics=risk_metrics if isinstance(risk_metrics, dict) else {},
+        risk_profile=risk_profile if isinstance(risk_profile, dict) else {},
+    )
+
+    return {
+        "status": "waiting_for_human",
+        "thread_id": thread_id,
+        "gate": gate,
+    }

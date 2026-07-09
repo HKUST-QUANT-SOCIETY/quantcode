@@ -47,11 +47,18 @@ class AgentState(BaseFlowState, total=False):
     - human_review_result — 人工审核结果（"proceed"/"abort"，由 request_human_review tool 写入）
     - task_goal     — 任务目标描述（取自 input_data.task）
     - _gate_purpose — Day 5: risk/loop/max_iter, 内部追踪 gate 来源
+    - current_step  — LLM 本轮意图的完整工具批次（list[str]，用于 fingerprint）
+    - last_tool     — 本轮实际执行的 tool 列表（list[str]，用于 fingerprint）
+    - tool_args     — 本轮实际执行的 tool 参数列表（list[dict]，用于 fingerprint）
+    - errors        — 工具执行错误信息（list[str]，operator.add 累积）
+    - output_data   — 标准化产出（给 MCP / OpenCode 状态回流消费）
+    - artifacts     — 产物路径列表（operator.add 累积）
+    - gate          — OpenCode 可展示的 HumanGate payload
 
     **不放进 state 的字段**（通过闭包注入）：
     - tools         — ToolDef 列表（Pydantic 模型，msgpack 不支持）
-    注：``seen_states`` 由 ``make_post_tool_check`` 闭包内部维护，
-    不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
+     注：``seen_states`` 由 ``make_post_tool_check`` 闭包内部维护，
+     不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
     """
 
     messages: Annotated[list[Any], operator.add]  # 累积所有 node 返回的新消息
@@ -62,6 +69,13 @@ class AgentState(BaseFlowState, total=False):
     human_review_result: str | None
     task_goal: str
     _gate_purpose: str | None  # Day 5: risk/loop/max_iter, 内部追踪 gate 来源
+    current_step: list[str] | None
+    last_tool: list[str] | None
+    tool_args: list[dict[str, Any]] | None
+    errors: list[str] | None
+    output_data: dict[str, Any] | None
+    artifacts: Annotated[list[str], operator.add] | None
+    gate: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +128,22 @@ def make_llm_node(
         # 调 LLM（带 tool 列表）
         response: AIMessage = model(history, tools=tools)
 
-        return {
+        updates = {
             "messages": [response],
             "iterations": state.get("iterations", 0) + 1,
         }
+
+        tc = getattr(response, "tool_calls", None)
+        if tc:
+            names = []
+            for call in tc:
+                if isinstance(call, dict):
+                    names.append(call.get("name", ""))
+                else:
+                    names.append(getattr(call, "name", ""))
+            updates["current_step"] = names
+
+        return updates
 
     return llm_node
 
@@ -153,6 +179,11 @@ def make_tool_node(
         results: list[ToolMessage] = []
         # 收集需要注入 state 的字段
         state_updates: dict[str, Any] = {}
+
+        executed_tools: list[str] = []
+        executed_args: list[dict[str, Any]] = []
+        tool_errors: list[str] = []
+
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
@@ -177,9 +208,17 @@ def make_tool_node(
                         f"Tool '{c['name']}' failed: {type(e).__name__}. "
                         "请改用其他方案或向用户报告。"
                     )
+            executed_tools.append(c["name"])
+            executed_args.append(c["args"])
             results.append(
                 ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
             )
+
+        if executed_tools:
+            state_updates["last_tool"] = executed_tools
+            state_updates["tool_args"] = executed_args
+        if tool_errors:
+            state_updates["errors"] = tool_errors
 
         state_updates["messages"] = results
         return state_updates
@@ -193,6 +232,7 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     当前注册的映射：
     - calc_risk_stub → risk_metrics（完整 dict，含阈值）
     - mark_task_done / task_done → task_status="done"
+    - write_blackboard → task_status="done"（流程最后一步，写入完成后标记结束）
     - request_human_review → human_review_result（"proceed"/"abort"，由 _human_gate_node 最终裁决）
     """
     updates: dict[str, Any] = {}
@@ -203,10 +243,38 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     if tool_name in ("mark_task_done", "task_done", "mark_complete"):
         updates["task_status"] = "done"
 
+    if tool_name == "write_blackboard":
+        updates["task_status"] = "done"
+
     if tool_name in ("request_human_review", "human_review"):
-        # tool stub 返回 "proceed"/"abort"；_human_gate_node 做最终裁决
+        # Day 4 俞高磊：request_human_review 现在含 interrupt() 暂停，
+        # 外部 resume 后返回 {"decision": "proceed"/"abort"}
         decision = output.get("decision", "abort")
         updates["human_review_result"] = decision
+        # 同时注入 gate_purpose 标记这是 risk gate
+        if "_gate_purpose" not in updates:
+            updates["_gate_purpose"] = "risk"
+
+    # Day 4 控制平面状态回流：标准字段透传给 AgentState/MCP。
+    if "output_data" in output and isinstance(output.get("output_data"), dict):
+        updates["output_data"] = output["output_data"]
+
+    if "artifacts" in output:
+        artifacts = output.get("artifacts") or []
+        if isinstance(artifacts, str):
+            artifacts = [artifacts]
+        if isinstance(artifacts, list):
+            updates["artifacts"] = [str(item) for item in artifacts]
+
+    if "gate" in output and isinstance(output.get("gate"), dict):
+        updates["gate"] = output["gate"]
+
+    if "errors" in output:
+        errors = output.get("errors") or []
+        if isinstance(errors, str):
+            errors = [errors]
+        if isinstance(errors, list):
+            updates["errors"] = [str(item) for item in errors]
 
     return updates
 
@@ -290,18 +358,24 @@ def make_routing_edge(
     def routing_edge(state: AgentState) -> str:
         messages = state.get("messages", [])
         if not messages:
+            # print("[DEBUG routing_edge] no messages → end")
             return "end"
 
-        # 迭代上限检查（尊重 AgentRunner 的 max_iterations 参数）
         if state.get("iterations", 0) >= max_iterations:
+            # print(f"[DEBUG routing_edge] iterations={state.get('iterations', 0)} >= {max_iterations} → end")
             return "end"
 
         last = messages[-1]
         if not isinstance(last, AIMessage):
+            # print(f"[DEBUG routing_edge] last is not AIMessage → end")
             return "end"
 
         if not getattr(last, "tool_calls", None):
-            return "end"
+            task_status = state.get("task_status")
+            # print(f"[DEBUG routing_edge] no tool_calls, task_status={task_status!r}")
+            if task_status == "done":
+                return "end"
+            return "continue"
 
         return "continue"
 
@@ -339,11 +413,12 @@ def make_tool_routing_edge(
         messages = state.get("messages", [])
         iterations = state.get("iterations", 0)
 
-        # 迭代上限检查（尊重 AgentRunner 的 max_iterations 参数）
+        # print(f"[DEBUG tool_routing_edge ENTRY] iterations={iterations}, messages_count={len(messages)}")
+
         if iterations >= max_iterations:
+            # print(f"[DEBUG tool_routing_edge] iterations >= max_iterations → max_iter")
             return "max_iter"
 
-        # 从所有 AIMessage 中提取 tool_call 历史
         tool_call_history: list[str] = []
         for msg in messages:
             if isinstance(msg, AIMessage):
@@ -353,7 +428,8 @@ def make_tool_routing_edge(
                     if name:
                         tool_call_history.append(name)
 
-        # 计算指纹并累加到历史（闭包内跨迭代持久化）
+        # print(f"[DEBUG tool_routing_edge] tool_call_history={tool_call_history}")
+
         fp = compute_state_fingerprint(dict(state))
         fingerprint_history.append(fp)
 
@@ -362,12 +438,20 @@ def make_tool_routing_edge(
             "tool_call_history": tool_call_history,
             "fingerprint_history": list(fingerprint_history),
             "risk_metrics": state.get("risk_metrics"),
+            "human_review_result": state.get("human_review_result"),
             "task_status": state.get("task_status"),
             "execution_trace": _build_execution_trace(messages),
             "task_goal": state.get("task_goal", "") or state.get("input_data", {}).get("task", ""),
         }
 
         result = route_next_step(routing_state)
+        # print(f"[DEBUG tool_routing_edge] iterations={iterations}, "
+        #       f"tool_history={tool_call_history}, "
+        #       f"fp_history_len={len(fingerprint_history)}, "
+        #       f"decision={result.decision.value}, reason={result.reason!r}")
+        # print(f"[DEBUG state fields] current_step={state.get('current_step')!r}, "
+        #       f"last_tool={state.get('last_tool')!r}, "
+        #       f"tool_args={state.get('tool_args')!r}")
 
         if result.decision == RouteDecision.ABORT_LOOP:
             return "human_gate"
@@ -605,6 +689,10 @@ def init_agent_state(
         tools=tools,
         system_prompt=system_prompt,
         task_goal=user_msg,
+        output_data=None,
+        artifacts=[],
+        errors=[],
+        gate=None,
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
