@@ -192,11 +192,11 @@ def test_list_tools_excludes_non_model_tools_when_quantcode_group_is_model(monke
 
 
 def test_call_tool_success():
-    result = mcp_server.call_tool("read_pr", {"pr_number": 42})
+    result = mcp_server.call_tool("read_pr", {"pr_path": "tests/fixtures/sample_model_pr/README.md"})
     assert result["isError"] is False
     assert len(result["content"]) == 1
     assert result["content"][0]["type"] == "text"
-    assert "42" in result["content"][0]["text"]
+    assert "ModelSpec" in result["content"][0]["text"]
 
 
 def test_call_tool_unknown_tool():
@@ -249,14 +249,17 @@ def test_handle_tools_call():
         "jsonrpc": "2.0",
         "id": 3,
         "method": "tools/call",
-        "params": {"name": "read_pr", "arguments": {"pr_number": 99}},
+        "params": {
+            "name": "read_pr",
+            "arguments": {"pr_path": "tests/fixtures/sample_model_pr/README.md"},
+        },
     }
     resp = mcp_server.handle_request(req)
     assert resp["jsonrpc"] == "2.0"
     assert resp["id"] == 3
     result = resp["result"]
     assert result["isError"] is False
-    assert "99" in result["content"][0]["text"]
+    assert "ModelSpec" in result["content"][0]["text"]
 
 
 def test_handle_ping():
