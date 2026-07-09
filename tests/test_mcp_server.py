@@ -347,28 +347,17 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
         "jsonrpc": "2.0", "id": 1, "method": "tools/list"
     }) + "\n"
 
-    proc = subprocess.Popen(
+    proc = subprocess.run(
         [sys.executable, "-m", "quantcode.mcp_server"],
+        input=list_req,
         env=env,
         cwd=project_root,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
-        bufsize=0,  # unbuffered,避免 Windows pipe 卡死
+        timeout=10,
+        check=False,
     )
-    try:
-        # 写 list_req + 关 stdin(mcp_server 收到 EOF 会退出)
-        proc.stdin.write(list_req)
-        proc.stdin.close()
-        stdout, stderr = proc.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        pytest.fail("mcp_server subprocess 10s 内未响应")
-    finally:
-        if proc.poll() is None:
-            proc.kill()
+    stdout, stderr = proc.stdout, proc.stderr
 
     # 验证 stdout 含 JSON-RPC 响应
     assert stdout, f"stdout 空(可能 subprocess 启动失败),stderr={stderr!r}"
@@ -426,28 +415,17 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
         "params": {"name": "check_gate", "arguments": {"risk_profile": profile}}
     }) + "\n"
 
-    proc = subprocess.Popen(
+    proc = subprocess.run(
         [sys.executable, "-m", "quantcode.mcp_server"],
+        input=list_req + call_req,
         env=env,
         cwd=project_root,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
-        bufsize=0,
+        timeout=10,
+        check=False,
     )
-    try:
-        proc.stdin.write(list_req)
-        proc.stdin.write(call_req)
-        proc.stdin.close()
-        stdout, stderr = proc.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        pytest.fail("mcp_server subprocess 10s 内未响应")
-    finally:
-        if proc.poll() is None:
-            proc.kill()
+    stdout, stderr = proc.stdout, proc.stderr
 
     assert stdout, f"stdout 空,stderr={stderr!r}"
     lines = [l for l in stdout.split("\n") if l.strip()]
