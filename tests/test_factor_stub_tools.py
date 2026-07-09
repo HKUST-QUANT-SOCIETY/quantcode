@@ -54,9 +54,8 @@ def test_factor_tools_registered():
 
 
 def test_match_main_stub_returns_expected_shape():
-    """match_main stub 返回 {compatible, suggested_fields, notes} 三键。"""
+    """match_main returns legacy keys plus fixture-backed operator hints."""
     t = global_registry.get("match_main")
-    # 模拟 registry.call 的参数验证路径
     validated = t.schema(idea="PB-ROE 季度再平衡")
     out = t.execute(validated, ctx={})
     assert isinstance(out, dict)
@@ -64,22 +63,59 @@ def test_match_main_stub_returns_expected_shape():
     assert isinstance(out["suggested_fields"], list)
     assert len(out["suggested_fields"]) > 0
     assert "notes" in out
+    assert "fundamental_ratio" in out["suggested_operators"]
+    assert out["need_new_operator"] is False
+
+
+def test_match_main_unknown_factor_requests_new_operator():
+    """Unknown idea should not pretend compatibility."""
+    t = global_registry.get("match_main")
+    validated = t.schema(idea="超参数优化因子")
+    out = t.execute(validated, ctx={})
+    assert out["compatible"] is False
+    assert out["need_new_operator"] is True
+    assert out["new_operator_hint"]
 
 
 def test_gen_schema_stub_returns_expected_shape():
-    """gen_schema stub 返回 {name, formula, fields, rebalance} 四键。"""
+    """gen_schema keeps legacy keys and adds dynamic schema metadata."""
     t = global_registry.get("gen_schema")
     validated = t.schema(
         idea="PB-ROE 季度再平衡",
-        match_result={"compatible": True, "suggested_fields": ["pb", "roe"]},
+        match_result={
+            "compatible": True,
+            "suggested_fields": ["pb", "roe"],
+            "suggested_operators": ["fundamental_ratio"],
+        },
     )
     out = t.execute(validated, ctx={})
     assert isinstance(out, dict)
     assert "name" in out
     assert "formula" in out
     assert "fields" in out
-    assert out["fields"] == ["pb", "roe"]
+    assert out["fields"] == ["fundamental_ratio"]
     assert "rebalance" in out
+    assert out["valid"] is True
+    assert out["class_name"].endswith("FactorSpec")
+    assert f"class {out['class_name']}" in out["schema_code"]
+    assert "window" in out["json_schema"]["properties"]
+    assert out["error"] is None
+
+
+def test_gen_schema_dynamic_class_can_validate():
+    """Generated schema code can be imported and validates window."""
+    t = global_registry.get("gen_schema")
+    validated = t.schema(
+        idea="momentum",
+        match_result={"compatible": True, "suggested_operators": ["ts_mean"]},
+    )
+    out = t.execute(validated, ctx={})
+    namespace = {}
+    exec(out["schema_code"], namespace)  # noqa: S102 - test validates generated code
+    cls = namespace[out["class_name"]]
+    assert cls(window=20, universe="CSI1000").window == 20
+    with pytest.raises(ValueError, match="window 太短"):
+        cls(window=1)
 
 
 # ---------------------------------------------------------------------------
