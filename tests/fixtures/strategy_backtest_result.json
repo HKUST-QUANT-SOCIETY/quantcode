@@ -1,0 +1,34 @@
+{
+  "strategy_name": "multi_signal_csi1000",
+  "as_of_date": "2026-06-27",
+  "universe": "CSI1000",
+  "candidates": [
+    {
+      "signal_id": "pb_roe_ranker",
+      "source_group": "factor",
+      "weight_hint": 0.35
+    },
+    {
+      "signal_id": "momentum_20d",
+      "source_group": "factor",
+      "weight_hint": 0.25
+    },
+    {
+      "signal_id": "ml_ensemble_v2",
+      "source_group": "model",
+      "weight_hint": 0.4
+    },
+    {
+      "signal_id": "low_quality_noise",
+      "source_group": "factor",
+      "weight_hint": 0.02
+    }
+  ],
+  "expected_selected_min": 3,
+  "backtest_stub": {
+    "annual_return": 0.092,
+    "sharpe": 1.12,
+    "max_drawdown": 0.11,
+    "turnover_monthly": 0.21
+  }
+}

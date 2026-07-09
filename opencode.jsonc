@@ -29,16 +29,42 @@
     }
   },
 
-  // MCP servers（Day 3 尹一帆）
-  // quantcode: 暴露 model/risk/factor/options 等组的量化 tool 给 OpenCode，
-  // 入口 quantcode/mcp_server.py（stdin/stdout JSON-RPC）
-  // 切换组：修改 QUANTCODE_GROUP 为 model | risk | factor | options ...
+  // MCP servers（Day 3 尹一帆 / Day 4 刘炽 扩展）
+  // quantcode-*: 暴露各组 Python tool 给 OpenCode（stdin/stdout JSON-RPC）
+  // OpenCode 启动后 Agent 可调用对应 MCP tool；切换组用不同 server 名即可。
   "mcp": {
-    "quantcode": {
+    "quantcode-model": {
       "type": "local",
-      "command": ["python", "-m", "quantcode.mcp_server"],
+      "command": ["python3", "-m", "quantcode.mcp_server"],
       "environment": {
         "QUANTCODE_GROUP": "model",
+        "PYTHONPATH": "."
+      },
+      "enabled": true
+    },
+    "quantcode-strategy": {
+      "type": "local",
+      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "environment": {
+        "QUANTCODE_GROUP": "strategy",
+        "PYTHONPATH": "."
+      },
+      "enabled": true
+    },
+    "quantcode-fundamental": {
+      "type": "local",
+      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "environment": {
+        "QUANTCODE_GROUP": "fundamental",
+        "PYTHONPATH": "."
+      },
+      "enabled": true
+    },
+    "quantcode-options": {
+      "type": "local",
+      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "environment": {
+        "QUANTCODE_GROUP": "options",
         "PYTHONPATH": "."
       },
       "enabled": true

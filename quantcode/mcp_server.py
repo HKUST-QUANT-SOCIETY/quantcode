@@ -60,6 +60,8 @@ from tools.options._register import (  # noqa: F401  触发 options tool 注册
     run_options_backtest_stub_tool,
 )
 import tools.risk._register  # noqa: F401  触发 risk tool 注册
+import tools.strategy._register  # noqa: F401  触发 strategy tool 注册
+import tools.fundamental._register  # noqa: F401  触发 fundamental tool 注册
 
 
 # ---------------------------------------------------------------------------

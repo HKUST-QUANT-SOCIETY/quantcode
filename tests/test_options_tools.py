@@ -40,11 +40,15 @@ def test_build_vol_surface_from_sample_csv():
             "underlying": "GC",
             "as_of_date": "2026-06-27",
             "data_path": "data/sample_options/gc_options_merged_sample.csv",
+            "write_artifact": True,
         },
     )
     assert result["underlying"] == "GC"
     assert len(result["points"]) >= 1
     assert 0 <= result["points"][0]["implied_vol"] <= 5
+    assert result["interpolation_method"] == "black_scholes_iv_bisection"
+    assert result.get("artifact_path")
+    assert result["data_quality"] in {"sample_bs_iv", "sample", "mock"}
 
 
 def test_calc_greeks_returns_profile():

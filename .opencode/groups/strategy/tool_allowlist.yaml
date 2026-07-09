@@ -1,0 +1,7 @@
+# strategy 组 tool 白名单 — Day 4 刘炽
+# 由 tools/registry.py::load_group_config 读取
+allowlist:
+  - select_signals
+  - combine_signals
+  - run_strategy_backtest
+  - deploy_strategy
