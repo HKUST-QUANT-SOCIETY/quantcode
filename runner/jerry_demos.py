@@ -90,10 +90,13 @@ def run_fundamental_demo(
         "pit_rag_search",
         {"query": query, "as_of_date": as_of_date, "top_k": 10},
     )
-    pit = PITResult.model_validate(pit_raw)
+    pit = PITResult.model_validate(
+        {k: v for k, v in pit_raw.items() if k not in ("backend", "pit_rule")}
+    )
     assert all(d.published_at <= pit.as_of_date for d in pit.documents), (
         "PIT violation: published_at > as_of_date"
     )
+    backend = pit_raw.get("backend", "unknown")
 
     fin = registry.call(
         "extract_financial",
@@ -128,8 +131,22 @@ def run_fundamental_demo(
         },
     )
     research = ResearchResult.model_validate(
-        {k: v for k, v in report_raw.items() if k != "typst_used"}
+        {
+            k: v
+            for k, v in report_raw.items()
+            if k not in ("typst_used", "markdown_filled", "pdf_filled")
+        }
     )
+
+    # Human review gate (Pattern 5) — deterministic approve for automated acceptance.
+    # In OpenCode/AgentRunner this is an interrupt; here we record the gate payload.
+    human_gate = {
+        "tool": "request_human_review",
+        "reason": f"研报待验收: {target_identifier} as_of {as_of_date}",
+        "status": "approved_for_acceptance",
+        "decision": "approve",
+        "note": "Automated acceptance path records gate; live AgentRunner uses interrupt/resume",
+    }
 
     bundle = {
         "target_identifier": target_identifier,
@@ -138,13 +155,20 @@ def run_fundamental_demo(
         "pit_safety": {
             "filtered_count": pit.filtered_count,
             "all_published_at_lte_as_of": True,
-            "backend": "fixture_json",
-            "note": "Chroma 向量库 Week 2 接入；当前 fixture 强制 PIT 过滤",
+            "backend": backend,
+            "pit_rule": pit_raw.get("pit_rule", "published_at <= as_of_date"),
+            "note": (
+                "Day5: prefer Chroma PersistentClient; "
+                "fixture_json only if chromadb unavailable"
+            ),
         },
         "financials": fin,
         "dcf": dcf,
         "research": research.model_dump(mode="json"),
+        "human_gate": human_gate,
         "typst_used": report_raw.get("typst_used", False),
+        "pdf_filled": report_raw.get("pdf_filled", False),
+        "markdown_filled": report_raw.get("markdown_filled", False),
     }
     artifact_path = _write_artifact(
         f"artifacts/research/{target_identifier.replace('.', '_')}-{as_of_date}/fundamental_bundle.json",
@@ -156,9 +180,13 @@ def run_fundamental_demo(
         "artifact_path": artifact_path,
         "pit_filtered_count": pit.filtered_count,
         "pit_doc_count": len(pit.documents),
+        "pit_backend": backend,
+        "human_gate": human_gate["status"],
         "markdown_path": research.markdown_path,
         "pdf_path": research.pdf_path,
         "typst_used": report_raw.get("typst_used", False),
+        "markdown_filled": report_raw.get("markdown_filled", False),
+        "pdf_filled": report_raw.get("pdf_filled", False),
     }
 
 

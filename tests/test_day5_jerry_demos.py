@@ -32,8 +32,14 @@ def test_day5_fundamental_demo_pit_safe():
     bundle = json.loads(path.read_text(encoding="utf-8"))
     assert bundle["pit_safety"]["all_published_at_lte_as_of"] is True
     assert bundle["pit_safety"]["filtered_count"] >= 1
+    assert bundle["pit_safety"]["backend"] in ("chroma", "fixture_json")
     assert bundle["research"]["markdown_path"]
+    assert bundle.get("markdown_filled") is True
+    assert bundle.get("human_gate", {}).get("decision") == "approve"
     assert "DOC-LEAK-2026" not in {d["id"] for d in bundle["pit"]["documents"]}
+    md = (PROJECT_ROOT / bundle["research"]["markdown_path"]).read_text(encoding="utf-8")
+    assert "FCF TTM" in md
+    assert "Stub content for" not in md
 
 
 def test_day5_options_demo_produces_options_risk():

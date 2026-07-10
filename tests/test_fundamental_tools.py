@@ -15,6 +15,8 @@ EXPECTED = {
     "extract_financial",
     "dcf_valuation",
     "render_report",
+    "request_human_review",
+    "mark_task_done",
 }
 
 
@@ -41,10 +43,28 @@ def test_pit_rag_filters_lookahead():
             "top_k": 10,
         },
     )
-    validated = PITResult.model_validate(result)
+    assert result.get("backend") in ("chroma", "fixture_json")
+    assert result.get("pit_rule") == "published_at <= as_of_date"
+    validated = PITResult.model_validate(
+        {k: v for k, v in result.items() if k not in ("backend", "pit_rule")}
+    )
     assert validated.filtered_count >= 1
     assert all(d.published_at <= validated.as_of_date for d in validated.documents)
     assert "DOC-LEAK-2026" not in {d.id for d in validated.documents}
+
+
+def test_pit_rag_chroma_backend_preferred():
+    """Day5: prefer real Chroma; allow fixture_json only if chromadb missing."""
+    result = registry.call(
+        "pit_rag_search",
+        {"query": "蜜雪冰城", "as_of_date": "2025-01-01", "top_k": 5},
+    )
+    try:
+        import chromadb  # noqa: F401
+
+        assert result["backend"] == "chroma"
+    except ImportError:
+        assert result["backend"] == "fixture_json"
 
 
 def test_extract_dcf_render_pipeline():
@@ -94,7 +114,7 @@ def test_extract_dcf_render_pipeline():
         {
             k: v
             for k, v in report.items()
-            if k not in ("typst_used", "markdown_filled")
+            if k not in ("typst_used", "markdown_filled", "pdf_filled")
         }
     )
     assert validated.markdown_path

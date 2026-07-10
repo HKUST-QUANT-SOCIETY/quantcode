@@ -58,8 +58,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  schema   : {data.get('schema')}")
             print(f"  artifact : {data.get('artifact_path')}")
             if name == "fundamental":
-                print(f"  PIT      : filtered={data.get('pit_filtered_count')} docs={data.get('pit_doc_count')}")
-                print(f"  typst    : {data.get('typst_used')}")
+                print(
+                    f"  PIT      : filtered={data.get('pit_filtered_count')} "
+                    f"docs={data.get('pit_doc_count')} backend={data.get('pit_backend')}"
+                )
+                print(f"  human    : {data.get('human_gate')}")
+                print(
+                    f"  report   : md_filled={data.get('markdown_filled')} "
+                    f"pdf_filled={data.get('pdf_filled')} typst={data.get('typst_used')}"
+                )
+                print(f"  markdown : {data.get('markdown_path')}")
+                print(f"  pdf      : {data.get('pdf_path')}")
             if name == "options":
                 print(f"  delta    : {data.get('portfolio_delta')}")
                 print(f"  sharpe   : {data.get('backtest_sharpe')}")

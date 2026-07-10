@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fixture 真实数据需求清单 · 刘炽</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --card: #fffdf9;
+      --line: #e7e0d5;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --ok: #166534;
+      --chip: #ecfdf5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #d9f3ef 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #fde68a55 0%, transparent 45%),
+        var(--bg);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+    h1 {
+      font-size: 1.85rem;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 28px;
+      font-size: 0.98rem;
+    }
+    .callout {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-bottom: 28px;
+    }
+    .callout strong { color: var(--accent); }
+    h2 {
+      font-size: 1.25rem;
+      margin: 36px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 1.05rem;
+      margin: 22px 0 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 10px 0 18px;
+      font-size: 0.92rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      background: #f0ebe3;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: none; }
+    code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.86em;
+      background: #f0ebe3;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .chip {
+      display: inline-block;
+      background: var(--chip);
+      color: var(--ok);
+      border: 1px solid #a7f3d0;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .chip.warn {
+      background: #fff7ed;
+      color: var(--warn);
+      border-color: #fdba74;
+    }
+    .chip.p0 {
+      background: #fef2f2;
+      color: #b91c1c;
+      border-color: #fecaca;
+    }
+    ul { padding-left: 1.2rem; }
+    li { margin: 4px 0; }
+    .footer {
+      margin-top: 40px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fixture 真实数据需求清单</h1>
+    <p class="sub">
+      Owner：刘炽（options / fundamental / strategy）· 用途：把现有 fixture 从「手写假数」升级为「从真实源抽样固化」· 更新：2026-07-10
+    </p>
+
+    <div class="callout">
+      <strong>先回答你的问题：</strong>
+      是的——下面这份清单<strong>专门用于 fixture</strong>，不是生产全量接入清单。
+      <br /><br />
+      Fixture = 测试/demo 用的<strong>小样本快照</strong>。正确做法是：向各组/基建要一小段<strong>真实数据</strong> → 脱敏/截断 → 写进
+      <code>tests/fixtures/</code> 或 <code>data/sample_options/</code>。
+      <br />
+      不是让你现在接全市场 API；也不是继续纯手编假 JSON（除非对方暂时给不了）。
+    </div>
+
+    <h2>0. 概念对照</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>概念</th>
+          <th>是什么</th>
+          <th>你要做什么</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Fixture</strong></td>
+          <td>仓库里的样例输入文件（JSON/CSV/diff）</td>
+          <td>用真实源抽样后固化进仓库</td>
+        </tr>
+        <tr>
+          <td><strong>真实数据来源</strong></td>
+          <td>服务器共享盘 / Chroma / 各组跑数产物</td>
+          <td>找对应 owner 要「一小段可公开进 repo 的样本」</td>
+        </tr>
+        <tr>
+          <td><strong>生产接入</strong></td>
+          <td>tool 直接读全量库/API</td>
+          <td>Week 2+；本清单不覆盖全量</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>1. 你名下相关 Fixture 总表</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture 文件</th>
+          <th>服务哪条流</th>
+          <th>当前状态</th>
+          <th>升级优先级</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>data/sample_options/gc_options_merged_sample.csv</code></td>
+          <td>options 曲面</td>
+          <td><span class="chip warn">mock 结构对齐</span></td>
+          <td><span class="chip p0">P0</span></td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/pit_corpus_sample.json</code></td>
+          <td>fundamental pit_rag</td>
+          <td><span class="chip warn">手写样例</span></td>
+          <td><span class="chip p0">P0</span></td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/strategy_backtest_result.json</code></td>
+          <td>strategy 选信号</td>
+          <td><span class="chip warn">手写候选信号</span></td>
+          <td><span class="chip p0">P0</span></td>
+        </tr>
+        <tr>
+          <td>（建议新增）财务 stub → 真财务片段</td>
+          <td>extract_financial / dcf</td>
+          <td><span class="chip warn">代码内 seed stub</span></td>
+          <td><span class="chip">P1</span></td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/factor_backtest_result.json</code></td>
+          <td>factor / 跨组</td>
+          <td><span class="chip">已有结构</span></td>
+          <td><span class="chip">P1</span>（找因子组）</td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/risk_metrics_*.json</code></td>
+          <td>risk 双场景</td>
+          <td><span class="chip">已有结构</span></td>
+          <td><span class="chip">P2</span>（找风控组）</td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/sample_model/model_spec.json</code></td>
+          <td>model handoff</td>
+          <td><span class="chip">已有结构</span></td>
+          <td><span class="chip">P2</span>（找模型组）</td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/sample_pr.diff</code> / <code>sample_pr_real.diff</code></td>
+          <td>read_pr</td>
+          <td><span class="chip">已有</span></td>
+          <td><span class="chip">P2</span>（找模型组）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>2. P0：你自己三条线 —— Fixture 要的真实数据</h2>
+
+    <h3>2.1 Options 曲面 Fixture</h3>
+    <p><strong>目标文件：</strong><code>data/sample_options/gc_options_merged_sample.csv</code>（可另存 <code>_from_prod_YYYYMMDD.csv</code>）</p>
+    <table>
+      <thead>
+        <tr>
+          <th>向谁要</th>
+          <th>真实数据源</th>
+          <th>抽多少就够做 fixture</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>基建组 + 期权组</td>
+          <td><code>/srv/quant/shared_data/options/merged/gc_options/</code> 某一日 parquet/csv</td>
+          <td><strong>1 个交易日</strong>，约 20–200 行（多 strike × call/put）即可</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Fixture 里必须保留的列：</strong></p>
+    <ul>
+      <li><code>datetime</code> / <code>file_date</code></li>
+      <li><code>underlying</code>（如 GC）</li>
+      <li><code>expiration</code></li>
+      <li><code>strike_price</code></li>
+      <li><code>instrument_class</code>（call/put）</li>
+      <li><code>bid_px</code>, <code>ask_px</code>, <code>mid_px</code>（或 <code>close</code>）</li>
+      <li><code>symbol</code>（建议）</li>
+      <li><code>volume</code>（可选）</li>
+    </ul>
+    <p><strong>额外建议同日抽一份：</strong>对应期货价 1 行（forward），可放进同目录小 JSON，避免 BS 用 strike 中位数凑。</p>
+    <p><strong>脱敏：</strong>若政策不允许原样进 Git，可对价格做微小噪声，但字段与日期关系要真实。</p>
+
+    <h3>2.2 Fundamental PIT 语料 Fixture</h3>
+    <p><strong>目标文件：</strong><code>tests/fixtures/pit_corpus_sample.json</code></p>
+    <table>
+      <thead>
+        <tr>
+          <th>向谁要</th>
+          <th>真实数据源</th>
+          <th>抽多少就够做 fixture</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>基建组（Chroma）+ 基本面组</td>
+          <td>研报/公告语料库或 Chroma collection 导出</td>
+          <td><strong>4–8 篇</strong>同一 ticker（如 2097.HK）；另保留/构造 1 篇 <code>published_at</code> 在未来的文档专测 PIT</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>每条文档字段（fixture JSON）：</strong></p>
+    <ul>
+      <li><code>id</code>（必须）</li>
+      <li><code>published_at</code>（必须，ISO 日期）</li>
+      <li><code>title</code>（必须）</li>
+      <li><code>snippet</code> 或正文截断 200–500 字（必须）</li>
+      <li><code>source</code>（必须，券商/公告名）</li>
+      <li><code>url</code>（可选，可置 null）</li>
+      <li><code>score</code>（可选，检索分；没有可事后算）</li>
+    </ul>
+    <p><strong>注意：</strong>进仓库的应是<strong>脱敏摘要</strong>，不要整篇未授权研报全文。</p>
+
+    <h3>2.3 Strategy 候选信号 Fixture</h3>
+    <p><strong>目标文件：</strong><code>tests/fixtures/strategy_backtest_result.json</code></p>
+    <table>
+      <thead>
+        <tr>
+          <th>向谁要</th>
+          <th>真实数据源</th>
+          <th>抽多少就够做 fixture</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>因子组 / 模型组</td>
+          <td>一次真实 AutoEval / ModelSpec 跑数后的信号列表，或 Blackboard 导出</td>
+          <td><strong>3–6 条</strong>候选信号 + 1 个 <code>as_of_date</code> + universe</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Fixture 字段：</strong></p>
+    <ul>
+      <li><code>strategy_name</code>, <code>as_of_date</code>, <code>universe</code></li>
+      <li><code>candidates[]</code>：<code>signal_id</code>, <code>source_group</code>, <code>weight_hint</code></li>
+      <li>（可选）附带真实回测摘要数字，便于对照 stub</td>
+    </ul>
+
+    <h2>3. P1：建议新增 / 升级的 Fixture</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>建议文件</th>
+          <th>向谁要什么真实片段</th>
+          <th>用途</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>tests/fixtures/financials_2097HK.json</code></td>
+          <td>基本面组：某公司一期财报关键指标 + <code>publish_date</code></td>
+          <td>替换 extract_financial 的 seed stub</td>
+        </tr>
+        <tr>
+          <td><code>tests/fixtures/gc_futures_spot_sample.json</code></td>
+          <td>基建：与 options 同日的期货结算价 1 行</td>
+          <td>曲面 forward 真实化</td>
+        </tr>
+        <tr>
+          <td><code>factor_backtest_result.json</code> 替换为真跑数截断</td>
+          <td>因子组：AutoEval 一次真实 <code>summary.json</code> 脱敏</td>
+          <td>跨组 strategy←factor 更真</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>4. P2：跨组 Fixture（你可协助，不必须你采全量）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture</th>
+          <th>向谁要</th>
+          <th>要什么「真实小样本」</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>risk_metrics_normal.json</code> / <code>breach.json</code></td>
+          <td>风控组</td>
+          <td>一次真实风控计算的指标截断（正常 + 超阈值各一份）</td>
+        </tr>
+        <tr>
+          <td><code>sample_model/model_spec.json</code></td>
+          <td>模型组</td>
+          <td>一份真实 PR 对应的 ModelSpec 脱敏版</td>
+        </tr>
+        <tr>
+          <td><code>sample_pr_real.diff</code></td>
+          <td>模型组</td>
+          <td>测试 PR 的真实 diff 片段（可截断）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>5. 你要出去「要数」时的最小话术</h2>
+    <h3>基建组</h3>
+    <ul>
+      <li>给我 <code>merged/gc_options</code> <strong>任意 1 天</strong>可导出样本（20–200 行）进 fixture</li>
+      <li>同日 futures 结算价 1 行</li>
+      <li>Chroma/语料：导出 5–8 条含 <code>published_at</code> 的摘要（可脱敏）</li>
+    </ul>
+    <h3>期权组</h3>
+    <ul>
+      <li>确认字段与 <code>DataStructure.md</code> 一致；mid 用哪一列算 IV</li>
+    </ul>
+    <h3>基本面组</h3>
+    <ul>
+      <li>1 个 ticker 的 4–8 篇摘要 + 1 期财务关键指标（含发布日）</li>
+    </ul>
+    <h3>因子 / 模型组</h3>
+    <ul>
+      <li>3–6 条真实信号（id / source_group / weight_hint / as_of_date）</li>
+    </ul>
+
+    <h2>6. 验收标准（Fixture 升级算不算完成）</h2>
+    <ul>
+      <li>文件仍在 repo 内，demo/测试不依赖外网</li>
+      <li>字段能过对应 Pydantic schema</li>
+      <li>来源可追溯（在 README 或 JSON 里写 <code>source</code> / <code>as_of</code> / <code>note: sampled from …</code>）</li>
+      <li>PIT fixture 仍保留至少 1 条应被过滤的未来文档</li>
+      <li>未把未授权全文研报、密钥、完整生产库塞进 Git</li>
+    </ul>
+
+    <p class="footer">
+      文件路径：<code>docs/jerry_fixture_real_data.html</code> ·
+      用浏览器打开即可查看 ·
+      本页只列 Fixture 抽样需求，不含生产全量接入。
+    </p>
+  </main>
+</body>
+</html>

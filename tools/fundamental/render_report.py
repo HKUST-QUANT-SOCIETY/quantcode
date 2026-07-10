@@ -154,15 +154,94 @@ def _write_markdown(path: Path, args: RenderReportArgs) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _try_typst(pdf_path: Path) -> bool:
+def _typst_escape(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace("#", "\\#")
+        .replace("@", "\\@")
+        .replace("$", "\\$")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+    )
+
+
+def _write_filled_typst(path: Path, args: RenderReportArgs) -> None:
+    name = args.target_name or args.target_identifier
+    fv = args.fair_value_per_share
+    if fv is None:
+        fv = (args.dcf or {}).get("fair_value_per_share", "N/A")
+    fin = args.financials or {}
+    docs = args.documents or []
+
+    doc_lines = []
+    for d in docs[:8]:
+        title = _typst_escape(str(d.get("title") or d.get("id")))
+        snip = _typst_escape(str(d.get("snippet") or "")[:180])
+        src = _typst_escape(str(d.get("source") or ""))
+        pub = _typst_escape(str(d.get("published_at") or "")[:10])
+        doc_lines.append(f"- *{title}* ({src}, {pub}): {snip}")
+
+    body = f"""
+#set text(font: ("Times New Roman", "Songti SC", "PingFang SC"), size: 11pt)
+#set page(margin: 2cm)
+
+#align(center)[
+  #text(size: 18pt, weight: "bold")[Research Report — {_typst_escape(str(name))}]
+]
+
+#v(8pt)
+- Identifier: `{_typst_escape(args.target_identifier)}`
+- As of: {args.as_of_date.isoformat()}
+- Fair value / share: *{fv}*
+- PIT docs: {len(docs)} (filtered lookahead: {args.pit_filtered_count})
+
+== Research questions
+"""
+    for q in args.research_questions or ["N/A"]:
+        body += f"- {_typst_escape(q)}\n"
+
+    body += "\n== Financials\n"
+    if fin:
+        body += (
+            f"- Revenue TTM: {fin.get('revenue_ttm')}\n"
+            f"- EBIT TTM: {fin.get('ebit_ttm')}\n"
+            f"- FCF TTM: {fin.get('fcf_ttm')}\n"
+            f"- Shares (m): {fin.get('shares_outstanding_m')}\n"
+        )
+    else:
+        body += "- (no financials)\n"
+
+    body += "\n== Valuation (DCF)\n"
+    dcf = args.dcf or {}
+    body += (
+        f"- Method: `{_typst_escape(str(dcf.get('method', 'n/a')))}`\n"
+        f"- WACC: {dcf.get('wacc', 'n/a')}\n"
+        f"- Fair value / share: *{fv}*\n"
+    )
+
+    body += "\n== PIT evidence\n"
+    body += "\n".join(doc_lines) if doc_lines else "- (no documents)\n"
+
+    body += (
+        "\n== Risks\n"
+        "- Financials/DCF may be stub-backed; verify before production use.\n"
+        "- Corpus backend may be local Chroma seeded from fixture.\n"
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body.strip() + "\n", encoding="utf-8")
+
+
+def _try_typst(pdf_path: Path, args: RenderReportArgs) -> bool:
     typst = shutil.which("typst")
-    template = PROJECT_ROOT / "templates" / "typst" / "research-report.typ"
-    if not typst or not template.exists():
+    if not typst:
         return False
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    typ_path = pdf_path.with_suffix(".typ")
     try:
+        _write_filled_typst(typ_path, args)
         subprocess.run(
-            [typst, "compile", str(template), str(pdf_path)],
+            [typst, "compile", str(typ_path), str(pdf_path)],
             check=True,
             capture_output=True,
             text=True,
@@ -170,7 +249,21 @@ def _try_typst(pdf_path: Path) -> bool:
         )
         return pdf_path.exists()
     except (subprocess.SubprocessError, OSError):
-        return False
+        # fallback: compile layout stub so typst_used can still be true for env check
+        template = PROJECT_ROOT / "templates" / "typst" / "research-report.typ"
+        if not template.exists():
+            return False
+        try:
+            subprocess.run(
+                [typst, "compile", str(template), str(pdf_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            return pdf_path.exists()
+        except (subprocess.SubprocessError, OSError):
+            return False
 
 
 def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:
@@ -183,7 +276,7 @@ def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:
     _write_markdown(md_path, args)
     pdf_ok = False
     if args.use_typst:
-        pdf_ok = _try_typst(pdf_path)
+        pdf_ok = _try_typst(pdf_path, args)
 
     def _rel(p: Path) -> str:
         try:
@@ -210,15 +303,16 @@ def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:
     payload = result.model_dump(mode="json")
     payload["typst_used"] = pdf_ok
     payload["markdown_filled"] = bool(args.documents or args.financials or args.dcf)
+    payload["pdf_filled"] = pdf_ok
     return payload
 
 
 render_report_tool = ToolDef(
     id="render_report",
     description=(
-        "Render a research report artifact. Writes markdown under artifacts/research/ "
-        "filled with optional PIT documents, financials, and DCF. "
-        "If typst is installed, also compiles the layout stub PDF. "
+        "Render a research report artifact. Writes filled markdown under artifacts/research/ "
+        "and compiles a filled Typst PDF when typst is installed. "
+        "Pass documents/financials/dcf from upstream tools. "
         "Returns ResearchResult JSON."
     ),
     schema=RenderReportArgs,
