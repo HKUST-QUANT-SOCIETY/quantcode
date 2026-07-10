@@ -1,9 +1,8 @@
 """Routing and guard modules — execution control layer for Agent orchestration.
 
 Day 3 俞高磊：代码规则路由 + 死循环检测 + 迭代上限 + 状态指纹 + RLHF 记录。
-
-注：fingerprint 采用白名单实现（见 fingerprint.py），不导出 EXCLUDED_FIELDS
-（原 PR #16 的死代码，已删）。
+Day 5: RLHF 格式重构 — 删 reward_key/REWARD，改为 system_decision + human_decision
+         + gate_purpose + risk_score + label（4 路显式映射，非 XOR）。
 """
 
 from .router import RouteDecision, RouteResult, route_next_step
@@ -24,10 +23,13 @@ from .fingerprint import (
     compute_state_fingerprint,
 )
 from .rlhf_logger import (
-    REWARD,
     RLHF_PATH,
     log_rlhf_entry,
     make_rlhf_entry,
+)
+from .session_review import (
+    apply_session_verdict,
+    reviewer_review_session,
 )
 
 __all__ = [
@@ -50,8 +52,10 @@ __all__ = [
     "FINGERPRINT_FIELDS",
     "compute_state_fingerprint",
     # RLHF logger
-    "REWARD",
     "RLHF_PATH",
     "log_rlhf_entry",
     "make_rlhf_entry",
+    # Session review
+    "apply_session_verdict",
+    "reviewer_review_session",
 ]

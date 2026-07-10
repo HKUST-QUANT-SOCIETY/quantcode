@@ -314,7 +314,9 @@ def test_call_executes_with_provided_ctx():
 
 def test_project_root_points_to_quantcode():
     # tools/registry.py → tools/ → quantcode/（仓库根）
-    assert PROJECT_ROOT.name == "quantcode"
+    # 大小写不敏感：仓库可被克隆进任意大小写的目录名（如 QUANTcode/quantcode），
+    # 关键是根目录含 tools/ 与 runner/。
+    assert PROJECT_ROOT.name.lower() == "quantcode"
     assert (PROJECT_ROOT / "tools").is_dir()
     assert (PROJECT_ROOT / "runner").is_dir()
 

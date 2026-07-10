@@ -14,6 +14,7 @@ import pytest
 from tools.skills.loader import (
     MIMOCODE_SKILLS_DIR,
     MIMOCODE_SKILLS_DIR_FALLBACK,
+    MIMOCODE_SKILLS_DIR_VENDORED,
     _strip_frontmatter,
     load_skill,
 )
@@ -98,7 +99,11 @@ def test_load_business_skill_missing_raises() -> None:
 
 def test_meta_skill_path_exists() -> None:
     """至少有一个 MimoCode skill 路径应存在（前置校验）。"""
-    exists = MIMOCODE_SKILLS_DIR.exists() or MIMOCODE_SKILLS_DIR_FALLBACK.exists()
+    exists = (
+        MIMOCODE_SKILLS_DIR_VENDORED.exists()
+        or MIMOCODE_SKILLS_DIR.exists()
+        or MIMOCODE_SKILLS_DIR_FALLBACK.exists()
+    )
     assert exists, "MimoCode skill bundle 目录不存在"
 
 

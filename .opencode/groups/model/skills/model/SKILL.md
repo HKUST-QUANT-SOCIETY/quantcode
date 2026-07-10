@@ -31,17 +31,45 @@ schema_out: schemas.model.ModelSpec
 - 任务涉及：文献整理、模型设计、训练实现、提 PR、触发风控
 - 下游需要结构化 `ModelSpec`（PR body 或 Blackboard）
 
-## 可用 tool（Day 3 ToolRegistry）
+## ⚠️ 你只有一个 tool：`run_agent`
 
-| Tool | 用途 | 注意 |
+**本 compose 模式下你只能调用一个 MCP tool：`run_agent`**。所有单步操作（读 PR、提取元数据、生成 spec、写 blackboard、触发 risk）都由 `run_agent` 内部的 AgentRunner ReAct 循环自主完成。
+
+### 调用方式
+
+```
+run_agent(task="<任务描述>", group="model", skill_name="model", max_iterations=50)
+```
+
+| 参数 | 必填 | 说明 |
 |------|------|------|
-| `read_pr` | 读取 PR diff | mock 实现，返回 diff 文本 |
-| `extract_metadata` | 从 diff 提取元数据 | 输出 ticker / factor 等 |
-| `generate_model_spec` | 生成 `ModelSpec` | 必须过 Pydantic 校验 |
-| `write_blackboard` | 写入 Blackboard | GROUP / PROJECT scope |
-| `trigger_risk_flow` | 触发 risk 组 Agent | 跨组 handoff |
+| `task` | **是** | 自然语言任务描述，如 "处理 PR #42，生成 ModelSpec 并 handoff 风控" |
+| `group` | **是** | 固定为 `"model"` |
+| `skill_name` | 否 | 可选子 skill：`"model"`（默认）/ `"model:lit-review"` / `"model:pr-submit"` |
+| `max_iterations` | 否 | 默认 50，复杂任务可设更大 |
 
-加载路径：`.opencode/groups/model/tool_allowlist.yaml`
+**调度表：根据任务内容选 skill_name**
+
+| 任务关键词 | 应传 skill_name | 原因 |
+|-----------|----------------|------|
+| pr, submit, pull request, handoff | `"model-pr-submit"` | 执行器：read_pr → spec → blackboard → risk |
+| lit review, paper, survey, arxiv | `"model-lit-review"` | 执行器：文献结构化审查 |
+| 通用 / 不确定 | `"model"` | 编排器（内部自动路由到子 skill） |
+
+> **重要**：即使你传了 `skill_name="model"`，`run_agent` 内部会根据任务关键词自动切换到对应的执行器子 skill。但为了确保确定性，建议直接传正确的子 skill 名。
+
+### 调用规则（必须遵守！）
+
+1. **收到任务后，立刻调用 `run_agent`**——不要先分析、不要先解释、不要先列计划
+2. **不要在对话中描述你"将"怎么做**，直接调 tool
+3. **如果被问"能帮我做 X 吗？"→ 直接调 `run_agent(task="做 X", group="model")`**
+4. **如果任务不完整，果断调 tool**，AgentRunner 内部会自行澄清
+5. **run_agent 返回后再用自然语言总结结果**给用户
+
+### 单步 tool 由 AgentRunner 内部自动调用（你不需要知道）
+
+以下 tool 由 `run_agent` 内部的 AgentRunner ReAct 循环自动调度，你**不要试图直接调用**它们（MCP 里不存在）：
+read_pr / extract_metadata / generate_model_spec / write_blackboard / trigger_risk_flow
 
 ## Compose 子 skill（按依赖顺序）
 
@@ -91,10 +119,11 @@ result = runner.run(
 
 ## 验收标准（组级）
 
+- [ ] compose agent 收到任务后**实际调用了** `run_agent`（不是只用文字描述）
+- [ ] `run_agent` 返回 status="completed" 或 "stopped"（含 tool_calls 追踪）
 - [ ] `ModelSpec` 通过 Pydantic 校验
 - [ ] Blackboard 写入成功
 - [ ] risk 组 flow 被触发（或 `shared.pending_risk_reviews` 有记录）
-- [ ] AgentRunner 能加载 skill 并完成 ≥3 步 tool 调用
 
 ## 跨组接口
 

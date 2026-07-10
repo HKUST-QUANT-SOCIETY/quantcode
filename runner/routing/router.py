@@ -3,11 +3,10 @@ Rule-based router — deterministic next-step decision for the Agent.
 
 Priority (from Plan §1.1):
   1. max_iterations_exceeded  → abort_max_iterations
-  2. loop detected            → abort_loop
-  3. fingerprint repeat       → abort_loop
-  4. risk threshold exceeded  → human_gate
-  5. task finished            → finish
-  6. otherwise                → continue
+  2. loop detected            → abort_loop  (frequency / fingerprint / errors / TF-IDF)
+  3. risk threshold exceeded  → human_gate
+  4. task finished            → finish
+  5. otherwise                → continue
 
 Abort always wins over human_gate: a looping Agent should be stopped,
 not handed to a human reviewer.
@@ -61,18 +60,26 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
       - iteration_count        : int
       - tool_call_history      : list[str]
       - fingerprint_history    : list[str]
-      - risk_metrics           : dict | None   (output of calc_risk_stub)
-      - task_status            : str | None    ("done" triggers finish)
+      - execution_trace        : list[dict]  (for TF-IDF + error detection)
+      - risk_metrics           : dict | None (output of calc_risk_stub)
+      - task_status            : str | None  ("done" triggers finish)
     """
 
     iteration_count    = state.get("iteration_count", 0)
     tool_call_history  = state.get("tool_call_history", [])
     fingerprint_history = state.get("fingerprint_history", [])
+    execution_trace    = state.get("execution_trace") or []
     risk_metrics       = state.get("risk_metrics")
     task_status        = state.get("task_status")
+    human_review_result = state.get("human_review_result")
 
-    # ---- 1. Guards first (abort beats everything) -------------------------
-    guard = detect_loop(tool_call_history, fingerprint_history, iteration_count)
+    # ---- 1. Guards (loop detection — always rule-based) ------------------
+    guard = detect_loop(
+        tool_call_history,
+        fingerprint_history,
+        iteration_count,
+        execution_trace=execution_trace,
+    )
     if guard.aborted:
         if guard.reason == "max_iterations_exceeded":
             return RouteResult(
@@ -80,14 +87,23 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
                 reason=guard.reason,
                 detail=guard.detail,
             )
+        # All other loop detections → human review (don't kill agent directly)
         return RouteResult(
             decision=RouteDecision.ABORT_LOOP,
             reason=guard.reason,
             detail=guard.detail,
         )
 
-    # ---- 2. Human gate (risk threshold check) -----------------------------
-    if risk_metrics and _risk_exceeds_threshold(risk_metrics):
+    # ---- 2. Risk gating ---------------------------------------------------
+    # Rule-based threshold (always active), but only before a human has already
+    # made a decision for this checkpoint. After approve/proceed the agent must
+    # be allowed to continue without re-triggering the same gate on unchanged
+    # risk_metrics; after reject/abort the human_gate routing will end safely.
+    if (
+        risk_metrics
+        and _risk_exceeds_threshold(risk_metrics)
+        and human_review_result not in ("proceed", "abort")
+    ):
         return RouteResult(
             decision=RouteDecision.HUMAN_GATE,
             reason="risk_threshold_exceeded",
@@ -122,4 +138,15 @@ def _risk_exceeds_threshold(metrics: dict[str, Any]) -> bool:
         return True
     if metrics.get("position_limit", 0) > pos_limit:
         return True
+    # Day 4 俞高磊：加上 correlation_with_existing 检查（杨欣琳 RiskProfile 对齐）
+    # 使用 abs() — 负相关（如 -0.7）同样意味着与现有持仓高度相关，应触发人审
+    if abs(metrics.get("correlation_with_existing", 0)) > 0.6:
+        return True
     return False
+
+
+__all__ = [
+    "RouteDecision",
+    "RouteResult",
+    "route_next_step",
+]
