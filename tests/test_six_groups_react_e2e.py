@@ -66,36 +66,42 @@ SIX_GROUPS = [
         "tools": ["read_pr", "extract_metadata", "generate_model_spec"],
         "min_iterations": 3,
         "artifact_key": "model_spec",
+        "artifact_keywords": ["model_spec", "spec"],
     },
     {
         "group": "risk",
         "tools": ["read_blackboard", "calc_risk", "generate_risk_profile"],
         "min_iterations": 3,
         "artifact_key": "risk_profile",
+        "artifact_keywords": ["risk_profile", "risk"],
     },
     {
         "group": "factor",
         "tools": ["match_main", "gen_schema", "autoeval"],
         "min_iterations": 3,
         "artifact_key": "factor_report",
+        "artifact_keywords": ["factor_report", "factor"],
     },
     {
         "group": "strategy",
         "tools": ["select_signals", "combine_signals", "run_strategy_backtest"],
         "min_iterations": 3,
         "artifact_key": "strategy_report",
+        "artifact_keywords": ["strategy_report", "strategy"],
     },
     {
         "group": "fundamental",
         "tools": ["pit_rag_search", "extract_financial", "dcf_valuation", "render_report"],
         "min_iterations": 3,
         "artifact_key": "research_report",
+        "artifact_keywords": ["research_report", "report"],
     },
     {
         "group": "options",
         "tools": ["build_vol_surface", "calc_greeks", "run_options_backtest_stub"],
         "min_iterations": 3,
         "artifact_key": "vol_surface_report",
+        "artifact_keywords": ["vol_surface_report", "vol_surface"],
     },
 ]
 
@@ -128,7 +134,7 @@ def tmp_db(tmp_path):
 class _ScriptedLLM:
     """调 N 次返回预设 AIMessage 序列,tool_calls 引用各组 tool."""
 
-    def __init__(self, tool_sequence: list[str]):
+    def __init__(self, tool_sequence: list[str], artifact_key: str | None = None):
         self._responses = []
         for i, tool_name in enumerate(tool_sequence):
             self._responses.append(AIMessage(
@@ -139,8 +145,12 @@ class _ScriptedLLM:
                     "id": f"call-{i}",
                 }],
             ))
-        # 最后一个 AIMessage 表示"完成"
-        self._responses.append(AIMessage(content=f"Final: {tool_sequence[-1]} done"))
+        # 最后一个 AIMessage 表示"完成",嵌入 artifact_key 让 schema 校验有内容可检
+        final_payload = (
+            f"Final: artifact={artifact_key} done ({tool_sequence[-1]})"
+            if artifact_key else f"Final: {tool_sequence[-1]} done"
+        )
+        self._responses.append(AIMessage(content=final_payload))
         self._idx = 0
 
     def __call__(self, messages, tools=None):
@@ -173,8 +183,8 @@ def test_group_agent_runs_three_plus_steps_and_produces_artifact(
         tools = _make_simple_tools([tool_name], {})
         register_tool(tools[0])
 
-    # 2. 准备 ScriptedLLM 调所有 tool 序列
-    llm = _ScriptedLLM(group_cfg["tools"])
+    # 2. 准备 ScriptedLLM 调所有 tool 序列(final message 嵌入 artifact_key)
+    llm = _ScriptedLLM(group_cfg["tools"], artifact_key=group_cfg["artifact_key"])
 
     # 3. 跑 AgentRunner
     runner = AgentRunner(group=group_cfg["group"], model=llm, checkpoint_db=tmp_db)
@@ -186,19 +196,30 @@ def test_group_agent_runs_three_plus_steps_and_produces_artifact(
         thread_id=f"t-six-groups-{group_cfg['group']}",
     )
 
-    # 4. 验证 ≥3 步
-    assert final["iterations"] >= group_cfg["min_iterations"], (
+    # 4. 验证每个 scripted tool 都被走过(iterations ≥ len(tools),
+    #    这比 min_iterations=3 更严,防止 short-circuit)
+    assert final["iterations"] >= len(group_cfg["tools"]), (
         f"[{group_cfg['group']}] iterations={final['iterations']} < "
-        f"{group_cfg['min_iterations']}"
+        f"len(tools)={len(group_cfg['tools'])} — agent 短路了,未走完 tool 序列"
     )
 
-    # 5. 验证最后一条 message 是 final answer（不是 tool_call 残留）
+    # 5. 验证最后一条 message 是 final answer(不是 tool_call 残留)
     last_msg = final["messages"][-1]
     assert not getattr(last_msg, "tool_calls", None), (
         f"[{group_cfg['group']}] messages[-1] 仍有 tool_calls 残留: {last_msg.tool_calls}"
     )
     assert last_msg.content, (
         f"[{group_cfg['group']}] messages[-1].content 为空,无 final answer"
+    )
+
+    # 6. 轻量 schema 校验:final content 必须非空 + 包含该组 artifact 的期望关键词
+    #    (避开 import 各组真实 Pydantic model 的依赖,做 keyword-level 校验)
+    content_lower = (last_msg.content or "").lower()
+    expected_keywords = group_cfg.get("artifact_keywords", [])
+    matched = [kw for kw in expected_keywords if kw.lower() in content_lower]
+    assert matched, (
+        f"[{group_cfg['group']}] final content 不含 artifact 关键词 "
+        f"{expected_keywords}; content={last_msg.content!r}"
     )
 
 
@@ -229,7 +250,7 @@ def test_group_agent_does_not_hang_on_simple_task(group_cfg, tmp_db, clean_regis
         thread_id=f"t-quick-{group_cfg['group']}",
     )
 
-    assert final["iterations"] <= 5, (
-        f"[{group_cfg['group']}] iterations={final['iterations']} 超过 max_iterations=5,"
-        "怀疑挂死"
+    assert final["iterations"] < 5, (
+        f"[{group_cfg['group']}] iterations={final['iterations']} 达到 max_iterations=5,"
+        "怀疑挂死 / runaway loop"
     )
