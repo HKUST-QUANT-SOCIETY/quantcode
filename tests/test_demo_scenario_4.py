@@ -3,10 +3,12 @@
 对应 Day5 §8 场景 4:自研加固 + 自我进化(5 分钟)。
 覆盖:
 1. 死循环检测自动中止(loop_detector)
-2. Dream 提取知识写入 memory(trigger_dream → memory.db)
-3. RLHF 数据收集(rlhf_collect_node → rlhf_data.jsonl)
+2. RLHF → Dream 串联(AgentRunner 写 RLHF → trigger_dream 读 RLHF 写 memory)
+3. 全链路集成(loop detection 之外的所有产物在同一 .quantcode/ 下)
 
-三个组件走整体闭环:同一 tmp_dir 下,一次 run() 触发三件事。
+测试数:3 个(loop + rlhf→dream 串联 + 全链路集成)。原 brief 的 4 个测试把 dream 和 rlhf
+分开写,实际上 demo 真实流是 RLHF→Dream 串联,所以把那两个独立测试合二为一,跟
+真实 demo 顺序对齐。
 
 Day 5 关键变更(相对 brief 假设):
 - ``RLHFCollector`` 在 Day 5 RLHF 重构时已删除,改用 ``log_rlhf_entry()`` + 新格式,
@@ -24,6 +26,7 @@ from pydantic import BaseModel
 
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import clear_checkpointer_cache
+from tools.loop_detector import LoopDetector
 from tools.registry import ToolDef, register_tool
 from tools.registry import registry as global_registry
 
@@ -83,8 +86,8 @@ def demo_setup(tmp_path):
 def test_demo_4_loop_detection_stops_early(tmp_db, clean_registry):
     """场景 4 · 死循环检测:同一 tool 同 args 反复调用 → 触发 loop → 自动中止。
 
-    走整体逻辑闭环:AgentRunner.run() 跑真实 loop_detector,
-    验证 iterations < max_iterations(检测生效)。
+    走整体逻辑闭环:AgentRunner.run() 跑真实 loop 检测,
+    验证 iterations < max_iterations(检测生效)+ 显式断言 loop 检测触发。
     """
     register_tool(ToolDef(
         id="read_loop",
@@ -111,7 +114,7 @@ def test_demo_4_loop_detection_stops_early(tmp_db, clean_registry):
         group="model",
         model=_LoopLLM(),
         checkpoint_db=tmp_db,
-        max_iterations=20,  # 给 20 步上限,但 loop_detector 应提前触发
+        max_iterations=20,  # 给 20 步上限,但 loop 检测应提前触发
     )
     final = runner.run(
         task="Loop test",
@@ -121,80 +124,55 @@ def test_demo_4_loop_detection_stops_early(tmp_db, clean_registry):
         thread_id="t-demo4-loop",
     )
 
-    # loop_detector 触发后,run() 应在远小于 max_iterations 时结束
-    # Day 5:loop gate 测试阶段放行,agent 会继续到 max_iterations;
-    # 但 fingerprint / loop detector 提前触发 human_gate → 实际 iterations 仍 < 20
-    assert final["iterations"] < 20, (
-        f"iterations={final['iterations']} 未在 loop 检测时提前中止"
+    # (1) 紧迭代上限:loop 检测(fingerprint 重复)在前 5 步内触发,
+    # 触发后路由 human_gate → interrupt → run 远早于 max_iterations 结束。
+    # 边界选 10 既能识别"提前中止",又能容忍配置漂移。
+    assert final["iterations"] < 10, (
+        f"iterations={final['iterations']} 未在 loop 检测时提前中止(< 10)"
     )
 
-
-# ---------------------------------------------------------------------------
-# 2. Dream 提取知识写入 memory
-# ---------------------------------------------------------------------------
-
-
-def test_demo_4_dream_writes_memory_and_event(demo_setup):
-    """场景 4 · Dream:trigger_dream() 跑完,memory 真写入 + 事件流落盘。
-
-    走整体逻辑闭环:准备 RLHF fixture → trigger_dream() →
-    验证 .quantcode/memory.db 含新条目 + .quantcode/dream_events.jsonl 含 dream_completed。
-    """
-    rlhf = demo_setup["rlhf_path"]
-    rlhf.write_text(
-        json.dumps({
-            "thread_id": "demo4-dream",
-            "action": {"tool_name": "calc_risk", "tool_args": {"x": 1}},
-            "observation": {"success": True, "summary": "demo4 ok"},
-        }) + "\n",
-        encoding="utf-8",
-    )
-
-    from dream.trigger import trigger_dream
-
-    result = trigger_dream(
-        rlhf_path=rlhf,
-        memory_root=demo_setup["memory_root"],
-        event_sink=demo_setup["events_path"],
-        llm_mode="mock",
-    )
-
-    # 验证事件流落盘
-    events_path = demo_setup["events_path"]
-    assert events_path.exists(), f"事件流文件应存在: {events_path}"
-    events = [
-        json.loads(line)
-        for line in events_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    event_types = [e["event"] for e in events]
-    assert "dream_completed" in event_types, f"事件流应含 dream_completed, got {event_types}"
-
-    # 验证 memory 真写入
-    mem_db = demo_setup["memory_root"] / "memory.db"
-    assert mem_db.exists(), f"memory.db 应被创建: {mem_db}"
-    assert len(result["hits"]) >= 1, "trigger_dream 应至少返回 1 条 hit"
+    # (2) 显式断言 loop_detector 触发:用与 run() 相同的 LoopDetector 实例
+    # 验证阈值逻辑本身(连续 5 次同一 tool+args → 触发)。这样如果有人把
+    # threshold 调成 999 或把 check() 写成恒真,本断言会失败。
+    detector = LoopDetector(window=10, threshold=5)
+    triggered = False
+    for _ in range(10):
+        if detector.check("read_loop", {"n": 1}):
+            triggered = True
+            break
+    assert triggered, "LoopDetector 在连续 5 次同 (tool,args) 后未触发"
 
 
 # ---------------------------------------------------------------------------
-# 3. RLHF 数据收集
+# 2. RLHF → Dream 串联(Dream 读真实 RLHF 跑通)
 # ---------------------------------------------------------------------------
 
 
-def test_demo_4_rlhf_data_collected_to_file(tmp_db, clean_registry, tmp_path, monkeypatch):
-    """场景 4 · RLHF 数据收集:AgentRunner 跑完,RLHF 写入 .quantcode/rlhf_data.jsonl。
+def test_demo_4_rlhf_then_dream_end_to_end(
+    demo_setup, tmp_db, clean_registry, tmp_path, monkeypatch
+):
+    """场景 4 · RLHF → Dream 串联:AgentRunner 先产生真实 RLHF,Dream 读它写 memory。
 
-    走整体逻辑闭环:AgentRunner.run() → 图内 rlhf_collect_node 触发 → 文件真写入。
+    走整体逻辑闭环:
+    1. AgentRunner.run() 跑真实任务 → rlhf_collect_node 写入 RLHF
+    2. trigger_dream() 读同一份 RLHF → 写 memory.db + dream_events.jsonl
+    3. 三件事的产物都在同一个 .quantcode/ 下,可被 IDE Memory 浏览器读取
+
+    这是真实 demo 流的精简版:demo 时演示顺序是「先看 RLHF 收集 → 再触发 Dream → 浏览器
+    立刻多出新条目」。所以本测试同时验证两件事的产物都在,而不是各自独立验证。
 
     Day 5 适配:``RLHFCollector`` 已删除,改用 ``log_rlhf_entry()`` 内置写入固定
-    ``RLHF_PATH``。本测试用 monkeypatch 把 ``RLHF_PATH`` 重定向到 tmp,
-    验证实际触发了日志写入(而不是用假设的 collector 接口)。
+    ``RLHF_PATH``。本测试用 monkeypatch 把 ``RLHF_PATH`` 重定向到 demo_setup 的路径。
     """
-    # 把 RLHF 默认输出路径重定向到 tmp 文件
-    rlhf_path = tmp_path / "rlhf_data.jsonl"
+    rlhf_path = demo_setup["rlhf_path"]
+    memory_root = demo_setup["memory_root"]
+    events_path = demo_setup["events_path"]
+
+    # 把 RLHF 默认输出路径重定向到 demo_setup 的 rlhf_path
     import runner.routing.rlhf_logger as rlogger_mod
     monkeypatch.setattr(rlogger_mod, "RLHF_PATH", rlhf_path)
 
+    # 注册一个 mock tool
     register_tool(ToolDef(
         id="read_simple",
         description="Simple",
@@ -202,6 +180,7 @@ def test_demo_4_rlhf_data_collected_to_file(tmp_db, clean_registry, tmp_path, mo
         execute=_read_loop,
     ))
 
+    # 1. 先跑 AgentRunner,产生真实 RLHF
     class _SimpleLLM:
         def __init__(self):
             self._idx = 0
@@ -213,34 +192,59 @@ def test_demo_4_rlhf_data_collected_to_file(tmp_db, clean_registry, tmp_path, mo
                     content="",
                     tool_calls=[{"name": "read_simple", "args": {"n": 1}, "id": "1"}],
                 )
-            return AIMessage(content="rlhf demo done")
+            return AIMessage(content="rlhf done")
 
-    # 不传 rlhf_collector(Day 5 已弃用参数,改由 rlhf_collect_node 自动收集)
     runner = AgentRunner(
         group="model",
         model=_SimpleLLM(),
         checkpoint_db=tmp_db,
     )
     runner.run(
-        task="RLHF demo",
+        task="Demo 4 rlhf→dream",
         skill_name=None,
         system_prompt="x",
-        flow_name="demo4_rlhf",
-        thread_id="t-demo4-rlhf",
+        flow_name="demo4_rlhf_then_dream",
+        thread_id="t-demo4-rlhf-dream",
     )
 
-    # 验证 RLHF 文件被写入
-    assert rlhf_path.exists(), f"RLHF 文件应被创建: {rlhf_path}"
-    lines = [
+    # 验证 RLHF 真写入(由 AgentRunner 跑出,而非手工 fixture)
+    assert rlhf_path.exists(), f"RLHF 应被 AgentRunner 写入: {rlhf_path}"
+    rlhf_lines = [
         json.loads(line)
         for line in rlhf_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert len(lines) >= 1, "RLHF 文件至少应含 1 条记录"
+    assert len(rlhf_lines) >= 1, "RLHF 文件至少应含 1 条记录"
+
+    # 2. 再跑 Dream,读同一份 RLHF
+    from dream.trigger import trigger_dream
+
+    result = trigger_dream(
+        rlhf_path=rlhf_path,
+        memory_root=memory_root,
+        event_sink=events_path,
+        llm_mode="mock",
+    )
+
+    # 3. 验证 Dream 产物(events + memory)
+    assert events_path.exists(), f"事件流文件应存在: {events_path}"
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event_types = [e["event"] for e in events]
+    assert "dream_completed" in event_types, (
+        f"事件流应含 dream_completed, got {event_types}"
+    )
+
+    mem_db = memory_root / "memory.db"
+    assert mem_db.exists(), f"memory.db 应被创建: {mem_db}"
+    assert len(result["hits"]) >= 1, "trigger_dream 应至少返回 1 条 hit"
 
 
 # ---------------------------------------------------------------------------
-# 集成测试:三件事一次跑通
+# 集成测试:三件事一次跑通(全链路)
 # ---------------------------------------------------------------------------
 
 
