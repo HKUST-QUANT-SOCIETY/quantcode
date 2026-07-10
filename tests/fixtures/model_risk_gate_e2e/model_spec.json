@@ -1,0 +1,29 @@
+{
+  "model_name": "risk_gate_e2e_probe",
+  "model_type": "linear",
+  "owner": "xinlinyang",
+  "code_path": "tests/fixtures/model_risk_gate_e2e/model_spec.json",
+  "training_data_start": "2022-01-01",
+  "training_data_end": "2024-12-31",
+  "as_of_date": "2025-01-15",
+  "hyperparameters": {
+    "lookback_days": 20,
+    "rebalance_days": 5
+  },
+  "feature_dependencies": [
+    "close_return_20d",
+    "realized_volatility_20d"
+  ],
+  "operator_dependencies": [
+    "zscore",
+    "rank"
+  ],
+  "risk_metadata": {
+    "universe": "CSI1000",
+    "benchmark": "CSI1000",
+    "expected_holding_period_days": 5,
+    "max_position_pct": 0.05,
+    "uses_leverage": false,
+    "notes": "Test-only ModelSpec for the real model-to-risk GitHub E2E flow."
+  }
+}
