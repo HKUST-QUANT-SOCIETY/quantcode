@@ -297,3 +297,33 @@ def test_dream_real_mode_requires_model(tmp_path):
             llm_mode="real",
             model=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Day 5 补强：rlhf 聚合（跨多条 trace，而非只读最后一条）
+# ---------------------------------------------------------------------------
+
+
+def test_dream_aggregates_multiple_rlhf_records(tmp_path):
+    """Day 5：_load_rlhf_aggregate 应跨多条记录统计 tool 频次 + thread 数。"""
+    from dream.dream_prototype import _load_rlhf_aggregate
+
+    rlhf = tmp_path / "rlhf.jsonl"
+    lines = [
+        {"thread_id": "t1", "group": "risk", "action": {"tool_name": "calc_risk"}},
+        {"thread_id": "t1", "group": "risk", "action": {"tool_name": "check_gate"}},
+        {"thread_id": "t2", "group": "risk", "action": {"tool_name": "calc_risk"}},
+    ]
+    rlhf.write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
+
+    agg = _load_rlhf_aggregate(rlhf)
+    assert agg is not None
+    a = agg["_aggregate"]
+    assert a["total_records"] == 3
+    assert a["thread_count"] == 2
+    assert a["tool_frequency"]["calc_risk"] == 2
+    assert "risk" in a["groups"]
+    # 向后兼容：仍保留最后一条的 thread_id 字段
+    assert agg["thread_id"] == "t2"
