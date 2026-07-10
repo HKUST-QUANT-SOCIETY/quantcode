@@ -13,7 +13,7 @@
 | 完成项 | 说明 | 影响谁 |
 |---|---|---|
 | ✅ **PR#25 解冲突合入 main** | 俞高磊的 run_agent + stream trace；引擎升级为确定性 HumanGate；旧 `gate_tools` 参数已移除 | 全员 |
-| ✅ **opencode.jsonc 补 risk/factor MCP server** | 6 组命名 server 齐全（原缺 risk/factor，demo 会失败） | 俞高磊 / 杨欣琳 / 肖骥超 |
+| ✅ **opencode.jsonc 补 risk/factor MCP server** | 6 组命名 server 齐全（原缺 risk/factor，demo 会失败） | 俞高磊 / 杨欣琳 |
 | ✅ **引擎修复**：skill_loader vendored 路径、550 passed / 0 failed | 21 个测试从失败变绿 | 尹一帆 |
 | ✅ **三处文档漂移修复** | §5.5 LangGraph 表述、§3.4 仓库结构、§4.5 Memory/Blackboard scope 区分 | 全员参考 |
 | ✅ **trigger_risk_flow 机制定型** | Architecture §3.2 更新：Blackboard 队列标志（方式2）已文档化 | 陈镇鸿 |
@@ -145,7 +145,7 @@
 
 2. **gen_schema 真 LLM 收口**：`tools/factor/gen_schema_stub.py` 的硬编码模板换成真 LLM 动态生成 Pydantic 代码，加安全 exec 沙箱（仅允许 Pydantic import）
 
-3. **AutoEval 真 API**（肖骥超协助）：`flows/factor_autoeval.py::call_autoeval_api` 从 mock 换成真 HTTP 调用
+3. **AutoEval 真 API**：`flows/factor_autoeval.py::call_autoeval_api` 从 mock 换成真 HTTP 调用（对接 `HKUST-QUANT-SOCIETY/auto_factor_evaluation`），返回结构保持与 `MOCK_AUTOEVAL_PAYLOAD_V1` 字段一致
 
 4. **factor demo 整链**：`/compose "测 PB-ROE 因子"` → match_main（真 LLM）→ gen_schema（真 LLM）→ autoeval（真 API）→ IC/IR 阈值验收 → merge/reject 决策，录屏可演
 
@@ -179,23 +179,7 @@
 
 ---
 
-## 8. 肖骥超 · AutoEval 真 API 接入
-
-**背景**：`flows/factor_autoeval.py` 是因子主链路，`call_autoeval_api` 现在返回 mock 数据。Lead 负责接口设计和阈值验收口径，肖骥超负责真 HTTP 对接。
-
-**剩余任务**：
-
-1. 把 `call_autoeval_api` 里的 `_mock_autoeval_result(spec)` 替换为真实的 `HKUST-QUANT-SOCIETY/auto_factor_evaluation` HTTP 调用，返回 IC/IR/换手/衰减等指标
-2. 保持返回结构与 `MOCK_AUTOEVAL_PAYLOAD_V1` 字段一致（Lead 的 acceptance.py 验收以此为准）
-3. 与 Lead 确认接入方式（HTTP endpoint / token）
-
-**验收**：
-- [ ] `run_acceptance_checks("factor:autoeval", report)` 对真实回测结果通过
-- [ ] IC ≥ 0.03, IR ≥ 0.5, turnover_monthly ≤ 0.8, t_stat ≥ 2.0
-
----
-
-## 9. Demo 场景编排（investor demo 30 分钟）
+## 8. Demo 场景编排（investor demo 30 分钟）
 
 **场景 1：因子评估 + 验收闭环（8 分钟，Lead）**
 - `/compose "测 PB-ROE 因子"` → match_main（真 LLM 读主线）→ gen_schema（真 LLM 生成 FactorSpec）→ AutoEval 真回测 → IC/IR 阈值验收 → merge/reject 决策
@@ -221,7 +205,7 @@
 
 ---
 
-## 10. 交付物（Day 5 必须齐）
+## 9. 交付物（Day 5 必须齐）
 
 | 交付物 | 负责人 | 状态 |
 |---|---|---|
@@ -236,7 +220,7 @@
 
 ---
 
-## 11. 收工验收 checklist（investor demo 前）
+## 10. 收工验收 checklist（investor demo 前）
 
 ### IDE 上线（硬性）
 - [ ] OpenCode fork 能起，`/compose` 真触发 Python Agent
@@ -264,7 +248,7 @@
 
 ---
 
-## 12. 各人待合入的 PR（需 rebase 到 main）
+## 11. 各人待合入的 PR（需 rebase 到 main）
 
 | PR | 作者 | 状态 | 操作 |
 |---|---|---|---|
@@ -279,7 +263,7 @@
 
 ---
 
-## 13. 降级方案（若某项 Day5 当天卡住）
+## 12. 降级方案（若某项 Day5 当天卡住）
 
 | 卡住项 | 降级 |
 |---|---|
