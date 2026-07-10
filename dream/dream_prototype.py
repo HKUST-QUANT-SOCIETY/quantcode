@@ -138,6 +138,62 @@ def _load_last_rlhf_record(rlhf_path: Path) -> dict | None:
         return None
 
 
+def _load_rlhf_aggregate(rlhf_path: Path) -> dict | None:
+    """Day 5 补强：聚合 rlhf_data.jsonl 的**所有**记录，而非只取最后一条。
+
+    产出一个 record，除了保留最后一条的字段（向后兼容），额外附上跨条聚合：
+    - ``_aggregate.total_records`` / ``_thread_count`` / ``_groups``
+    - ``_aggregate.tool_frequency``：tool_name → 次数（降序）
+    - ``_aggregate.top_tools``：最高频的几个 tool
+
+    这样 LLM 摘要能看到"整体重复模式"，而不是被单条 trace 局限。
+    """
+    if not rlhf_path.exists():
+        return None
+    try:
+        records: list[dict] = []
+        with rlhf_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return None
+
+    if not records:
+        return None
+
+    from collections import Counter
+
+    tool_freq: Counter = Counter()
+    threads: set[str] = set()
+    groups: set[str] = set()
+    for rec in records:
+        action = rec.get("action", {})
+        name = action.get("tool_name", "") if isinstance(action, dict) else ""
+        if name:
+            tool_freq[name] += 1
+        if tid := rec.get("thread_id"):
+            threads.add(tid)
+        if grp := rec.get("group"):
+            groups.add(grp)
+
+    # 以最后一条为基底（保留 thread_id 等字段），叠加聚合视图
+    base = dict(records[-1])
+    base["_aggregate"] = {
+        "total_records": len(records),
+        "thread_count": len(threads),
+        "groups": sorted(groups),
+        "tool_frequency": dict(tool_freq.most_common()),
+        "top_tools": [t for t, _ in tool_freq.most_common(5)],
+    }
+    return base
+
+
 def _summarize_with_llm(
     record: dict | None,
     *,
@@ -229,7 +285,8 @@ def run_dream(
         if record is not None:
             source_used = "checkpoints"
     if record is None and trace_source in ("auto", "rlhf"):
-        record = _load_last_rlhf_record(rlhf_path)
+        # Day 5 补强：优先聚合所有 rlhf 记录（跨 trace 模式），失败退回单条。
+        record = _load_rlhf_aggregate(rlhf_path) or _load_last_rlhf_record(rlhf_path)
         if record is not None:
             source_used = "rlhf"
     if record is None:

@@ -1,10 +1,12 @@
-# risk 组 tool 白名单 — Day 3 俞高磊
-# 由 tools/registry.py::load_group_config 读取
+# risk 组 tool 白名单 — Day 4 + Day 7 HumanGate
 allowlist:
+  - run_agent
   - read_blackboard
   - calc_risk
+  - calc_risk_stub
   - generate_risk_profile
   - check_gate
+  - request_human_review
   - write_pr_comment
   # 共享工具
   - search_memory

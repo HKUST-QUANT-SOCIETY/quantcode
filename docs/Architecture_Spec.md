@@ -287,25 +287,43 @@ def route_safety(state: AgentState) -> Literal["continue", "abort"]:
 
 #### 跨组路由（特殊情况）
 
-model 组 Agent 调 `trigger_risk_flow` → 触发 risk 组 Agent，这是跨组路由：
+model 组 Agent 调 `trigger_risk_flow` → 触发 risk 组处理，这是跨组路由。
+
+**Day 5 定型：采用方式 2（Blackboard 队列标志）**。曾评估过两种方式，最终选队列标志作为落地机制：
 
 ```python
-def trigger_risk_flow(blackboard_key: str) -> str:
-    """跨组触发：启动另一个 Agent"""
-    # 方式 1（同步）：直接 invoke risk Agent
-    risk_agent = load_agent_for_group("risk")
-    result = risk_agent.invoke({
-        "messages": [("user", f"分析 {blackboard_key}")],
-        "group": "risk",
-    })
-    return result
-    
-    # 方式 2（异步，Day 4+）：写 task queue，risk Agent 监听队列
-    task_queue.publish({"group": "risk", "task": f"分析 {blackboard_key}"})
-    return "已触发 risk 流程"
+# ✅ 已落地（tools/model/trigger_risk_flow.py）：方式 2 — Blackboard 队列标志
+def trigger_risk_flow(blackboard_key: str) -> dict:
+    """把 pending risk review 写入 PROJECT scope 队列，供 risk 组消费。"""
+    # 1. 读取上游 write_blackboard 写的 model spec（shared.model_entries.<key>）
+    # 2. 向 PROJECT scope 的 shared.pending_risk_reviews 追加一条 pending review
+    #    （GROUP_APPEND 写策略，带 @dedupe_within 600s 去重）
+    # 3. 返回 {risk_queue_key, review_id, review}，本组流程即结束
+    ...
 ```
 
-**关键点**：跨组触发后，model 组的路由返回 `end`（本组流程结束）；risk 组是独立的 Agent 循环，有自己的路由。
+**实际数据链**（已跑通，`tests/test_model_tools.py` + `tests/test_risk_*.py` 覆盖）：
+
+```
+model Agent:
+  write_blackboard(key="model.pr_123_spec")
+    → 落到 PROJECT scope: shared.model_entries.model.pr_123_spec
+  trigger_risk_flow(blackboard_key="model.pr_123_spec")
+    → 向 PROJECT scope: shared.pending_risk_reviews 追加 {review_id → {status:pending, blackboard_key, ...}}
+    → model 组路由返回 end（本组结束）
+risk Agent（独立循环，自己的路由）:
+  read_blackboard(blackboard_key="model.pr_123_spec")
+    → 从 PROJECT scope 读回 model_spec
+  calc_risk → generate_risk_profile → check_gate → (超阈值) HumanGate interrupt → write_pr_comment
+```
+
+**为什么选方式 2 而非方式 1（直接同步 invoke risk Agent）**：
+- 解耦：model 组不持有 risk Agent 的引用，跨组只通过 Blackboard 契约通信（对齐 Pattern 2 Stateful Blackboard）
+- 可观测：队列条目在 Blackboard 留痕，前端可可视化"谁写了什么、谁读了什么"
+- 幂等：`@dedupe_within` 保证同一 blackboard_key 600s 内不重复触发
+- 方式 1（同步直接 invoke）留作 Week 2 的低延迟优化选项，不是当前口径
+
+**关键点**：跨组触发后，model 组的路由返回 `end`（本组流程结束）；risk 组是独立的 Agent 循环，有自己的路由。当前 Day 5 demo 里 risk 组通过 `run_agent(group="risk", skill_name="risk-gate")` 或 `read_blackboard` 消费队列/spec。
 
 #### 路由与 Checkpoint 的配合
 

@@ -29,15 +29,34 @@
     }
   },
 
-  // MCP servers（Day 3 尹一帆 / Day 4 刘炽 扩展）
-  // quantcode-*: 暴露各组 Python tool 给 OpenCode（stdin/stdout JSON-RPC）
+  // MCP servers（Day 3 尹一帆 / Day 4 刘炽 扩展 / Day 5 补 risk+factor）
+  // quantcode-<group>: 暴露各组 Python tool 给 OpenCode（stdin/stdout JSON-RPC）
   // OpenCode 启动后 Agent 可调用对应 MCP tool；切换组用不同 server 名即可。
+  // 6 组各一个命名 server，QUANTCODE_GROUP 在此固定（切组=选不同 server）。
   "mcp": {
     "quantcode-model": {
       "type": "local",
       "command": ["python3", "-m", "quantcode.mcp_server"],
       "environment": {
         "QUANTCODE_GROUP": "model",
+        "PYTHONPATH": "."
+      },
+      "enabled": true
+    },
+    "quantcode-risk": {
+      "type": "local",
+      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "environment": {
+        "QUANTCODE_GROUP": "risk",
+        "PYTHONPATH": "."
+      },
+      "enabled": true
+    },
+    "quantcode-factor": {
+      "type": "local",
+      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "environment": {
+        "QUANTCODE_GROUP": "factor",
         "PYTHONPATH": "."
       },
       "enabled": true

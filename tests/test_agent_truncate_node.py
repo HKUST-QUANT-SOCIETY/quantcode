@@ -149,8 +149,10 @@ def test_agent_runner_truncate_actually_truncates_long_messages(tmp_path):
     # 2000 字符 → tiktoken ~250 tokens, no-tiktoken ~1000 tokens, 都 > 100 阈值
     long_content = "a" * 2000
 
+    # 每次 echo 用不同 args，避免触发 PR25 引擎的 state-fingerprint 死循环检测
+    # （相同 tool + 相同 args 连续调用会被判定为 state loop 提前中止）。
     script = [
-        AIMessage(content="", tool_calls=[{"name": "echo", "args": {"msg": "x"}, "id": str(i)}])
+        AIMessage(content="", tool_calls=[{"name": "echo", "args": {"msg": f"x{i}"}, "id": str(i)}])
         for i in range(1, 7)
     ] + [AIMessage(content="[done]")]
 

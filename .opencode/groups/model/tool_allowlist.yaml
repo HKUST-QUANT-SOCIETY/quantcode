@@ -1,6 +1,7 @@
-# model 组 tool 白名单 — Day 3 尹一帆
-# 由 tools/registry.py::load_group_config 读取
+# model 组 tool 白名单 — Day 4 俞高磊
+# ★ run_agent 是 meta tool，不在此 allowlist；AgentRunner 内部 agent 只看到下方单步 tool + 共享工具
 allowlist:
+  # 单步 tool（AgentRunner 内部使用）
   - read_pr
   - extract_metadata
   - generate_model_spec
