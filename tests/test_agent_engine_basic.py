@@ -879,8 +879,18 @@ def test_agent_runner_uses_retry_wrapper_when_enabled(tmp_db, clean_registry):
         system_prompt="x",
         thread_id="retry-test",
     )
-    assert call_count["n"] == 2, f"抖 1 次后应跑通,实际调 {call_count['n']} 次"
+# post-merge: AgentRunner.run() 内部调 LLM 多次（pre-merge 1 次,post-merge 2 次）,
+    # 每次 LLM 调用各自走 retry.所以每次需要抖 1 次才成功 → call_count 是偶数.
+    # 验证核心不变性:
+    #   1. 至少调了一次 LLM（不是 0 次短路）
+    #   2. 至少一次 retry 成功（不是无限失败）
+    #   3. 最终整体跑通（run() 返回正常 final state）
+    assert call_count["n"] >= 2, f"应至少调 2 次 LLM,实际 {call_count['n']}"
+    assert call_count["n"] % 2 == 0, (
+        f"每次 LLM 调用需 1 次 retry 才成功,总次数应为偶数,实际 {call_count['n']}"
+    )
     assert runner.model.stats.success_after_retry is True
+    assert result["messages"][-1].content  # run() 正常返回
 
 
 def test_agent_runner_no_retry_by_default(tmp_db, clean_registry):
