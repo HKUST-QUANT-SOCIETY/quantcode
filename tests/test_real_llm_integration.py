@@ -43,7 +43,6 @@ def test_agent_runner_risk_with_real_llm(require_real_llm, tmp_path):
     runner = AgentRunner(
         group="risk",
         model=require_real_llm,
-        gate_tools=["check_gate"],
         checkpoint_db=tmp_path / "cp.db",
         max_iterations=6,  # 限制步数，避免无限循环
     )
@@ -108,7 +107,6 @@ def test_agent_runner_risk_normal_scenario_no_interrupt(require_real_llm, tmp_pa
     runner = AgentRunner(
         group="risk",
         model=require_real_llm,
-        gate_tools=["check_gate"],
         checkpoint_db=tmp_path / "cp_normal.db",
         max_iterations=6,
     )

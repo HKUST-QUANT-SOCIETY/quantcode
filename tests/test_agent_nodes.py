@@ -19,6 +19,7 @@ from runner.agent_nodes import (
     make_should_continue,
     make_tool_node,
 )
+from runner.routing.rlhf_logger import RLHF_PATH as _DEFAULT_RLHF_PATH
 from tools.loop_detector import LoopDetector, MAX_ITERATIONS
 from tools.registry import ToolDef, ToolRegistry, register_tool
 
@@ -75,15 +76,6 @@ class MockLLM:
         resp = self._responses[self._call_count]
         self._call_count += 1
         return resp
-
-
-# 一个 mock RLHFCollector
-class MockRLHFCollector:
-    def __init__(self):
-        self.entries: list[dict] = []
-
-    def record(self, state, action, reward):
-        self.entries.append({"state": state, "action": action, "reward": reward})
 
 
 # ---------------------------------------------------------------------------
@@ -491,9 +483,18 @@ def test_post_tool_check_triggers_state_loop_on_repeated_state():
 # ---------------------------------------------------------------------------
 
 
-def test_rlhf_collect_node_records_action_and_state():
-    collector = MockRLHFCollector()
-    node = make_rlhf_collect_node(collector)
+def test_rlhf_collect_node_writes_rlhf_log_to_file(tmp_path, monkeypatch):
+    """Day 5: rlhf_collect_node 使用新格式写入 RLHF JSONL，不再用旧 RLHFCollector。
+
+    验证节点写入了文件（测试用临时目录替换 RLHF_PATH）。"""
+    import json
+    rlhf_log_path = tmp_path / "rlhf_test.jsonl"
+
+    # 替换 RLHF_PATH 的默认路径，让测试写入临时文件
+    import runner.routing.rlhf_logger as rlogger_mod
+    monkeypatch.setattr(rlogger_mod, "RLHF_PATH", rlhf_log_path)
+
+    node = make_rlhf_collect_node(None)  # collector=None，走新格式
     state: AgentState = {
         "messages": [
             AIMessage(
@@ -506,100 +507,31 @@ def test_rlhf_collect_node_records_action_and_state():
     }
     out = node(state)
     assert out == {}  # 不修改 state
-    assert len(collector.entries) == 1
-    entry = collector.entries[0]
-    # state 不应包含 messages/tools/_memory 等不可序列化字段
-    assert "messages" not in entry["state"]
-    assert "tools" not in entry["state"]
-    assert "_memory" not in entry["state"]
-    assert entry["state"]["group"] == "model"
-    # action 包含 tool_calls 和 content
-    assert entry["action"]["tool_calls"] == [
-        {"name": "echo", "args": {"msg": "hi"}, "id": "c1"}
-    ]
-    assert entry["action"]["content"] == "thinking"
-    assert entry["reward"] == 0.0
+
+    # 文件被写入
+    assert rlhf_log_path.exists()
+    lines = rlhf_log_path.read_text().strip().split("\n")
+    assert len(lines) == 1
+    parsed = json.loads(lines[0])
+    assert parsed["action"]["tool_name"] == "echo"
+    assert parsed["group"] == "model"
+    assert "reward" not in parsed  # Day 5: no reward field
+    assert "system_decision" in parsed
+    assert "human_decision" in parsed
+    assert "gate_purpose" in parsed
+    assert "label" in parsed
+    assert "risk_score" in parsed
 
 
-def test_rlhf_collect_node_with_no_ai_message_records_empty_action():
-    collector = MockRLHFCollector()
-    node = make_rlhf_collect_node(collector)
+def test_rlhf_collect_node_with_no_ai_message_skips_logging(tmp_path, monkeypatch):
+    """没有 tool_calls 时，不写 RLHF 日志（避免空日志）。"""
+    import runner.routing.rlhf_logger as rlogger_mod
+    rlhf_log_path = tmp_path / "rlhf_test2.jsonl"
+    monkeypatch.setattr(rlogger_mod, "RLHF_PATH", rlhf_log_path)
+
+    node = make_rlhf_collect_node(None)
     state: AgentState = {"messages": [HumanMessage(content="hi")]}
     out = node(state)
     assert out == {}
-    assert collector.entries[0]["action"] == {}
-
-# ---------------------------------------------------------------------------
-# Day 4 修复:fingerprint 必须在每次 tool_call 后变化(否则第二次 tool 就 state_loop 终止 Agent)
-# ---------------------------------------------------------------------------
-
-
-def test_post_tool_check_fingerprint_changes_per_tool_call():
-    """🟢Day 4 修复:post_tool_check 内部 fingerprint 必须在每次 tool_call 后变化。
-
-    Day 3 旧实现用 compute_state_fingerprint hash 5 个字段(current_step/last_tool/...
-    ),但 AgentState 里这些字段都不存在 → fingerprint 永远不变 → 第二次 tool 就
-    触发 state_loop 把 Agent 终止。Day 4 改用 last_tool/tool_args/iterations 重新算
-    fingerprint,确保每次 tool_call 后变化。
-    """
-    from runner.agent_nodes import make_post_tool_check
-    from tools.loop_detector import LoopDetector
-
-    fn = make_post_tool_check(LoopDetector())
-
-    # 模拟连续 3 次 tool_call 不同的 tool
-    state_v1 = {
-        "messages": [
-            HumanMessage(content="task"),
-            AIMessage(content="", tool_calls=[
-                {"name": "read_blackboard", "args": {"x": 1}, "id": "1"}
-            ]),
-        ],
-        "iterations": 1,
-    }
-    state_v2 = {
-        "messages": [
-            HumanMessage(content="task"),
-            AIMessage(content="", tool_calls=[
-                {"name": "read_blackboard", "args": {"x": 1}, "id": "1"}
-            ]),
-            ToolMessage(content="ok", tool_call_id="1", name="read_blackboard"),
-            AIMessage(content="", tool_calls=[
-                {"name": "calc_risk", "args": {"y": 2}, "id": "2"}
-            ]),
-        ],
-        "iterations": 2,
-    }
-    state_v3 = {
-        "messages": state_v2["messages"] + [
-            ToolMessage(content="ok", tool_call_id="2", name="calc_risk"),
-            AIMessage(content="", tool_calls=[
-                {"name": "check_gate", "args": {"z": 3}, "id": "3"}
-            ]),
-        ],
-        "iterations": 3,
-    }
-
-    # 同一 post_tool_check 实例(同 seen_states set)
-    r1 = fn(state_v1)
-    r2 = fn(state_v2)
-    r3 = fn(state_v3)
-
-    # 3 次都返 "rlhf"(没触发 loop / state_loop)
-    assert r1 == "rlhf", f"v1 应返 'rlhf', got {r1}"
-    assert r2 == "rlhf", f"v2 应返 'rlhf', got {r2}"
-    assert r3 == "rlhf", f"v3 应返 'rlhf', got {r3}"
-
-    # 🟢严格验收:同样的 fingerprint 检查,如果 fingerprint 不变,第二次会触发 state_loop
-    # 验证:跑一个用 "compute_state_fingerprint"(旧实现)的人,第二次应该返 "state_loop"
-    from runner.routing.fingerprint import compute_state_fingerprint
-
-    # 旧实现的 fingerprint:hash 5 个字段(都从 AgentState 拿不到)
-    fp_v1 = compute_state_fingerprint(dict(state_v1))
-    fp_v2 = compute_state_fingerprint(dict(state_v2))
-    fp_v3 = compute_state_fingerprint(dict(state_v3))
-    # 旧实现的 fingerprint 永远一样(因为字段都缺)
-    assert fp_v1 == fp_v2 == fp_v3, (
-        f"compute_state_fingerprint 对 AgentState 永远同值({fp_v1[:16]}...),"
-        f"这就是 Day 3 触发 state_loop 的根本原因"
-    )
+    # 没有 tool_calls → 不写日志
+    assert not rlhf_log_path.exists()

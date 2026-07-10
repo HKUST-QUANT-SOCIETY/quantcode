@@ -19,6 +19,13 @@ GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
 # MimoCode 上游仓库的 skill 路径（与 Mimo-code 内容一致，按 GitHub 仓库名大小写）。
 # 实际布局：packages/opencode/src/skill/compose/.bundle（含 src/）。
 # 同时保留不含 src/ 的备选，兼容历史布局。
+#
+# Day 5：优先用仓库内 vendored 副本（vendor/mimo-code/...），这是最稳定的来源——
+# 不依赖用户在仓库外克隆 MiMo-Code。保留仓库外的兄弟目录路径作为回退。
+_VENDORED_BASE = PROJECT_ROOT / "vendor" / "mimo-code" / "packages" / "opencode"
+MIMOCODE_SKILLS_DIR_VENDORED = _VENDORED_BASE / "src" / "skill" / "compose" / ".bundle"
+MIMOCODE_SKILLS_DIR_VENDORED_LEGACY = _VENDORED_BASE / "skill" / "compose" / ".bundle"
+
 _MIMOCODE_BASE = PROJECT_ROOT.parent / "MiMo-Code" / "packages" / "opencode"
 _MIMOCODE_BASE_FALLBACK = PROJECT_ROOT.parent / "Mimo-code" / "packages" / "opencode"
 MIMOCODE_SKILLS_DIR = _MIMOCODE_BASE / "src" / "skill" / "compose" / ".bundle"
@@ -47,6 +54,8 @@ def _find_meta_skill(skill_name: str) -> Path | None:
     同时检查带 src/ 和不带 src/ 的两种布局。
     """
     for base in (
+        MIMOCODE_SKILLS_DIR_VENDORED,          # Day 5：优先仓库内 vendored 副本
+        MIMOCODE_SKILLS_DIR_VENDORED_LEGACY,
         MIMOCODE_SKILLS_DIR,
         MIMOCODE_SKILLS_DIR_LEGACY,
         MIMOCODE_SKILLS_DIR_FALLBACK,
@@ -119,7 +128,10 @@ def load_skill(
         mbody = _strip_frontmatter(mpath.read_text(encoding="utf-8"))
         parts.append(f"\n# 方法论补充：{m}\n\n{mbody}")
 
-    return "\n\n---\n\n".join(parts)
+    text = "\n\n---\n\n".join(parts)
+    # ★ Day 4 俞高磊：追加简短 tool-call 指令
+    _call_hint = "\n\n## RULES\n- Call tools. Do not describe them.\n"
+    return text + _call_hint
 
 
 __all__ = [

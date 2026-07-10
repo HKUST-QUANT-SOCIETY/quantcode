@@ -85,6 +85,22 @@ class TestRouteHumanGate:
         assert r.decision == RouteDecision.HUMAN_GATE
         assert r.reason == "risk_threshold_exceeded"
 
+    def test_approved_high_risk_does_not_retrigger_gate(self):
+        """Approve/proceed 后，同一份 risk_metrics 不应反复触发 human_gate。"""
+        r = route_next_step(_state(
+            risk_metrics=calc_risk_stub("high_risk"),
+            human_review_result="proceed",
+        ))
+        assert r.decision == RouteDecision.CONTINUE
+
+    def test_rejected_high_risk_does_not_retrigger_gate(self):
+        """Reject/abort 后也不应反复触发 human_gate；下游 human_gate routing 会安全结束。"""
+        r = route_next_step(_state(
+            risk_metrics=calc_risk_stub("high_risk"),
+            human_review_result="abort",
+        ))
+        assert r.decision == RouteDecision.CONTINUE
+
 
 # ---------------------------------------------------------------------------
 # Finish

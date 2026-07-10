@@ -22,53 +22,47 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
 
 ## 工作流程
 
-1. **生成 `ModelSpec`**：模型类型、训练数据范围、超参、依赖算子、风控元数据
-2. **校验**：用 Pydantic 校验 `ModelSpec`；不通过则报错给用户改
-3. **创建 PR**：通过 `github_pr_create`（必须带 `@dedupe_within`）
-4. **附 PR 描述**：在 PR body 中写入 fenced JSON block，标题为 `ModelSpec`
-5. **登记到 Blackboard**：用 `write_blackboard` 把 `ModelSpec` 写入 PROJECT scope 的 `shared.model_entries.<key>`
-6. **触发跨组**：用 `trigger_risk_flow` 写 PROJECT scope 的 `shared.pending_risk_reviews`，供 risk 组消费
+1. **读取 PR**：调用 `read_pr(pr_number)` 获取 diff
+2. **提取元数据**：调用 `extract_metadata(diff)` 获取 ticker / factor 信息
+3. **生成 ModelSpec**：调用 `generate_model_spec(metadata)` 生成模型规格
+4. **写入 Blackboard**：调用 `write_blackboard(key="model.pr_<pr_number>_spec", value=spec)` 写入 PROJECT scope
+5. **触发风控**：调用 `trigger_risk_flow(blackboard_key="model.pr_<pr_number>_spec")` 写 PROJECT scope 的 `shared.pending_risk_reviews`，供 risk 组消费
 
 当前实现不默认双写 GROUP 私有条目；只有后续确有模型组私有状态需要时，才由对应 tool 显式写 GROUP scope。
 
+## 强制规则
+
+- **必须执行全部 5 步**，不得在任意步骤后提前停止
+- 即使元数据是 UNKNOWN / unknown_factor 等 mock 值，也必须继续执行后续步骤
+- 生成 ModelSpec 后，**必须紧接着**调用 write_blackboard
+- **必须紧接着**调用 trigger_risk_flow 完成 handoff
+- 不得在生成 ModelSpec 后输出纯文本结束；必须继续调用工具
+- 如果某步工具执行失败，重试或报告错误，不得跳过后续步骤
+- **完成 checklist**：每步完成后 mentally 标记为已完成，然后立即执行下一步。只有 5 步全部完成时，才能输出纯文本总结。
+
 ## 输出 schema
 
-`schemas.model.ModelSpec`，同时在 PR 描述里附 JSON 块：
+`schemas.model.ModelSpec`，同时写入 Blackboard：
 
 ```json
 {
-  "model_name": "pb_roe_ranker",
-  "model_type": "boosting",
-  "code_path": "tests/fixtures/sample_model/sample_model.py",
-  "training_data_start": "2021-01-01",
-  "training_data_end": "2023-12-31",
-  "as_of_date": "2024-03-15",
-  "hyperparameters": {"n_estimators": 100, "learning_rate": 0.05},
-  "feature_dependencies": ["pb", "roe_ttm", "market_cap"],
-  "operator_dependencies": ["rank", "zscore"],
-  "risk_metadata": {
-    "universe": "CSI1000",
-    "benchmark": "CSI1000",
-    "expected_holding_period_days": 20,
-    "max_position_pct": 0.05,
-    "uses_leverage": false
-  },
-  "commit_sha": "abcdef1"
+  "model_id": "model-bc0e42f8",
+  "model_type": "lightgbm",
+  "training_window": {"start": "2020-01-01", "end": "2024-12-31"},
+  "hyperparameters": {"learning_rate": 0.05, "num_leaves": 31}
 }
 ```
 
 ## 验收标准
 
-- PR 成功创建（GitHub PR URL 返回）
-- `ModelSpec` 通过 Pydantic 校验
+- [ ] `read_pr` 已调用，PR diff 已获取
+- [ ] `extract_metadata` 已调用，元数据已提取
+- [ ] `generate_model_spec` 已调用，spec 已生成
+- [ ] `write_blackboard` 已调用，spec 已写入 Blackboard
+- [ ] `trigger_risk_flow` 已调用，risk 组已收到 handoff
+- 以上 5 项必须全部完成，缺一不可
 - PROJECT scope 的 `shared.pending_risk_reviews` 出现对应 pending review
-- 同一 commit + 同一 PR body 在 5 分钟内不会重复创建 PR / 重复通知
-
-## 副作用 tool 约定
-
-- `github_pr_create` key：`{commit_sha}:{sha256(pr_body)}`
-- `cross_team_notify` key：`model:risk:{pr_url}:{commit_sha}`
-- dedupe window：300 秒
+- 同一 blackboard_key 在 5 分钟内不会重复触发 risk handoff（`trigger_risk_flow` 带 `@dedupe_within`）
 
 ## GitHub token 注入
 

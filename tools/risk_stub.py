@@ -16,6 +16,18 @@ import sys
 from datetime import date
 from typing import Literal
 
+from pydantic import BaseModel
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schema（ToolDef 用）
+# ---------------------------------------------------------------------------
+
+class CalcRiskStubArgs(BaseModel):
+    """calc_risk_stub 的参数 schema。"""
+    scenario: Literal["normal", "high_risk"]
+
+
 # ---------------------------------------------------------------------------
 # HumanGate 阈值常量
 # ---------------------------------------------------------------------------

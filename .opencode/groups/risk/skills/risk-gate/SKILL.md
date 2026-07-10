@@ -34,12 +34,29 @@ pattern: Pattern 5 (Human-in-the-Loop Gate) + ReAct tool loop
    - 若 `requires_human=false` → 跳到步骤 6。
    - 若 `requires_human=true` → 触发 **HumanGate interrupt**，等待 `approve` / `reject`。
 
-5. **HumanGate** — 超阈值时暂停，展示 `risk_profile` 与 `reasons`。
+5. **HumanGate** — 超阈值时调用 `request_human_review` tool 暂停并等待人工审批。
+   - 该 tool 会通过 `langgraph.types.interrupt()` 真正暂停执行，等待 OpenCode 用户 approve/reject。
+   - 暂停后，OpenCode 会展示 `waiting_for_human` 状态，包含 gate_id、reasons、risk_profile。
    - `approve` → 继续写 PR comment。
-   - `reject` → **不要** 调用 `write_pr_comment`。
+   - `reject` → **不要** 调用 `write_pr_comment`，输出应标注为 rejected。
 
 6. **`write_pr_comment`** — 写入 `QuantCode Risk Gate Report`（本地 artifact + 可选 GitHub）。
    - 同一 PR + 同一 `head_sha` + 同一 profile **自动 dedupe**，不重复发帖。
+
+## Human Gate 触发规则（重要）
+
+Human gate 必须在以下情况触发，不能绕过：
+
+1. **调用 `calc_risk_stub` 且 `scenario="high_risk"` 时** — high_risk 场景默认产出超标指标
+   （VaR99 > 5%、max_drawdown > 15%、position_limit_usage > 80%）。
+   此时必须调用 `request_human_review`，向用户展示超标原因并等待 approve/reject。
+
+2. **用户直接提供高风险材料时** — 若输入 task 明确包含 VaR、max_drawdown、position_limit、
+   相关性等指标且数值超过阈值，必须调用 `request_human_review` 等待审批。
+
+3. **正常场景（normal / 指标未超标）** — 可以跳过 human gate，直接完成。
+
+**规则：永远不要在超阈值或 high_risk 场景下未经人工审批就调用 `write_pr_comment`。**
 
 ## 输入
 
