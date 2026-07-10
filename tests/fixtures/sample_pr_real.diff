@@ -1,0 +1,53 @@
+diff --git a/models/pb_roe_ranker.py b/models/pb_roe_ranker.py
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/models/pb_roe_ranker.py
+@@ -0,0 +1,48 @@
++"""PB-ROE cross-sectional ranker — sample PR for GitHub read_pr tests."""
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++import numpy as np
++import pandas as pd
++
++
++@dataclass
++class ModelConfig:
++    universe: str = "CSI1000"
++    lookback_days: int = 252
++    max_position: float = 0.02
++    leverage: float = 1.0
++    holding_period: int = 5
++
++
++def compute_features(df: pd.DataFrame) -> pd.DataFrame:
++    out = df.copy()
++    out["pb_z"] = (out["pb"] - out["pb"].mean()) / (out["pb"].std() + 1e-8)
++    out["roe_z"] = (out["roe_ttm"] - out["roe_ttm"].mean()) / (
++        out["roe_ttm"].std() + 1e-8
++    )
++    return out
++
++
++def score(df: pd.DataFrame) -> pd.Series:
++    feats = compute_features(df)
++    return -feats["pb_z"] + 0.8 * feats["roe_z"]
++
++
++def generate_positions(scores: pd.Series, config: ModelConfig) -> pd.Series:
++    ranks = scores.rank(pct=True)
++    long = (ranks > 0.9).astype(float)
++    weights = long / (long.sum() + 1e-8)
++    return weights.clip(upper=config.max_position)
++
++
++# Risk metadata (for ModelSpec extractors)
++RISK_META = {
++    "universe": "CSI1000",
++    "benchmark": "000852.SH",
++    "holding_period": 5,
++    "max_position": 0.02,
++    "leverage": 1.0,
++}

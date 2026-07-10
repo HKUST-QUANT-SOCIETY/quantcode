@@ -90,11 +90,16 @@ def generate_risk_profile(
 
 
 def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
-    """检查是否需人工审批，返回 requires_human 与 reasons。"""
+    """检查是否需人工审批，返回 requires_human / reasons / risk_profile。
+
+    Day 4: route_gate_node 会直接消费这个结果构造 HumanGate interrupt payload，
+    所以这里把 risk_profile 一并带回，避免 gate node 再倒推上游状态。
+    """
     reasons = profile.breached_thresholds(thresholds)
     return {
         "requires_human": bool(reasons),
         "reasons": reasons,
+        "risk_profile": profile.model_dump(mode="json"),
     }
 
 

@@ -239,52 +239,50 @@ compose  → 工作流编排模式（QuantCode 主战场，调用编排平面 AP
 
 ### 3.4 仓库结构
 
+> **说明**：编排/引擎实现全部在 Python（`runner/`），不是 TS plugin。控制平面（TS）复用 OpenCode fork，通过 MCP 调 Python。以下为**实际落地布局**（2026-07-10 校准，替换早期 TS plugin 蓝图）。
+
 ```
-quantcode/
+quantcode/                       # 仓库根（Python 编排/执行 + 配置 + 文档）
 ├── .opencode/
-│   ├── config.yaml              # 全局配置 + 组身份识别
-│   └── groups/
-│       ├── fundamental/
-│       │   ├── MEMORY.md
-│       │   ├── skills/          # 基本面组的 SKILL.md 文件
-│       │   ├── tools/           # 基本面组私有 tool
-│       │   └── agent.yaml       # 该组 primary agent 配置
-│       ├── factor/
-│       ├── model/
-│       ├── risk/
-│       ├── strategy/
-│       └── options/
+│   ├── config.yaml / opencode.jsonc  # 全局配置 + 6 组 MCP server + permission
+│   └── groups/                  # 每组：skills/（SKILL.md）+ tool_allowlist.yaml
+│       ├── fundamental/  factor/  model/  risk/  strategy/  options/
 │
-├── plugins/                     # OpenCode plugin（跨组共享）
-│   ├── memory-mimo.ts           # 从 MimoCode 移植的 Memory
-│   ├── checkpoint.ts            # 自动 checkpoint
-│   ├── subagent-mimo.ts         # Subagent 编排
-│   ├── goal-judge.ts            # Goal + Judge
-│   ├── dream.ts                 # /dream 命令
-│   └── distill.ts               # /distill 命令
+├── runner/                      # ★ 编排平面（Python / LangGraph）
+│   ├── agent_engine.py          # AgentRunner：自搭 StateGraph ReAct 引擎
+│   ├── agent_nodes.py           # llm/tool/rlhf 节点 + 路由边 + truncate 节点
+│   ├── agent_mcp_tool.py        # run_agent MCP 入口（start/resume 两阶段）
+│   ├── langgraph_base.py        # StateGraph 工厂 + SqliteSaver checkpointer
+│   ├── compose_executor.py      # 线性 flow 的 FLOW_REGISTRY 执行入口
+│   ├── human_gate.py            # 确定性 HumanGate interrupt/resume + gate payload
+│   ├── acceptance.py            # 程序化验收 runner（阈值检查）
+│   ├── schema_validator.py      # JSON Schema 校验
+│   ├── risk_agent.py            # risk 组 ReAct 装配
+│   ├── memory/                  # Memory FTS5（service/fts/query/reconcile/paths）
+│   ├── routing/                 # 路由函数 + 死循环/指纹加固 + rlhf_logger
+│   └── blackboard.py            # Blackboard（PROJECT/GROUP scope 跨组共享）
 │
-├── tools/                       # 跨组共享 tool
-│   ├── autoeval_client.py       # 调 AutoFactorEvaluation
-│   ├── server_ssh.py            # SSH 读 Server A/B 主线
-│   ├── rag_search.py            # ChromaDB + 时点过滤
-│   ├── github_pr.py             # GitHub PR 操作
-│   ├── crawl_trending.py        # 爬虫
-│   └── extract_financial.py     # 财报结构化
+├── flows/                       # 线性 Compose 流（预定义 StateGraph）
+│   ├── factor_autoeval.py       # factor:autoeval
+│   └── risk_gate.py             # risk:gate
 │
-├── schemas/                     # Pydantic Schema 库
-│   ├── factor.py
-│   ├── research.py
-│   ├── risk.py
-│   └── ...
+├── tools/                       # ★ 执行平面（Python tool，按组）
+│   ├── registry.py              # ToolDef + ToolRegistry + 按组过滤
+│   ├── loop_detector.py         # 死循环检测
+│   ├── common/                  # request_human_review / mark_task_done
+│   ├── utils/dedupe.py          # @dedupe_within 副作用去重
+│   ├── model/  risk/  factor/  fundamental/  strategy/  options/  # 各组 tool
+│   └── skills/loader.py         # SKILL.md → system prompt（含 vendored meta-skill）
 │
-├── desktop/                     # OpenCode desktop fork 的 UI 改动
-│   └── ...
-│
-└── docs/
-    ├── QuantCode_Design.md      # 本文档
-    ├── PRD.md
-    └── 服务器接入.md
+├── schemas/                     # Pydantic Schema 库（factor/risk/model/research/...）
+├── dream/                       # dream_prototype.py（Distill：Day5 新增 distill_prototype.py）
+├── quantcode/                   # mcp_server.py（MCP stdio JSON-RPC server 入口）
+├── tests/                       # 全量测试（~48 文件）
+├── vendor/mimo-code/            # MimoCode 上游只读副本（含 15 个 compose skill .bundle）
+└── docs/                        # PRD / QuantCode_Design / Architecture_Spec / DayN_TaskList
 ```
+
+> 控制平面（OpenCode fork 的 desktop/UI 改动）在**独立仓库** `HKUST-QUANT-SOCIETY/opencode`（本机 `../opencode`），不在本仓库。
 
 ---
 
@@ -522,6 +520,11 @@ CREATE VIRTUAL TABLE memory_fts_search USING fts5(body);
 | `sessions` | `.quantcode/sessions/<thread_id>/` | 只有 owner 可读 | 会话级 checkpoint |
 | `tasks` | `.quantcode/tasks/<task_uuid>/` | 只有 owner 可读 | 任务级 progress（**QuantCode 新增**） |
 
+> ⚠️ **Memory scope（5 层）≠ Blackboard scope（2 层），两套独立机制，勿混淆**：
+> - **Memory**（`runner/memory/`）：上表 5-scope（`global/projects/groups/sessions/tasks`），FTS5 全文检索用，scope 名对应 `MemoryLocator.scope` 字段。
+> - **Blackboard**（`runner/blackboard.py`）：只有 `PROJECT`（全组可读）+ `GROUP`（组私有）2-scope，跨组结构化数据 handoff 用（如 model→risk 的 `shared.pending_risk_reviews`）。
+> - 两者都做"组隔离"，但 Memory 是知识检索层、Blackboard 是跨组状态传递层，实现和 API 各自独立。
+
 **Type 分类**：
 
 - `memory` - 长期语义知识（手动 + Dream 自动提取）
@@ -613,14 +616,16 @@ memory.search(
 
 | 类别 | 选型 |
 |---|---|
-| Agent 引擎语言 | TypeScript (OpenCode 原生) + Python (业务 tool) |
+| 控制平面语言 | TypeScript (OpenCode fork：接入 / 可视化) |
+| 编排平面语言 | Python (LangGraph ReAct Agent + 自研运行时加固) |
+| 执行平面语言 | Python (业务 tool) |
 | 桌面框架 | Electron (OpenCode `packages/desktop`) |
 | Web 框架 | SolidJS + Vite + TailwindCSS (OpenCode 原生) |
 | Schema 系统 | Pydantic v2 |
-| 数据库 | SQLite (会话 + Memory FTS5) + ChromaDB (向量) |
-| HTTP | Hono (OpenCode) + FastAPI (业务后端) |
-| 通信 | HTTP + SSE + WebSocket |
-| 编排 | OpenCode Compose Mode（不引入 LangGraph） |
+| 数据库 | SQLite (会话 + Memory FTS5 + Blackboard + checkpoint) + ChromaDB (向量) |
+| HTTP / MCP | OpenCode ↔ Python 编排层通过 MCP (stdio JSON-RPC) 调用；业务后端可选 FastAPI |
+| 通信 | MCP (stdio) + SSE 状态流 |
+| 编排 | **Python / LangGraph ReAct Agent**（自研 StateGraph + 确定性 HumanGate + 死循环/迭代/指纹加固）；复用 MimoCode 15 个 compose skill（markdown，引擎无关） |
 
 ---
 
@@ -751,6 +756,10 @@ memory.search(
 | 2026-06-30 | Track 调整：陈镇鸿 → 模型组，杨欣琳 → 风控组 | 陈擅长后端工程匹配 model PR 流程；杨擅长 LLM 评估匹配风控审批 |
 | 2026-06-30 | Lead 接 PIT-RAG track（原杨欣琳的） | 基本面是主要使用方，由 Lead 维护契约 |
 | 2026-06-30 | 俞高磊任务暂不分配 | 等其入组进度确认后再补；原 ComposeTask schema + dedupe 工具改由 Lead 和陈镇鸿承接 |
+| 2026-07-10 | 编排层技术栈定型为 Python/LangGraph（删除 §5.5 旧"不引入 LangGraph"表述） | 与 PRD §6 / Architecture v2 / 实际代码对齐，6-30 定版前旧结论清理 |
+| 2026-07-10 | trigger_risk_flow 定型为方式 2（Blackboard 队列标志） | 解耦 + 可观测 + 幂等；方式 1 同步 invoke 留作 Week 2 低延迟优化 |
+| 2026-07-10 | Day5 引擎合并采用 PR#25 确定性 HumanGate + 移植 main 的 truncate | run_agent/IDE 依赖确定性 gate；truncate 保长任务鲁棒性（甲方案） |
+| 2026-07-10 | demo 分组：factor/model/risk 走 AgentRunner(真ReAct)，options/strategy/fundamental 线性 flow 兜底 | 主菜展示自主推理，其余保可演，Week 2 迁 ReAct |
 
 ---
 

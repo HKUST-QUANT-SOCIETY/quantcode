@@ -1,0 +1,49 @@
+{
+  "documents": [
+    {
+      "id": "DOC-CICC-2023-AR",
+      "source": "中金公司",
+      "title": "蜜雪冰城 2023 年度财务深度报告",
+      "published_at": "2024-03-15",
+      "snippet": "2023 年收入同比增长 28%，门店扩张与同店销售共同驱动。",
+      "score": 0.91,
+      "url": "https://example.com/cicc-2023"
+    },
+    {
+      "id": "DOC-HT-2024-Q1",
+      "source": "华泰证券",
+      "title": "餐饮连锁 2024Q1 跟踪",
+      "published_at": "2024-04-20",
+      "snippet": "现制茶饮龙头估值切换，关注单店模型与供应链成本。",
+      "score": 0.84,
+      "url": "https://example.com/ht-2024q1"
+    },
+    {
+      "id": "DOC-NEWS-2024-06",
+      "source": "财联社",
+      "title": "蜜雪冰城IPO进展报道",
+      "published_at": "2024-06-01",
+      "snippet": "公司提交港股招股书，披露门店与财务数据。",
+      "score": 0.72,
+      "url": null
+    },
+    {
+      "id": "DOC-LEAK-2026",
+      "source": "未来研报",
+      "title": "LOOKAHEAD BIAS DOC — should be filtered",
+      "published_at": "2026-12-01",
+      "snippet": "This document is after as_of_date and must be filtered out.",
+      "score": 0.99,
+      "url": null
+    },
+    {
+      "id": "DOC-MACRO-2022",
+      "source": "中金宏观",
+      "title": "消费复苏 macro note",
+      "published_at": "2022-11-10",
+      "snippet": "可选消费修复斜率放缓，关注下沉市场渗透率。",
+      "score": 0.55,
+      "url": null
+    }
+  ]
+}

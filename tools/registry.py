@@ -117,19 +117,27 @@ class ToolRegistry:
         return sorted(self._tools.keys())
 
     # ----- 按组过滤（架构 §3.3） -----
-    def get_tools_for_group(self, group: str) -> list[ToolDef]:
+    def get_tools_for_group(self, group: str, include_meta: bool = False) -> list[ToolDef]:
         """根据 ``.opencode/groups/<group>/tool_allowlist.yaml`` 过滤 tool。
 
         行为：
         - allowlist 不存在 → 返回空列表（该组无可用 tool）
         - allowlist 为空 → 返回空列表
         - allowlist 含未注册的 id → 静默跳过（不抛错，便于删 tool 不报错）
+        - include_meta=False（默认）：不附加 _meta tool
+        - include_meta=True：附加 _meta tool（仅供 MCP list_tools 等外部调用者使用）
 
         返回的 list 按 id 排序，便于 deterministic。
         """
         config = load_group_config(group)
         allowlist = set(config.get("allowlist", []))
         matched = [t for t in self._tools.values() if t.id in allowlist]
+        # Day 4 俞高磊：附加 meta tool（如 run_agent）。
+        # ★ include_meta 默认 False——内部 AgentRunner agent 不应看到 meta tool
+        if include_meta:
+            for t in self._tools.values():
+                if getattr(t, '_meta', False) and t not in matched:
+                    matched.append(t)
         matched.sort(key=lambda t: t.id)
         return matched
 
