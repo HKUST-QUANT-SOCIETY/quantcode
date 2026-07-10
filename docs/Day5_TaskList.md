@@ -27,7 +27,7 @@ Day 1-4 是把功能造出来；Day 5 是把功能**装进 IDE、跑成完整 de
 
 ## 2. 俞高磊 · IDE 前端集成（Day 5 核心）
 
-**目标**：把 Day 4 接通的控制平面→编排层链路，在 OpenCode desktop fork 里做成**可用产品**。这是 IDE 上线的主体。
+**目标**：把 Day 4 接通的控制平面→编排层链路，在 OpenCode desktop fork 里做成**可用产品**。这是 IDE 上线的主体，主责任人是俞高磊；Lead 只做接口验收和 demo 兜底，不替做 TS 主链路。
 
 **功能目标**（对照 Design §4.4 前端功能）：
 - **主视图 + 组识别**：登录后顶部显示当前组（基于 Day 4 的组绑定），可切换组（Day 5 可手动切换，Week 2 接 SSH key 自动）。
@@ -38,6 +38,11 @@ Day 1-4 是把功能造出来；Day 5 是把功能**装进 IDE、跑成完整 de
 - **Schema 卡片**：agent 返回的 Pydantic schema 用 `model_json_schema()` 渲染成卡片，可导出（接 Day 4 gen_schema）。
 - **Memory 浏览器**：查看 MEMORY.md / checkpoint / tasks（接 Day 2 Memory FTS5）。
 - **会话 Resume**：任意会话从任意 checkpoint 恢复（接 Day 2 checkpoint）。
+
+**Lead 只负责**：
+- 定义 Python 侧接口（MCP / AgentRunner CLI / stream 输出格式）
+- review TS PR
+- 若卡住，给降级方案：OpenCode 先 spawn Python + stdout JSONL 回流
 
 **Day 5 不做的面板**（P1，Week 2）：跨组通知中心、Dog Food 面板、Subagent 监控 UI、人工编排 YAML 编辑器——但要在 handoff.md 标清未做。
 
@@ -106,15 +111,22 @@ Day 1-4 是把功能造出来；Day 5 是把功能**装进 IDE、跑成完整 de
 
 ## 6. Lead · factor demo 场景 + 验收闭环 demo + PRD/Design 功能对照清零
 
-**目标**：factor 验收闭环做成 demo 主菜；对照 PRD/Design 把功能清单逐条核对清零。
+**目标**：factor 验收闭环做成 demo 主菜；对照 PRD/Design 把功能清单逐条核对清零。Lead 亲自负责 factor 核心壁垒，不把这部分外包。
 
 **功能目标**：
+- **factor 真 LLM 收口**：在当前 main 的 factor contract 上收口（`match_main` / `gen_schema` / `autoeval`），让 `match_main` 从 fixture/prototype 升级到**真 LLM 读主线/签名**，`gen_schema` 升级到**真 LLM 生成 schema + 安全收口**。这部分由 Lead 亲自做。
+- **AutoEval 真 API**：`autoeval` 从 stub 升级到真实 API。接口验收和闭环设计由 Lead 定，**具体 API 接入由肖骥超协助/负责**（他最熟 `flows/factor_autoeval.py` 主链路）。
 - **factor demo 场景**：`/compose "测 PB-ROE 因子"` → match_main（真 LLM 读主线）→ gen_schema（真 LLM 生成）→ autoeval（真 API 回测）→ IC/IR 阈值验收 → merge/reject 决策。整条链录屏可演。
 - **程序化验收闭环 demo**：现场展示"提交 → schema 校验 → assert 阈值 → 自动 merge/reject"，verdict 可见。
 - **PRD/Design 功能对照清单**：逐条核对 PRD §3.1 P0 + §4 功能详述 + Design §4 功能清单，产出一份 `docs/Day5_Feature_Checklist.md`：
   - ✅ 已实现 / 🔧 降级实现（标注降级到什么）/ ❌ 未实现（标注原因 + Week 2 计划）
   - 重点核对：6 组 Compose 流、三大模式契约、共用基础设施（验收 runner / schema 校验 / CI gate / dedupe）、Memory FTS5、Checkpoint、Dream、Schema 动态生成、match_main、跨组协作触发
 - **跨组集成兜底**：各模块出来后把 model→risk + factor→strategy 两条跨组流端到端打通。
+
+**Lead 不替别人做的**：
+- 不替俞高磊做 TS 控制平面
+- 不替刘炽补 strategy/fundamental tools
+- 只负责 factor 核心壁垒 + 验收标准 + 最终 demo/checklist
 
 **验收**：
 - [ ] factor 验收闭环 demo 可演（真 LLM + 真 AutoEval + 自动 merge/reject）
@@ -125,14 +137,19 @@ Day 1-4 是把功能造出来；Day 5 是把功能**装进 IDE、跑成完整 de
 
 ## 7. 刘炽 · strategy/fundamental/options demo 收口 + fixtures + schema 终验
 
-**目标**：Day 4 补的 strategy/fundamental 两组 + options 真实化，在 Day 5 做成可演 demo。
+**目标**：Day 4 补的 strategy/fundamental 两组 + options 真实化，在 Day 5 做成可演 demo。主责任人是刘炽；Lead 只定义"上线级"验收，不替补工具实现。
 
 **功能目标**：
-- **strategy demo**：`/compose "组合 PB-ROE + 动量信号"` → select → combine → backtest → StrategyReport（schema 校验过）。
-- **fundamental demo**：`/compose "分析公司 X 估值"` → pit_rag（真 Chroma，时点安全）→ extract_financial → dcf → render_report（Typst PDF）→ 人审。
-- **options demo**：`/compose "GC 期权 Greeks"` → build_vol_surface → calc_greeks → backtest。
+- **strategy demo**：select → combine → backtest → StrategyReport（schema 校验过）。
+- **fundamental demo**：→ pit_rag（真 Chroma，时点安全）→ extract_financial → dcf → render_report（Typst PDF）→ 人审。
+- **options demo**：→ build_vol_surface → calc_greeks → backtest。
 - **fixtures 终验**：6 组 demo 用的 fixtures 齐全 + 真实（不是占位）。
 - **6 组 schema 终验**：所有 demo 产出的 artifact 通过对应 Pydantic schema 校验。
+- **上线级标准**：不是只在 Python 里能跑，而是要能被 IDE/OpenCode 调起、artifact 可展示/可下载、fallback（如 markdown 代替 Typst、fixture 代替 Chroma）必须明确标注，不能伪装成真实接入。
+
+**Lead 不替做的**：
+- 不替 strategy/fundamental 再写工具
+- 只 review PR，兜底 demo 录屏，卡住时定义最小降级方案
 
 **验收**：
 - [ ] strategy/fundamental/options 三组各跑通一个 demo 场景，artifact 过 schema 校验
