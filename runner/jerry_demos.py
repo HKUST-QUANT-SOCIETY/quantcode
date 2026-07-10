@@ -121,6 +121,10 @@ def run_fundamental_demo(
             "fair_value_per_share": dcf["fair_value_per_share"],
             "citations_count": len(pit.documents),
             "use_typst": True,
+            "financials": fin,
+            "dcf": dcf,
+            "documents": [d.model_dump(mode="json") for d in pit.documents],
+            "pit_filtered_count": pit.filtered_count,
         },
     )
     research = ResearchResult.model_validate(

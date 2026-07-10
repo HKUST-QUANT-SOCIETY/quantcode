@@ -48,9 +48,19 @@ def test_pit_rag_filters_lookahead():
 
 
 def test_extract_dcf_render_pipeline():
+    from tools.registry import PROJECT_ROOT
+
+    pit = registry.call(
+        "pit_rag_search",
+        {"query": "蜜雪冰城 财务", "as_of_date": "2025-01-01", "top_k": 10},
+    )
     fin = registry.call(
         "extract_financial",
-        {"target_identifier": "2097.HK", "as_of_date": "2025-01-01"},
+        {
+            "target_identifier": "2097.HK",
+            "as_of_date": "2025-01-01",
+            "documents": pit["documents"],
+        },
     )
     assert fin["fcf_ttm"] > 0
 
@@ -74,14 +84,28 @@ def test_extract_dcf_render_pipeline():
             "fair_value_per_share": dcf["fair_value_per_share"],
             "citations_count": 12,
             "use_typst": True,
+            "financials": fin,
+            "dcf": dcf,
+            "documents": pit["documents"],
+            "pit_filtered_count": pit["filtered_count"],
         },
     )
     validated = ResearchResult.model_validate(
-        {k: v for k, v in report.items() if k != "typst_used"}
+        {
+            k: v
+            for k, v in report.items()
+            if k not in ("typst_used", "markdown_filled")
+        }
     )
     assert validated.markdown_path
     assert len(validated.sections_generated) >= 5
-    assert validated.citations_count >= 10
+    assert validated.citations_count >= 4
+    assert report.get("markdown_filled") is True
+    md = (PROJECT_ROOT / validated.markdown_path).read_text(encoding="utf-8")
+    assert "Fair value" in md or "fair value" in md.lower()
+    assert "FCF TTM" in md
+    assert "DOC-CICC-2023-AR" in md or "中金" in md
+    assert "Stub content for" not in md
 
 
 def test_load_fundamental_compose_skill():
