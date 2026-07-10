@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage
 
 from runner.agent_engine import AgentRunner
 from tools.registry import ToolDef, register_tool, registry as global_registry
-from pydantic import BaseModel
+from pydantic import create_model
 
 
 # ---------------------------------------------------------------------------
@@ -24,16 +24,11 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 
 
-class _ReadArgs(BaseModel):
-    pr_number: int = 1
-
-
 def _make_simple_tools(tool_names: list[str], expected_args_types: dict[str, type]) -> list[ToolDef]:
     """为给定组生成 mock tool 列表,签名满足 AgentRunner 注册要求。"""
     tools = []
     for name in tool_names:
         # 用 BaseModel 动态构造（避免为每组写 6 个 args class）
-        from pydantic import create_model
         args_model = create_model(f"{name}_args", **{
             "__annotations__": {k: v for k, v in expected_args_types.get(name, {}).items()}
         } if expected_args_types.get(name) else {})
@@ -66,42 +61,42 @@ SIX_GROUPS = [
         "tools": ["read_pr", "extract_metadata", "generate_model_spec"],
         "min_iterations": 3,
         "artifact_key": "model_spec",
-        "artifact_keywords": ["model_spec", "spec"],
+        "artifact_keywords": ["model_spec"],
     },
     {
         "group": "risk",
         "tools": ["read_blackboard", "calc_risk", "generate_risk_profile"],
         "min_iterations": 3,
         "artifact_key": "risk_profile",
-        "artifact_keywords": ["risk_profile", "risk"],
+        "artifact_keywords": ["risk_profile"],
     },
     {
         "group": "factor",
         "tools": ["match_main", "gen_schema", "autoeval"],
         "min_iterations": 3,
         "artifact_key": "factor_report",
-        "artifact_keywords": ["factor_report", "factor"],
+        "artifact_keywords": ["factor_report"],
     },
     {
         "group": "strategy",
         "tools": ["select_signals", "combine_signals", "run_strategy_backtest"],
         "min_iterations": 3,
         "artifact_key": "strategy_report",
-        "artifact_keywords": ["strategy_report", "strategy"],
+        "artifact_keywords": ["strategy_report"],
     },
     {
         "group": "fundamental",
         "tools": ["pit_rag_search", "extract_financial", "dcf_valuation", "render_report"],
         "min_iterations": 3,
         "artifact_key": "research_report",
-        "artifact_keywords": ["research_report", "report"],
+        "artifact_keywords": ["research_report"],
     },
     {
         "group": "options",
         "tools": ["build_vol_surface", "calc_greeks", "run_options_backtest_stub"],
         "min_iterations": 3,
         "artifact_key": "vol_surface_report",
-        "artifact_keywords": ["vol_surface_report", "vol_surface"],
+        "artifact_keywords": ["vol_surface_report"],
     },
 ]
 

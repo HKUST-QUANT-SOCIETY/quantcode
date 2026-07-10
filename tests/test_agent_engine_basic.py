@@ -879,7 +879,7 @@ def test_agent_runner_uses_retry_wrapper_when_enabled(tmp_db, clean_registry):
         system_prompt="x",
         thread_id="retry-test",
     )
-# post-merge: AgentRunner.run() 内部调 LLM 多次（pre-merge 1 次,post-merge 2 次）,
+    # post-merge: AgentRunner.run() 内部调 LLM 多次（pre-merge 1 次,post-merge 2 次）,
     # 每次 LLM 调用各自走 retry.所以每次需要抖 1 次才成功 → call_count 是偶数.
     # 验证核心不变性:
     #   1. 至少调了一次 LLM（不是 0 次短路）

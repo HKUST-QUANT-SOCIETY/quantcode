@@ -1,7 +1,7 @@
 """Day 5 跨组流引擎稳定性回归 — 尹一帆。
 
 目标（Day5 §3 "引擎稳定性"）：
-- model→risk / factor→strategy 长任务不爆 context、不挂死。
+- model→risk 长任务不爆 context、不挂死（factor→strategy 结构同源，引擎与组无关，详 Task 9）。
 - 验证 AgentRunner 在 max_iterations 内结束、messages 数量合理、retry 包装生效。
 
 按 Task 9 模式（test_six_groups_react_e2e.py）使用隔离 mock tool，
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel, create_model
+from pydantic import create_model
 
 from runner.agent_engine import AgentRunner
 from tools.registry import ToolDef, register_tool, registry as global_registry
@@ -153,7 +153,7 @@ def test_cross_group_flow_engine_stability_under_long_task(tmp_db, clean_registr
     #    5 步 tool_call → 大约 5 AIMessage + 5 ToolMessage = ~10 条
     #    加 RLHF/HumanMessage 等元数据，控制在 50 内远不爆
     msg_count = len(final["messages"])
-    assert msg_count < 50, (
+    assert msg_count < 20, (
         f"messages 数量 {msg_count} 过多,怀疑 context 爆掉"
     )
 
@@ -170,6 +170,9 @@ def test_cross_group_flow_engine_stability_under_long_task(tmp_db, clean_registr
     #    LongScriptedLLM 至少被调 5 次（5 次 tool_call 后 LLM 再调一次返回 final）
     assert hasattr(runner.model, "stats"), (
         "retry_max_retries>0 时 AgentRunner.model 应该是 RetryWrapper"
+    )
+    assert runner.model.__class__.__name__ == "RetryWrapper", (
+        f"retry_max_retries>0 时 AgentRunner.model 应是 RetryWrapper,实际 {runner.model.__class__.__name__}"
     )
     assert runner.model.stats.total_calls >= 5, (
         f"retry 包装下,LLM 应至少调 5 次,实际 total_calls={runner.model.stats.total_calls}"
