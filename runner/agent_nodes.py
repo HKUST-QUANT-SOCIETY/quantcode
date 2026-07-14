@@ -193,6 +193,16 @@ def make_tool_node(
                 if isinstance(output, dict):
                     state_updates.update(_extract_state_fields(c["name"], output))
             except Exception as e:
+                # Pattern 5: request_human_review 内 interrupt() 会抛 GraphInterrupt。
+                # 必须向上冒泡，否则人审 gate 会被吞成普通 tool error。
+                try:
+                    from langgraph.errors import GraphBubbleUp
+
+                    if isinstance(e, GraphBubbleUp):
+                        raise
+                except ImportError:
+                    if type(e).__name__ in ("GraphInterrupt", "GraphBubbleUp"):
+                        raise
                 # Day 3 评审修复（🟢#7）：异常脱敏，避免 SSH 凭据 / API key
                 # 等敏感信息随异常原文进入 LLM 上下文。
                 # 读类工具（read_/list_）一般不带凭据，可保留详细错误。

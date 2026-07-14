@@ -85,7 +85,13 @@ ORCHESTRATOR_DISPATCH: dict[str, list[tuple[tuple[str, ...], str]]] = {
         (("factor", "autoeval", "ic", "ir"), "factor-autoeval"),
     ],
     "options": [
-        (("options", "vol", "greeks", "backtest"), "options-compose"),
+        (("options", "vol", "greeks", "backtest", "gc", "期权"), "options-compose"),
+    ],
+    "strategy": [
+        (("strategy", "signal", "组合", "动量", "pb-roe", "backtest"), "strategy-compose"),
+    ],
+    "fundamental": [
+        (("估值", "研报", "公司", "pit", "dcf", "分析", "fundamental"), "fundamental-compose"),
     ],
 }
 

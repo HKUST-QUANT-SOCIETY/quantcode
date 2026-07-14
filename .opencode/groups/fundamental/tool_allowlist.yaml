@@ -1,6 +1,8 @@
-# fundamental 组 tool 白名单 — Day 4 刘炽
+# fundamental 组 tool 白名单 — Day 4/5 刘炽
 allowlist:
   - pit_rag_search
   - extract_financial
   - dcf_valuation
   - render_report
+  - request_human_review
+  - mark_task_done
