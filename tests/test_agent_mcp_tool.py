@@ -99,9 +99,20 @@ class TestRunAgentExecuteErrors:
         assert "thread_id" in result["error"].lower()
 
 
-class TestRiskGateMcpFlow:
-    """Day 7: risk-gate 通过确定性 risk_agent 路径完成 start/resume。"""
+import pytest
 
+
+class TestRiskGateMcpFlow:
+    """
+    DEPRECATED: Day 5 已移除 risk 特判路径，统一走 AgentRunner ReAct。
+
+    历史背景：Day 4 为 demo 稳定性临时加了 risk-gate 确定性 pipeline 特判
+    (_start_risk_gate_mode)。Day 5 统一至 AgentRunner ReAct 路径后，此特判已弃用。
+
+    ReAct 路径的测试见 tests/test_risk_react_ready.py 和 tests/test_risk_github_e2e.py。
+    """
+
+    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
     def test_start_high_risk_returns_waiting_for_human(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = _run_agent_execute(
@@ -118,6 +129,7 @@ class TestRiskGateMcpFlow:
         assert result["gate"]["decision_schema"]["allowed"] == ["approve", "reject"]
         assert result["gate"]["reasons"]
 
+    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
     def test_start_then_approve_completes_without_react_loop(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         thread_id = f"mcp-risk-approve-day4-{uuid.uuid4().hex}"
@@ -146,6 +158,7 @@ class TestRiskGateMcpFlow:
         assert resumed["output_data"]["status"] == "completed"
         assert resumed["output_data"]["pr_comment"] is not None
 
+    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
     def test_start_then_reject_returns_rejected(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         thread_id = f"mcp-risk-reject-day4-{uuid.uuid4().hex}"

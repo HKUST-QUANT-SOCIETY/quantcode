@@ -81,14 +81,24 @@ class TestRouteAbortLoop:
 
 class TestRouteHumanGate:
     def test_high_risk_triggers_gate(self):
-        r = route_next_step(_state(risk_metrics=calc_risk_stub("high_risk")))
+        """Day 5 fix: 只有当 risk_profile 存在时才触发 human_gate（确保 generate_risk_profile 已运行）。"""
+        r = route_next_step(_state(
+            risk_metrics=calc_risk_stub("high_risk"),
+            risk_profile={"scenario": "high_risk", "decision": "pending"},
+        ))
         assert r.decision == RouteDecision.HUMAN_GATE
         assert r.reason == "risk_threshold_exceeded"
+
+    def test_high_risk_without_profile_continues(self):
+        """Day 5 fix: risk_metrics 超阈值但 risk_profile 未生成时，应 CONTINUE 让 generate_risk_profile 执行。"""
+        r = route_next_step(_state(risk_metrics=calc_risk_stub("high_risk")))
+        assert r.decision == RouteDecision.CONTINUE
 
     def test_approved_high_risk_does_not_retrigger_gate(self):
         """Approve/proceed 后，同一份 risk_metrics 不应反复触发 human_gate。"""
         r = route_next_step(_state(
             risk_metrics=calc_risk_stub("high_risk"),
+            risk_profile={"scenario": "high_risk", "decision": "approved"},
             human_review_result="proceed",
         ))
         assert r.decision == RouteDecision.CONTINUE
@@ -97,6 +107,7 @@ class TestRouteHumanGate:
         """Reject/abort 后也不应反复触发 human_gate；下游 human_gate routing 会安全结束。"""
         r = route_next_step(_state(
             risk_metrics=calc_risk_stub("high_risk"),
+            risk_profile={"scenario": "high_risk", "decision": "rejected"},
             human_review_result="abort",
         ))
         assert r.decision == RouteDecision.CONTINUE

@@ -318,7 +318,7 @@ def run_risk_agent_react(
     Args:
         task: 用户任务描述（如 "处理 PR #42 的风险检查"）。
         model: LLM callable。不传则尝试从 config.json 创建 DeepSeek LLM。
-        checkpoint_db: SqliteSaver checkpoint 路径（必传，gate_tools 需要）。
+        checkpoint_db: SqliteSaver checkpoint 路径（必传，HumanGate checkpoint 需要）。
         thread_id: 显式指定 thread_id。
         max_iterations: 最大迭代步数。
 
@@ -353,13 +353,12 @@ def run_risk_agent_react(
 
     if checkpoint_db is None:
         raise ValueError(
-            "run_risk_agent_react: checkpoint_db 必传（gate_tools 需要 SqliteSaver）。"
+            "run_risk_agent_react: checkpoint_db 必传（HumanGate checkpoint 需要 SqliteSaver）。"
         )
 
     runner = AgentRunner(
         group="risk",
         model=model,
-        gate_tools=["check_gate"],
         checkpoint_db=checkpoint_db,
         max_iterations=max_iterations,
     )
