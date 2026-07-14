@@ -40,3 +40,6 @@ config.json
 # Lead内部规划草案（不对外）
 docs/Day2_to_Day5_Roadmap.md
 
+# SDD working artifacts(plan / brief / report / review / progress),不入库
+.superpowers/
+
