@@ -99,15 +99,20 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
     # made a decision for this checkpoint. After approve/proceed the agent must
     # be allowed to continue without re-triggering the same gate on unchanged
     # risk_metrics; after reject/abort the human_gate routing will end safely.
+    #
+    # Day 5 fix: 只在 risk_profile 存在时触发（确保 generate_risk_profile 已运行），
+    # 避免在 calc_risk 之后立即触发，导致 generate_risk_profile 和 check_gate 无法执行。
+    risk_profile = state.get("risk_profile")
     if (
         risk_metrics
+        and risk_profile is not None
         and _risk_exceeds_threshold(risk_metrics)
         and human_review_result not in ("proceed", "abort")
     ):
         return RouteResult(
             decision=RouteDecision.HUMAN_GATE,
             reason="risk_threshold_exceeded",
-            detail={"risk_metrics": risk_metrics},
+            detail={"risk_metrics": risk_metrics, "risk_profile": risk_profile},
         )
 
     # ---- 3. Finish --------------------------------------------------------

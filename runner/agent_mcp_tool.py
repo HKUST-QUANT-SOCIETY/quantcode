@@ -185,13 +185,9 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
 
     # ── resume mode ──
     if args.decision is not None:
-        if group == "risk" and resolved_skill == "risk-gate":
-            return _resume_risk_gate_mode(args, checkpoint_db)
         return _resume_mode(args, group, model, checkpoint_db, resolved_skill)
 
     # ── start mode ──
-    if group == "risk" and resolved_skill == "risk-gate":
-        return _start_risk_gate_mode(args, checkpoint_db)
     return _start_mode(args, group, model, checkpoint_db, resolved_skill)
 
 
@@ -219,6 +215,26 @@ def _start_mode(
         f"{make_thread_id(group, 'mcp_compose')}-{uuid.uuid4().hex[:8]}"
     )
 
+    # Day 5 fix: risk 组启动时读取 pending_risk_reviews，接收 model→risk 跨组流触发
+    task = args.task
+    if group == "risk":
+        try:
+            from tools.blackboard.blackboard_service import get_blackboard_service, BlackboardScope
+            from schemas.groups import GroupName
+            service = get_blackboard_service()
+            queue_entry = service.get_entry(
+                BlackboardScope.PROJECT,
+                None,
+                "shared.pending_risk_reviews",
+                requester_group=GroupName.RISK,
+            )
+            if queue_entry and isinstance(queue_entry.value, dict):
+                reviews = queue_entry.value.get("reviews", {})
+                if reviews:
+                    task = f"{task}\n\n[Pending risk reviews from model group: {len(reviews)} items]"
+        except Exception:
+            pass  # 读取失败不影响正常流程
+
     runner = AgentRunner(
         group=group,
         model=model,
@@ -231,14 +247,14 @@ def _start_mode(
         # 优先用 stream()；回退到 run()
         if hasattr(runner, "stream"):
             final_state = runner.stream(
-                task=args.task,
+                task=task,
                 skill_name=resolved_skill,
                 flow_name="mcp_compose",
                 thread_id=thread_id,
             )
         else:
             final_state = runner.run(
-                task=args.task,
+                task=task,
                 skill_name=resolved_skill,
                 flow_name="mcp_compose",
                 thread_id=thread_id,
@@ -297,7 +313,13 @@ def _start_risk_gate_mode(
     args: RunAgentArgs,
     checkpoint_db: Path,
 ) -> dict[str, Any]:
-    """risk-gate 专用 start 模式：走确定性 risk_agent，而不是通用 ReAct。"""
+    """
+    DEPRECATED: risk-gate 专用 start 模式，已弃用。统一走 AgentRunner。
+
+    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径，走确定性
+    build_risk_agent pipeline 而非 ReAct。现已统一至 AgentRunner ReAct 路径。
+    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
+    """
     if not args.task:
         return {
             "status": "error",
@@ -440,7 +462,13 @@ def _resume_risk_gate_mode(
     args: RunAgentArgs,
     checkpoint_db: Path,
 ) -> dict[str, Any]:
-    """risk-gate 专用 resume 模式：走 runner.risk_agent.resume_risk_gate。"""
+    """
+    DEPRECATED: risk-gate 专用 resume 模式，已弃用。统一走 AgentRunner。
+
+    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径。
+    现已统一至 _resume_mode 的 AgentRunner 路径。
+    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
+    """
     if not args.thread_id:
         return {
             "status": "error",
