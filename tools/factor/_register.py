@@ -25,7 +25,7 @@ USE_REAL_LLM = os.environ.get("QUANTCODE_FACTOR_USE_REAL_LLM", "0") == "1"
 if USE_REAL_LLM:
     from tools.factor.match_main import match_main_tool
     from tools.factor.gen_schema import gen_schema_tool  # gen_schema 真LLM实现
-    from tools.factor.autoeval_stub import autoeval_tool  # autoeval 暂时还是stub
+    from tools.factor.autoeval import autoeval_tool  # autoeval 真API实现（支持降级）
 else:
     # 触发 3 个 ToolDef 注册（stub版本）
     from tools.factor.match_main_stub import match_main_tool  # noqa: F401
