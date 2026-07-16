@@ -102,6 +102,7 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
     #
     # Day 5 fix: 只在 risk_profile 存在时触发（确保 generate_risk_profile 已运行），
     # 避免在 calc_risk 之后立即触发，导致 generate_risk_profile 和 check_gate 无法执行。
+    # calc_risk_stub_tool 会自动注入 risk_profile，所以测试场景也能正常触发。
     risk_profile = state.get("risk_profile")
     if (
         risk_metrics

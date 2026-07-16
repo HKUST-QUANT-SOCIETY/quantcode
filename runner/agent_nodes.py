@@ -240,14 +240,28 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     """从 tool 输出中提取需要注入 AgentState 的字段。
 
     当前注册的映射：
-    - calc_risk_stub → risk_metrics（完整 dict，含阈值）
+    - calc_risk_stub → risk_metrics（完整 dict，含阈值）+ risk_profile（测试场景支持）
+    - calc_risk → risk_metrics（完整 dict，含阈值）
     - mark_task_done / task_done → task_status="done"
     - write_blackboard → task_status="done"（流程最后一步，写入完成后标记结束）
     - request_human_review → human_review_result（"proceed"/"abort"，由 _human_gate_node 最终裁决）
     """
     updates: dict[str, Any] = {}
 
-    if tool_name in ("calc_risk_stub", "calc_risk"):
+    if tool_name == "calc_risk_stub":
+        # 注入 risk_metrics
+        updates["risk_metrics"] = output
+        # 测试场景支持：自动构造简单的 risk_profile 让 HumanGate 能触发
+        # 生产场景会通过 generate_risk_profile 工具覆盖此值
+        updates["risk_profile"] = {
+            "strategy_id": output.get("strategy_id"),
+            "as_of_date": output.get("as_of_date"),
+            "max_drawdown": output.get("max_drawdown"),
+            "tail_risk_var_99": output.get("tail_risk_var_99"),
+            "volatility": output.get("volatility"),
+        }
+    elif tool_name == "calc_risk":
+        # 生产场景：只注入 risk_metrics，不自动生成 risk_profile
         updates["risk_metrics"] = output
 
     if tool_name in ("mark_task_done", "task_done", "mark_complete"):
