@@ -43,6 +43,7 @@ class AgentState(BaseFlowState, total=False):
     - iterations    — 已执行步数（最后一次返回值覆盖）
     - system_prompt — SKILL.md 拼装出的系统提示（最后一次覆盖）
     - risk_metrics  — 风控指标（由 calc_risk_stub 写入，router.py 消费）
+    - risk_profile  — 风控画像（generate_risk_profile 写入；calc_risk_stub 测试场景下也注入，router.py 消费）
     - task_status   — 任务状态（"done" 触发 finish）
     - human_review_result — 人工审核结果（"proceed"/"abort"，由 request_human_review tool 写入）
     - task_goal     — 任务目标描述（取自 input_data.task）
@@ -65,6 +66,7 @@ class AgentState(BaseFlowState, total=False):
     iterations: int
     system_prompt: str
     risk_metrics: dict | None
+    risk_profile: dict | None
     task_status: str | None
     human_review_result: str | None
     task_goal: str
@@ -261,8 +263,15 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
             "volatility": output.get("volatility"),
         }
     elif tool_name == "calc_risk":
-        # 生产场景：只注入 risk_metrics，不自动生成 risk_profile
+        # 生产场景：只注入 risk_metrics，risk_profile 由 generate_risk_profile 生成
         updates["risk_metrics"] = output
+
+    if tool_name == "generate_risk_profile":
+        # 生产场景：generate_risk_profile 返回 {"risk_profile": {...}}，
+        # 提取进 state 供 route_next_step 的 HUMAN_GATE 条件消费。
+        profile = output.get("risk_profile")
+        if isinstance(profile, dict):
+            updates["risk_profile"] = profile
 
     if tool_name in ("mark_task_done", "task_done", "mark_complete"):
         updates["task_status"] = "done"
@@ -462,6 +471,7 @@ def make_tool_routing_edge(
             "tool_call_history": tool_call_history,
             "fingerprint_history": list(fingerprint_history),
             "risk_metrics": state.get("risk_metrics"),
+            "risk_profile": state.get("risk_profile"),
             "human_review_result": state.get("human_review_result"),
             "task_status": state.get("task_status"),
             "execution_trace": _build_execution_trace(messages),

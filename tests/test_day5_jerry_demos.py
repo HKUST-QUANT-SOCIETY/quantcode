@@ -11,6 +11,25 @@ from tools.registry import PROJECT_ROOT
 
 
 @pytest.fixture(autouse=True)
+def _ensure_demo_tools_registered():
+    """确保 strategy / fundamental / options 三组 tool 已注册。
+
+    其他测试文件用 ``registry._tools.clear()`` 清空全局 registry，模块级
+    import 只跑一次，所以每次 test 前显式 reload 一次注册模块，防止 demo
+    撞上空 registry（KeyError: Tool 'select_signals' not found）。
+    """
+    import importlib
+    import tools.fundamental._register as fundamental_register
+    import tools.options._register as options_register
+    import tools.strategy._register as strategy_register
+
+    importlib.reload(fundamental_register)
+    importlib.reload(options_register)
+    importlib.reload(strategy_register)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clean_artifacts(tmp_path, monkeypatch):
   # demos write under artifacts/ — allow writes in repo for test session
     yield
