@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Day5 汇报 · 刘炽 · strategy / fundamental / options</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1419;
+      --bg-elev: #171e26;
+      --bg-card: #1c2530;
+      --line: #2a3544;
+      --text: #e8eef4;
+      --muted: #8b9aab;
+      --accent: #3d9a7a;
+      --accent-soft: rgba(61, 154, 122, 0.14);
+      --warn: #c9a227;
+      --warn-soft: rgba(201, 162, 39, 0.12);
+      --pass: #3d9a7a;
+      --pending: #c97a3d;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: "DM Sans", system-ui, sans-serif;
+      --serif: "Source Serif 4", Georgia, serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1a2e28 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #1a2433 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 48px 28px 80px;
+    }
+
+    header.hero {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 28px;
+      margin-bottom: 36px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-size: clamp(1.85rem, 4vw, 2.45rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    .sub {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 38em;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      margin-top: 20px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .meta strong { color: var(--text); font-weight: 500; }
+
+    section {
+      margin-bottom: 40px;
+    }
+
+    h2 {
+      font-size: 0.78rem;
+      font-family: var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .verdict {
+      background: var(--accent-soft);
+      border: 1px solid rgba(61, 154, 122, 0.35);
+      border-radius: 10px;
+      padding: 18px 20px;
+      font-size: 1.05rem;
+    }
+
+    .verdict em {
+      font-style: normal;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 16px 14px;
+    }
+
+    .card .tag {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .card p, .card li {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .card ol {
+      margin-left: 1.1em;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .checks {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .checks li {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 12px;
+      align-items: start;
+      background: var(--bg-elev);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+    }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .badge.ok {
+      background: var(--accent-soft);
+      color: var(--pass);
+      border: 1px solid rgba(61, 154, 122, 0.4);
+    }
+
+    .badge.wait {
+      background: var(--warn-soft);
+      color: var(--warn);
+      border: 1px solid rgba(201, 162, 39, 0.4);
+    }
+
+    .badge.note {
+      background: rgba(201, 122, 61, 0.12);
+      color: var(--pending);
+      border: 1px solid rgba(201, 122, 61, 0.35);
+    }
+
+    .checks .desc strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .checks .desc span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 3px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    td code, .mono {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      color: #b8c9d9;
+    }
+
+    .cmd {
+      background: #0b1015;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      color: #b8d4c8;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.7;
+    }
+
+    .talk {
+      background: var(--bg-card);
+      border-left: 3px solid var(--accent);
+      padding: 16px 18px;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.98rem;
+    }
+
+    .talk p + p { margin-top: 10px; }
+
+    .talk .hint {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    a { color: #6eb8a0; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .two-col { grid-template-columns: 1fr; }
+      .checks li { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <p class="eyebrow">QuantCode · Day 5 · Agent Group</p>
+      <h1>刘炽 · strategy / fundamental / options<br />demo 收口汇报</h1>
+      <p class="sub">
+        对应 <code class="mono">Day5_TaskList.md §7</code>：三组 demo 跑通、artifact schema 校验、
+        PIT 时点安全可验、fixtures 终验标注。功能验收已本地全绿，合入走 PR。
+      </p>
+      <div class="meta">
+        <span>日期 <strong>2026-07-10</strong></span>
+        <span>分支 <strong>feature/jerry-day5-demos</strong></span>
+        <span>PR <strong><a href="https://github.com/HKUST-QUANT-SOCIETY/quantcode/pull/27" target="_blank" rel="noopener">#27</a></strong></span>
+        <span>验收脚本 <strong>scripts/accept_jerry_day5.py</strong></span>
+      </div>
+    </header>
+
+    <section>
+      <h2>一句话结论</h2>
+      <div class="verdict">
+        Day5 §7 <em>功能目标已完成并可验收</em>：三组 demo 全通、schema 过、Chroma PIT 可验、人审 interrupt/resume 通。
+        代码在 feature 分支 + PR #27，<em>不直接推 main</em>；PR#22 与 main 冲突且核心已在 main，建议 #27 合入后 close。
+      </div>
+    </section>
+
+    <section>
+      <h2>§7 验收对照</h2>
+      <ul class="checks">
+        <li>
+          <span class="badge wait">待合入</span>
+          <div class="desc">
+            <strong>PR#22 合入 main</strong>
+            <span>核心 tools 已在 main；#22 CONFLICTING。Day5 增量在 PR #27。建议 #27 merge 后 close #22。</span>
+          </div>
+        </li>
+        <li>
+          <span class="badge ok">PASS</span>
+          <div class="desc">
+            <strong>三组 demo + artifact schema</strong>
+            <span>strategy → StrategyReport；fundamental → PITResult + ResearchResult；options → OptionsRisk bundle。</span>
+          </div>
+        </li>
+        <li>
+          <span class="badge ok">PASS</span>
+          <div class="desc">
+            <strong>pit_rag 时点安全可验</strong>
+            <span>backend=chroma；filtered=1（DOC-LEAK-2026）；docs=4 均 published_at ≤ as_of_date。</span>
+          </div>
+        </li>
+        <li>
+          <span class="badge ok">PASS</span>
+          <div class="desc">
+            <strong>fixtures 齐全 + 降级标注</strong>
+            <span>tests/fixtures/README.md；accept 脚本 8 项 fixture exists 全绿。</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>三组 demo 链路</h2>
+      <div class="grid-3">
+        <article class="card">
+          <p class="tag">strategy</p>
+          <h3>信号组合 → 回测</h3>
+          <ol>
+            <li>select_signals</li>
+            <li>combine_signals</li>
+            <li>run_strategy_backtest</li>
+            <li>deploy_strategy</li>
+          </ol>
+          <p style="margin-top:10px"><code>verdict: pass</code></p>
+        </article>
+        <article class="card">
+          <p class="tag">fundamental</p>
+          <h3>研报 + 人审</h3>
+          <ol>
+            <li>pit_rag_search（Chroma）</li>
+            <li>extract_financial</li>
+            <li>dcf_valuation</li>
+            <li>render_report（filled）</li>
+            <li>request_human_review</li>
+          </ol>
+        </article>
+        <article class="card">
+          <p class="tag">options</p>
+          <h3>曲面 → Greeks</h3>
+          <ol>
+            <li>build_vol_surface（BS IV）</li>
+            <li>calc_greeks</li>
+            <li>run_options_backtest_stub</li>
+          </ol>
+          <p style="margin-top:10px"><code>delta 0.49 · sharpe 1.15</code></p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>关键交付物</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>类型</th>
+            <th>路径 / 链接</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>验收</td>
+            <td><code>scripts/accept_jerry_day5.py</code></td>
+            <td>一键终验（fixtures / schema / Chroma / 人审）</td>
+          </tr>
+          <tr>
+            <td>Demo CLI</td>
+            <td><code>scripts/demo_jerry_tracks.py</code></td>
+            <td>无需 LLM 跑三组 tool 链</td>
+          </tr>
+          <tr>
+            <td>Artifacts</td>
+            <td>
+              <code>artifacts/strategy/.../strategy_report.json</code><br />
+              <code>artifacts/research/.../fundamental_bundle.json</code><br />
+              <code>artifacts/options/.../options_risk.json</code>
+            </td>
+            <td>schema 校验通过的落盘结果</td>
+          </tr>
+          <tr>
+            <td>研报</td>
+            <td><code>artifacts/research/2097HK-2025-01-01.md/.pdf</code></td>
+            <td>含 PIT / 财务表 / DCF（非空 stub）</td>
+          </tr>
+          <tr>
+            <td>文档</td>
+            <td><code>docs/day5_jerry_demo.md</code> · <code>tests/fixtures/README.md</code></td>
+            <td>跑法 + 降级标注</td>
+          </tr>
+          <tr>
+            <td>PR</td>
+            <td><a href="https://github.com/HKUST-QUANT-SOCIETY/quantcode/pull/27" target="_blank" rel="noopener">#27</a></td>
+            <td>合入 main 的入口（当前 OPEN）</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>今天修掉的关键坑</h2>
+      <div class="two-col">
+        <div class="card">
+          <h3>人审 gate 被吞</h3>
+          <p><code>tool_node</code> 把 <code>GraphInterrupt</code> 当普通异常吃掉 → 人审不暂停。已改为向上冒泡；AgentRunner 可 <code>waiting_for_human</code> → <code>resume(approve)</code>。</p>
+        </div>
+        <div class="card">
+          <h3>空研报不可验收</h3>
+          <p>markdown / Typst 改为嵌入 PIT 文档、财务表、DCF；demo 输出 <code>md_filled=True pdf_filled=True</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>诚实降级（汇报时主动说）</h2>
+      <table>
+        <thead>
+          <tr><th>项</th><th>现状</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Chroma 语料</td>
+            <td>本地 PersistentClient + fixture 种子，非远程生产库</td>
+          </tr>
+          <tr>
+            <td>extract / DCF</td>
+            <td>简化 stub 财务，非完整卖方模型</td>
+          </tr>
+          <tr>
+            <td>options backtest</td>
+            <td>仍为 stub 引擎</td>
+          </tr>
+          <tr>
+            <td>strategy 信号</td>
+            <td>fixture 候选，非实时 Blackboard</td>
+          </tr>
+          <tr>
+            <td>录屏</td>
+            <td>非硬性；功能验收优先，录屏可后补</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>现场演示命令（30 秒）</h2>
+      <div class="cmd">cd ~/Projects/quantcode-workspace/quantcode
+git checkout feature/jerry-day5-demos
+
+python3 scripts/accept_jerry_day5.py          # 应见 ALL ACCEPTANCE CHECKS PASSED
+python3 scripts/demo_jerry_tracks.py --track all</div>
+    </section>
+
+    <section>
+      <h2>口头稿（约 90 秒）</h2>
+      <div class="talk">
+        <p>今天我收口的是 Day5 §7：strategy、fundamental、options 三组 demo。</p>
+        <p>功能上：三组链路都跑通，artifact 过 schema；fundamental 用了本地 Chroma 做 pit_rag，能看到过滤 1 篇未来文档；研报是填好的 MD/PDF，不是空壳；人审走 AgentRunner 真 interrupt/resume。</p>
+        <p>验收用 <code class="mono">accept_jerry_day5.py</code>，本地已经全绿。代码在 <code class="mono">feature/jerry-day5-demos</code>，PR 是 #27，等 review 合 main。PR#22 冲突且内容大体已在 main，建议 #27 合完再关。</p>
+        <p class="hint">若被问「是不是生产级」：主动说降级项——Chroma 是 fixture 种子、DCF/回测仍是 stub，但验收口径要求的可演示、可校验部分已齐。</p>
+      </div>
+    </section>
+
+    <footer>
+      QuantCode Day5 · Jerry Track · 打开本文件即可投屏汇报 ·
+      open docs/day5_jerry_standup.html
+    </footer>
+  </div>
+</body>
+</html>
