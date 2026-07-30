@@ -1,0 +1,38 @@
+ASCII diagram placeholder for quantcode_flow.png
+
+[User Intent] 
+     |
+     v
+[AgentRunner (group-specific)]
+     |
+     +-- loads skill markdown → system prompt
+     +-- filters tools by group
+     +-- builds StateGraph (llm → tool → routing)
+     |
+     v
+[Tool Chain Execution]
+     |
+     +-- Factor: match_main → gen_schema → autoeval
+     +-- Model: read_pr → extract_metadata → generate_model_spec
+     +-- Risk: calc_risk → generate_risk_profile → check_gate
+     |
+     v
+[Schema Validation]
+     |
+     +-- FactorSpec, ModelSpec, RiskProfile (Pydantic)
+     |
+     v
+[State Management]
+     |
+     +-- Blackboard (SQLite, 5-scope isolation)
+     +-- Memory (FTS5, group ACL)
+     |
+     v
+[Output Artifacts]
+     |
+     +-- JSON files → artifacts/{group}/
+     +-- GitHub PR comments (Risk gate)
+     +-- PDF reports (Fundamental)
+
+Cross-group handoff:
+  Model (write_blackboard) → PROJECT scope → Risk (read_blackboard)
