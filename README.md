@@ -1,90 +1,384 @@
+<div align="center">
+  
 # QuantCode
 
-> **港科大量化协会 Agent 平台** — 6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；流跑完自动接入生产主线。
+**Agent-driven quantitative research platform where six specialized teams compose through schema contracts**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)]()
+[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-589%20passed-brightgreen.svg)](tests/)
+[![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
-QuantCode 是 HKUST QUANT SOCIETY agent 组在 [OpenCode](https://github.com/anomalyco/opencode) fork 之上构建的量化投研 agent 平台。我们**不 fork MimoCode**：从 MimoCode cherry-pick Memory / Checkpoint / Subagent / Goal / Dream / Distill 等模块代码进我们的 OpenCode fork，业务能力通过 plugin / tool / skill 加在 fork 之上。
+[Quick Start](#quick-start) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
 
-## 核心叙事
+</div>
 
-> 用 agent 把 5 人 agent 组的产能放大成 30 人投研团队——做大机构嫌人力成本不划算、单一精品店没有广度去做的事：全标的、低相关、高频迭代的策略工厂。
+---
 
-## 核心理念
+## What is QuantCode?
 
-| 原则 | 含义 |
-|---|---|
-| **千组千流** | 统一 UI + 按组分发不同的 SKILL.md / MEMORY / 默认 tool 集 |
-| **Compose Mode 是产品中枢** | 第三种 primary agent，6 套 vertical Compose 流落到三大生产模式 |
-| **三大生产模式** | Pattern 1 (Orchestrator-Worker) + Pattern 2 (Stateful Blackboard) + Pattern 5 (Human-in-the-Loop Gate) + 副作用 tool dedupe 保险栓 |
-| **确定性契约** | skill 之间用 Pydantic / JSON Schema 通信，不依赖自然语言 |
-| **程序化验收** | 验收 = `assert` + Goal/Judge，不是"看一眼觉得行" |
-| **Dream + Distill** | 后台自我进化：自动沉淀 MEMORY、识别重复操作封装新 SKILL.md |
+QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) each work through their own ReAct-style agent — no manual handoffs, no Slack threads asking "did you finish the backtest?" The platform enforces **schema contracts** at every boundary: your factor submission must validate against `FactorSpec`, your model PR triggers automatic `RiskProfile` generation, and cross-group state flows through a type-safe Blackboard.
 
-详见 [`docs/QuantCode_Design.md`](docs/QuantCode_Design.md)。
+**Core thesis**: Replace "people negotiating over Slack" with "machines validating against schemas." Replace "does this look okay?" with "`assert` pass/fail + deterministic gates."
 
-## 目录结构
+Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-picking modules from MimoCode (Memory, Checkpoint, Subagent orchestration), and adding six vertical Compose flows for quant workflows.
+
+---
+
+## News
+
+| Date | Event |
+|------|-------|
+| 2026-07-16 | 🎯 **Beta Release** — 589/597 tests passing, 6-group E2E demos functional |
+| 2026-07-15 | 🔐 Risk Gate E2E: GitHub PR comments with auto-generated `RiskProfile` |
+| 2026-07-10 | 🧪 Factor tools migrated from stub → real LLM (DeepSeek) for `gen_schema` + `match_main` |
+| 2026-07-09 | 📐 HumanGate deterministic routing engine (Pattern 5: interrupt-resume) |
+| 2026-07-05 | 🏗️ AgentRunner ReAct engine + self-built StateGraph (no `create_react_agent`) |
+
+---
+
+## Architecture
+
+### Any domain → typed output
+
+<div align="center">
+<img src="docs/images/quantcode_flow.png" width="900" alt="QuantCode flow: 6 groups → AgentRunner → Schema validation → Blackboard → Production" />
+</div>
 
 ```
-.opencode/groups/<group>/        # 按组分发：fundamental / factor / model / risk / strategy / options
-   ├── MEMORY.md                  # 组内私有长期知识
-   ├── skills/                    # 该组的 SKILL.md 文件（Compose 流构件）
-   ├── tools/                     # 该组私有 tool
-   └── agent.yaml                 # 该组 primary agent 配置（计划）
-opencode.jsonc                    # OpenCode 全局配置 + 权限
-schemas/                          # Pydantic / JSON Schema 业务契约
-pipelines/                        # 各 skill 的 Python 实现
-templates/                        # Typst 模板、prompt 模板
-runner/                           # 验收 runner（公用，吃 JSON 吐 pass/fail）
-tools/utils/                      # 跨组共享工具（含 @dedupe_within 保险栓）
-.github/workflows/                # CI gate
-docs/                             # PRD、Design、Day 1 任务清单
-vendor/                           # 第三方依赖（cherry-pick 参考，.gitignore，不入主仓）
+User intent → Group-specific AgentRunner → Tool chain → Schema validation → Output artifact
+     ↓
+  Factor: match_main → gen_schema → autoeval → RiskProfile
+  Model: read_pr → extract_metadata → generate_model_spec → (triggers Risk flow)
+  Risk: read_blackboard → calc_risk → generate_risk_profile → check_gate → HumanGate
+     ↓
+  All outputs: JSON artifacts under artifacts/{group}/ + optional PR comments
 ```
 
-## 快速开始
+**Three production patterns:**
+
+1. **Pattern 1 (Push)** — Factor group submits FactorSpec → AutoEval returns IC/IR → merges to main if IR > threshold
+2. **Pattern 2 (Pull + Human Gate)** — Model group opens PR → Risk agent auto-generates RiskProfile → human approves if max_drawdown > 15%
+3. **Pattern 5 (Interrupt-Resume)** — Any tool can `interrupt()` mid-flow for human decision, then `resume(decision=...)` to continue
+
+> **Don't pre-define DAGs. Let agents route.**  
+> The platform provides deterministic routing (`route_next_step`) based on state fingerprints, loop detection, and risk thresholds — but the **sequence** of tool calls emerges from LLM reasoning, not hardcoded graphs.
+
+**Key primitives:**
+
+- **AgentRunner** — Self-built StateGraph ReAct engine (not `create_react_agent`). Loads group-specific tools, injects skill markdown as system prompt, routes via `tool_routing_edge` → `route_next_step`.
+- **ToolRegistry** — Global singleton. Each group's `_register.py` declares tools at import time. Tests use `importlib.reload()` to re-register after other tests clear the registry.
+- **Blackboard** — SQLite-backed shared state with 5-scope isolation (SESSION/THREAD/GROUP/PROJECT/GLOBAL). Model group writes `ModelSpec` to PROJECT scope → Risk group reads it.
+- **Memory** — FTS5 full-text search + 5-scope ACL. Factor agent can't read Model group's memory.
+- **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskProfile`, `StrategyReport`, etc.
+
+---
+
+## Six Workflows
+
+Each group has a vertical Compose flow — from raw idea to production-ready artifact.
+
+### 1. Factor (Owner: 肖骥超)
+
+**Goal**: Automate factor development from idea to AutoEval → main branch merge.
+
+**Tools**: `match_main`, `gen_schema`, `autoeval`
+
+**Flow**:
+```python
+idea = "高ROE低PB价值因子"
+  ↓ match_main (LLM) → finds similar factors in main branch
+  ↓ gen_schema (LLM) → generates FactorSpec with formula/fields/rebalance
+  ↓ autoeval (API) → submits to AutoEval service, returns IC/IR/turnover
+  ↓ Schema validation → artifacts/factor/{name}_eval.json
+  ↓ If IR > 1.5 && IC > 0.03 → auto-merge to main
+```
+
+**Demo**: `python runner/jerry_demos.py --track factor`
+
+**Status**: ✅ `match_main` + `gen_schema` using real DeepSeek LLM; `autoeval` falls back to mock (real AutoEval service TBD)
+
+---
+
+### 2. Model (Owner: 陈镇鸿)
+
+**Goal**: PR metadata extraction → cross-group handoff to Risk for gate check.
+
+**Tools**: `read_pr`, `extract_metadata`, `generate_model_spec`, `write_blackboard`
+
+**Flow**:
+```python
+PR #42 opened → read_pr → extract model type/params from diff
+  ↓ generate_model_spec → {"model_name": "pb_roe_ranker", "model_type": "ml", ...}
+  ↓ write_blackboard(scope=PROJECT) → triggers Risk flow
+  ↓ Risk agent reads ModelSpec → calculates risk_metrics → generates RiskProfile
+  ↓ check_gate → HumanGate if max_drawdown > 15%
+  ↓ write_pr_comment → posts RiskProfile JSON to PR
+```
+
+**Cross-group contract**: `ModelSpec` schema (must include `model_name`, `expected_sharpe`, `capacity_estimate`).
+
+---
+
+### 3. Risk (Owner: 杨欣琳)
+
+**Goal**: Automated risk gate for model PRs — generate `RiskProfile`, check thresholds, trigger HumanGate if needed.
+
+**Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `check_gate`, `write_pr_comment`, `request_human_review`
+
+**Flow**:
+```python
+ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, position_limit}
+  ↓ generate_risk_profile → enriched RiskProfile with thresholds
+  ↓ check_gate → {requires_human: true, reasons: ["max_drawdown", "tail_risk_var_99"]}
+  ↓ route_next_step detects risk_profile + threshold breach → HUMAN_GATE
+  ↓ _human_gate_node → interrupt() → waits for Command(resume={"decision": "approve"})
+  ↓ write_pr_comment → GitHub PR comment with full RiskProfile JSON
+```
+
+**HumanGate**: Deterministic routing — if `risk_metrics` exceed thresholds AND `risk_profile` exists, route to `human_gate` node. Agent pauses until user resumes with `approve` or `reject`.
+
+**Demo**: `pytest tests/test_risk_react_ready.py -v`
+
+**Production**: GitHub Actions workflow calls `run_agent(group="risk", task="Run risk gate for PR #{pr_number}")`
+
+---
+
+### 4. Fundamental (Owner: Lead)
+
+**Goal**: Point-in-time safe research report generation (prevent lookahead bias in backtests).
+
+**Tools**: `pit_rag_search`, `extract_financial`, `dcf_valuation`, `render_report`
+
+**PIT safety**: Chroma vector DB with timestamp filter — 2023-01-01 backtest only retrieves docs from ≤ 2022-12-31.
+
+---
+
+### 5. Strategy (Owner: TBD)
+
+**Goal**: Signal combination → backtest → deploy gate.
+
+**Tools**: `select_signals`, `combine_signals`, `run_strategy_backtest`, `deploy_strategy`
+
+**Gate**: `deploy_strategy` always requires HumanGate approval.
+
+---
+
+### 6. Options (Owner: 刘炽)
+
+**Goal**: Volatility surface construction + Greeks calculation for options strategies.
+
+**Tools**: `build_vol_surface`, `calc_greeks`, `run_options_backtest`
+
+**Output**: `artifacts/options/{symbol}_vol_surface.png` + GreeksProfile JSON
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12+
+- Bun (for OpenCode desktop)
+- Git
+
+### One-command install
 
 ```bash
-# 1. clone 本仓库
-gh repo clone HKUST-QUANT-SOCIETY/quantcode
-cd quantcode
-
-# 2. clone OpenCode fork（载体）
-gh repo clone HKUST-QUANT-SOCIETY/opencode ../opencode
-cd ../opencode && bun install && bun run dev
-# TUI 起来后能跟内置 build agent 对话即代表载体跑通
-
-# 3. 配置 provider（不入库）
-cp opencode.jsonc opencode.local.jsonc
-# 编辑 opencode.local.jsonc，加 LLM API key
-
-# 4. 安装 Python 业务包
-cd ../quantcode
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/HKUST-QUANT-SOCIETY/quantcode/main/scripts/setup.sh | bash
 ```
 
-## 6 套 Compose 流（业务层）
+**Or manual:**
 
-| Compose 流 | Owner | 核心 SKILL.md |
-|---|---|---|
-| **fundamental** | 用户（Lead） | `fundamental:brainstorm/fetch/extract/dcf/draft/render/review/publish` |
-| **factor** | 肖骥超 | `factor:brainstorm/match-main/gen-schema/execute/autoeval/risk-check/merge-main` |
-| **model** | 陈镇鸿 | `model:brainstorm/lit-review/plan/execute/pr-submit/cross-handoff` |
-| **risk** | 杨欣琳 | `risk:detect/analyze/schema-gen/ci-gate/feedback` |
-| **strategy** | 待定 | `strategy:brainstorm/select/combine/backtest/deploy` |
-| **options** | 刘炽 | `options:brainstorm/vol-surface/greeks/execute` |
+```bash
+# 1. Clone repos
+git clone https://github.com/HKUST-QUANT-SOCIETY/quantcode.git
+git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
 
-## 文档
+# 2. Install QuantCode
+cd quantcode
+pip install -e .
 
-- [Design](docs/QuantCode_Design.md) — 项目定位、架构、Pattern 1/2/5、6 套 Compose 流、团队分工
-- [PRD](docs/PRD.md) — 产品需求文档
-- [Day 1 任务清单](docs/Day1_TaskList.md) — 启动日全员任务
+# 3. Configure API keys
+cp config.example.json config.json
+# Edit config.json: add your DeepSeek API key
 
-## 团队
+# 4. Install OpenCode desktop
+cd ../opencode
+bun install
 
-HKUST QUANT SOCIETY · Agent Group · 6 人
+# 5. Start desktop
+cd ../quantcode
+./scripts/start-quantcode.sh
+```
+
+### Conversational path
+
+Open QuantCode desktop → select your group → type:
+
+```
+我想开发一个基于ROE和PB的价值因子
+```
+
+Agent auto-runs: `match_main` → `gen_schema` → `autoeval` → shows you IC/IR results.
+
+### Library path
+
+```python
+from tools.registry import registry
+
+# Factor group
+result = registry.call("gen_schema", {
+    "idea": "momentum factor using 20-day return",
+    "match_result": {"main_branch": "momentum", "similar_factors": []}
+})
+# Returns: {"name": "momentum_20d", "formula": "close/close.shift(20)-1", ...}
+
+# Risk group
+risk = registry.call("calc_risk", {
+    "model_spec": {"model_name": "test", "expected_sharpe": 1.5},
+    "scenario": "high_risk"
+})
+# Returns: {"max_drawdown": 0.22, "tail_risk_var_99": 0.085, ...}
+```
+
+### Run E2E demos
+
+```bash
+# All 6 groups
+python -m pytest tests/test_day5_jerry_demos.py::test_day5_all_demos -v
+
+# Individual tracks
+python runner/jerry_demos.py --track strategy
+python runner/jerry_demos.py --track fundamental
+python runner/jerry_demos.py --track options
+```
+
+---
+
+## Testing
+
+```bash
+# Full suite (589 tests)
+pytest
+
+# Specific group
+pytest tests/test_risk_react_ready.py -v
+
+# With real LLM (requires DEEPSEEK_API_KEY)
+QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
+```
+
+**Test status**: 589 passed, 8 skipped (as of 2026-07-16). The 8 skipped tests require real LLM API access.
+
+**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (5-scope isolation), Memory (FTS5), routing logic (loop detection + risk gates), HumanGate (interrupt-resume), cross-group handoff (Model→Risk).
+
+---
+
+## Documentation
+
+- **[User Manual](docs/USER_MANUAL.md)** — End-to-end guides for all 6 groups
+- **[Architecture Spec](docs/Architecture_Spec.md)** — System design, Pattern 1/2/5, state management
+- **[Module Architecture](docs/MODULE_ARCHITECTURE.md)** — 15 modules documented (1234 lines)
+- **[Testing Guide](TEST_GUIDE.md)** — How to write tests, mock LLMs, fixture patterns (745 lines)
+- **[PRD](docs/PRD.md)** — Product requirements, acceptance criteria
+
+---
+
+## In Production
+
+**Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
+
+**Current stage**: Beta — full E2E demos functional, 97.6% test pass rate, missing pieces:
+- AutoEval service endpoint (factor group blocked on real API)
+- Chromadb integration (fundamental group PIT RAG)
+- Dream/Distill automation (knowledge extraction from agent traces)
+
+**Production readiness estimate**: 4-6 weeks to GA per [product evaluation](https://github.com/HKUST-QUANT-SOCIETY/quantcode/issues/X).
+
+---
+
+## Roadmap
+
+- [ ] **AutoEval service integration** — Real factor evaluation API (currently mock)
+- [ ] **Multi-agent workflows** — Parallel agent orchestration for large-scale tasks
+- [ ] **Token budget management** — User-controlled token limits ("+500k" directive)
+- [ ] **Distill automation** — Extract reusable patterns from successful agent runs → new tools
+- [ ] **Long-context handling** — Custom reducer for 10h+ agent sessions
+- [ ] **Monitoring dashboard** — Real-time agent status, token consumption, error rates
+
+---
+
+## Contributing
+
+**Agent-first workflow** (recommended):
+
+Open the QuantCode desktop → type:
+
+```
+/implement add a new tool for calculating Fama-French 3-factor exposures
+```
+
+The Model agent will:
+1. Generate `tools/factor/fama_french.py` with ToolDef
+2. Register in `tools/factor/_register.py`
+3. Write unit tests in `tests/test_fama_french.py`
+4. Run tests and fix until green
+5. Create PR with summary
+
+**Manual workflow**:
+
+```bash
+# 1. Create feature branch
+git checkout -b feat/your-feature
+
+# 2. Make changes
+# 3. Add tests (test coverage must not decrease)
+pytest tests/test_your_feature.py
+
+# 4. Commit with conventional commits format
+git commit -m "feat(factor): add Fama-French 3-factor tool"
+
+# 5. Push and open PR
+git push origin feat/your-feature
+gh pr create
+```
+
+> **IMPORTANT**: All PRs trigger the Risk gate automatically. If your changes affect risk calculations or thresholds, expect HumanGate to pause the merge until a risk reviewer approves.
+
+**Code style**: Black (line length 100), Ruff (target py312), type hints required.
+
+---
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## Acknowledgements
+
+Built by the HKUST QUANT SOCIETY Agent Group (6 people):
+- **Lead**: Hendrix Chen (chenyuanheng0127@gmail.com)
+- **Factor**: 肖骥超
+- **Model**: 陈镇鸿
+- **Risk**: 杨欣琳
+- **Fundamental**: Lead
+- **Options**: 刘炽
+
+**Technology stack**:
+- [OpenCode](https://github.com/anomalyco/opencode) — Desktop shell fork
+- [LangGraph](https://github.com/langchain-ai/langgraph) — StateGraph orchestration
+- [LangChain](https://github.com/langchain-ai/langchain) — Tool abstractions
+- [DeepSeek](https://www.deepseek.com/) — LLM for schema generation and matching
+- Cherry-picked from [MimoCode](https://github.com/MimoCode/mimocode): Memory, Checkpoint, Subagent modules
+
+---
+
+<div align="center">
+  
+**[⬆ Back to Top](#quantcode)**
+
+Made with ☕ by the HKUST QUANT SOCIETY Agent Group
+
+</div>

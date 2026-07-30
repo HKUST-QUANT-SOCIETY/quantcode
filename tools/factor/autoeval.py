@@ -31,10 +31,24 @@ def _autoeval_execute(args: AutoevalArgs, ctx: dict) -> dict[str, Any]:
     """真API实现：提交FactorSpec到AutoEval服务并返回评估结果。"""
     import os
     import json
+    from pathlib import Path
 
-    # TODO: 从配置或环境变量读取AutoEval API endpoint
+    # 从环境变量或config.json读取AutoEval API配置
     autoeval_api_url = os.environ.get('AUTOEVAL_API_URL')
     autoeval_api_key = os.environ.get('AUTOEVAL_API_KEY')
+
+    # 如果环境变量未设置，尝试从config.json读取
+    if not autoeval_api_url or not autoeval_api_key:
+        try:
+            project_root = Path(__file__).resolve().parent.parent.parent
+            config_path = project_root / "config.json"
+            if config_path.exists():
+                config = json.loads(config_path.read_text())
+                autoeval_config = config.get("autoeval", {})
+                autoeval_api_url = autoeval_api_url or autoeval_config.get("api_url")
+                autoeval_api_key = autoeval_api_key or autoeval_config.get("api_key")
+        except Exception as e:
+            print(f"Warning: Failed to load config.json: {e}")
 
     if autoeval_api_url and autoeval_api_key:
         try:
