@@ -27,8 +27,10 @@ if str(_ROOT) not in sys.path:
 from langchain_core.messages import AIMessage
 
 from runner.agent_engine import AgentRunner
+from runner.archive_pack import pack_jerry_demo_results
 from runner.jerry_demos import run_all_demos
 from runner.langgraph_base import clear_checkpointer_cache
+from schemas.archive import ArchiveManifest, ArchiveSource
 from schemas.fundamental import PITResult, ResearchResult
 from schemas.options import GreeksProfile, OptionsBacktestReport, VolSurfaceResult
 from schemas.strategy import StrategyReport
@@ -64,7 +66,8 @@ def _check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def accept_linear_demos() -> dict:
-    results = run_all_demos()
+    # archive=False here; we pack once with acceptance source tag below
+    results = run_all_demos(archive=False)
     s_path = PROJECT_ROOT / results["strategy"]["artifact_path"]
     StrategyReport.model_validate(json.loads(s_path.read_text(encoding="utf-8")))
     _check("strategy StrategyReport schema", True, s_path.name)
@@ -124,6 +127,21 @@ def accept_linear_demos() -> dict:
         "fundamental human_gate recorded",
         bundle.get("human_gate", {}).get("decision") == "approve",
     )
+
+    packs = pack_jerry_demo_results(
+        results,
+        source=ArchiveSource.ACCEPTANCE,
+        acceptance={"status": "passed", "suite": "accept_jerry_day5.linear_demos"},
+    )
+    for track, pack in packs.items():
+        ArchiveManifest.model_validate(pack.manifest.model_dump())
+        _check(
+            f"archive pack {track}",
+            pack.file_count >= 1 and (PROJECT_ROOT / pack.manifest_path).exists(),
+            pack.archive_dir,
+        )
+        results[track]["archive_id"] = pack.archive_id
+        results[track]["archive_dir"] = pack.archive_dir
     return results
 
 

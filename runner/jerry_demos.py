@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from schemas.archive import ArchiveSource
 from schemas.fundamental import PITResult, ResearchResult
 from schemas.options import GreeksProfile, OptionsBacktestReport, VolSurfaceResult
 from schemas.strategy import StrategyReport
@@ -18,6 +19,20 @@ from tools.registry import PROJECT_ROOT, registry
 import tools.fundamental._register  # noqa: F401
 import tools.options._register  # noqa: F401
 import tools.strategy._register  # noqa: F401
+
+
+def _attach_archive(track: str, result: dict[str, Any], *, archive: bool) -> dict[str, Any]:
+    if not archive:
+        return result
+    from runner.archive_pack import pack_demo_result
+
+    packed = pack_demo_result(track, result, source=ArchiveSource.DEMO)
+    result = dict(result)
+    result["archive_id"] = packed.archive_id
+    result["archive_dir"] = packed.archive_dir
+    result["archive_manifest"] = packed.manifest_path
+    result["archive_file_count"] = packed.file_count
+    return result
 
 
 def _write_artifact(rel_path: str, payload: dict) -> str:
@@ -30,6 +45,7 @@ def _write_artifact(rel_path: str, payload: dict) -> str:
 def run_strategy_demo(
     *,
     fixture_path: str = "tests/fixtures/strategy_backtest_result.json",
+    archive: bool = True,
 ) -> dict[str, Any]:
     """select → combine → backtest → deploy，产出 StrategyReport。"""
     fixture = json.loads((PROJECT_ROOT / fixture_path).read_text(encoding="utf-8"))
@@ -68,14 +84,18 @@ def run_strategy_demo(
         f"artifacts/strategy/{report.strategy_name}/strategy_report.json",
         report.model_dump(mode="json"),
     )
-    return {
-        "track": "strategy",
-        "schema": "StrategyReport",
-        "artifact_path": artifact_path,
-        "verdict": report.verdict.value,
-        "deploy_status": deploy.get("status"),
-        "selected_signals": report.selected_signals,
-    }
+    return _attach_archive(
+        "strategy",
+        {
+            "track": "strategy",
+            "schema": "StrategyReport",
+            "artifact_path": artifact_path,
+            "verdict": report.verdict.value,
+            "deploy_status": deploy.get("status"),
+            "selected_signals": report.selected_signals,
+        },
+        archive=archive,
+    )
 
 
 def run_fundamental_demo(
@@ -84,6 +104,7 @@ def run_fundamental_demo(
     target_name: str = "蜜雪冰城",
     as_of_date: str = "2025-01-01",
     query: str = "蜜雪冰城 财务 估值",
+    archive: bool = True,
 ) -> dict[str, Any]:
     """pit_rag → extract → dcf → render；验证 PIT 时点安全。"""
     pit_raw = registry.call(
@@ -174,20 +195,24 @@ def run_fundamental_demo(
         f"artifacts/research/{target_identifier.replace('.', '_')}-{as_of_date}/fundamental_bundle.json",
         bundle,
     )
-    return {
-        "track": "fundamental",
-        "schema": "PITResult + ResearchResult",
-        "artifact_path": artifact_path,
-        "pit_filtered_count": pit.filtered_count,
-        "pit_doc_count": len(pit.documents),
-        "pit_backend": backend,
-        "human_gate": human_gate["status"],
-        "markdown_path": research.markdown_path,
-        "pdf_path": research.pdf_path,
-        "typst_used": report_raw.get("typst_used", False),
-        "markdown_filled": report_raw.get("markdown_filled", False),
-        "pdf_filled": report_raw.get("pdf_filled", False),
-    }
+    return _attach_archive(
+        "fundamental",
+        {
+            "track": "fundamental",
+            "schema": "PITResult + ResearchResult",
+            "artifact_path": artifact_path,
+            "pit_filtered_count": pit.filtered_count,
+            "pit_doc_count": len(pit.documents),
+            "pit_backend": backend,
+            "human_gate": human_gate["status"],
+            "markdown_path": research.markdown_path,
+            "pdf_path": research.pdf_path,
+            "typst_used": report_raw.get("typst_used", False),
+            "markdown_filled": report_raw.get("markdown_filled", False),
+            "pdf_filled": report_raw.get("pdf_filled", False),
+        },
+        archive=archive,
+    )
 
 
 def run_options_demo(
@@ -195,6 +220,7 @@ def run_options_demo(
     strategy_name: str = "gc_vol_carry",
     underlying: str = "GC",
     as_of_date: str = "2026-06-27",
+    archive: bool = True,
 ) -> dict[str, Any]:
     """build_vol_surface → calc_greeks → backtest，产出 OptionsRisk bundle。"""
     surface_raw = registry.call(
@@ -263,22 +289,26 @@ def run_options_demo(
         f"artifacts/options/{strategy_name}/options_risk.json",
         options_risk,
     )
-    return {
-        "track": "options",
-        "schema": "VolSurfaceResult + GreeksProfile + OptionsBacktestReport",
-        "artifact_path": artifact_path,
-        "surface_artifact": surface_raw.get("artifact_path"),
-        "greeks_artifact": greeks_raw.get("artifact_path"),
-        "portfolio_delta": greeks.portfolio_greeks.delta,
-        "backtest_sharpe": backtest.sharpe,
-    }
+    return _attach_archive(
+        "options",
+        {
+            "track": "options",
+            "schema": "VolSurfaceResult + GreeksProfile + OptionsBacktestReport",
+            "artifact_path": artifact_path,
+            "surface_artifact": surface_raw.get("artifact_path"),
+            "greeks_artifact": greeks_raw.get("artifact_path"),
+            "portfolio_delta": greeks.portfolio_greeks.delta,
+            "backtest_sharpe": backtest.sharpe,
+        },
+        archive=archive,
+    )
 
 
-def run_all_demos() -> dict[str, Any]:
+def run_all_demos(*, archive: bool = True) -> dict[str, Any]:
     return {
-        "strategy": run_strategy_demo(),
-        "fundamental": run_fundamental_demo(),
-        "options": run_options_demo(),
+        "strategy": run_strategy_demo(archive=archive),
+        "fundamental": run_fundamental_demo(archive=archive),
+        "options": run_options_demo(archive=archive),
     }
 
 

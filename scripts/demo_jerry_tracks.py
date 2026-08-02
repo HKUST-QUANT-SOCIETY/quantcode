@@ -39,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
         default="all",
     )
     parser.add_argument("--json", action="store_true", help="只输出 JSON 结果")
+    parser.add_argument(
+        "--no-archive",
+        action="store_true",
+        help="跳过写入 archives/ 存档包（默认会归档）",
+    )
     args = parser.parse_args(argv)
 
     runners = {
@@ -47,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         "options": run_options_demo,
         "all": run_all_demos,
     }
-    result = runners[args.track]()
+    archive = not args.no_archive
+    result = runners[args.track](archive=archive)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -57,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n=== {name} ===")
             print(f"  schema   : {data.get('schema')}")
             print(f"  artifact : {data.get('artifact_path')}")
+            if data.get("archive_dir"):
+                print(f"  archive  : {data.get('archive_dir')} ({data.get('archive_file_count')} files)")
             if name == "fundamental":
                 print(
                     f"  PIT      : filtered={data.get('pit_filtered_count')} "

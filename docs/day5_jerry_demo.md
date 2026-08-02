@@ -9,17 +9,30 @@ cd ~/Projects/quantcode-workspace/quantcode
 python3 scripts/accept_jerry_day5.py
 ```
 
-覆盖：fixtures 终验、三组 schema artifact、Chroma PIT、AgentRunner 人审 interrupt/resume、strategy/options 多步 tool 链。
+覆盖：fixtures 终验、三组 schema artifact、Chroma PIT、AgentRunner 人审 interrupt/resume、strategy/options 多步 tool 链、**demo 存档 packs**。
 
 ## 快速跑通（无需 LLM）
 
 ```bash
 python3 scripts/demo_jerry_tracks.py --track all
-python3 scripts/demo_jerry_tracks.py --track fundamental
-python3 scripts/demo_jerry_tracks.py --track all --json
+# 默认会写入 archives/<archive_id>/（可用 --no-archive 跳过）
+
+python3 scripts/archive_pack.py --track all
+python3 scripts/archive_pack.py --list
 ```
 
-## 产出 artifact 路径
+## Demo 存档（archives/）
+
+`artifacts/` 是临时工作区（gitignore）；汇报/复盘用 **archive pack**：
+
+```
+archives/<timestamp>-<group>-.../
+  manifest.json
+  README.md
+  artifacts/     # 本轮产物拷贝
+  meta/input.json
+  meta/acceptance.json   # accept 脚本打包时有
+```
 
 | Track | Artifact | Schema |
 |-------|----------|--------|
