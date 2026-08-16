@@ -39,7 +39,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          path: source
           persist-credentials: false
+          set-safe-directory: false
           clean: true
 
       - name: Setup Python
@@ -55,18 +57,21 @@ jobs:
           echo "QUANTCODE_VENV=$VENV_DIR" >> "$GITHUB_ENV"
 
       - name: Install dependencies
+        working-directory: source
         run: |
           "$QUANTCODE_VENV/bin/python" -m pip install --upgrade pip
           "$QUANTCODE_VENV/bin/python" -m pip install -e .
 
       - name: Run manual smoke test
         if: github.event_name == 'workflow_dispatch'
+        working-directory: source
         run: >
           "$QUANTCODE_VENV/bin/python" scripts/run_risk_gate_tool.py
           --scenario normal
 
       - name: Post formal risk profile comment
         if: github.event_name == 'pull_request'
+        working-directory: source
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -83,6 +88,7 @@ jobs:
 
       - name: Repeat formal risk profile comment to verify dedupe
         if: github.event_name == 'pull_request'
+        working-directory: source
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -100,6 +106,10 @@ jobs:
       - name: Clean isolated Python environment
         if: always()
         run: |
+          if [ -z "${QUANTCODE_VENV:-}" ]; then
+            echo "No isolated Python environment was created."
+            exit 0
+          fi
           case "$QUANTCODE_VENV" in
             "$RUNNER_TEMP"/quantcode-*) rm -rf -- "$QUANTCODE_VENV" ;;
             *) echo "Refusing to remove unexpected path: $QUANTCODE_VENV"; exit 1 ;;
