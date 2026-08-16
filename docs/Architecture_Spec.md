@@ -592,6 +592,38 @@ blackboard.read(scope="projects", key="model.pr.123")  # risk 组读
 - `cos_client.py`：COS 存储读写
 - `rlhf_collector.py`：收集 RLHF 训练数据
 
+### 4.3 PR Multi-Agent Review 平面
+
+PR 代码审查位于业务执行平面之外。它不启动 Quant Code AgentRunner，也不执行 PR 中的 Python 业务代码。
+
+```text
+pull_request_target（workflow 来自默认分支）
+  → Server B / Quant Physical Gates
+      → secret、生产路径、JSON/YAML、shell、可复现性检查
+      → 同一 workflow run 的 physical artifact
+  → Server B / Quant Multi-Agent Review
+      → Contract Boundary
+      → Agent Runtime
+      → Factor Pipeline
+      → Model and Risk
+      → Research Workflow
+      → CI and Supply Chain
+  → arbiter: pass / warn / block
+  → 更新同一条 PR 评论
+```
+
+信任边界如下：
+
+- PR source 是不可信输入，只用于读取 diff 和静态文件。
+- workflow 定义与 reviewer matrix、gate policy、repo profile 都来自 PR 的 base/default branch。PR head 不能在同一次运行中修改自己的审查控制面。
+- 中央 review engine 固定到完整 commit SHA。Server B 预先安装对应 wheel 到 `/opt/quant-review-ci/releases/<sha>/venv`，目录由 root 持有，runner 服务用户只有读和执行权限。
+- workflow 不安装 Quant Code，也不创建 Quant Code venv。业务依赖测试属于独立测试 CI，不能塞进 reviewer job。
+- physical job 不接触 DeepSeek secret。agent job 只消费同一 GitHub run 产生并校验过的 physical artifact。
+- `deepseek-review` Environment 只允许 `main` branch 部署；feature branch 中新增的 workflow 不能读取 DeepSeek secret。
+- 使用 `pull_request_target` 获取默认分支中的可信 workflow；PR head 只作为静态数据读取，不导入、不测试、不执行。内部 self-hosted runner 仍拒绝 fork PR。
+
+这套 code review 与 Model → Risk Compose → HumanGate 是两个系统。前者判断代码 diff 是否可合并，后者判断模型业务风险是否需要人工批准。
+
 ---
 
 ## 5. 从 OpenCode 学到的设计原则
@@ -636,6 +668,7 @@ blackboard.read(scope="projects", key="model.pr.123")  # risk 组读
 - **副作用幂等**：对外副作用 tool（PR 评论、邮件）在去重窗口内重复触发只生效一次
 - **状态可恢复**：Agent 在任意 tool 执行后崩溃，可从 checkpoint 恢复，不重跑已完成步骤
 - **算法数据沉淀**：每次 tool call 的 (state, action, reward) 可被记录，供 RLHF / 评估使用
+- **PR 审查可信性**：审查配置来自 base SHA，review engine 固定版本，physical artifact 与同一 workflow run 绑定，blocker 能阻止合并
 
 > 具体的迭代排期、任务拆解、人员分工见独立的任务计划文档（如 `docs/DayN_TaskList.md`），不属于本架构规格。
 

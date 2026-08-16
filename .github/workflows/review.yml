@@ -1,0 +1,313 @@
+name: Multi-Agent Code Review
+
+on:
+  # The default branch owns this workflow definition. PR head code is data only.
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: quantcode-multiagent-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  REVIEW_ENGINE_ROOT: /opt/quant-review-ci/releases
+
+jobs:
+  physical-gates:
+    name: Quant Physical Gates
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, server-b-multiagent-review]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Select pinned prebuilt review engine
+        env:
+          REVIEW_CI_REF: ${{ vars.REVIEW_CI_REF }}
+        run: |
+          if [[ ! "$REVIEW_CI_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Repository variable REVIEW_CI_REF must be a full 40-character commit SHA."
+            exit 1
+          fi
+
+          engine_home="$REVIEW_ENGINE_ROOT/$REVIEW_CI_REF"
+          if [ ! -x "$engine_home/venv/bin/quant-review-ci" ]; then
+            echo "Pinned review engine is not prebuilt on this runner: $engine_home"
+            exit 1
+          fi
+          if [ "$(cat "$engine_home/ENGINE_REF" 2>/dev/null)" != "$REVIEW_CI_REF" ]; then
+            echo "Prebuilt review engine marker does not match REVIEW_CI_REF."
+            exit 1
+          fi
+          echo "REVIEW_CI_BIN=$engine_home/venv/bin/quant-review-ci" >> "$GITHUB_ENV"
+          echo "REVIEW_CI_HOME=$engine_home" >> "$GITHUB_ENV"
+
+      - name: Checkout PR source without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+          path: pr-source
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Checkout trusted target configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Run deterministic gates
+        id: physical
+        continue-on-error: true
+        env:
+          CONFIG_DIR: ${{ github.workspace }}/trusted-target/.review-ci
+          OUTPUT_DIR: ${{ runner.temp }}/physical-review
+          PR_REPO: ${{ github.workspace }}/pr-source
+          REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
+          PYTHONSAFEPATH: "1"
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [ ! -d "$CONFIG_DIR" ]; then
+            CONFIG_DIR="$REVIEW_CI_HOME/profiles/quantcode"
+            echo "Bootstrap run: using root-owned Quant Code config from the pinned engine release."
+          fi
+          for config_file in reviewer_matrix.yaml gate_policy.yaml repo_profiles.yaml; do
+            if [ ! -f "$CONFIG_DIR/$config_file" ]; then
+              echo "Repository review config is incomplete: $CONFIG_DIR/$config_file is missing."
+              exit 1
+            fi
+          done
+          config_args=(--config-dir "$CONFIG_DIR")
+          profile_args=()
+          if [ -n "$REVIEW_CI_PROFILE" ]; then
+            profile_args=(--profile "$REVIEW_CI_PROFILE")
+          fi
+
+          set +e
+          "$REVIEW_CI_BIN" \
+            --repo "$PR_REPO" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --physical-only \
+            --out-dir "$OUTPUT_DIR" \
+            "${config_args[@]}" \
+            "${profile_args[@]}"
+          exit_code=$?
+          set -e
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload physical review result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: physical-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/physical-review/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce physical gate status
+        if: always()
+        env:
+          RESULT_FILE: ${{ runner.temp }}/physical-review/review-result.json
+          CLI_EXIT_CODE: ${{ steps.physical.outputs.exit_code }}
+        run: |
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "Physical review did not produce review-result.json (CLI exit: $CLI_EXIT_CODE)."
+            exit 1
+          fi
+          case "$CLI_EXIT_CODE" in
+            0|2) ;;
+            *) echo "Physical review CLI failed unexpectedly with exit code $CLI_EXIT_CODE."; exit 1 ;;
+          esac
+
+          status=$(jq -r ".arbiter.status" "$RESULT_FILE")
+          echo "Physical review status: $status"
+          case "$status" in
+            pass|warn) exit 0 ;;
+            block) exit 1 ;;
+            *) echo "Unexpected physical review status: $status"; exit 1 ;;
+          esac
+
+  agent-review:
+    name: Quant Multi-Agent Review
+    needs: physical-gates
+    runs-on: [self-hosted, linux, x64, server-b-multiagent-review]
+    environment: deepseek-review
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Select pinned prebuilt review engine
+        env:
+          REVIEW_CI_REF: ${{ vars.REVIEW_CI_REF }}
+        run: |
+          if [[ ! "$REVIEW_CI_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Repository variable REVIEW_CI_REF must be a full 40-character commit SHA."
+            exit 1
+          fi
+
+          engine_home="$REVIEW_ENGINE_ROOT/$REVIEW_CI_REF"
+          if [ ! -x "$engine_home/venv/bin/quant-review-ci" ]; then
+            echo "Pinned review engine is not prebuilt on this runner: $engine_home"
+            exit 1
+          fi
+          if [ "$(cat "$engine_home/ENGINE_REF" 2>/dev/null)" != "$REVIEW_CI_REF" ]; then
+            echo "Prebuilt review engine marker does not match REVIEW_CI_REF."
+            exit 1
+          fi
+          echo "REVIEW_CI_BIN=$engine_home/venv/bin/quant-review-ci" >> "$GITHUB_ENV"
+          echo "REVIEW_CI_HOME=$engine_home" >> "$GITHUB_ENV"
+
+      - name: Checkout PR source without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+          path: pr-source
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Checkout trusted target configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Download physical review result
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: physical-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/physical-review
+
+      - name: Run Quant Code reviewer matrix
+        id: agents
+        continue-on-error: true
+        env:
+          CONFIG_DIR: ${{ github.workspace }}/trusted-target/.review-ci
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-v4-flash' }}
+          OUTPUT_DIR: ${{ runner.temp }}/agent-review
+          PHYSICAL_RESULT: ${{ runner.temp }}/physical-review/review-result.json
+          PR_REPO: ${{ github.workspace }}/pr-source
+          REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
+          PYTHONSAFEPATH: "1"
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [ ! -d "$CONFIG_DIR" ]; then
+            CONFIG_DIR="$REVIEW_CI_HOME/profiles/quantcode"
+            echo "Bootstrap run: using root-owned Quant Code config from the pinned engine release."
+          fi
+          for config_file in reviewer_matrix.yaml gate_policy.yaml repo_profiles.yaml; do
+            if [ ! -f "$CONFIG_DIR/$config_file" ]; then
+              echo "Repository review config is incomplete: $CONFIG_DIR/$config_file is missing."
+              exit 1
+            fi
+          done
+          config_args=(--config-dir "$CONFIG_DIR")
+          profile_args=()
+          if [ -n "$REVIEW_CI_PROFILE" ]; then
+            profile_args=(--profile "$REVIEW_CI_PROFILE")
+          fi
+
+          set +e
+          "$REVIEW_CI_BIN" \
+            --repo "$PR_REPO" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --agent-only \
+            --gate-attestation-file "$PHYSICAL_RESULT" \
+            --require-llm \
+            --out-dir "$OUTPUT_DIR" \
+            "${config_args[@]}" \
+            "${profile_args[@]}"
+          exit_code=$?
+          set -e
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload combined review result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: combined-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/agent-review/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create or update PR summary
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SUMMARY_PATH: ${{ runner.temp }}/agent-review/review-summary.md
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- quant-multiagent-review -->";
+            if (!fs.existsSync(process.env.SUMMARY_PATH)) {
+              core.warning("No agent review summary was produced.");
+              return;
+            }
+
+            const summary = fs.readFileSync(process.env.SUMMARY_PATH, "utf8");
+            const body = `${marker}\n${summary}`.slice(0, 65000);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const previous = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Enforce combined review status
+        if: always()
+        env:
+          RESULT_FILE: ${{ runner.temp }}/agent-review/review-result.json
+          CLI_EXIT_CODE: ${{ steps.agents.outputs.exit_code }}
+        run: |
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "Agent review did not produce review-result.json (CLI exit: $CLI_EXIT_CODE)."
+            exit 1
+          fi
+          case "$CLI_EXIT_CODE" in
+            0|2) ;;
+            *) echo "Agent review CLI failed unexpectedly with exit code $CLI_EXIT_CODE."; exit 1 ;;
+          esac
+
+          status=$(jq -r ".arbiter.status" "$RESULT_FILE")
+          echo "Combined review status: $status"
+          case "$status" in
+            pass|warn) exit 0 ;;
+            block) exit 1 ;;
+            *) echo "Unexpected combined review status: $status"; exit 1 ;;
+          esac

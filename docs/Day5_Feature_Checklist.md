@@ -56,7 +56,8 @@
 |---|---|---|
 | 验收 runner | `runner/acceptance.py`（risk/factor 阈值检查） | ✅ |
 | Schema 校验 | `runner/schema_validator.py`（jsonschema） | ✅ |
-| CI gate | `.github/workflows/risk-gate.yml`（GitHub Actions 真集成） | ✅ |
+| PR Code Review | `.github/workflows/review.yml`（中央 Multi-Agent Review + Server B） | 🔧 接入中 |
+| Risk Compose 业务 gate | `flows/risk_gate.py` + HumanGate；不再由 PR reviewer 直接安装并执行 | ✅ 业务实现，独立 CI 待补 |
 | dedupe | `tools/utils/dedupe.py` | ✅ |
 
 ---
