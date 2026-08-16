@@ -15,7 +15,8 @@
 5. [Fundamental组（基本面研究）](#fundamental组基本面研究)
 6. [Strategy组（策略构建）](#strategy组策略构建)
 7. [Options组（期权定价）](#options组期权定价)
-8. [常见问题](#常见问题)
+8. [PR代码审查](#pr代码审查)
+9. [常见问题](#常见问题)
 
 ---
 
@@ -350,6 +351,27 @@ QuantCode:
 | `build_vol_surface` | 构建波动率曲面 |
 | `calc_greeks` | 计算Greeks |
 | `run_options_backtest` | 期权策略回测 |
+
+---
+
+## PR代码审查
+
+Quant Code 内部分支提交 PR 后，GitHub 自动运行两层代码审查：
+
+1. `Quant Physical Gates` 检查 secret、生产路径、JSON/YAML、shell 和可复现性问题。
+2. `Quant Multi-Agent Review` 按改动目录选择 Contract、Runtime、Factor、Model/Risk、Research、CI reviewer，并把汇总结论写入 PR 评论。
+
+结论含义：
+
+| 结论 | 含义 | 处理方式 |
+|---|---|---|
+| `pass` | 没有发现需要处理的问题 | 继续正常人工 review |
+| `warn` | 有非阻断问题 | 阅读评论，判断是否在本 PR 修复 |
+| `block` | deterministic gate 或 reviewer 发现 blocker | 修复并 push，系统自动重跑 |
+
+这项代码审查不会安装或运行完整 Quant Code。它与模型 PR 的 `RiskProfile` / HumanGate 不同：前者检查代码，后者检查模型业务风险。
+
+当前只允许仓库内部分支使用 Server B self-hosted runner。fork PR 不会在内部 runner 上执行，需要维护者先检查来源并采用受信任分支流程。
 
 ---
 

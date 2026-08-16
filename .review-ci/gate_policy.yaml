@@ -1,0 +1,42 @@
+gates:
+  secret_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  prod_path_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  schema_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  shell_syntax_gate:
+    enabled: true
+    required: false
+    block_on: blocker
+  pytest_gate:
+    enabled: false
+    required: false
+    block_on: blocker
+  artifact_contract_gate:
+    enabled: false
+    required: false
+    block_on: important
+  reproducibility_gate:
+    enabled: true
+    required: false
+    block_on: important
+
+pytest_timeout_seconds: 180
+max_command_output_chars: 12000
+pytest_commands: []
+
+artifact_contract:
+  required_files: []
+  manifest_required_fields:
+    - code_hash
+    - data_hash
+    - config_hash
+    - environment_hash
+    - as_of

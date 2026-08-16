@@ -1,0 +1,100 @@
+profiles:
+  quantcode:
+    description: Quant Code agent runtime, six research groups, contracts, and CI integration.
+    repo_name_hints: [quantcode]
+    execution_zone: research
+    runner_labels: [self-hosted, linux, x64, server-b-multiagent-review]
+    allowed_write_roots:
+      - /tmp/quant-smoke
+    categories:
+      data:
+        - schemas/**
+        - tests/test_*schema*.py
+        - tests/test_*blackboard*.py
+        - tests/test_human_gate.py
+        - config.example.json
+        - .review-ci/**
+      factor_engine:
+        - tools/factor/**
+        - flows/factor_autoeval.py
+        - pipelines/factor_eval/**
+        - tests/test_*factor*.py
+        - artifacts/factor/**
+      backtest:
+        - tools/fundamental/**
+        - tools/strategy/**
+        - tools/options/**
+        - pipelines/pit_rag/**
+        - pipelines/research_pdf/**
+        - data/sample_options/**
+        - tests/test_*fundamental*.py
+        - tests/test_*strategy*.py
+        - tests/test_*options*.py
+        - artifacts/research/**
+      scoring: []
+      model:
+        - tools/model/**
+        - tools/risk/**
+        - flows/risk_gate.py
+        - pipelines/risk_gate/**
+        - tests/test_*model*.py
+        - tests/test_*risk*.py
+        - artifacts/risk/**
+      infra:
+        - .github/**
+        - scripts/**
+        - pyproject.toml
+        - package.json
+        - package-lock.json
+        - bun.lock
+        - .gitignore
+      docs:
+        - docs/**
+        - README.md
+        - TEST_GUIDE.md
+        - LICENSE
+        - '**/*.rst'
+        - '**/*.tex'
+      gateway: []
+      assetization: []
+      purification: []
+      orchestration:
+        - runner/**
+        - quantcode/**
+        - dream/**
+        - tools/registry.py
+        - tools/utils/**
+        - .opencode/**
+        - opencode.jsonc
+        - tests/test_*agent*.py
+        - tests/test_*routing*.py
+        - tests/test_*checkpoint*.py
+        - tests/test_*memory*.py
+        - tests/test_*dedupe*.py
+        - tests/test_*loop*.py
+        - tests/test_*compose*.py
+        - tests/test_mcp_server.py
+    protected_outputs:
+      - cross-group Blackboard state
+      - FactorSpec and AutoEval result
+      - ModelSpec and RiskProfile
+      - HumanGate decision
+      - research and backtest artifact
+    artifact_manifest_required_fields:
+      - code_hash
+      - data_hash
+      - config_hash
+      - environment_hash
+      - as_of
+    smoke_commands: []
+
+  generic:
+    description: Conservative fallback for an unexpected repository name.
+    repo_name_hints: []
+    execution_zone: local
+    runner_labels: [ubuntu-latest]
+    allowed_write_roots:
+      - /tmp/quant-smoke
+    categories: {}
+    protected_outputs: []
+    smoke_commands: []

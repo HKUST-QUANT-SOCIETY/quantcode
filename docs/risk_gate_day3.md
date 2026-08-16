@@ -182,7 +182,7 @@ export QUANTCODE_POST_RISK_COMMENT=1
 
 ### GitHub Actions
 
-见 `.github/workflows/risk-gate.yml`：`pull_request` 触发时注入 `GITHUB_TOKEN`、`GITHUB_REPOSITORY`、`QUANTCODE_POST_RISK_COMMENT=1`，并**连续跑两次**同场景以验证 marker dedupe（第二次不应新建评论）。
+旧版 `.github/workflows/risk-gate.yml` 曾直接运行该业务场景，并连续执行两次验证 marker dedupe。该 workflow 已被通用 `.github/workflows/review.yml` 取代。当前 PR Code Review 不执行 Quant Code 业务包；Risk Compose 写评论的 dedupe 应在业务测试或独立业务 workflow 中验证。
 
 ### 去重两层
 

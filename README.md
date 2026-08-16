@@ -29,6 +29,7 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 
 | Date | Event |
 |------|-------|
+| 2026-08-17 | 🔎 **Multi-Agent PR Review** — Quant Code reviewer matrix、deterministic gates 与 Server B 预构建 review engine 完成接入设计 |
 | 2026-07-16 | 🎯 **Beta Release** — 589/597 tests passing, 6-group E2E demos functional |
 | 2026-07-15 | 🔐 Risk Gate E2E: GitHub PR comments with auto-generated `RiskProfile` |
 | 2026-07-10 | 🧪 Factor tools migrated from stub → real LLM (DeepSeek) for `gen_schema` + `match_main` |
@@ -275,6 +276,19 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 ---
 
+## Pull Request Review
+
+同一条 PR 上有两套不同职责的机制：
+
+- **Multi-Agent Code Review** 检查代码 diff。它由 `.github/workflows/review.yml` 触发，先运行 deterministic gates，再按 `.review-ci/reviewer_matrix.yaml` 调用六类 reviewer，最后生成一个 `pass / warn / block` 结论并更新 PR 评论。
+- **Risk Compose + HumanGate** 处理 Quant Code 的模型业务流程。它生成 `RiskProfile`，在风险阈值超限时等待人工决定。它不是通用代码 reviewer。
+
+Review CI 在受限的 Server B runner 上运行。runner 读取按中央引擎 commit SHA 固化的 root-owned 预构建环境，不安装 Quant Code，也不为每个 PR 创建业务 venv。完整 Quant Code 测试应由独立测试 workflow 负责；当前 review gate 只执行不依赖业务依赖的 secret、生产路径、JSON/YAML、shell 与可复现性检查。
+
+Reviewer 分工、gate policy、可信配置规则和运维状态见 [Multi-Agent Review 运维说明](docs/GITHUB_ACTIONS_SERVER_B_MIGRATION.md)。
+
+---
+
 ## Documentation
 
 - **[User Manual](docs/USER_MANUAL.md)** — End-to-end guides for all 6 groups
@@ -282,6 +296,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 - **[Module Architecture](docs/MODULE_ARCHITECTURE.md)** — 15 modules documented (1234 lines)
 - **[Testing Guide](TEST_GUIDE.md)** — How to write tests, mock LLMs, fixture patterns (745 lines)
 - **[PRD](docs/PRD.md)** — Product requirements, acceptance criteria
+- **[Multi-Agent Review](docs/GITHUB_ACTIONS_SERVER_B_MIGRATION.md)** — PR reviewer matrix、gate policy、Server B runner 与部署状态
 
 ---
 
@@ -344,7 +359,7 @@ git push origin feat/your-feature
 gh pr create
 ```
 
-> **IMPORTANT**: All PRs trigger the Risk gate automatically. If your changes affect risk calculations or thresholds, expect HumanGate to pause the merge until a risk reviewer approves.
+> 内部分支 PR 会触发 Multi-Agent Code Review。代码审查出现 blocker 时 check 失败；模型业务流中的风险阈值超限则由 Risk Compose 的 HumanGate 单独处理。
 
 **Code style**: Black (line length 100), Ruff (target py312), type hints required.
 
