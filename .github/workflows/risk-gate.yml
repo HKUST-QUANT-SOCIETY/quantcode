@@ -5,10 +5,16 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write  # Required for posting PR comments via /issues/{number}/comments API
+concurrency:
+  group: quantcode-risk-gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# Jobs opt in to the minimum permissions they need.
+permissions: {}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_CACHE_DIR: "1"
 
 # Owner: 杨欣琳（T2 风控 / 跨组接收）
 # 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
@@ -16,21 +22,48 @@ permissions:
 
 jobs:
   risk-gate:
-    runs-on: ubuntu-latest
+    name: QuantCode Risk Gate
+    # Never execute code from a fork on the internal self-hosted runner.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, server-b-multiagent-review]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write  # Required for posting PR comments via /issues/{number}/comments API
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout PR source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+          clean: true
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - name: Install deps
+      - name: Create isolated Python environment
+        env:
+          VENV_DIR: ${{ runner.temp }}/quantcode-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          pip install -e .
-          pip install jsonschema
+          python -m venv "$VENV_DIR"
+          echo "QUANTCODE_VENV=$VENV_DIR" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          "$QUANTCODE_VENV/bin/python" -m pip install --upgrade pip
+          "$QUANTCODE_VENV/bin/python" -m pip install -e .
+
+      - name: Run manual smoke test
+        if: github.event_name == 'workflow_dispatch'
+        run: >
+          "$QUANTCODE_VENV/bin/python" scripts/run_risk_gate_tool.py
+          --scenario normal
 
       - name: Post formal risk profile comment
         if: github.event_name == 'pull_request'
@@ -42,7 +75,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: >
-          python scripts/run_risk_gate_tool.py
+          "$QUANTCODE_VENV/bin/python" scripts/run_risk_gate_tool.py
           --scenario normal
           --pr-number "$PR_NUMBER"
           --head-sha "$HEAD_SHA"
@@ -58,8 +91,16 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: >
-          python scripts/run_risk_gate_tool.py
+          "$QUANTCODE_VENV/bin/python" scripts/run_risk_gate_tool.py
           --scenario normal
           --pr-number "$PR_NUMBER"
           --head-sha "$HEAD_SHA"
           --pr-url "$PR_URL"
+
+      - name: Clean isolated Python environment
+        if: always()
+        run: |
+          case "$QUANTCODE_VENV" in
+            "$RUNNER_TEMP"/quantcode-*) rm -rf -- "$QUANTCODE_VENV" ;;
+            *) echo "Refusing to remove unexpected path: $QUANTCODE_VENV"; exit 1 ;;
+          esac
