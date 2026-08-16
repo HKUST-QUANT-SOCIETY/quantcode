@@ -371,7 +371,7 @@ Quant Code 内部分支提交 PR 后，GitHub 自动运行两层代码审查：
 
 这项代码审查不会安装或运行完整 Quant Code。它与模型 PR 的 `RiskProfile` / HumanGate 不同：前者检查代码，后者检查模型业务风险。
 
-当前只允许仓库内部分支使用 Server B self-hosted runner。fork PR 不会在内部 runner 上执行，需要维护者先检查来源并采用受信任分支流程。
+当前只允许仓库内部分支使用 Server B self-hosted runner。默认分支提供可信 workflow，PR 代码只被静态读取，不会在 runner 上执行。fork PR 不会进入内部 runner，需要维护者先检查来源并采用受信任分支流程。
 
 ---
 

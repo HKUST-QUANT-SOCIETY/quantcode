@@ -12,7 +12,7 @@ gates:
     required: true
     block_on: blocker
   shell_syntax_gate:
-    enabled: true
+    enabled: false
     required: false
     block_on: blocker
   pytest_gate:

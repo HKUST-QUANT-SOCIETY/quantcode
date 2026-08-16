@@ -97,4 +97,5 @@ profiles:
       - /tmp/quant-smoke
     categories: {}
     protected_outputs: []
+    artifact_manifest_required_fields: []
     smoke_commands: []

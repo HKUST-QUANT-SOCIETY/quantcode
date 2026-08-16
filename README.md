@@ -283,7 +283,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 - **Multi-Agent Code Review** 检查代码 diff。它由 `.github/workflows/review.yml` 触发，先运行 deterministic gates，再按 `.review-ci/reviewer_matrix.yaml` 调用六类 reviewer，最后生成一个 `pass / warn / block` 结论并更新 PR 评论。
 - **Risk Compose + HumanGate** 处理 Quant Code 的模型业务流程。它生成 `RiskProfile`，在风险阈值超限时等待人工决定。它不是通用代码 reviewer。
 
-Review CI 在受限的 Server B runner 上运行。runner 读取按中央引擎 commit SHA 固化的 root-owned 预构建环境，不安装 Quant Code，也不为每个 PR 创建业务 venv。完整 Quant Code 测试应由独立测试 workflow 负责；当前 review gate 只执行不依赖业务依赖的 secret、生产路径、JSON/YAML、shell 与可复现性检查。
+Review CI 在受限的 Server B runner 上运行。默认分支中的 `pull_request_target` workflow 是可信控制面，PR head 只作为静态 diff 和文件数据读取，绝不执行。DeepSeek Environment 只允许 `main` branch 部署，feature branch workflow 不能读取密钥。runner 读取按中央引擎 commit SHA 固化的 root-owned 预构建环境，不安装 Quant Code，也不为每个 PR 创建业务 venv。完整 Quant Code 测试应由独立测试 workflow 负责；当前 review gate 只执行不依赖业务依赖的 secret、生产路径、JSON/YAML 与可复现性检查。
 
 Reviewer 分工、gate policy、可信配置规则和运维状态见 [Multi-Agent Review 运维说明](docs/GITHUB_ACTIONS_SERVER_B_MIGRATION.md)。
 

@@ -597,7 +597,7 @@ blackboard.read(scope="projects", key="model.pr.123")  # risk 组读
 PR 代码审查位于业务执行平面之外。它不启动 Quant Code AgentRunner，也不执行 PR 中的 Python 业务代码。
 
 ```text
-pull_request
+pull_request_target（workflow 来自默认分支）
   → Server B / Quant Physical Gates
       → secret、生产路径、JSON/YAML、shell、可复现性检查
       → 同一 workflow run 的 physical artifact
@@ -615,11 +615,12 @@ pull_request
 信任边界如下：
 
 - PR source 是不可信输入，只用于读取 diff 和静态文件。
-- reviewer matrix、gate policy、repo profile 从 PR 的 base SHA 检出。PR 不能在同一次运行中修改自己的审查规则。
+- workflow 定义与 reviewer matrix、gate policy、repo profile 都来自 PR 的 base/default branch。PR head 不能在同一次运行中修改自己的审查控制面。
 - 中央 review engine 固定到完整 commit SHA。Server B 预先安装对应 wheel 到 `/opt/quant-review-ci/releases/<sha>/venv`，目录由 root 持有，runner 服务用户只有读和执行权限。
 - workflow 不安装 Quant Code，也不创建 Quant Code venv。业务依赖测试属于独立测试 CI，不能塞进 reviewer job。
 - physical job 不接触 DeepSeek secret。agent job 只消费同一 GitHub run 产生并校验过的 physical artifact。
-- `pull_request_target` 禁用；内部 self-hosted runner 不执行 fork PR。
+- `deepseek-review` Environment 只允许 `main` branch 部署；feature branch 中新增的 workflow 不能读取 DeepSeek secret。
+- 使用 `pull_request_target` 获取默认分支中的可信 workflow；PR head 只作为静态数据读取，不导入、不测试、不执行。内部 self-hosted runner 仍拒绝 fork PR。
 
 这套 code review 与 Model → Risk Compose → HumanGate 是两个系统。前者判断代码 diff 是否可合并，后者判断模型业务风险是否需要人工批准。
 

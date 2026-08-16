@@ -271,7 +271,7 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - **业务 Risk Compose**：ModelSpec → RiskProfile → 阈值检查 → HumanGate → PR 评论（去重）
 - **代码审查 CI**（`.github/workflows/review.yml`）：PR 触发 → deterministic gates → Quant Code reviewer matrix → arbiter → PR 评论（去重）
 
-两者不能混用。业务 Risk Compose 判断模型风险，代码审查 CI 判断 diff 的正确性、安全性和契约兼容性。代码审查使用中央 `multiagent_review_ci_standalone` 引擎，固定到完整 commit SHA，并调用 Server B 上 root-owned 的预构建环境。它不安装 Quant Code；完整业务测试由独立测试 CI 承担。
+两者不能混用。业务 Risk Compose 判断模型风险，代码审查 CI 判断 diff 的正确性、安全性和契约兼容性。代码审查由默认分支中的 `pull_request_target` workflow 控制，PR head 只作为静态审查数据。它使用中央 `multiagent_review_ci_standalone` 引擎，固定到完整 commit SHA，并调用 Server B 上 root-owned 的预构建环境。它不安装 Quant Code；完整业务测试由独立测试 CI 承担。
 
 ### 4.4 核心引擎功能实现路线
 

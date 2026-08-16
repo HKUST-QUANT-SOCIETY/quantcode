@@ -26,12 +26,12 @@ Quant Code 的目标流程是：仓库内部分支提交 PR 后，由 GitHub 调
 | Server B 预构建环境 | 完成 | `/opt/quant-review-ci/releases/374e0176fecb21b1729bf38fcaf205580793afc6`，含 root-owned bootstrap config |
 | wheel SHA-256 | 完成 | `8632262aef058ce81adf6eecb1ca1a5e75040ab263e69a9bf9f829b869d9e003` |
 | Quant Code repository variables | 完成 | `REVIEW_CI_REF`、`REVIEW_CI_PROFILE=quantcode`、DeepSeek endpoint/model |
-| `deepseek-review` Environment | 已创建 | Quant Code repository environment 已存在 |
-| `DEEPSEEK_API_KEY` | 未完成 | 中央仓库的 Environment secret 无法由 GitHub 读取或复制，需要管理员向 Quant Code 环境写入同一密钥 |
+| `deepseek-review` Environment | 完成 | 已创建，并只允许 `main` branch 部署 |
+| `DEEPSEEK_API_KEY` | 完成 | 已写入 Quant Code Environment；值不进入仓库或 Server B |
 | Workflow 与 `.review-ci` 合入 main | 未完成 | 当前随接入 PR 评审 |
 | Quant Code 专属矩阵实跑 | 未完成 | 接入 PR 合入后，用下一条内部测试 PR 验证 base SHA 配置 |
 
-只要 `DEEPSEEK_API_KEY` 尚未写入 Quant Code 的 `deepseek-review` Environment，physical gates 可以运行，agent review 会因 `--require-llm` 失败。不能把这种状态标记为“部署成功”。
+真实 bootstrap run 已证明 DeepSeek provider、六个 reviewer、arbiter 和 PR 评论更新能够工作。该次 review 正确阻断了不可信 head workflow 的 secret 风险；修复后的可信 workflow 需要在合入默认分支后由下一条 PR 做最终验收。
 
 ## Reviewer matrix
 
@@ -57,7 +57,7 @@ Quant Code 的目标流程是：仓库内部分支提交 PR 后，由 GitHub 调
 | `secret_gate` | 启用 | blocker 时阻断 | 所有 PR 必须检查凭据泄漏 |
 | `prod_path_gate` | 启用 | blocker 时阻断 | 防止研究代码直接写受保护 Server A/B 或 COS 路径 |
 | `schema_gate` | 启用 | 解析失败时阻断 | JSON/YAML 必须可解析 |
-| `shell_syntax_gate` | 启用 | shell 语法错误时阻断 | 不需要安装业务依赖 |
+| `shell_syntax_gate` | 禁用 | 不参与 | `bash -n` 仍会让 shell 解析不可信 PR 文件；特权 workflow 不调用任何 PR shell |
 | `reproducibility_gate` | 启用 | important 及以上阻断 | 模型随机性与 wall-clock 时间必须显式化 |
 | `pytest_gate` | 禁用 | 不参与 | Review job 不安装 Quant Code；完整测试属于独立 CI |
 | `artifact_contract_gate` | 禁用 | 不参与 | 当前仓库尚未形成统一、可验证的 artifact manifest |
@@ -66,9 +66,9 @@ Quant Code 的目标流程是：仓库内部分支提交 PR 后，由 GitHub 调
 
 ## 可信配置与首个 PR
 
-Workflow 从 PR 的 base SHA 检出 `.review-ci/`，不使用 head SHA 中刚修改的规则。这可以阻止 PR 为自己关闭 gate 或放宽 reviewer。
+Workflow 使用 `pull_request_target`，因此 workflow 定义来自默认分支；它再从 PR 的 base SHA 检出 `.review-ci/`，不使用 head SHA 中刚修改的规则。PR head 只能提供静态 diff 和文件数据，不能在同一次运行中修改 workflow、关闭 gate 或放宽 reviewer。
 
-因此首个接入 PR 有一个预期的 bootstrap 行为：main 尚无 `.review-ci/`，该次运行使用 Server B 固定引擎目录下 root-owned 的 `profiles/quantcode`。这三份文件与本 PR 的候选配置一致，但 runner 用户不能修改。接入 PR 合入 main 后，下一条 PR 改为使用 base SHA 中的 Quant Code matrix 和 policy。验收不能只看 bootstrap PR 变绿。
+因此首个接入 PR 无法用 head 中新增的 `pull_request_target` workflow 自审。先前的 `pull_request` bootstrap run 只用于证明预构建引擎、physical gates 和六个 reviewer 可以工作，并已暴露出 head workflow 的 secret 风险。修复后，接入 PR 合入 main，下一条 PR 才会由默认分支中的可信 workflow 使用 base SHA 的 Quant Code matrix 和 policy。最终验收必须在下一条 PR 完成。
 
 ## Server B 固定环境
 
@@ -111,9 +111,10 @@ Repository Environment `deepseek-review`：
 
 ```text
 Secret: DEEPSEEK_API_KEY
+Deployment branch policy: main
 ```
 
-密钥只配置在 Environment。不要写入 repository variable、workflow、Server B 文件、shell profile 或 artifact。
+密钥只配置在 Environment，且 Environment 只允许 `main` branch 部署。`pull_request_target` 的 ref 来自 base branch，因此可信 workflow 可以使用；feature branch 新增的普通 workflow 不能取得该密钥。不要把密钥写入 repository variable、workflow、Server B 文件、shell profile 或 artifact。
 
 ## Runner 状态
 
@@ -129,19 +130,18 @@ Secret: DEEPSEEK_API_KEY
 
 ## 验收顺序
 
-1. 向 Quant Code 的 `deepseek-review` Environment 写入 `DEEPSEEK_API_KEY`。
-2. 确认接入 PR 的 bootstrap physical 和 agent jobs 都完成。
-3. 合入接入 PR，让 `.review-ci/` 成为 main 的可信 base 配置。
-4. 新建一条仅修改文档的内部测试 PR，确认六个 reviewer 正常选择或 benign skip，且只有一条 bot 汇总评论。
-5. 新建一条故意包含无效 YAML 的测试 PR，确认 `schema_gate` 阻断；测试后关闭该 PR，不合并。
-6. 稳定运行后，把 `Quant Physical Gates` 和 `Quant Multi-Agent Review` 配成 branch protection required checks。
+1. 人工检查接入 PR 中的 workflow、`.review-ci` 和 CODEOWNERS；`pull_request_target` 在文件进入默认分支前不会运行该文件。
+2. 合入接入 PR，让 workflow 与 `.review-ci/` 成为 main 的可信控制面。
+3. 新建一条仅修改文档的内部测试 PR，确认默认分支 workflow 被调用、六个 reviewer 正常选择或 benign skip，且只有一条 bot 汇总评论。
+4. 新建一条故意包含无效 YAML 的测试 PR，确认 `schema_gate` 阻断；测试后关闭该 PR，不合并。
+5. 稳定运行后，把 `Quant Physical Gates` 和 `Quant Multi-Agent Review` 配成 branch protection required checks。
 
 ## 安全边界
 
-- 使用 `pull_request`，不使用 `pull_request_target`。
+- 使用 `pull_request_target`，workflow 定义来自默认分支。
 - fork PR 不进入内部 self-hosted runner。
 - checkout 不持久化 GitHub credentials。
-- PR source、base 配置和 review engine 分开存放。
+- PR source、base 配置和 review engine 分开存放；PR source 只作为静态数据读取。
 - physical job 不接触 DeepSeek secret。
-- review job 不安装、不导入、不执行 Quant Code 业务包。
+- review job 不安装、不导入、不测试、不执行 Quant Code 业务包或 PR shell。
 - 生产发布、Server A/B 写入和 HumanGate 决定仍是独立的人审流程。

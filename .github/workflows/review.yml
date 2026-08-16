@@ -1,7 +1,8 @@
 name: Multi-Agent Code Review
 
 on:
-  pull_request:
+  # The default branch owns this workflow definition. PR head code is data only.
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 concurrency:
