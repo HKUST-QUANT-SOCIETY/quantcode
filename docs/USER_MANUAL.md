@@ -30,7 +30,7 @@
 
 **方式1：正式安装包**（组员推荐）
 
-从 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 下载与你的系统匹配的 DMG、Windows 安装程序、AppImage、DEB 或 RPM。安装步骤见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。正式安装包自带桌面运行环境，不需要 Bun，也不会在每次启动时重新安装 OpenCode。
+从 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 下载与你的系统匹配的 macOS DMG/ZIP 或 Windows 安装程序。Linux 实际安装包暂未开放。安装步骤见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。正式安装包自带桌面运行环境，不需要 Bun，也不会在每次启动时重新安装 OpenCode。
 
 **方式2：源码开发模式**（仅桌面端开发者）
 

@@ -2,16 +2,13 @@
 
 QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 自己的产品身份、界面和发布通道。普通组员安装正式包后不需要安装 Bun、Node.js 或完整 OpenCode 源码。
 
-正式安装包发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。每个版本包含下列文件：
+正式安装包发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行流程先覆盖 macOS 和 Windows；Linux 的 electron-builder 配置会保留，但暂不作为可下载的正式版本：
 
 | 平台 | 安装文件 | 适用场景 |
 | --- | --- | --- |
 | macOS Apple Silicon | `quantcode-<version>-mac-arm64.dmg` | M1/M2/M3/M4/M5 Mac |
 | macOS Intel | `quantcode-<version>-mac-x64.dmg` | Intel Mac |
 | Windows x64 | `quantcode-<version>-win-x64.exe` | Windows 10/11 64 位 |
-| Linux x64 | `quantcode-<version>-linux-x64.AppImage` | 无需系统安装 |
-| Debian/Ubuntu x64 | `quantcode-<version>-linux-x64.deb` | 受系统包管理器管理 |
-| Fedora/RHEL x64 | `quantcode-<version>-linux-x64.rpm` | 受系统包管理器管理 |
 
 ## 安装前准备
 
@@ -39,28 +36,9 @@ QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会�
 
 正式公开版本应使用 Azure Trusted Signing。未签名的内部测试包可能触发 Microsoft Defender SmartScreen，不应作为正式版本传播。
 
-## Linux
+## Linux（暂缓）
 
-### AppImage
-
-```bash
-chmod +x quantcode-<version>-linux-x64.AppImage
-./quantcode-<version>-linux-x64.AppImage
-```
-
-### Debian / Ubuntu
-
-```bash
-sudo apt install ./quantcode-<version>-linux-x64.deb
-```
-
-### Fedora / RHEL
-
-```bash
-sudo dnf install ./quantcode-<version>-linux-x64.rpm
-```
-
-Linux 桌面入口、可执行文件和窗口身份均使用独立的 QuantCode 标识，不会覆盖系统中已经安装的 OpenCode。
+Linux 的 AppImage、DEB 和 RPM 目标已经保留在桌面端配置中，但当前不生成或发布实机安装包。待独立的 Linux 主机、桌面会话、窗口标识和升级链路完成验收后，再开放对应下载项。
 
 ## 首次启动
 
@@ -98,4 +76,3 @@ OPENCODE_CHANNEL=quantcode bun --cwd packages/desktop dev
 ```
 
 源码开发模式与正式安装包使用不同的数据目录，不应拿开发模式替代组员安装验收。
-
