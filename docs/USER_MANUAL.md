@@ -28,19 +28,23 @@
 
 ### 启动QuantCode
 
-**方式1：一键启动脚本**（推荐）
-```bash
-cd /path/to/QUANTcode
-./scripts/start-quantcode.sh
-```
+**方式1：正式安装包**（组员推荐）
 
-**方式2：手动启动**
-```bash
-# 1. 启动桌面端
-cd opencode && bun run dev:desktop
+从 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 下载与你的系统匹配的 DMG、Windows 安装程序、AppImage、DEB 或 RPM。安装步骤见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。正式安装包自带桌面运行环境，不需要 Bun，也不会在每次启动时重新安装 OpenCode。
 
-# 2. 在桌面端中选择你的组
-# 3. 开始对话
+**方式2：源码开发模式**（仅桌面端开发者）
+
+```bash
+# 1. 进入独立的 OpenCode fork
+cd opencode
+
+# 2. 首次安装依赖
+bun install
+
+# 3. 启动 QuantCode channel
+OPENCODE_CHANNEL=quantcode bun --cwd packages/desktop dev
+
+# 4. 在桌面端中选择你的组并连接 Server B
 ```
 
 ### 基本使用流程

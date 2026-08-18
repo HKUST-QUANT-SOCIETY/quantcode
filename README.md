@@ -176,19 +176,33 @@ ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, posit
 
 ## Quick Start
 
-### Prerequisites
+### Install the desktop app
+
+Team members should install a packaged desktop release. Bun, Node.js, Git, and the OpenCode source tree are not required for normal use.
+
+1. Open [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases).
+2. Download the DMG, Windows installer, AppImage, DEB, or RPM for your platform.
+3. Start QuantCode, choose your research group, and connect to Server B with your registered SSH identity.
+
+See [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) for platform-specific instructions, signing expectations, data locations, and automatic updates.
+
+### Install the research engine from source
+
+The source workflow below is for QuantCode engine and desktop contributors.
+
+#### Prerequisites
 
 - Python 3.12+
 - Bun (for OpenCode desktop)
 - Git
 
-### One-command install
+#### One-command engine install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HKUST-QUANT-SOCIETY/quantcode/main/scripts/setup.sh | bash
 ```
 
-**Or manual:**
+**Or manual development setup:**
 
 ```bash
 # 1. Clone repos
