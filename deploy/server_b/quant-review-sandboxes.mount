@@ -1,0 +1,12 @@
+[Unit]
+Description=Bounded tmpfs for untrusted QuantCode PR tests
+Before=actions.runner.HKUST-QUANT-SOCIETY.server-b-multiagent-review-01.service
+
+[Mount]
+What=tmpfs
+Where=/srv/quant/runner-sandboxes
+Type=tmpfs
+Options=size=6G,mode=0700,uid=1042,gid=1050,nosuid,nodev,noexec
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,83 @@
+profiles:
+  quantcode:
+    description: QuantCode agent orchestration, schema contracts, six research flows, and PR risk gates.
+    repo_name_hints: [quantcode]
+    execution_zone: ci
+    runner_labels: [self-hosted, linux, x64, server-b-multiagent-review]
+    allowed_write_roots:
+      - /tmp/quant-smoke
+    categories:
+      contracts:
+        - quantcode/schemas/**
+        - schemas/**
+        - templates/**
+        - config*.json
+        - tools/schema_utils.py
+        - "**/*contract*"
+      orchestration:
+        - quantcode/**
+        - runner/**
+        - flows/**
+        - pipelines/**
+        - tools/github_comments.py
+        - tools/loop_detector.py
+        - tools/registry.py
+        - tools/skills/**
+        - .opencode/**
+        - opencode.jsonc
+      memory:
+        - runner/memory/**
+        - dream/**
+        - "**/*memory*"
+        - "**/*checkpoint*"
+      factor:
+        - tools/factor/**
+        - pipelines/factor_eval/**
+        - "**/*factor*"
+      model:
+        - tools/model/**
+        - "**/*model*"
+      risk:
+        - tools/risk/**
+        - pipelines/risk_gate/**
+        - "**/*risk*"
+        - "**/*human_gate*"
+      fundamental:
+        - tools/fundamental/**
+        - pipelines/pit_rag/**
+        - pipelines/research_pdf/**
+        - "**/*fundamental*"
+        - "**/*pit*"
+      strategy:
+        - tools/strategy/**
+        - "**/*strategy*"
+        - "**/*backtest*"
+      options:
+        - tools/options/**
+        - "**/*option*"
+        - "**/*vol_surface*"
+        - "**/*greeks*"
+      integration:
+        - tests/**
+        - tools/common/**
+        - tools/utils/**
+      ci:
+        - .github/**
+        - .review-ci/**
+        - deploy/**
+        - scripts/**
+        - pyproject.toml
+        - uv.lock
+        - package.json
+        - package-lock.json
+        - bun.lock
+      docs:
+        - docs/**
+        - "**/*.md"
+    protected_outputs:
+      - FactorSpec and factor evaluation artifacts
+      - ModelSpec and RiskProfile contracts
+      - Blackboard cross-group state
+      - HumanGate admission decisions
+    artifact_manifest_required_fields: []
+    smoke_commands: []
