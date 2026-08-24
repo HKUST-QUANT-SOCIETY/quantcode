@@ -4,7 +4,7 @@
 > **受众**：QA测试人员、产品经理、演示准备者
 > **最后更新**：2026-07-15（Lead）
 
-> 本手册描述开发与 QA 的源码测试环境。正式可分发的桌面安装包当前只支持 macOS 和 Windows；下列 Linux 要求仅用于源码测试，不表示提供 Linux 安装包。
+> 本手册描述开发与 QA 的源码测试环境。当前 GitHub Actions 已构建 macOS、Windows 和 Linux x64 的 unsigned 安装 artifact；它们仅用于 QA 验证，尚不是已签名、可向组员分发的正式 Release。
 
 ---
 
@@ -27,7 +27,7 @@
 **操作系统**：
 - macOS 10.15+
 - Windows 10+
-- Linux (Ubuntu 20.04+，仅源码测试)
+- Linux (Ubuntu 20.04+，用于源码开发与 CI 安装包测试；当前可生成 unsigned x64 artifact，正式 Release 待签名验收)
 
 **软件依赖**：
 - Node.js 18+ / Bun 1.0+
@@ -209,20 +209,15 @@ bun run dev:desktop
 启动后，你应该看到：
 
 ```
+$ bun run script/dev-quantcode.ts desktop
 $ bun --cwd packages/desktop dev
-$ bun ./scripts/predev.ts
-Copied dev icons from ./icons/dev to resources/icons
-opencode script {
-  "channel": "feat/quantcode-day5-ui",
-  ...
-}
 ...
 $ electron-vite dev
 vite v7.1.4 building for development...
 ✓ built in 1234ms
 ```
 
-**最后会自动打开Electron窗口**，显示OpenCode界面。
+**最后会自动打开 Electron 窗口**，页签、启动态和错误页都应显示 QuantCode；如果仍显示 OpenCode，说明启动的不是 `dev:desktop` QuantCode channel，或浏览器标签页仍保留旧文档，需强制刷新。
 
 如果窗口没有自动打开，检查终端是否有错误信息。
 

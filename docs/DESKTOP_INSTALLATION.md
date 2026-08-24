@@ -2,13 +2,18 @@
 
 QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 自己的产品身份、界面和发布通道。普通组员安装正式包后不需要安装 Bun、Node.js 或完整 OpenCode 源码。
 
-正式安装包发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行流程先覆盖 macOS 和 Windows；Linux 的 electron-builder 配置会保留，但暂不作为可下载的正式版本：
+> 当前状态（2026-08-19）：macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 的 QuantCode 安装产物已由 GitHub Actions 实际构建成功；Linux 产物包括 AppImage、DEB、RPM。它们均为 unsigned 测试 artifact，正式 Release 尚未发布。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing，以及私有 Release 仓库的自动更新访问方案。当前测试包不能当作正式安装包外发。Linux ARM64 尚未纳入正式矩阵。
+
+正式安装包完成验收后将发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行矩阵覆盖 macOS、Windows 和 Linux x64：
 
 | 平台 | 安装文件 | 适用场景 |
 | --- | --- | --- |
 | macOS Apple Silicon | `quantcode-<version>-mac-arm64.dmg` | M1/M2/M3/M4/M5 Mac |
 | macOS Intel | `quantcode-<version>-mac-x64.dmg` | Intel Mac |
 | Windows x64 | `quantcode-<version>-win-x64.exe` | Windows 10/11 64 位 |
+| Linux x64 | `quantcode-<version>-linux-x86_64.AppImage` | 便携运行；生成完整性 metadata，自动更新当前关闭 |
+| Linux x64 | `quantcode-<version>-linux-amd64.deb` | Debian/Ubuntu 手动安装 |
+| Linux x64 | `quantcode-<version>-linux-x86_64.rpm` | Fedora/RHEL 系手动安装 |
 
 ## 安装前准备
 
@@ -26,7 +31,7 @@ QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会�
 2. 打开 DMG，将 `QuantCode.app` 拖入“应用程序”。
 3. 从“应用程序”启动 QuantCode。
 
-正式公开版本应经过 Developer ID 签名和 Apple 公证。内部未签名测试包只用于开发验收，出现 Gatekeeper 提示时不要向外部分发。
+正式版本必须经过 Developer ID 签名和 Apple 公证。内部未签名测试包只用于开发验收，出现 Gatekeeper 提示时不要向外部分发。
 
 ## Windows
 
@@ -34,11 +39,13 @@ QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会�
 2. 运行安装程序。QuantCode 默认安装到当前用户，无需管理员权限。
 3. 从开始菜单启动 QuantCode。
 
-正式公开版本应使用 Azure Trusted Signing。未签名的内部测试包可能触发 Microsoft Defender SmartScreen，不应作为正式版本传播。
+正式版本必须使用 Azure Trusted Signing，并校验签名证书 Subject 与 updater 的 `publisherName` 一致。未签名的内部测试包可能触发 Microsoft Defender SmartScreen，不应作为正式版本传播。
 
-## Linux（暂缓）
+## Linux x64
 
-Linux 的 AppImage、DEB 和 RPM 目标已经保留在桌面端配置中，但当前不生成或发布实机安装包。待独立的 Linux 主机、桌面会话、窗口标识和升级链路完成验收后，再开放对应下载项。
+1. AppImage 可直接赋予执行权限后运行。`latest-linux.yml` 会记录 SHA-512 完整性信息，但它不是独立的来源签名；在客户端实现签名 metadata 或等价信任锚之前，Linux 自动更新保持关闭。
+2. Debian/Ubuntu 使用 `.deb`，Fedora/RHEL 系使用 `.rpm`；这两类包作为手动安装资产发布，升级时重新安装新包。
+3. 当前正式矩阵只覆盖 x86_64；ARM64 包仍需独立 runner 和桌面会话验收。
 
 ## 首次启动
 
@@ -56,12 +63,13 @@ Linux 的 AppImage、DEB 和 RPM 目标已经保留在桌面端配置中，但�
 
 ## 自动升级
 
-正式安装包每十分钟检查一次 QuantCode GitHub Release 的 `latest*.yml` 更新元数据。发现新版本后，用户确认下载和重启；不会静默替换正在运行的研究任务。
+macOS/Windows 升级代码已配置为每十分钟检查一次 QuantCode GitHub Release 的 `latest*.yml`，并在用户确认后下载和重启。这个能力目前尚未完成生产验收：Release 仓库是 Private，浏览器登录不会自动把 GitHub 权限交给桌面 updater。正式启用前必须将更新资产公开，或实现不内置长期 PAT 的受控更新服务/用户授权方案。Linux 即使以后使用公开 feed，也必须先增加独立的签名 metadata 或等价信任锚，不能只依赖可与安装包一起被替换的 SHA-512 文件。
 
 以下情况需要手动下载安装包：
 
 - 从未签名的内部测试版切换到正式签名版。
 - 自动更新元数据尚未发布。
+- Release 仓库仍为 Private，桌面 updater 没有读取权限。
 - 企业网络阻止访问 GitHub Release。
 
 ## 开发者源码运行
@@ -72,7 +80,7 @@ Linux 的 AppImage、DEB 和 RPM 目标已经保留在桌面端配置中，但�
 git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
 cd opencode
 bun install
-OPENCODE_CHANNEL=quantcode bun --cwd packages/desktop dev
+bun run dev:desktop
 ```
 
 源码开发模式与正式安装包使用不同的数据目录，不应拿开发模式替代组员安装验收。

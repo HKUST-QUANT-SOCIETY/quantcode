@@ -28,9 +28,9 @@
 
 ### 启动QuantCode
 
-**方式1：正式安装包**（组员推荐）
+**方式1：正式安装包**（组员推荐，尚未发布）
 
-从 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 下载与你的系统匹配的 macOS DMG/ZIP 或 Windows 安装程序。Linux 实际安装包暂未开放。安装步骤见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。正式安装包自带桌面运行环境，不需要 Bun，也不会在每次启动时重新安装 OpenCode。
+截至 2026-08-19，macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 的 unsigned 安装 artifact 均已由 GitHub Actions 构建成功，Linux 包含 AppImage/DEB/RPM。签名、公证与私有 Release 仓库的自动更新访问尚未完成，因此 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 还没有可对组员发布的正式版本。就绪后，从该页面下载与你的系统匹配的 macOS DMG/ZIP、Windows 安装程序或 Linux AppImage/DEB/RPM；Linux ARM64 暂不开放。安装步骤与当前状态见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。
 
 **方式2：源码开发模式**（仅桌面端开发者）
 
@@ -42,7 +42,7 @@ cd opencode
 bun install
 
 # 3. 启动 QuantCode channel
-OPENCODE_CHANNEL=quantcode bun --cwd packages/desktop dev
+bun run dev:desktop
 
 # 4. 在桌面端中选择你的组并连接 Server B
 ```

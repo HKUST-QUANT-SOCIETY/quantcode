@@ -178,13 +178,15 @@ ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, posit
 
 ### Install the desktop app
 
-Team members should install a packaged desktop release. Bun, Node.js, Git, and the OpenCode source tree are not required for normal use.
+Team members should eventually install a packaged desktop release. Bun, Node.js, Git, and the OpenCode source tree will not be required for normal use. As of 2026-08-19, GitHub Actions has built unsigned QuantCode artifacts for macOS Apple Silicon, macOS Intel, Windows x64, and Linux x64 (AppImage, DEB, RPM). No signed/notarized formal Release has been published.
+
+Once the release status in [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) is marked ready:
 
 1. Open [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases).
-2. Download the macOS DMG/ZIP or Windows installer for your platform. Linux packages are not part of the current release yet.
+2. Download the signed/notarized macOS DMG/ZIP, signed Windows installer, or approved platform-unsigned Linux AppImage/DEB/RPM package for your platform.
 3. Start QuantCode, choose your research group, and connect to Server B with your registered SSH identity.
 
-See [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) for platform-specific instructions, signing expectations, data locations, and automatic updates.
+See [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) for the current readiness status, platform instructions, signing requirements, data locations, and automatic-update blocker.
 
 ### Install the research engine from source
 
