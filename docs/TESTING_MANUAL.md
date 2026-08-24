@@ -4,7 +4,7 @@
 > **受众**：QA测试人员、产品经理、演示准备者
 > **最后更新**：2026-07-15（Lead）
 
-> 本手册描述开发与 QA 的源码测试环境。当前 GitHub Actions 已构建 macOS、Windows 和 Linux x64 的 unsigned 安装 artifact；它们仅用于 QA 验证，尚不是已签名、可向组员分发的正式 Release。
+> 本手册描述开发与 QA 的源码测试环境。当前 [GitHub Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981) 已通过 macOS、Windows 和 Linux x64 的 unsigned 安装 artifact 与 packaged smoke；它们仅用于 QA 验证，尚不是已签名、可向组员分发的正式 Release。
 
 ---
 

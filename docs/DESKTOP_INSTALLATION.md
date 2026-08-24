@@ -2,7 +2,7 @@
 
 QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 自己的产品身份、界面和发布通道。普通组员安装正式包后不需要安装 Bun、Node.js 或完整 OpenCode 源码。
 
-> 当前状态（2026-08-19）：macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 的 QuantCode 安装产物已由 GitHub Actions 实际构建成功；Linux 产物包括 AppImage、DEB、RPM。它们均为 unsigned 测试 artifact，正式 Release 尚未发布。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing，以及私有 Release 仓库的自动更新访问方案。当前测试包不能当作正式安装包外发。Linux ARM64 尚未纳入正式矩阵。
+> 当前状态（2026-08-24）：[GitHub Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981) 已通过 macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 四目标构建、packaged launch smoke 和最终 release bundle 校验；Linux 产物包括 AppImage、DEB、RPM。它们均为 unsigned 测试 artifact，正式 Release 尚未发布。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing，以及私有 Release 仓库的自动更新访问方案。当前测试包不能当作正式安装包外发。Linux ARM64 尚未纳入正式矩阵。
 
 正式安装包完成验收后将发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行矩阵覆盖 macOS、Windows 和 Linux x64：
 

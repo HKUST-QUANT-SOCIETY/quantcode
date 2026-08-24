@@ -30,7 +30,7 @@
 
 **方式1：正式安装包**（组员推荐，尚未发布）
 
-截至 2026-08-19，macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 的 unsigned 安装 artifact 均已由 GitHub Actions 构建成功，Linux 包含 AppImage/DEB/RPM。签名、公证与私有 Release 仓库的自动更新访问尚未完成，因此 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 还没有可对组员发布的正式版本。就绪后，从该页面下载与你的系统匹配的 macOS DMG/ZIP、Windows 安装程序或 Linux AppImage/DEB/RPM；Linux ARM64 暂不开放。安装步骤与当前状态见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。
+截至 2026-08-24，[GitHub Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981) 已通过 macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 的 unsigned 安装 artifact、packaged smoke 和最终 bundle 校验，Linux 包含 AppImage/DEB/RPM。签名、公证与私有 Release 仓库的自动更新访问尚未完成，因此 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases) 还没有可对组员发布的正式版本。就绪后，从该页面下载与你的系统匹配的 macOS DMG/ZIP、Windows 安装程序或 Linux AppImage/DEB/RPM；Linux ARM64 暂不开放。安装步骤与当前状态见[桌面端安装与升级](DESKTOP_INSTALLATION.md)。
 
 **方式2：源码开发模式**（仅桌面端开发者）
 
