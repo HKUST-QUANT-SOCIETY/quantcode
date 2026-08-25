@@ -33,7 +33,7 @@ max_command_output_chars: 20000
 
 pytest_commands:
   - categories: [contracts, orchestration, memory, factor, model, risk, fundamental, strategy, options, integration, ci, unknown]
-    command: [/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh]
+    command: [/srv/quant/envs/quant-review-test-wrapper-a3cd117-v7/run_quantcode_review_tests.sh]
 
 artifact_contract:
   required_files: []

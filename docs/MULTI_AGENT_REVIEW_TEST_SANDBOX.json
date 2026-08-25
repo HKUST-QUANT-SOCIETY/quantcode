@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sandbox_id": "quantcode-test-sandbox-a3cd117-v8",
+  "sandbox_id": "quantcode-test-sandbox-a3cd117-v9",
   "built_on": "2026-08-24",
   "platform": {
     "os": "ubuntu",
@@ -24,8 +24,9 @@
     "pip_check": "passed"
   },
   "wrapper": {
-    "path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh",
-    "sha256": "9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3",
+    "path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v7/run_quantcode_review_tests.sh",
+    "sha256": "22b5182d6a7b9fe5b616fd860db2e6a5312033d4b2b41ef17e4779b5c8cfc42c",
+    "sandbox_parent_env": "QUANT_REVIEW_SANDBOX_PARENT",
     "network_namespace": "isolated",
     "ipc_namespace": "isolated",
     "uts_namespace": "isolated",
@@ -89,7 +90,7 @@
     "quantcode_tests_passed": 589,
     "quantcode_tests_skipped": 8,
     "warnings": 1,
-    "elapsed_seconds": 19.19,
+    "elapsed_seconds": 19.16,
     "runner_process_restart_seconds": 10,
     "runner_broker_reconnect_seconds_observed": 71,
     "runner_single_listener_recovery": "passed",

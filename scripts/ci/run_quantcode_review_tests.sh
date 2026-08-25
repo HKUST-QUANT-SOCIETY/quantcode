@@ -13,11 +13,11 @@ readonly chroma_archive_sha256="913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27
 readonly chroma_tree_sha256="21dd9e6ccaf517de6f60d3cb52e144a4f8703eec76da27d7fef5dcf665389004"
 
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
-: "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+: "${QUANT_REVIEW_SANDBOX_PARENT:?QUANT_REVIEW_SANDBOX_PARENT is required}"
 
 readonly sandbox_parent="/srv/quant/runner-sandboxes"
-if [[ "$RUNNER_TEMP" != "$sandbox_parent" ]]; then
-  echo "Refusing an unbounded sandbox parent: $RUNNER_TEMP" >&2
+if [[ "$QUANT_REVIEW_SANDBOX_PARENT" != "$sandbox_parent" ]]; then
+  echo "Refusing an unbounded sandbox parent: $QUANT_REVIEW_SANDBOX_PARENT" >&2
   exit 1
 fi
 if [[ "$(findmnt -n -T "$sandbox_parent" -o TARGET)" != "$sandbox_parent" ]] ||
@@ -77,12 +77,12 @@ if [[ "$chroma_tree_sha" != "$chroma_tree_sha256" ]]; then
   exit 1
 fi
 
-readonly sandbox_root="$(mktemp -d "$RUNNER_TEMP/quantcode-pytest.XXXXXX")"
+readonly sandbox_root="$(mktemp -d "$sandbox_parent/quantcode-pytest.XXXXXX")"
 readonly rootfs="$sandbox_root/rootfs"
 cleanup() {
   set +e
   case "$sandbox_root" in
-    "$RUNNER_TEMP"/quantcode-pytest.*)
+    "$sandbox_parent"/quantcode-pytest.*)
       remove_sandbox_root "$sandbox_root"
       ;;
   esac

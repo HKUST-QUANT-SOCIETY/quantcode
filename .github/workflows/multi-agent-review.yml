@@ -24,7 +24,7 @@ env:
   PYTHONNOUSERSITE: "1"
   PYTHONSAFEPATH: "1"
   REVIEW_CI_RUNTIME: /srv/quant/envs/quant-review-374e0176-a3cd117-v2
-  REVIEW_CI_MANIFEST_SHA256: 43e2e59a9d88b3813d31d307746463f2d8c270719318d1002eaa039dad982d9c
+  REVIEW_CI_MANIFEST_SHA256: 38bc4b96519c6ac0a89c6d64415c9c2277bdd28c8223724c5cde9d2cc2a2c7e6
   REVIEW_CI_REQUIREMENTS_SHA256: 3b64c225ea6e20ed5be9ff966d4026c9dd85eea8fff54da1a9b3b5cb08a585a1
   REVIEW_CI_PIP_INSPECT_SHA256: ae198ba40f2773a40d80540a7281d77b887273c2a517b7c05e76648bfc9a19b9
   REVIEW_CI_TEST_DEPS: /srv/quant/envs/quantcode-testdeps-a3cd117-v1
@@ -50,10 +50,10 @@ env:
   REVIEW_CI_PYTHON_BASE: /srv/quant/envs/python-3.12.13-review-stable
   REVIEW_CI_PYTHON_SHA256: 547a8cb634bc4d7a58248b35c373612f5dd87cca3efcf7f80a8c338256c703cc
   REVIEW_CI_LIBPYTHON_SHA256: 407fd314d57b58aae561c7184ead0ad68d7a2c0621792a1d0480f89f5d4da114
-  REVIEW_CI_TEST_WRAPPER: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh
-  REVIEW_CI_TEST_WRAPPER_SHA256: 9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3
-  REVIEW_CI_TEST_SANDBOX_MANIFEST: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/test-sandbox-manifest-v8.json
-  REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256: c65a521fde6a4ad4512634cf1a8da965f70615f5ce7ef75b05ae674a00276449
+  REVIEW_CI_TEST_WRAPPER: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v7/run_quantcode_review_tests.sh
+  REVIEW_CI_TEST_WRAPPER_SHA256: 22b5182d6a7b9fe5b616fd860db2e6a5312033d4b2b41ef17e4779b5c8cfc42c
+  REVIEW_CI_TEST_SANDBOX_MANIFEST: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v7/test-sandbox-manifest-v9.json
+  REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256: 265996bf08935f1e8e8453c42da29d819d8f1ac644c285a263768b8dc30fab8e
   LD_LIBRARY_PATH: /srv/quant/envs/python-3.12.13-review-stable/lib
 
 jobs:
@@ -127,7 +127,7 @@ jobs:
             exit 1
           fi
 
-          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v8.json"
           requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
           pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
           python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"
@@ -349,7 +349,7 @@ jobs:
           PR_REPO: ${{ github.workspace }}/quantcode
           REVIEW_CI_BIN: ${{ steps.runtime.outputs.cli }}
           REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
-          RUNNER_TEMP: ${{ env.REVIEW_CI_SANDBOX_TEMP }}
+          QUANT_REVIEW_SANDBOX_PARENT: ${{ env.REVIEW_CI_SANDBOX_TEMP }}
           PYTHONSAFEPATH: "1"
         working-directory: ${{ runner.temp }}
         run: |
@@ -453,7 +453,7 @@ jobs:
             echo "REVIEW_CI_REF must be a full 40-character commit SHA." >&2
             exit 1
           fi
-          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v8.json"
           requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
           pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
           python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"
