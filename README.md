@@ -281,6 +281,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 - **[Architecture Spec](docs/Architecture_Spec.md)** — System design, Pattern 1/2/5, state management
 - **[Module Architecture](docs/MODULE_ARCHITECTURE.md)** — 15 modules documented (1234 lines)
 - **[Testing Guide](TEST_GUIDE.md)** — How to write tests, mock LLMs, fixture patterns (745 lines)
+- **[Multi-Agent Review](docs/MULTI_AGENT_REVIEW.md)** — Reviewer matrix, physical gates, fixed Server B runtime, and rollout
 - **[PRD](docs/PRD.md)** — Product requirements, acceptance criteria
 
 ---
@@ -344,7 +345,7 @@ git push origin feat/your-feature
 gh pr create
 ```
 
-> **IMPORTANT**: All PRs trigger the Risk gate automatically. If your changes affect risk calculations or thresholds, expect HumanGate to pause the merge until a risk reviewer approves.
+> **IMPORTANT**: Ready internal PRs trigger both the product Risk Gate and repository-wide Multi-Agent Review. The review workflow is loaded from `main`, and its head-bound `Quant Review Gate` status reports failure when either physical or agent review does not complete. On the current GitHub Free/private-repository plan this status is advisory; see [`docs/MULTI_AGENT_REVIEW.md`](docs/MULTI_AGENT_REVIEW.md) before treating it as an enforced merge gate. Risk threshold changes may additionally pause at HumanGate for a human decision.
 
 **Code style**: Black (line length 100), Ruff (target py312), type hints required.
 

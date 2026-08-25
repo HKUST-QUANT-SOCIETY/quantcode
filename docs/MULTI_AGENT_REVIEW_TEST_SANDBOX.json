@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "sandbox_id": "quantcode-test-sandbox-a3cd117-v8",
+  "built_on": "2026-08-24",
+  "platform": {
+    "os": "ubuntu",
+    "os_version": "22.04",
+    "architecture": "x86_64",
+    "python": "3.12.13"
+  },
+  "test_dependencies": {
+    "path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1",
+    "install_mode": "offline wheelhouse",
+    "package_count": 113,
+    "requirements_path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1/test-requirements.txt",
+    "requirements_sha256": "1b0af5452aee67e9348a96501ef2f58c57831b7a13ea3948eb7998593a0930ee",
+    "pip_inspect_path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1/test-pip-inspect.json",
+    "pip_inspect_sha256": "859ec35d259b59643acb5bb87e3f99edee50db7496ff477a741d5439358072ef",
+    "freeze_path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1/test-freeze.txt",
+    "freeze_sha256": "4d5630312f58bdbce388d12e9da0484d373dafca2389f302f596d6d8bdd4bb7c",
+    "python_base": "/srv/quant/envs/python-3.12.13-review-stable",
+    "review_engine_installed": false,
+    "quantcode_distribution_installed": false,
+    "pip_check": "passed"
+  },
+  "wrapper": {
+    "path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh",
+    "sha256": "9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3",
+    "network_namespace": "isolated",
+    "ipc_namespace": "isolated",
+    "uts_namespace": "isolated",
+    "pid_namespace": "isolated",
+    "mount_namespace": "isolated",
+    "user_namespace": "mapped root inside namespace only",
+    "chroot": "minimal",
+    "no_new_privileges": true,
+    "capability_bounding_set": "empty",
+    "host_etc_bind_mounted": false,
+    "host_usr_local_bind_mounted": false,
+    "read_only_mount_flags": [
+      "ro",
+      "nosuid",
+      "nodev"
+    ],
+    "process_limits": {
+      "cpu_seconds_per_process": 900,
+      "virtual_memory_kib_per_process": 8388608,
+      "max_file_bytes": 1073741824,
+      "max_open_files": 4096,
+      "max_processes": 512,
+      "core_size": 0
+    }
+  },
+  "host_limits": {
+    "sandbox_tmpfs": "/srv/quant/runner-sandboxes",
+    "sandbox_tmpfs_size_bytes": 6442450944,
+    "sandbox_tmpfs_options": [
+      "nosuid",
+      "nodev",
+      "noexec"
+    ],
+    "runner_service": "actions.runner.HKUST-QUANT-SOCIETY.server-b-multiagent-review-01.service",
+    "memory_high_bytes": 8589934592,
+    "memory_max_bytes": 10737418240,
+    "memory_swap_max_bytes": 0,
+    "tasks_max": 768,
+    "cpu_max": "400000 100000",
+    "kill_mode": "control-group",
+    "oom_policy": "kill",
+    "restart": "always",
+    "restart_seconds": 10,
+    "mount_unit_sha256": "bb0ad66f253889ad2058989732e6bbeeb1d9aed97a1b9fd3cd13345828c97e01",
+    "resource_dropin_sha256": "eecce6317e973bdfde602a57aaf7586f139d6fc083aaf3423234e054d969c300"
+  },
+  "mimocode_skills": {
+    "path": "/srv/quant/envs/mimocode-compose-0abfd8a",
+    "commit": "0abfd8a226c83f4a9088c09b5341a8f2c1aa9787",
+    "all_file_count": 38,
+    "skill_md_count": 15,
+    "full_tree_sha256": "d67ee430a68fe32822d74c726f980cf3cf7150d11b8cd9554804cc5a1acaa928"
+  },
+  "filesystem_policy": {
+    "owner": "root",
+    "runner_acl": "gha-multiagent-review:rX",
+    "other_acl": "none",
+    "runner_can_write_trusted_assets": false
+  },
+  "verification": {
+    "quantcode_tests_passed": 589,
+    "quantcode_tests_skipped": 8,
+    "warnings": 1,
+    "elapsed_seconds": 19.19,
+    "runner_process_restart_seconds": 10,
+    "runner_broker_reconnect_seconds_observed": 71,
+    "runner_single_listener_recovery": "passed",
+    "stale_sandbox_cleanup": "passed",
+    "test_mode": "offline isolated chroot",
+    "project_import_source": "PR checkout only"
+  }
+}
