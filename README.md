@@ -124,18 +124,21 @@ PR #42 opened → read_pr → extract model type/params from diff
 ### 3. Risk (Owner: 杨欣琳)
 
 **Goal**: For each PR or business handoff, spawn a bounded Risk Scout subagent that locates the
-actual Risk Gate scope, designs the evidence-producing process, and returns a head-bound
+actual Risk Gate scope, designs the evidence-producing process, and returns a source-bound
 `RiskGateTaskArtifact`.
 
-**Scout tools**: `list_changed_files`, `read_changed_files`, `list_risk_capabilities`,
-`get_policy_ref`, `submit_risk_gate_task`. The scout has no unmodified-repository read, shell, write,
-secret, raw-data, GitHub-publish, or HumanGate capability.
+**Scout tools**: PR workers use `list_changed_files` / `read_changed_files`; runtime workers use
+`list_risk_context` / `read_risk_context`. Both can inspect trusted capability/policy metadata and
+submit one canonical task Artifact. The scout has no shell, write, secret, raw-data, GitHub-publish,
+or HumanGate capability.
 
 **Flow**:
 ```text
 PR / business event
   → spawn Risk Scout child task
-  → dynamically locate required | not_required | indeterminate, scope, process, evidence
+  → persisted ComposeTask child dynamically locates scope, process, and evidence
+  → requested business Gate: required | indeterminate (the child cannot self-waive)
+  → PR docs/media only: not_required remains available after trusted path validation
   → deterministic task validator (head SHA, coverage, DAG, tool ids, evidence refs, digest)
   → v1: dispatch exactly one task-bound trusted capability request
   → evidence reducer → final RiskGateArtifact
@@ -150,11 +153,16 @@ trusted capability registry; an unknown capability stays visible in the Artifact
 `RiskProfile` remains available as a quantitative-risk attachment and legacy UI contract; it is no
 longer the universal Risk Gate contract.
 
-**Tests**: `pytest tests/test_dynamic_risk_gate_subagent.py tests/test_risk_gate_workflow.py -v`
+The risk MCP surface exposes only `spawn_risk_scout` plus `run_agent`; child context tools require a
+bounded in-memory session, and legacy fixed RiskProfile tools cannot be invoked through MCP by name.
 
-**Current CI boundary**: the peer Server B workflow now plans against the real PR diff. Only the
-single-asset backtest capability is execution-ready; other dynamically requested specialists return
-`not_evaluable` until a trusted handler/data contract is registered. v1 supports exactly one required
+**Tests**: `pytest tests/test_dynamic_risk_gate_subagent.py tests/test_runtime_risk_gate_orchestrator.py -v`
+
+**Current boundary**: OpenCode/MCP now creates a persisted, context-bound Risk Scout child and returns
+its `RiskGateTaskArtifact`; redacted handoff content is ephemeral, while locators, summaries, hashes,
+task events, and the final Artifact are persisted. The peer Server B workflow plans against the real
+PR diff. Only the single-asset backtest capability is execution-ready; other dynamically requested
+specialists return `not_evaluable` until a trusted handler/data contract is registered. v1 supports exactly one required
 step/request; multi-step specialist dispatch and interactive HumanGate approval are not yet wired.
 The status remains advisory and is not investment-risk approval.
 

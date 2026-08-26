@@ -77,6 +77,7 @@ class AgentRunner:
         checkpoint_db: str | Path | None = None,
         truncate_tokens: int | None = None,
         allowed_tool_ids: set[str] | frozenset[str] | None = None,
+        tool_context: dict[str, Any] | None = None,
         retry_max_retries: int = 0,  # Day 5:LLM 重试次数,0=不启用
         retry_base_delay: float = 0.5,
     ) -> None:
@@ -107,6 +108,11 @@ class AgentRunner:
         self.allowed_tool_ids = (
             frozenset(allowed_tool_ids) if allowed_tool_ids is not None else None
         )
+        # Tool-only dependencies stay in the graph closure and never enter the
+        # checkpointed AgentState. This is how a parent can hand a model handle
+        # and bounded context source to a child without serializing credentials.
+        self.tool_context = dict(tool_context or {})
+        self.tool_context["_model"] = self.model
 
     # ----- 构造 StateGraph -----
     def build(
@@ -169,6 +175,7 @@ class AgentRunner:
         tool_node = make_tool_node(
             self.registry,
             allowed_tool_ids=self.allowed_tool_ids,
+            tool_context=self.tool_context,
         )
         # Day 5 RLHF 重构：rlhf_collect_node 始终添加到图中（不再依赖 rlhf_collector 参数）。
         # rlhf_collector 仅用于向后兼容双写（可选）。
@@ -564,6 +571,7 @@ class AgentRunner:
 
         status = (
             "waiting_for_human" if final_state.get("status") == "waiting_for_human"
+            else "failed" if final_state.get("task_status") == "abandoned"
             else "completed" if final_state.get("task_status") == "done"
             else "stopped"
         )

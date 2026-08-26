@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from runner.blackboard import BlackboardService
+from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
 from schemas import BlackboardScope, GroupName, WritePolicy
 from tools.registry import registry
 
@@ -414,6 +414,7 @@ def test_trigger_risk_flow_writes_project_queue(tmp_path):
                 "model_name": "pb_roe_ranker",
                 "commit_sha": "abcdef1",
                 "pr_url": None,
+                "api_key": "must-not-cross-groups",
             },
         ),
         ctx={
@@ -454,6 +455,20 @@ def test_trigger_risk_flow_writes_project_queue(tmp_path):
     )
     assert queue is not None
     assert "abcdef1" in queue.value["reviews"]
+
+    shared_risk_board = BlackboardService(
+        db_path,
+        session_id=DEFAULT_SESSION_ID,
+        requester_group=GroupName.RISK,
+    )
+    shared_queue = shared_risk_board.get_entry(
+        BlackboardScope.PROJECT,
+        None,
+        "shared.pending_risk_reviews",
+    )
+    assert shared_queue is not None
+    shared_review = shared_queue.value["reviews"]["abcdef1"]
+    assert shared_review["context_snapshot"]["api_key"] == "[redacted]"
 
 
 def test_trigger_risk_flow_dedupes_within_window(tmp_path):

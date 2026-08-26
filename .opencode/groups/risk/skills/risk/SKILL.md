@@ -5,12 +5,7 @@ group: risk
 owner: 杨欣琳
 pattern: Pattern 5 (Human-in-the-Loop Gate) + Pattern 1 (Orchestrator-Worker)
 tools:
-  - github_pr_comment
-  - risk_metrics
-  - backtest_run
-  - memory_read
-  - memory_write
-  - request_human_review
+  - spawn_risk_scout
 flows:
   - risk-gate
 schema_in: schemas.compose_task.ComposeTask
@@ -38,11 +33,7 @@ specialist subagents，汇总 evidence，必要时触发 **HumanGate**。
 
 | Tool | 用途 | 注意 |
 |------|------|------|
-| `github_pr_comment` | 把 gate 结论写到 PR | `@dedupe_within`，key=`{pr_url}:{head_sha}:{verdict}` |
-| `risk_metrics` | 计算/读取 max_drawdown、VaR、相关性等 | Day 3 可用 `tools/risk_stub` + fixture |
-| `backtest_run` | 历史回测（stub 或 Server SSH） | 输入需含 `as_of_date`，防 lookahead |
-| `memory_read` / `memory_write` | 风控口径、历史案例 | 阈值变更写 GROUP MEMORY |
-| `request_human_review` | HumanGate 等人审批 | verdict=`needs_human` 时必调 |
+| `spawn_risk_scout` | 创建真实 ComposeTask child，返回动态任务 Artifact | 只传 redacted context；child 有独立 allowlist |
 
 ## Compose 子任务（动态生成）
 
@@ -54,15 +45,15 @@ risk:reduce      → 确定性验证 evidence / policy / digest
 risk:feedback    → 发布最终 Artifact；needs_human 才创建 HumanGate
 ```
 
-以上是目标编排语义。当前生产落地只覆盖 Server B PR workflow 的 Risk Scout + 单 request
-executor + Artifact reducer；OpenCode/MCP child spawn、multi-step specialist dispatcher 和交互式
-HumanGate resume 仍待接入，不能宣称已完成。
+OpenCode/MCP 已落地 `risk:locate` / `risk:plan`：`spawn_risk_scout` 创建、运行、持久化真实
+`ComposeTask` child，并返回 context-bound `RiskGateTaskArtifact`。`risk:specialist` 的通用多步骤
+dispatcher、通用 reducer 和交互式 HumanGate resume 仍待接入，不能宣称完整 Gate 已完成。
 
 主实现：`.opencode/groups/risk/skills/risk-gate/SKILL.md`。
 
 ## 核心 schema
 
-**输入**：PR / handoff / Artifact refs + repository / base SHA / head SHA
+**输入**：PR binding，或 project / business event + redacted handoff / Artifact context refs
 
 **正式输出契约**：`schemas.risk_gate_task.RiskGateTaskArtifact` + 最终 `RiskGateArtifact`
 
@@ -71,16 +62,19 @@ HumanGate resume 仍待接入，不能宣称已完成。
 
 ## 工作流 tips
 
-1. 每次都创建 Scout，不用静态文件路径先判定业务风险；`not_required` 也要有完整 coverage Artifact。
-2. 先列出 changed files，再读取需要的契约、政策和上下文 Artifact；每个范围判断都引用 evidence id。
-3. process 由 Scout 设计，但自动执行只能引用 trusted capability id，不能携带任意命令。
-4. Risk Scout 不能写 PR、触发 HumanGate 或读取 secrets；这些副作用由后续独立阶段处理。
-5. 不写 model 私有数据到 PROJECT scope；Artifact 只保存 locator、hash 和脱敏摘要。
+1. 业务父任务已请求 Gate 时必须创建 Scout；child 只能 `required | indeterminate`，不能自我豁免。
+2. PR 仅对 trusted docs/media surface 允许 `not_required`，仍需完整 coverage Artifact；代码、配置、
+   workflow、policy 和未知路径不能由单个 Scout 标绿。
+3. 先列出 changed files / context refs，再读取需要的契约、政策和上下文 Artifact；每个范围判断都引用 evidence id。
+4. process 由 Scout 设计，但自动执行只能引用 trusted capability id，不能携带任意命令。
+5. Risk Scout 不能写 PR、触发 HumanGate 或读取 secrets；这些副作用由后续独立阶段处理。
+6. 原始业务 context 不进入 ComposeTask 持久化；Artifact 只保存 locator、hash 和脱敏摘要。
 
 ## 验收标准（组级）
 
 - [ ] 新业务风险领域无需新增 enum 即可进入 Artifact
-- [ ] required / not_required / indeterminate 都绑定当前 head SHA 并通过 schema/digest 校验
+- [x] runtime required / indeterminate 绑定 context digest；PR decision 绑定当前 head SHA
+- [x] OpenCode/MCP 创建真实 ComposeTask child，并记录 parent/subagent/task event
 - [ ] 未注册 capability、缺失 evidence、stale head 或步骤失败均不能 pass
 - [ ] HumanGate 绑定 task / plan / evidence digest
 - [ ] PR 评论按 head SHA + Artifact digest 去重

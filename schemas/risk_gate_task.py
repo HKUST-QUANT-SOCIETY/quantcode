@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from ._compat import Self, StrEnum
-from .risk_gate_artifact import PRBinding, SHA256_PATTERN
+from .risk_gate_artifact import BusinessRiskBinding, PRBinding, SHA256_PATTERN
 
 
 IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,127}$"
@@ -43,6 +43,7 @@ class RiskGateEvidence(BaseModel):
     content_sha256: str = Field(pattern=SHA256_PATTERN)
     summary: str = Field(min_length=1, max_length=2048)
     changed_files: list[str] = Field(default_factory=list, max_length=500)
+    context_refs: list[str] = Field(default_factory=list, max_length=500)
     revision: str | None = Field(default=None, max_length=64)
     redacted: bool = True
 
@@ -69,9 +70,16 @@ class RiskGateScopeTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target: str = Field(min_length=1, max_length=1024)
-    changed_files: list[str] = Field(min_length=1, max_length=500)
+    changed_files: list[str] = Field(default_factory=list, max_length=500)
+    context_refs: list[str] = Field(default_factory=list, max_length=500)
     rationale: str = Field(min_length=1, max_length=2048)
     evidence_refs: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _has_a_bound_source(self) -> Self:
+        if not self.changed_files and not self.context_refs:
+            raise ValueError("risk scope target requires changed_files or context_refs")
+        return self
 
 
 class RiskGateCoverage(BaseModel):
@@ -79,14 +87,22 @@ class RiskGateCoverage(BaseModel):
 
     changed_files_total: int = Field(ge=0, le=500)
     changed_files_examined: int = Field(ge=0, le=500)
+    context_refs_total: int = Field(default=0, ge=0, le=500)
+    context_refs_examined: int = Field(default=0, ge=0, le=500)
     complete: bool
 
     @model_validator(mode="after")
     def _counts_are_consistent(self) -> Self:
         if self.changed_files_examined > self.changed_files_total:
             raise ValueError("examined changed-file count exceeds total")
-        if self.complete != (self.changed_files_examined == self.changed_files_total):
-            raise ValueError("coverage.complete does not match changed-file counts")
+        if self.context_refs_examined > self.context_refs_total:
+            raise ValueError("examined context-ref count exceeds total")
+        expected_complete = (
+            self.changed_files_examined == self.changed_files_total
+            and self.context_refs_examined == self.context_refs_total
+        )
+        if self.complete != expected_complete:
+            raise ValueError("coverage.complete does not match source counts")
         return self
 
 
@@ -141,7 +157,7 @@ class RiskGateSubagentProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     subagent_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    parent_task_id: str | None = Field(default=None, pattern=IDENTIFIER_PATTERN)
+    parent_task_id: str | None = Field(default=None, pattern=REFERENCE_PATTERN)
     role: str = Field(default="risk-scout", pattern=IDENTIFIER_PATTERN)
     model: str = Field(min_length=1, max_length=128)
     prompt_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -165,6 +181,7 @@ class RiskGateTaskProposal(BaseModel):
     assumptions: list[str] = Field(default_factory=list, max_length=100)
     unknowns: list[str] = Field(default_factory=list, max_length=100)
     examined_changed_files: list[str] = Field(default_factory=list, max_length=500)
+    examined_context_refs: list[str] = Field(default_factory=list, max_length=500)
     process: list[RiskGateProcessStep] = Field(default_factory=list, max_length=100)
     execution_requests: list[RiskGateExecutionRequest] = Field(default_factory=list, max_length=100)
     deliverables: list[str] = Field(default_factory=list, max_length=100)
@@ -178,7 +195,7 @@ class RiskGateTaskDraft(BaseModel):
     artifact_type: str = Field(
         default="dynamic-risk-gate-task", pattern=r"^dynamic-risk-gate-task$"
     )
-    binding: PRBinding
+    binding: PRBinding | BusinessRiskBinding
     trigger: RiskGateTrigger
     scope: RiskGateScope
     process: list[RiskGateProcessStep] = Field(default_factory=list, max_length=100)
@@ -191,13 +208,31 @@ class RiskGateTaskDraft(BaseModel):
 
     @model_validator(mode="after")
     def _contract_is_self_consistent(self) -> Self:
+        targets = [*self.scope.included, *self.scope.excluded]
+        if isinstance(self.binding, PRBinding):
+            if (
+                any(target.context_refs for target in targets)
+                or any(item.context_refs for item in self.evidence)
+                or self.scope.coverage.context_refs_total
+                or self.scope.coverage.context_refs_examined
+            ):
+                raise ValueError("PR Risk Gate Artifact cannot contain business context refs")
+        else:
+            if (
+                any(target.changed_files for target in targets)
+                or any(item.changed_files for item in self.evidence)
+                or self.scope.coverage.changed_files_total
+                or self.scope.coverage.changed_files_examined
+            ):
+                raise ValueError("business Risk Gate Artifact cannot contain PR changed files")
+
         evidence_ids = [item.evidence_id for item in self.evidence]
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("risk task evidence ids must be unique")
         known_evidence = set(evidence_ids)
         references: list[str] = []
         references.extend(ref for reason in self.trigger.reasons for ref in reason.evidence_refs)
-        for target in [*self.scope.included, *self.scope.excluded]:
+        for target in targets:
             references.extend(target.evidence_refs)
         if unknown := set(references) - known_evidence:
             raise ValueError(f"risk task contains dangling evidence references: {sorted(unknown)}")

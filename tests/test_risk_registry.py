@@ -39,15 +39,7 @@ def test_risk_allowlist_filters_tools(monkeypatch):
     importlib.reload(mcp_server)
     tools = mcp_server.list_tools()["tools"]
     names = {t["name"] for t in tools}
-    assert names == {
-        "read_blackboard",
-        "calc_risk",
-        "calc_risk_stub",
-        "check_gate",
-        "generate_risk_profile",
-        "write_pr_comment",
-        "request_human_review",
-    }
+    assert names == {"spawn_risk_scout"}
 
 
 def test_registry_call_read_blackboard():

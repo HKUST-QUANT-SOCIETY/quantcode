@@ -36,7 +36,10 @@ from schemas.risk_gate_task import (
 
 APPROVED_BASE_URL = "https://api.deepseek.com"
 MAX_CHANGED_FILES = 500
-MAX_DIFF_BYTES = 120_000
+# The aggregate diff is hashed and scanned locally; the provider receives only
+# inventory plus per-file reads. Keep a coarse abuse ceiling without rejecting
+# ordinary large PRs before the Scout can use its bounded read tools.
+MAX_DIFF_BYTES = 4 * 1024 * 1024
 MAX_TOOL_CALLS = 32
 MAX_AGENT_TURNS = 12
 MAX_TOTAL_READ_BYTES = 512_000
@@ -66,6 +69,30 @@ CREDENTIAL_PATTERNS = (
         r"-----BEGIN PGP PRIVATE KEY BLOCK-----"
     ),
 )
+DOC_ONLY_SUFFIXES = {
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".md",
+    ".mdx",
+    ".pdf",
+    ".png",
+    ".rst",
+    ".svg",
+    ".txt",
+    ".webp",
+}
+DOC_ONLY_ROOT_FILES = {
+    "AUTHORS",
+    "CHANGELOG",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+}
 
 
 def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -152,6 +179,29 @@ def _subagent_identity(binding: PRBinding) -> tuple[str, str | None]:
 def _reject_credential_material(text: str) -> None:
     if any(pattern.search(text) for pattern in CREDENTIAL_PATTERNS):
         raise ValueError("credential-like material detected in bounded Risk Scout input")
+
+
+def _trusted_not_required_surface(changed: list[dict[str, str]]) -> bool:
+    """Allow self-skip only for inert documentation/media locations.
+
+    This is an infrastructure admission policy, not a business-risk checklist.
+    Any code, configuration, policy, workflow, or unfamiliar path still requires
+    a scoped Risk Gate task (or an indeterminate fail-closed Artifact).
+    """
+
+    if not changed:
+        return True
+    for item in changed:
+        path = item["path"]
+        suffix = Path(path).suffix.lower()
+        if path in DOC_ONLY_ROOT_FILES:
+            continue
+        if path.startswith("docs/") and suffix in DOC_ONLY_SUFFIXES:
+            continue
+        if path.startswith(("assets/", "screenshots/")) and suffix in DOC_ONLY_SUFFIXES:
+            continue
+        return False
+    return True
 
 
 class RiskScoutTools:
@@ -475,8 +525,9 @@ def _agent_prompt(
         "steps may be new; automatic execution may request only capability ids returned by "
         "list_risk_capabilities. Cite actual tool evidence ids for every trigger reason and scope "
         "decision. Explicitly call read_changed_files for every path before claiming complete "
-        "coverage. "
-        "before returning not_required. Finish only with submit_risk_gate_task."
+        "coverage. You may return not_required only for inert documentation/media changes; "
+        "trusted validation rejects self-waiver for code, configuration, policy, workflow, or "
+        "unfamiliar paths. Finish only with submit_risk_gate_task."
     )
     user_payload = {
         "binding": binding.model_dump(mode="json"),
@@ -612,6 +663,8 @@ def finalize_proposal(
         and proposal.confidence < float(min_not_required_confidence)
     ):
         raise ValueError("low-confidence not_required decision must fail closed")
+    if proposal.examined_context_refs:
+        raise ValueError("PR Risk Scout cannot claim non-PR context coverage")
     claimed_examined = set(proposal.examined_changed_files)
     if invented := claimed_examined - changed_paths:
         raise ValueError(f"Risk Scout invented examined changed files: {sorted(invented)}")
@@ -626,6 +679,8 @@ def finalize_proposal(
     excluded_files = {
         path for target in proposal.excluded for path in target.changed_files
     }
+    if any(target.context_refs for target in [*proposal.included, *proposal.excluded]):
+        raise ValueError("PR Risk Scout scope must use changed_files")
     if overlap := included_files.intersection(excluded_files):
         raise ValueError(
             f"Risk Scout scope includes and excludes the same files: {sorted(overlap)}"
@@ -641,6 +696,13 @@ def finalize_proposal(
         )
     if tools.opaque_changed_files and proposal.decision == RiskGateTriggerDecision.NOT_REQUIRED:
         raise ValueError("opaque binary or gitlink changes cannot be marked not_required")
+    if (
+        proposal.decision == RiskGateTriggerDecision.NOT_REQUIRED
+        and not _trusted_not_required_surface(changed)
+    ):
+        raise ValueError(
+            "Risk Scout cannot self-waive a non-documentation Risk Gate"
+        )
     evidence_files = {
         item.evidence_id: set(item.changed_files) for item in tools.evidence
     }

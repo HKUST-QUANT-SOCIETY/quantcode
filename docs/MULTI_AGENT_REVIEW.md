@@ -130,13 +130,17 @@ The risk workflow follows the same trust split:
 - `pull_request_target` loads executable YAML from trusted `main`.
 - The planner reads the exact PR head only as bounded Git data; planner code, schemas, capability registry and workflow authority come from the exact base SHA.
 - A newly spawned Risk Scout subagent uses only `list_changed_files`, `read_changed_files`, capability lookup, policy lookup and `submit_risk_gate_task`. Provider egress is limited to changed-file diffs and trusted capability/policy metadata; unmodified private source is not exposed. The scout has no shell, write, GitHub, raw-data or HumanGate tool.
-- The scout dynamically returns `required | not_required | indeterminate`, open-ended risk domains, included/excluded scope, a step DAG, evidence requirements and structured capability requests. `not_required` still requires complete diff coverage and an Artifact.
+- The scout dynamically returns open-ended risk domains, included/excluded scope, a step DAG, evidence requirements and structured capability requests. A single scout may return `not_required` only for trusted documentation/media locations; code, configuration, workflow, policy and unfamiliar paths require `required` or fail-closed `indeterminate`.
 - Trusted validation injects the repository/PR/base/head binding, verifies evidence references and canonical SHA-256, and resolves capability ids. Unknown or unavailable capabilities remain visible but cannot execute.
 - Only an execution-ready plan reaches the offline executor. The executor receives no DeepSeek key or GitHub token and dispatches only root-owned, digest-pinned handlers/data snapshots. The current registry has one execution-ready single-asset backtest capability; other dynamically planned checks fail closed as `not_evaluable` until a bounded handler exists.
 - Current v1 binds exactly one required step/request to one evidence Artifact. A multi-step DAG is retained in the task Artifact but is `not_evaluable` until a trusted DAG dispatcher exists. `needs_human` currently publishes an advisory failure; interactive HumanGate approve/resume is not yet connected to this workflow.
 - A no-secret reducer binds evidence and policy to the task/plan/head, then a checkout-free publisher revalidates the complete Artifact, upserts one bot-authored report and publishes the head-bound `Quant Risk Gate` status.
 
 The dynamic part is the business scope and process. Fixed parts are secrets isolation, sandboxing, tool/capability permissions, resource limits, Artifact schemas, evidence hashes, live-head checks and HumanGate binding. DeepSeek never directly controls a GitHub status or approval.
+
+OpenCode/MCP uses the same task contract for non-PR events through `spawn_risk_scout`. The parent creates a persisted `ComposeTask` child with `BusinessRiskBinding`, supplies bounded redacted context, and receives a canonical `RiskGateTaskArtifact`. Raw context is not persisted in the task record. This runtime bridge plans the gate; generic multi-step specialist execution and reduction remain pending.
+
+The risk MCP surface exposes only `spawn_risk_scout` and the `run_agent` meta entrypoint. `tools/call` revalidates the same group allowlist used by `tools/list`, so callers cannot recover the legacy fixed `check_gate` path by guessing its tool name. Child-only context/capability tools additionally require an in-memory `RuntimeRiskScoutSession` and cannot be called directly.
 
 This remains an **advisory engineering Risk Gate**, not production investment approval. `RiskProfile` and the old `normal/high_risk` scenarios are legacy fixtures/attachments, not the production orchestration contract.
 

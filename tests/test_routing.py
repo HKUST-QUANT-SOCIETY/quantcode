@@ -122,6 +122,11 @@ class TestRouteFinish:
         r = route_next_step(_state(task_status="done"))
         assert r.decision == RouteDecision.FINISH
 
+    def test_task_abandoned_finishes_without_human_gate(self):
+        r = route_next_step(_state(task_status="abandoned"))
+        assert r.decision == RouteDecision.FINISH
+        assert r.reason == "task_abandoned"
+
 
 # ---------------------------------------------------------------------------
 # Priority: abort > human_gate

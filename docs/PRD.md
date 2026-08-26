@@ -90,7 +90,7 @@
 | `fundamental` | 基本面研究 + 研报 PDF | 用户（Lead） |
 | `factor` | 因子开发 → AutoEval → 主线 | 肖骥超 |
 | `model` | 模型 PR 元数据 → 跨组发起 | 陈镇鸿 |
-| `risk` | PR 风控门禁 → HumanGate | 杨欣琳 |
+| `risk` | 业务事件 → 动态 Risk Scout → Artifact / HumanGate | 杨欣琳 |
 | `strategy` | 组合构建、回测、上线 | 待定 |
 | `options` | 波动率曲面、Greeks、对冲 | 刘炽 |
 
@@ -136,7 +136,7 @@
 
 每套流 = 一组 SKILL.md + 调度规则 + 默认 tool 集 + MEMORY.md。详细 skill 列表见 `docs/QuantCode_Design.md` §4.3。
 
-#### 4.1.1 risk Compose 流（PR 风控门禁）
+#### 4.1.1 risk Compose 流（动态业务 Risk Gate）
 
 **用户故事**：
 > 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，不用等风控组人工 review 就知道哪里要改。
@@ -144,16 +144,18 @@
 该用户故事只是量化策略场景。产品总契约不得把所有 Risk Gate 固定为这些指标；权限、数据、
 组合、期权、模型稳定性或未来新业务风险均由 Risk Scout 根据本次上下文动态定位。
 
-**Risk Scout Tools**（只读/提交型，当前 PR v1）：
+**Risk Scout Tools**（只读/提交型）：
 - `list_changed_files` / `read_changed_files`
-- `list_risk_capabilities` / `get_policy_ref`
+- `list_risk_context` / `read_risk_context`（OpenCode / MCP 业务 handoff）
+- `list_risk_capabilities` / `get_policy_ref` / `get_risk_policy`
 - `submit_risk_gate_task`
 
-当前 provider egress 仅包含 changed-file diff 和受信 capability/policy metadata；不读取或发送
-未修改的私有源码。非 PR Artifact / handoff connector 尚未接入，接入时需要单独授权和证据契约。
+PR provider egress 仅包含 changed-file diff 和受信 capability/policy metadata；业务运行时只发送
+父任务显式提供、通过大小与 credential scan 的 redacted context。原始 context 不写入 task 文件，
+只持久化 locator、摘要、内容哈希、task event 和最终 Artifact。
 
 **System Prompt**（核心指令）：
-> 你是新创建的 Risk Scout subagent。检查本次 PR / 业务事件，定位是否需要 Risk Gate、
+> 你是新创建的 Risk Scout subagent。检查本次 PR / 业务事件，定位 Risk Gate 的
 > 纳入/排除范围、要引用的政策和证据、检查步骤与受信 capability；不要套用固定指标清单。
 > 你没有 shell、写权限、密钥、原始数据或 GitHub/HumanGate 副作用。最终只提交
 > `RiskGateTaskArtifact`。
@@ -163,13 +165,16 @@
 **输出**：`RiskGateTaskArtifact` → specialist evidence → 最终 `RiskGateArtifact`；`RiskProfile`
 仅作为量化策略 attachment。
 
-**当前交付边界**：Server B PR v1 已实现 dynamic Scout、单 required request 的受信 executor 和
-head-bound Artifact；multi-step specialist、非 PR handoff connector 与交互式 HumanGate resume
-属于后续能力，当前必须 `not_evaluable` / advisory failure，不能伪装 pass。
+**当前交付边界**：Server B PR v1 和 OpenCode/MCP 业务 runtime 均已实现 dynamic Scout task
+Artifact；runtime 会真实创建、运行并持久化 `ComposeTask` child。业务父任务既然已经请求 Gate，
+child 只能返回 `required | indeterminate`，不能自行取消。multi-step specialist dispatcher、通用
+evidence reducer 与交互式 HumanGate resume 仍未完成，当前必须 `not_evaluable` / advisory failure，
+不能伪装 pass。
 
 **验收标准**：
 ```python
-assert artifact["binding"]["head_sha"] == current_pr_head
+assert artifact["binding"]["head_sha"] == current_pr_head  # PR adapter
+# 或 artifact["binding"]["context_sha256"] == canonical_context_digest
 assert artifact["scope"]["coverage"]["complete"] is True
 assert all(reason["evidence_refs"] for reason in artifact["trigger"]["reasons"])
 assert artifact["artifact_sha256"] == canonical_sha256(artifact_without_digest)

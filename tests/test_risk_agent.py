@@ -40,6 +40,7 @@ def test_risk_allowlist_matches_registered_tools():
         "check_gate",
         "write_pr_comment",
         "request_human_review",
+        "spawn_risk_scout",
     }
 
 

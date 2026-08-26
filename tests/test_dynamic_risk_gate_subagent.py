@@ -580,6 +580,97 @@ def test_not_required_still_requires_complete_diff_evidence(tmp_path: Path) -> N
         )
 
 
+def test_non_documentation_pr_cannot_be_self_waived_by_one_scout(tmp_path: Path) -> None:
+    changed_path = "live_trading/order_router.py"
+    repo, base, head = _repo(
+        tmp_path,
+        path=changed_path,
+        content="SEND_LIVE_ORDERS = True\n",
+    )
+    proposal = {
+        "decision": "not_required",
+        "confidence": 0.99,
+        "reasons": [
+            {
+                "summary": "The Scout claimed the code change needed no Risk Gate.",
+                "evidence_refs": ["ev-pr-diff"],
+            }
+        ],
+        "risk_domains": [],
+        "included": [],
+        "excluded": [
+            {
+                "target": changed_path,
+                "changed_files": [changed_path],
+                "rationale": "The Scout attempted to exclude executable trading code.",
+                "evidence_refs": ["ev-pr-diff"],
+            }
+        ],
+        "assumptions": [],
+        "unknowns": [],
+        "examined_changed_files": [changed_path],
+        "process": [],
+        "execution_requests": [],
+        "deliverables": [],
+        "missing_requirements": [],
+    }
+    with pytest.raises(ValueError, match="cannot self-waive"):
+        discover(
+            repo=repo,
+            base=base,
+            head=head,
+            binding=_binding(base, head),
+            registry_path=_registry(tmp_path),
+            model="fake-risk-scout",
+            base_url="https://api.deepseek.com",
+            model_call=_two_turn_model(proposal),
+        )
+
+
+def test_large_pr_uses_bounded_per_file_reads_instead_of_120k_admission_gate(
+    tmp_path: Path,
+) -> None:
+    first_path = "risk/large_policy_a.py"
+    second_path = "risk/large_policy_b.py"
+    repo, base, _head = _repo(
+        tmp_path,
+        path=first_path,
+        content="LIMIT_A = 1\n" * 7000,
+    )
+    target = repo / second_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("LIMIT_B = 2\n" * 7000, encoding="utf-8")
+    _git(repo, "add", second_path)
+    _git(repo, "commit", "-m", "second large policy")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert len(
+        subprocess.run(
+            ["git", "diff", f"{base}...{head}"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        ).stdout
+    ) > 120_000
+
+    proposal = _required_proposal(first_path)
+    proposal["included"][0]["changed_files"] = [first_path, second_path]
+    proposal["included"][0]["target"] = "large governed risk policy change"
+    proposal["examined_changed_files"] = [first_path, second_path]
+    proposal["process"][0]["inputs"] = [first_path, second_path, "position-limit-v2"]
+    artifact = discover(
+        repo=repo,
+        base=base,
+        head=head,
+        binding=_binding(base, head),
+        registry_path=_registry(tmp_path),
+        model="fake-risk-scout",
+        base_url="https://api.deepseek.com",
+        model_call=_two_turn_model(proposal),
+    )
+    assert artifact.scope.coverage.complete is True
+    assert artifact.scope.coverage.changed_files_examined == 2
+
+
 def test_low_confidence_not_required_decision_fails_closed(tmp_path: Path) -> None:
     changed_path = "docs/risk-guide.md"
     repo, base, head = _repo(tmp_path, path=changed_path, content="wording only\n")

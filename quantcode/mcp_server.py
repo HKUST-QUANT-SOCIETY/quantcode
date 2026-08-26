@@ -230,6 +230,8 @@ def _get_model():
             bound = chat_model
         return bound.invoke(messages)
 
+    _callable_model._quantcode_model_name = model_name  # type: ignore[attr-defined]
+
     return _callable_model
 
 
@@ -254,6 +256,27 @@ def tool_def_to_mcp(tool: ToolDef) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _tools_for_mcp_group(group: str | None) -> list[ToolDef]:
+    """Resolve the exact externally callable surface for one MCP group."""
+
+    if group:
+        tools = registry.get_tools_for_group(group)
+        if group == "risk":
+            # Fixed RiskProfile tools remain legacy-internal; desktop/MCP enters
+            # through the bounded dynamic child task.
+            tools = [tool for tool in tools if tool.id == "spawn_risk_scout"]
+    else:
+        tools = registry.list_all()
+
+    try:
+        run_agent = registry.get("run_agent")
+        if getattr(run_agent, "_meta", False) and run_agent not in tools:
+            tools = [*tools, run_agent]
+    except KeyError:
+        pass
+    return sorted(tools, key=lambda tool: tool.id)
+
+
 def list_tools() -> dict:
     """实现 MCP 的 ``tools/list``：返回 QUANTCODE_GROUP 过滤后的 tool。
 
@@ -264,20 +287,11 @@ def list_tools() -> dict:
     让 OpenCode compose agent 能发现并调用它。
     """
     _mcp_group = _get_mcp_group()
+    tools = _tools_for_mcp_group(_mcp_group)
     if _mcp_group:
-        tools = registry.get_tools_for_group(_mcp_group)
         logger.info("list_tools: group=%s → %d tools", _mcp_group, len(tools))
     else:
-        tools = registry.list_all()
         logger.info("list_tools: no group → %d tools (all)", len(tools))
-
-    # 附加 run_agent meta tool（如果已注册且不在列表中）
-    try:
-        run_agent = registry.get("run_agent")
-        if getattr(run_agent, '_meta', False) and run_agent not in tools:
-            tools = tools + [run_agent]
-    except KeyError:
-        pass
 
     tool_ids = [t.id for t in tools]
     logger.debug("list_tools: returning %s", tool_ids)
@@ -301,6 +315,14 @@ def call_tool(name: str, arguments: dict) -> dict:
     """
     try:
         mcp_group = _get_mcp_group()
+        if mcp_group:
+            allowed = {tool.id for tool in _tools_for_mcp_group(mcp_group)}
+            if name not in allowed:
+                raise PermissionError(
+                    f"tool '{name}' is not exposed to MCP group '{mcp_group}'"
+                )
+        else:
+            registry.get(name)
         ctx: dict[str, Any] = {
             "source": "mcp",
             "_model": _get_model(),
@@ -309,10 +331,13 @@ def call_tool(name: str, arguments: dict) -> dict:
         # dict.get("group", "") 返回 None 而非默认值 ""
         if mcp_group:
             ctx["group"] = mcp_group
-        logger.info("call_tool: %s(%s) group=%s model=%s",
-                     name, json.dumps(arguments, default=str)[:200],
-                     mcp_group or "(unset)",
-                     "present" if ctx["_model"] else "missing")
+        logger.info(
+            "call_tool: %s argument_keys=%s group=%s model=%s",
+            name,
+            sorted(arguments) if isinstance(arguments, dict) else [],
+            mcp_group or "(unset)",
+            "present" if ctx["_model"] else "missing",
+        )
         result = registry.call(name, arguments, ctx=ctx)
         text = result if isinstance(result, str) else json.dumps(result, default=str, ensure_ascii=False)
         return {
@@ -320,8 +345,19 @@ def call_tool(name: str, arguments: dict) -> dict:
             "isError": False,
         }
     except Exception as e:
+        if isinstance(e, PermissionError):
+            detail = str(e)
+        elif isinstance(e, KeyError):
+            detail = f"unknown tool '{name}'"
+        else:
+            detail = "request failed"
         return {
-            "content": [{"type": "text", "text": f"Error: {type(e).__name__}: {e}"}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Error: {type(e).__name__}: {detail}",
+                }
+            ],
             "isError": True,
         }
 

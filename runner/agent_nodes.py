@@ -153,6 +153,7 @@ def make_llm_node(
 def make_tool_node(
     registry: ToolRegistry,
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    tool_context: dict[str, Any] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
 
@@ -172,11 +173,14 @@ def make_tool_node(
         if not tool_calls:
             return {"messages": []}
 
-        ctx = {
-            "group": state.get("group", ""),
-            "thread_id": state.get("thread_id", ""),
-            "session_id": state.get("thread_id", ""),  # alias
-        }
+        ctx = dict(tool_context or {})
+        ctx.update(
+            {
+                "group": state.get("group", ""),
+                "thread_id": state.get("thread_id", ""),
+                "session_id": state.get("thread_id", ""),  # alias
+            }
+        )
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 
         results: list[ToolMessage] = []
@@ -285,6 +289,9 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
 
     if tool_name in ("mark_task_done", "task_done", "mark_complete"):
         updates["task_status"] = "done"
+
+    if output.get("task_status") in {"done", "abandoned"}:
+        updates["task_status"] = output["task_status"]
 
     if tool_name == "write_blackboard":
         updates["task_status"] = "done"
@@ -416,7 +423,7 @@ def make_routing_edge(
         if not getattr(last, "tool_calls", None):
             task_status = state.get("task_status")
             # print(f"[DEBUG routing_edge] no tool_calls, task_status={task_status!r}")
-            if task_status == "done":
+            if task_status in {"done", "abandoned"}:
                 return "end"
             return "continue"
 

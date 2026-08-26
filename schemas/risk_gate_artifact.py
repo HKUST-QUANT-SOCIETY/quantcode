@@ -53,6 +53,16 @@ class PRBinding(BaseModel):
     head_sha: str = Field(pattern=GIT_SHA_PATTERN)
 
 
+class BusinessRiskBinding(BaseModel):
+    """Immutable identity for a non-PR business event handed to Risk Scout."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+    event_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+    context_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
 class RiskSubject(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

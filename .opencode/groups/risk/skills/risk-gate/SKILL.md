@@ -1,6 +1,6 @@
 ---
 name: risk-gate
-description: 按业务上下文创建 Risk Scout subagent，动态定位风险范围、检查流程与证据，返回 head-bound Artifact
+description: 按业务上下文创建 Risk Scout subagent，动态定位风险范围、检查流程与证据，返回 source-bound Artifact
 group: risk
 owner: 杨欣琳
 pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
@@ -25,7 +25,8 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
 1. 主 agent 创建 Risk Scout child task，绑定 repository / PR / base SHA / head SHA、
    `subagent_id` 和 `parent_task_id`。
 2. Scout 使用 CI 专用只读工具定位 changed files、相关契约、政策和已有 Artifact。
-3. Scout 提交 `RiskGateTaskArtifact`，decision 为 `required | not_required | indeterminate`。
+3. Scout 提交 `RiskGateTaskArtifact`。业务父任务已请求 Gate 时只能 `required | indeterminate`；
+   PR 仅在 trusted docs/media surface 可 `not_required`。
 4. 确定性 validator 校验 coverage、证据引用、步骤 DAG、capability requests 和 Artifact digest。
 5. `required` 且 `execution_ready=true` 时，orchestrator 按动态 `process[]` 创建受限 specialist
    subagents；每个 specialist 只能调用对应 capability。
@@ -38,16 +39,17 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
 ## Risk Scout 的受控工具
 
 CI 规划阶段只允许 `list_changed_files`、`read_changed_files`、
-`list_risk_capabilities`、`get_policy_ref` 和 `submit_risk_gate_task`。当前 provider egress
-只包含 PR changed-file diff 与受信 capability/policy metadata；非 PR Artifact / handoff connector
-尚未接入。
+`list_risk_capabilities`、`get_policy_ref` 和 `submit_risk_gate_task`。OpenCode/MCP child 只允许
+`list_risk_context`、`read_risk_context`、capability/policy lookup 和 submit。业务 context 必须由
+父任务显式传入、redacted、限长并通过 credential scan。
 
 不得提供 `bash`、`write_file`、任意 Python entrypoint、GitHub 写接口、原始 COS / 数据库凭据
 或 `request_human_review`。规划阶段不产生外部副作用。
 
 ## Fail-closed 规则
 
-- `not_required` 也必须覆盖全部 changed files 并返回 Artifact，不能静默 skip；
+- 业务父任务请求 Gate 后，child 不得返回 `not_required`；
+- PR 的 `not_required` 只允许 trusted docs/media 路径，且必须覆盖全部 changed files；
 - diff 未完整检查、存在重要 unknowns 或缺少 capability 时不能标记 execution-ready；
 - 模型发明 changed file、policy、evidence 或 capability 时拒绝 Artifact；
 - 未注册 capability 可以保留在计划中供人处理，但绝不自动执行；
@@ -89,8 +91,10 @@ CI 规划阶段只允许 `list_changed_files`、`read_changed_files`、
   compiler / executor / reducer / publisher 分权处理；
 - **当前 CI v1 限制**：只自动执行一个 required step/request；多步骤 Artifact 会保留，但结果为
   `not_evaluable`。`needs_human` 会发布失败的 advisory status，尚未接入交互式 approve/resume；
-- **OpenCode / MCP**：真实 ComposeTask child spawn 与 context-Artifact connector 尚未接入，当前仍走
-  legacy `runner.risk_agent`；
+- **OpenCode / MCP**：`spawn_risk_scout` 已创建真实 ComposeTask child；child 使用独立 tool allowlist，
+  绑定 `BusinessRiskBinding.context_sha256` 并持久化 task/events/Artifact；
+- **当前 runtime 限制**：动态 task Artifact 已完成，但通用 multi-step specialist dispatcher 和
+  generic evidence reducer 尚未接入；
 - **Legacy**：`scripts/run_risk_gate_tool.py` 仅供旧 UI、fixture 和渐进迁移。
 
 ## 依赖

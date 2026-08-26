@@ -62,7 +62,7 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
       - fingerprint_history    : list[str]
       - execution_trace        : list[dict]  (for TF-IDF + error detection)
       - risk_metrics           : dict | None (output of calc_risk_stub)
-      - task_status            : str | None  ("done" triggers finish)
+      - task_status            : str | None  ("done"/"abandoned" trigger finish)
     """
 
     iteration_count    = state.get("iteration_count", 0)
@@ -117,10 +117,12 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
         )
 
     # ---- 3. Finish --------------------------------------------------------
-    if task_status == "done":
+    if task_status in {"done", "abandoned"}:
         return RouteResult(
             decision=RouteDecision.FINISH,
-            reason="task_completed",
+            reason=(
+                "task_completed" if task_status == "done" else "task_abandoned"
+            ),
         )
 
     # ---- 4. Default -------------------------------------------------------
