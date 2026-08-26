@@ -1,65 +1,1129 @@
 name: Risk Gate
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_dispatch:
+  # Workflow authority, planner, catalog, schemas, and publisher all come from
+  # the exact target-branch commit. PR source is bounded planner input only.
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write  # Required for posting PR comments via /issues/{number}/comments API
+concurrency:
+  # Keep skipped title/body edits outside the real review cancellation group.
+  group: >-
+    quantcode-risk-gate-${{ github.event.pull_request.number }}-${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && format('ignored-edit-{0}', github.run_id) || 'review' }}
+  cancel-in-progress: true
 
-# Owner: 杨欣琳（T2 风控 / 跨组接收）
-# 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
-# 副作用（写 PR 评论）依赖 tools/utils/dedupe.py（陈镇鸿 Day 1 实现）
+permissions: {}
+
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  GIT_CONFIG_GLOBAL: /dev/null
+  GIT_CONFIG_NOSYSTEM: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_CACHE_DIR: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONNOUSERSITE: "1"
+  PYTHONSAFEPATH: "1"
+  RISK_CI_RUNTIME: /srv/quant/envs/quant-review-374e0176-a3cd117-v2
+  RISK_CI_MANIFEST_SHA256: 9e55af41d56b94569faf073ecc3f8db2a7eefd31d31f03b8bbeb9e8fa5efbaa4
+  RISK_CI_REQUIREMENTS_SHA256: 3b64c225ea6e20ed5be9ff966d4026c9dd85eea8fff54da1a9b3b5cb08a585a1
+  RISK_CI_PIP_INSPECT_SHA256: ae198ba40f2773a40d80540a7281d77b887273c2a517b7c05e76648bfc9a19b9
+  RISK_CI_PYTHON_BASE: /srv/quant/envs/python-3.12.13-review-stable
+  RISK_CI_PYTHON_SHA256: 547a8cb634bc4d7a58248b35c373612f5dd87cca3efcf7f80a8c338256c703cc
+  RISK_CI_LIBPYTHON_SHA256: 407fd314d57b58aae561c7184ead0ad68d7a2c0621792a1d0480f89f5d4da114
+  RISK_GATE_CATALOG_RELATIVE: .review-ci/risk_gate_catalog.yaml
+  RISK_GATE_PLANNER_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
+  RISK_GATE_PLANNER_MODEL: ${{ vars.RISK_GATE_PLANNER_MODEL || vars.DEEPSEEK_MODEL || 'deepseek-v4-flash' }}
+  # These are immutable infrastructure roots, not a fixed Risk Gate scenario.
+  # The dynamic task selects a capability request; trusted code binds it to
+  # one exact handler/data/policy contract before these roots are mounted.
+  RISK_GATE_SNAPSHOT_ROOT: /srv/quant/envs/quant-risk-snapshot-rb-1m-d31e17-v1
+  RISK_GATE_SNAPSHOT_TREE_SHA256: 89d7c4980b2bfdfb25201a561e8b98eb0e79682ec5b11a8646274846c2cd0931
+  RISK_GATE_ENGINE_ROOT: /srv/quant/envs/quant-risk-engine-57fbab670666-v1
+  RISK_GATE_ENGINE_TREE_SHA256: 6df52f40989ccc9dd5080b64e2e997479ef28653263bb9b23edff42b54b32c6d
+  RISK_GATE_EXECUTOR_RUNTIME: /srv/quant/envs/quant-risk-backtest-py310-57fbab-v1
+  RISK_GATE_EXECUTOR_RUNTIME_TREE_SHA256: 374d98cd5e49ffaf586fef862aeb8360ce79d233dde3fac2cd2eda3ede9f409d
+  RISK_GATE_EXECUTOR_MANIFEST: /srv/quant/envs/quant-risk-backtest-py310-57fbab-v1/runtime-manifest-v1.json
+  RISK_GATE_EXECUTOR_MANIFEST_SHA256: ec2aa054a0bb6ac13f5de25c325976355eda904bf2a019fc8493d00b616f2135
+  RISK_GATE_EXECUTOR_PYTHON: /srv/quant/envs/quant-risk-backtest-py310-57fbab-v1/bin/python
+  RISK_GATE_EXECUTOR_PYTHON_TARGET: /usr/bin/python3.10
+  RISK_GATE_EXECUTOR_PYTHON_SHA256: d6bca2b84e73c7775a0dd5e6a76899cfe4ee62863d7c8f88513811d1fda23f49
+  LD_LIBRARY_PATH: /srv/quant/envs/python-3.12.13-review-stable/lib
 
 jobs:
-  risk-gate:
-    runs-on: ubuntu-latest
+  initialize-risk-gate:
+    name: Initialize Quant Risk Gate
+    if: >-
+      ${{ (github.event.action != 'edited' || github.event.changes.base.ref.from != null) &&
+          (github.event.action != 'closed' || github.event.pull_request.merged == false) }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 5
+    permissions:
+      statuses: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Invalidate any prior risk status for this head
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+        with:
+          script: |
+            const sameRepository = process.env.HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            const isReady = process.env.IS_DRAFT === "false";
+            const isOpen = process.env.PR_STATE === "open";
+            const allowed = sameRepository && isReady && isOpen;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.HEAD_SHA,
+              state: allowed ? "pending" : "failure",
+              context: "Quant Risk Gate",
+              description: allowed ? "Agent-planned risk evaluation is running" : "Only open, ready, same-repository PRs are evaluated",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            core.warning("Quant Risk Gate remains advisory until protected main and an independent attestor are available.");
+            if (!allowed) core.setFailed("Risk evaluation is disabled for closed, draft, or cross-repository PRs.");
+
+  plan-risk-gate:
+    name: Plan Quant Risk Evaluation
+    needs: initialize-risk-gate
+    if: >-
+      ${{ needs.initialize-risk-gate.result == 'success' &&
+          github.event.pull_request.draft == false &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    environment: deepseek-review
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      applicability: ${{ steps.plan.outputs.applicability }}
+      gate_decision: ${{ steps.plan.outputs.gate_decision }}
+      execution_ready: ${{ steps.plan.outputs.execution_ready }}
+      plan_digest: ${{ steps.plan.outputs.plan_digest }}
+      task_digest: ${{ steps.plan.outputs.task_digest }}
+    steps:
+      - name: Verify pinned planner runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          manifest="$RISK_CI_RUNTIME/runtime-manifest-v11.json"
+          requirements="$RISK_CI_RUNTIME/runtime-requirements.txt"
+          pip_inspect="$RISK_CI_RUNTIME/runtime-pip-inspect.json"
+          python_binary="$RISK_CI_PYTHON_BASE/bin/python"
+          python_library="$RISK_CI_PYTHON_BASE/lib/libpython3.12.so.1.0"
+          for path in "$manifest" "$requirements" "$pip_inspect" "$python_binary" "$python_library" "$RISK_CI_RUNTIME/bin/python"; do
+            if [[ ! -r "$path" ]]; then echo "Pinned risk planner runtime is missing: $path" >&2; exit 1; fi
+          done
+          if [[ "$(sha256sum "$manifest" | cut -d ' ' -f 1)" != "$RISK_CI_MANIFEST_SHA256" ||
+                "$(sha256sum "$requirements" | cut -d ' ' -f 1)" != "$RISK_CI_REQUIREMENTS_SHA256" ||
+                "$(sha256sum "$pip_inspect" | cut -d ' ' -f 1)" != "$RISK_CI_PIP_INSPECT_SHA256" ||
+                "$(sha256sum "$python_binary" | cut -d ' ' -f 1)" != "$RISK_CI_PYTHON_SHA256" ||
+                "$(sha256sum "$python_library" | cut -d ' ' -f 1)" != "$RISK_CI_LIBPYTHON_SHA256" ]]; then
+            echo "Pinned risk planner runtime hash verification failed." >&2
+            exit 1
+          fi
+
+      - name: Checkout exact PR head as bounded planner input
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+          path: pr-source
+          persist-credentials: false
+          set-safe-directory: false
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Checkout exact trusted target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.12'
+          fetch-depth: 0
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
 
-      - name: Install deps
+      - name: Verify planner inputs and trusted authority
+        id: preflight
+        shell: bash
+        env:
+          PR_REPO: ${{ github.workspace }}/pr-source
+          TRUSTED_REPO: ${{ github.workspace }}/trusted-target
         run: |
-          pip install -e .
-          pip install jsonschema
+          set -euo pipefail
+          preflight_error=""
+          [[ "$(git -C "$PR_REPO" rev-parse HEAD)" == "$HEAD_SHA" ]]
+          [[ "$(git -C "$TRUSTED_REPO" rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ -f "$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE" ]]
+          [[ -f "$TRUSTED_REPO/scripts/ci/discover_risk_gate.py" ]]
+          [[ -f "$TRUSTED_REPO/scripts/ci/plan_risk_gate.py" ]]
+          [[ -f "$TRUSTED_REPO/schemas/risk_gate_task.py" ]]
+          if find "$PR_REPO" -path "$PR_REPO/.git" -prune -o -type l -print -quit | grep -q .; then
+            echo "PR input contains a symlink; provider access will be skipped." >&2
+            preflight_error="pr-symlink-input"
+          fi
+          if find "$TRUSTED_REPO" -path "$TRUSTED_REPO/.git" -prune -o -type l -print -quit | grep -q .; then
+            echo "Trusted target contains a symlink; planner authority is ambiguous." >&2
+            exit 1
+          fi
+          shopt -s nocasematch
+          while IFS= read -r -d '' changed_path; do
+            if [[ "$changed_path" =~ (^|/)(\.ssh|secrets?)(/|$)|(^|/)\.env(\.|$)|(^|/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|(^|/)[^/]*(credential|secret|token|private[_-]?key)[^/]*$|\.(pem|key|p12|pfx|jks|keystore|kdbx)$ ]]; then
+              echo "Risk Scout input uses a credential-sensitive path; provider access will be skipped." >&2
+              preflight_error="credential-like-input"
+              break
+            fi
+            object="$HEAD_SHA:$changed_path"
+            if [[ "$(git -C "$PR_REPO" cat-file -t "$object" 2>/dev/null || true)" != "blob" ]]; then
+              continue
+            fi
+            if ! git -C "$PR_REPO" cat-file blob "$object" |
+              "$RISK_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import re
+          import sys
 
-      - name: Post formal risk profile comment
-        if: github.event_name == 'pull_request'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          QUANTCODE_POST_RISK_COMMENT: "1"
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: >
-          python scripts/run_risk_gate_tool.py
-          --scenario normal
-          --pr-number "$PR_NUMBER"
-          --head-sha "$HEAD_SHA"
-          --pr-url "$PR_URL"
+          payload = sys.stdin.buffer.read()
+          patterns = (
+              re.compile(rb"(?i)(secret[_-]?key|access[_-]?key|api[_-]?key|token)\s*[:=]\s*[\x27\x22]?[A-Za-z0-9_\-./+=]{16,}"),
+              re.compile(rb"(?:AKIA|ASIA|AKID)[A-Za-z0-9]{16,}"),
+              re.compile(rb"sk-[A-Za-z0-9_-]{20,}"),
+              re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
+              re.compile(rb"xox[a-z]-[A-Za-z0-9-]{20,}"),
+              re.compile(rb"AIza[0-9A-Za-z_-]{30,}"),
+              re.compile(rb"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+              re.compile(rb"-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----|-----BEGIN PGP PRIVATE KEY BLOCK-----"),
+          )
+          if any(pattern.search(payload) for pattern in patterns):
+              raise SystemExit("credential-like value found")
+          '
+            then
+              echo "Risk Scout input contains credential-like material; provider access will be skipped." >&2
+              preflight_error="credential-like-input"
+              break
+            fi
+          done < <(git -C "$PR_REPO" diff --diff-filter=ACMRT --name-only -z "$BASE_SHA...$HEAD_SHA")
+          echo "input_error=$preflight_error" >> "$GITHUB_OUTPUT"
 
-      - name: Repeat formal risk profile comment to verify dedupe
-        if: github.event_name == 'pull_request'
+      - name: Verify PR is still current before provider access
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          QUANTCODE_POST_RISK_COMMENT: "1"
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const {data: currentPull} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const current = currentPull.state === "open" && currentPull.draft === false &&
+              currentPull.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
+              currentPull.head.sha === process.env.EXPECTED_HEAD_SHA &&
+              currentPull.base.sha === process.env.EXPECTED_BASE_SHA &&
+              process.env.EXPECTED_HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            if (!current) core.setFailed("PR state or base/head changed before risk planning.");
+
+      - name: Spawn bounded dynamic Risk Scout subagent
+        id: plan
+        continue-on-error: true
+        shell: bash
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OUTPUT_DIR: ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_REPO: ${{ github.workspace }}/pr-source
+          PREFLIGHT_ERROR: ${{ steps.preflight.outputs.input_error }}
+          TRUSTED_REPO: ${{ github.workspace }}/trusted-target
+        working-directory: ${{ github.workspace }}/trusted-target
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          export PYTHONPATH="$TRUSTED_REPO"
+          preflight_error="$PREFLIGHT_ERROR"
+          if [[ "$RISK_GATE_PLANNER_BASE_URL" != "https://api.deepseek.com" ]]; then
+            echo "Risk planner endpoint is not approved; provider access will be skipped." >&2
+            preflight_error="unapproved-provider-endpoint"
+          fi
+          if [[ -e "$OUTPUT_DIR" ]]; then echo "Risk plan output already exists." >&2; exit 1; fi
+          mkdir -p "$OUTPUT_DIR"
+          task="$OUTPUT_DIR/risk-gate-task.json"
+          plan="$OUTPUT_DIR/risk-gate-plan.json"
+          discover_args=(
+            --repo "$PR_REPO"
+            --base "$BASE_SHA"
+            --head "$HEAD_SHA"
+            --repository "$GITHUB_REPOSITORY"
+            --pr-number "$PR_NUMBER"
+            --registry "$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE"
+            --model "$RISK_GATE_PLANNER_MODEL"
+            --base-url "$RISK_GATE_PLANNER_BASE_URL"
+            --output "$task"
+          )
+          if [[ -n "$preflight_error" ]]; then
+            discover_args+=(--preflight-error "$preflight_error")
+          fi
+          "$RISK_CI_RUNTIME/bin/python" -m scripts.ci.discover_risk_gate \
+            "${discover_args[@]}"
+          unset DEEPSEEK_API_KEY
+          "$RISK_CI_RUNTIME/bin/python" -m scripts.ci.plan_risk_gate \
+            --repo "$PR_REPO" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --catalog "$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE" \
+            --model "$RISK_GATE_PLANNER_MODEL" \
+            --base-url "$RISK_GATE_PLANNER_BASE_URL" \
+            --task-artifact "$task" \
+            --output "$plan"
+          task_size="$(stat -c '%s' "$task")"
+          size="$(stat -c '%s' "$plan")"
+          if (( task_size < 2 || task_size > 2097152 )); then echo "Risk task size is invalid: $task_size" >&2; exit 1; fi
+          if (( size < 2 || size > 1048576 )); then echo "Risk plan size is invalid: $size" >&2; exit 1; fi
+          gate_decision="$(jq -er '.trigger.decision' "$task")"
+          jq -e '.execution_ready | type == "boolean"' "$task" >/dev/null
+          execution_ready="$(jq -r '.execution_ready' "$task")"
+          task_digest="$(jq -er '.artifact_sha256' "$task")"
+          applicability="$(jq -er '.applicability' "$plan")"
+          plan_digest="$(jq -er '.plan_digest' "$plan")"
+          [[ "$gate_decision" =~ ^(required|not_required|indeterminate)$ ]]
+          [[ "$execution_ready" =~ ^(true|false)$ ]]
+          [[ "$task_digest" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$applicability" =~ ^(evaluable|not_evaluable|not_applicable)$ ]]
+          [[ "$plan_digest" =~ ^[0-9a-f]{64}$ ]]
+          jq -e --arg repository "$GITHUB_REPOSITORY" --argjson pr "$PR_NUMBER" \
+            --arg base "$BASE_SHA" --arg head "$HEAD_SHA" \
+            '.schema_version == 1 and .binding.repository == $repository and
+             .binding.pr_number == $pr and .binding.base_sha == $base and .binding.head_sha == $head' "$task" "$plan" >/dev/null
+          jq -e --arg decision "$gate_decision" --arg applicability "$applicability" '
+            ($decision == "not_required" and $applicability == "not_applicable") or
+            ($decision == "indeterminate" and $applicability == "not_evaluable") or
+            ($decision == "required" and ($applicability == "evaluable" or $applicability == "not_evaluable"))
+          ' <<< '{}' >/dev/null
+          (cd "$OUTPUT_DIR" && sha256sum risk-gate-task.json > risk-gate-task.sha256)
+          (cd "$OUTPUT_DIR" && sha256sum risk-gate-plan.json > risk-gate-plan.sha256)
+          echo "gate_decision=$gate_decision" >> "$GITHUB_OUTPUT"
+          echo "execution_ready=$execution_ready" >> "$GITHUB_OUTPUT"
+          echo "task_digest=$task_digest" >> "$GITHUB_OUTPUT"
+          echo "applicability=$applicability" >> "$GITHUB_OUTPUT"
+          echo "plan_digest=$plan_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Upload canonical risk plan
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: risk-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-task.json
+            ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-task.sha256
+            ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-plan.json
+            ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-plan.sha256
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce planner result
+        if: always()
+        shell: bash
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          PLAN_PATH: ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-plan.json
+          TASK_PATH: ${{ runner.temp }}/risk-plan-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-task.json
+        run: |
+          set -euo pipefail
+          if [[ "$PLAN_OUTCOME" != "success" || ! -s "$TASK_PATH" || ! -s "$PLAN_PATH" ]]; then
+            echo "Dynamic Risk Scout failed or produced no canonical task/plan Artifact." >&2
+            exit 1
+          fi
+
+  execute-risk-gate:
+    name: Execute Trusted Risk Backtest
+    needs: plan-risk-gate
+    if: ${{ needs.plan-risk-gate.result == 'success' && needs.plan-risk-gate.outputs.applicability == 'evaluable' }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact trusted target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Verify pinned trusted Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$RISK_CI_RUNTIME/runtime-manifest-v11.json"
+          python_binary="$RISK_CI_PYTHON_BASE/bin/python"
+          python_library="$RISK_CI_PYTHON_BASE/lib/libpython3.12.so.1.0"
+          [[ "$(sha256sum "$manifest" | cut -d ' ' -f 1)" == "$RISK_CI_MANIFEST_SHA256" ]]
+          [[ "$(sha256sum "$python_binary" | cut -d ' ' -f 1)" == "$RISK_CI_PYTHON_SHA256" ]]
+          [[ "$(sha256sum "$python_library" | cut -d ' ' -f 1)" == "$RISK_CI_LIBPYTHON_SHA256" ]]
+
+      - name: Download canonical risk plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: risk-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/risk-plan-input
+
+      - name: Validate trusted plan and execution infrastructure
+        shell: bash
+        env:
+          PLAN_DIR: ${{ runner.temp }}/risk-plan-input
+          TRUSTED_REPO: ${{ github.workspace }}/trusted-target
+        working-directory: ${{ github.workspace }}/trusted-target
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN DEEPSEEK_API_KEY PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          export PYTHONPATH="$TRUSTED_REPO"
+          [[ "$(git -C "$TRUSTED_REPO" rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ -f "$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE" ]]
+          [[ -f "$TRUSTED_REPO/scripts/ci/run_agentic_backtest.py" ]]
+          (cd "$PLAN_DIR" && sha256sum -c risk-gate-plan.sha256)
+          "$RISK_CI_RUNTIME/bin/python" - <<'PY'
+          import os
+          from pathlib import Path
+          from schemas.risk_gate_artifact import RiskApplicability, RiskGatePlan
+
+          plan = RiskGatePlan.model_validate_json(
+              (Path(os.environ["PLAN_DIR"]) / "risk-gate-plan.json").read_text(encoding="utf-8")
+          )
+          if plan.applicability != RiskApplicability.EVALUABLE:
+              raise SystemExit("trusted executor received a non-evaluable plan")
+          if plan.binding.base_sha != os.environ["BASE_SHA"] or plan.binding.head_sha != os.environ["HEAD_SHA"]:
+              raise SystemExit("risk plan SHA binding mismatch")
+          PY
+          for value in "$RISK_GATE_SNAPSHOT_ROOT" "$RISK_GATE_ENGINE_ROOT" "$RISK_GATE_EXECUTOR_RUNTIME" "$RISK_GATE_EXECUTOR_MANIFEST" "$RISK_GATE_EXECUTOR_PYTHON"; do
+            [[ -n "$value" ]] || { echo "Risk execution infrastructure is not configured." >&2; exit 1; }
+          done
+          snapshot_root="$(realpath -e "$RISK_GATE_SNAPSHOT_ROOT")"
+          engine_root="$(realpath -e "$RISK_GATE_ENGINE_ROOT")"
+          executor_runtime="$(realpath -e "$RISK_GATE_EXECUTOR_RUNTIME")"
+          executor_manifest="$(realpath -e "$RISK_GATE_EXECUTOR_MANIFEST")"
+          executor_python="$executor_runtime/bin/python"
+          python_target="$(realpath -e "$executor_python")"
+          [[ -d "$snapshot_root" && -d "$engine_root" && -d "$executor_runtime" && -f "$executor_manifest" && -x "$executor_python" ]]
+          case "$snapshot_root:$engine_root:$executor_runtime:$executor_python" in
+            /srv/quant/*:/srv/quant/*:/srv/quant/*:/srv/quant/*) ;;
+            *) echo "Risk execution inputs must be admin-provisioned under /srv/quant." >&2; exit 1 ;;
+          esac
+          [[ "$executor_manifest" == "$executor_runtime/runtime-manifest-v1.json" ]]
+          [[ "$RISK_GATE_EXECUTOR_PYTHON" == "$executor_python" ]]
+          [[ -L "$executor_python" && "$python_target" == "$RISK_GATE_EXECUTOR_PYTHON_TARGET" ]]
+          for path in "$snapshot_root" "$engine_root" "$executor_runtime" "$executor_manifest"; do
+            [[ "$(stat -c '%U' "$path")" == "root" ]] || { echo "Risk execution input is not root-owned: $path" >&2; exit 1; }
+            [[ ! -w "$path" ]] || { echo "Risk execution input is writable by runner: $path" >&2; exit 1; }
+          done
+          [[ "$(stat -Lc '%U' "$executor_python")" == "root" ]] || { echo "Risk Python target is not root-owned." >&2; exit 1; }
+          [[ ! -w "$executor_python" ]] || { echo "Risk Python target is writable by runner." >&2; exit 1; }
+          [[ "$(sha256sum "$executor_manifest" | cut -d ' ' -f 1)" == "$RISK_GATE_EXECUTOR_MANIFEST_SHA256" ]]
+          [[ "$(sha256sum "$executor_python" | cut -d ' ' -f 1)" == "$RISK_GATE_EXECUTOR_PYTHON_SHA256" ]]
+          jq -e --arg runtime "$executor_runtime" --arg engine "$engine_root" --arg snapshot "$snapshot_root" \
+            --arg python_sha "$RISK_GATE_EXECUTOR_PYTHON_SHA256" --arg runtime_tree "$RISK_GATE_EXECUTOR_RUNTIME_TREE_SHA256" \
+            --arg engine_tree "$RISK_GATE_ENGINE_TREE_SHA256" --arg snapshot_tree "$RISK_GATE_SNAPSHOT_TREE_SHA256" \
+            '.schema_version == 1 and .runtime.path == $runtime and .runtime.python_sha256 == $python_sha and
+             .runtime.payload_tree_sha256_excluding_manifest == $runtime_tree and .engine.path == $engine and
+             .engine.tree_sha256 == $engine_tree and .snapshot.path == $snapshot and .snapshot.tree_sha256 == $snapshot_tree and
+             .access.runner_identity == "gha-multiagent-review" and .access.runner_access == "read-execute-only" and
+             .access.raw_cos_credentials_present == false' "$executor_manifest" >/dev/null
+          tree_sha() {
+            local root="$1"
+            local excluded="${2:-}"
+            if [[ -n "$excluded" ]]; then
+              (cd "$root" && find . -xdev -type f ! -path "$excluded" -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+            else
+              (cd "$root" && find . -xdev -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+            fi
+          }
+          [[ "$(tree_sha "$executor_runtime" './runtime-manifest-v1.json')" == "$RISK_GATE_EXECUTOR_RUNTIME_TREE_SHA256" ]]
+          [[ "$(tree_sha "$engine_root")" == "$RISK_GATE_ENGINE_TREE_SHA256" ]]
+          [[ "$(tree_sha "$snapshot_root")" == "$RISK_GATE_SNAPSHOT_TREE_SHA256" ]]
+
+      - name: Run trusted catalog materializer and executor
+        id: execute
+        continue-on-error: true
+        shell: bash
+        env:
+          OUTPUT_ROOT: ${{ runner.temp }}/risk-execution-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAN_PATH: ${{ runner.temp }}/risk-plan-input/risk-gate-plan.json
+          TRUSTED_REPO: ${{ github.workspace }}/trusted-target
+        working-directory: ${{ github.workspace }}/trusted-target
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN DEEPSEEK_API_KEY PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          export PYTHONPATH="$TRUSTED_REPO"
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          RISK_GATE_SNAPSHOT_ROOT="$(realpath -e "$RISK_GATE_SNAPSHOT_ROOT")"
+          RISK_GATE_ENGINE_ROOT="$(realpath -e "$RISK_GATE_ENGINE_ROOT")"
+          executor_runtime="$(realpath -e "$RISK_GATE_EXECUTOR_RUNTIME")"
+          [[ "$RISK_GATE_EXECUTOR_PYTHON" == "$executor_runtime/bin/python" ]]
+          [[ "$(realpath -e "$RISK_GATE_EXECUTOR_PYTHON")" == "$RISK_GATE_EXECUTOR_PYTHON_TARGET" ]]
+          [[ "$(sha256sum "$RISK_GATE_EXECUTOR_PYTHON" | cut -d ' ' -f 1)" == "$RISK_GATE_EXECUTOR_PYTHON_SHA256" ]]
+          export RISK_GATE_SNAPSHOT_ROOT RISK_GATE_ENGINE_ROOT RISK_GATE_EXECUTOR_PYTHON
+          if [[ -e "$OUTPUT_ROOT" ]]; then echo "Risk execution output already exists." >&2; exit 1; fi
+          mkdir -p "$OUTPUT_ROOT"
+          output="$OUTPUT_ROOT/output"
+          runtime_tmp="$OUTPUT_ROOT/runtime-tmp"
+          mkdir -p "$runtime_tmp"
+          plan_dir="$(dirname "$PLAN_PATH")"
+          catalog_path="$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE"
+          host_net_namespace="$(readlink /proc/self/ns/net)"
+          export plan_dir catalog_path host_net_namespace output runtime_tmp
+          /usr/bin/unshare \
+            --user \
+            --map-root-user \
+            --mount \
+            --net \
+            --ipc \
+            --uts \
+            --pid \
+            --fork \
+            --kill-child=TERM \
+            /usr/bin/bash -c '
+              set -euo pipefail
+              mount --make-rprivate /
+              for source in "$TRUSTED_REPO" "$plan_dir" "$RISK_GATE_SNAPSHOT_ROOT" "$RISK_GATE_ENGINE_ROOT" "$RISK_GATE_EXECUTOR_RUNTIME"; do
+                mount --bind "$source" "$source"
+                mount -o remount,bind,ro,nosuid,nodev "$source"
+              done
+              current_net_namespace="$(readlink /proc/self/ns/net)"
+              if [[ "$current_net_namespace" == "$host_net_namespace" ]]; then
+                echo "Executor did not enter a distinct network namespace." >&2
+                exit 1
+              fi
+              snapshot_options="$(findmnt -n -T "$RISK_GATE_SNAPSHOT_ROOT" -o OPTIONS)"
+              case ",$snapshot_options," in
+                *,ro,*) ;;
+                *) echo "Materialized snapshot is not mounted read-only." >&2; exit 1 ;;
+              esac
+              cd "$TRUSTED_REPO"
+              exec /usr/bin/env -i \
+                PATH=/usr/bin:/bin \
+                HOME="$runtime_tmp" \
+                TMPDIR="$runtime_tmp" \
+                TZ=UTC \
+                LANG=C.UTF-8 \
+                LC_ALL=C.UTF-8 \
+                PYTHONPATH="$TRUSTED_REPO:$RISK_GATE_ENGINE_ROOT:$RISK_GATE_ENGINE_ROOT/backtest_layer:$RISK_GATE_ENGINE_ROOT/factor_layer/factor_engine" \
+                PYTHONDONTWRITEBYTECODE=1 \
+                PYTHONNOUSERSITE=1 \
+                PYTHONSAFEPATH=1 \
+                PYTHONHASHSEED=0 \
+                OPENBLAS_NUM_THREADS=1 \
+                OMP_NUM_THREADS=1 \
+                MKL_NUM_THREADS=1 \
+                "$RISK_GATE_EXECUTOR_PYTHON" -m scripts.ci.run_agentic_backtest \
+                  --plan "$PLAN_PATH" \
+                  --catalog "$catalog_path" \
+                  --snapshot-root "$RISK_GATE_SNAPSHOT_ROOT" \
+                  --engine-root "$RISK_GATE_ENGINE_ROOT" \
+                  --output "$output"
+            '
+          artifact="$output/backtest-evidence.json"
+          size="$(stat -c '%s' "$artifact")"
+          if (( size < 2 || size > 1048576 )); then echo "Backtest evidence size is invalid: $size" >&2; exit 1; fi
+          (cd "$output" && sha256sum -c backtest-evidence.sha256)
+          jq -e --arg repository "$GITHUB_REPOSITORY" --argjson pr "${{ github.event.pull_request.number }}" \
+            --arg base "$BASE_SHA" --arg head "$HEAD_SHA" --arg plan "${{ needs.plan-risk-gate.outputs.plan_digest }}" \
+            '.evidence.schema_version == 1 and .evidence.binding.repository == $repository and
+             .evidence.binding.pr_number == $pr and .evidence.binding.base_sha == $base and
+             .evidence.binding.head_sha == $head and .evidence.plan_digest == $plan and
+             (.evidence.status | IN("pass", "block", "error"))' "$artifact" >/dev/null
+
+      - name: Upload backtest evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: risk-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/risk-execution-${{ github.run_id }}-${{ github.run_attempt }}/output/backtest-evidence.json
+            ${{ runner.temp }}/risk-execution-${{ github.run_id }}-${{ github.run_attempt }}/output/backtest-evidence.sha256
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce executor result
+        if: always()
+        shell: bash
+        env:
+          EVIDENCE_PATH: ${{ runner.temp }}/risk-execution-${{ github.run_id }}-${{ github.run_attempt }}/output/backtest-evidence.json
+          EXECUTE_OUTCOME: ${{ steps.execute.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$EXECUTE_OUTCOME" != "success" || ! -s "$EVIDENCE_PATH" ]]; then
+            echo "Trusted risk materializer/executor failed or produced no evidence." >&2
+            exit 1
+          fi
+
+  review-risk-gate:
+    name: Review Risk Evidence
+    needs: [plan-risk-gate, execute-risk-gate]
+    if: ${{ always() && needs.plan-risk-gate.result == 'success' }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      verdict: ${{ steps.review.outputs.verdict }}
+    steps:
+      - name: Checkout exact trusted target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Verify pinned trusted Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$RISK_CI_RUNTIME/runtime-manifest-v11.json"
+          python_binary="$RISK_CI_PYTHON_BASE/bin/python"
+          python_library="$RISK_CI_PYTHON_BASE/lib/libpython3.12.so.1.0"
+          [[ "$(sha256sum "$manifest" | cut -d ' ' -f 1)" == "$RISK_CI_MANIFEST_SHA256" ]]
+          [[ "$(sha256sum "$python_binary" | cut -d ' ' -f 1)" == "$RISK_CI_PYTHON_SHA256" ]]
+          [[ "$(sha256sum "$python_library" | cut -d ' ' -f 1)" == "$RISK_CI_LIBPYTHON_SHA256" ]]
+
+      - name: Download canonical risk plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: risk-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/risk-review-plan
+
+      - name: Download backtest evidence
+        if: ${{ needs.execute-risk-gate.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: risk-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/risk-review-evidence
+
+      - name: Build head-bound evidence review
+        id: review
+        shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/risk-review-evidence
+          OUTPUT_DIR: ${{ runner.temp }}/risk-review-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAN_DIR: ${{ runner.temp }}/risk-review-plan
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TRUSTED_REPO: ${{ github.workspace }}/trusted-target
+        working-directory: ${{ github.workspace }}/trusted-target
+        run: |
+          set -euo pipefail
+          unset GITHUB_TOKEN GH_TOKEN DEEPSEEK_API_KEY PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          export PYTHONPATH="$TRUSTED_REPO"
+          [[ "$(git -C "$TRUSTED_REPO" rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ -f "$TRUSTED_REPO/scripts/ci/review_risk_evidence.py" ]]
+          (cd "$PLAN_DIR" && sha256sum -c risk-gate-task.sha256)
+          (cd "$PLAN_DIR" && sha256sum -c risk-gate-plan.sha256)
+          if [[ -e "$OUTPUT_DIR" ]]; then echo "Risk review output already exists." >&2; exit 1; fi
+          mkdir -p "$OUTPUT_DIR"
+          task="$PLAN_DIR/risk-gate-task.json"
+          plan="$PLAN_DIR/risk-gate-plan.json"
+          evidence="$EVIDENCE_DIR/backtest-evidence.json"
+          review="$OUTPUT_DIR/risk-gate-artifact.json"
+          review_args=(
+            --task "$task"
+            --plan "$plan"
+            --policy "$TRUSTED_REPO/$RISK_GATE_CATALOG_RELATIVE"
+            --repository "$GITHUB_REPOSITORY"
+            --pr-number "$PR_NUMBER"
+            --base-sha "$BASE_SHA"
+            --head-sha "$HEAD_SHA"
+            --output "$review"
+          )
+          if [[ -f "$evidence" ]]; then
+            (cd "$EVIDENCE_DIR" && sha256sum -c backtest-evidence.sha256)
+            review_args+=(--evidence "$evidence")
+          fi
+          "$RISK_CI_RUNTIME/bin/python" -m scripts.ci.review_risk_evidence "${review_args[@]}"
+
+          TASK_PATH="$task" PLAN_PATH="$plan" EVIDENCE_PATH="$evidence" REVIEW_PATH="$review" \
+            PACKAGE_PATH="$OUTPUT_DIR/risk-gate-review.json" \
+            "$RISK_CI_RUNTIME/bin/python" - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from schemas.risk_gate_artifact import RiskGateArtifact
+          from schemas.risk_gate_task import RiskGateTaskArtifact, RiskGateTriggerDecision
+          from scripts.ci.review_risk_evidence import (
+              canonical_evidence_digest,
+              canonical_sha256,
+              load_evidence,
+              load_plan,
+              plan_proposal_projection,
+          )
+
+          task = RiskGateTaskArtifact.model_validate_json(
+              Path(os.environ["TASK_PATH"]).read_text(encoding="utf-8")
+          )
+          plan = load_plan(Path(os.environ["PLAN_PATH"]))
+          review = RiskGateArtifact.model_validate_json(
+              Path(os.environ["REVIEW_PATH"]).read_text(encoding="utf-8")
+          )
+          review_payload = review.model_dump(mode="json")
+          review_claim = review_payload.pop("artifact_sha256")
+          if canonical_sha256(review_payload) != review_claim:
+              raise SystemExit("risk review canonical digest mismatch")
+          evidence_path = Path(os.environ["EVIDENCE_PATH"])
+          evidence = load_evidence(evidence_path) if evidence_path.exists() else None
+          if (
+              task.binding != plan.binding
+              or review.binding != plan.binding
+              or plan.task_digest != task.artifact_sha256
+              or review.task_digest != task.artifact_sha256
+              or review.plan_digest != plan.plan_digest
+          ):
+              raise SystemExit("risk review is not bound to the canonical plan")
+          if task.trigger.decision == RiskGateTriggerDecision.NOT_REQUIRED and plan.applicability.value != "not_applicable":
+              raise SystemExit("not-required dynamic task was compiled as an applicable plan")
+          if task.trigger.decision == RiskGateTriggerDecision.INDETERMINATE and plan.applicability.value != "not_evaluable":
+              raise SystemExit("indeterminate dynamic task was not compiled fail-closed")
+          if evidence is not None:
+              if (
+                  task.trigger.decision != RiskGateTriggerDecision.REQUIRED
+                  or not task.execution_ready
+                  or not task.scope.coverage.complete
+                  or task.scope.unknowns
+                  or task.missing_requirements
+              ):
+                  raise SystemExit("dynamic task did not authorize automatic evidence execution")
+              bound_requests = {
+                  item.request_id: item for item in task.execution_requests
+              }
+              bound_steps = {item.step_id: item for item in task.process}
+              request = bound_requests.get(plan.request_id)
+              step = bound_steps.get(plan.step_id)
+              if (
+                  request is None
+                  or step is None
+                  or request.step_id != step.step_id
+                  or request.capability_id != step.capability_id
+                  or plan.adapter is None
+                  or plan.adapter.adapter_id != request.capability_id
+              ):
+                  raise SystemExit("risk plan is not bound to a dynamic task capability request")
+              requested_plan = request.parameters.get("risk_gate_plan")
+              if requested_plan != plan_proposal_projection(plan):
+                  raise SystemExit("risk plan content differs from the dynamic task request")
+              if evidence.binding != plan.binding or evidence.plan_digest != plan.plan_digest:
+                  raise SystemExit("risk evidence is not bound to the canonical plan")
+              if (
+                  evidence.task_digest != task.artifact_sha256
+                  or evidence.step_id != plan.step_id
+                  or evidence.request_id != plan.request_id
+                  or review.completed_step_ids != [plan.step_id]
+              ):
+                  raise SystemExit("risk evidence is not bound to the dynamic task step/request")
+              if canonical_evidence_digest(evidence) != review.evidence_digest:
+                  raise SystemExit("risk review evidence digest mismatch")
+          else:
+              expected = canonical_sha256(
+                  {"applicability": plan.applicability.value, "plan_digest": plan.plan_digest}
+              )
+              if review.evidence_digest != expected:
+                  raise SystemExit("no-execution evidence digest mismatch")
+
+          catalog = Path(os.environ["TRUSTED_REPO"]) / os.environ["RISK_GATE_CATALOG_RELATIVE"]
+          package = {
+              "schema_version": 1,
+              "artifact_type": "agentic-risk-gate-review",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "pr_number": int(os.environ["PR_NUMBER"]),
+              "base_sha": os.environ["BASE_SHA"],
+              "head_sha": os.environ["HEAD_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "workflow_sha": os.environ["GITHUB_WORKFLOW_SHA"],
+              "catalog_sha256": hashlib.sha256(catalog.read_bytes()).hexdigest(),
+              "task": task.model_dump(mode="json"),
+              "plan": plan.model_dump(mode="json"),
+              "evidence": evidence.model_dump(mode="json") if evidence is not None else None,
+              "review": review.model_dump(mode="json"),
+          }
+          encoded = json.dumps(package, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+          if len(encoded.encode("utf-8")) > 2 * 1024 * 1024:
+              raise SystemExit("risk review artifact exceeds 2 MiB")
+          Path(os.environ["PACKAGE_PATH"]).write_text(encoded, encoding="utf-8")
+          PY
+          artifact="$OUTPUT_DIR/risk-gate-review.json"
+          (cd "$OUTPUT_DIR" && sha256sum risk-gate-review.json > risk-gate-review.sha256)
+          verdict="$(jq -er '.review.verdict' "$artifact")"
+          [[ "$verdict" =~ ^(pass|needs_human|block|error|not_applicable|not_evaluable)$ ]]
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+      - name: Upload evidence review artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: risk-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/risk-review-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-review.json
+            ${{ runner.temp }}/risk-review-${{ github.run_id }}-${{ github.run_attempt }}/risk-gate-review.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-risk-gate:
+    name: Publish Quant Risk Gate
+    needs: [initialize-risk-gate, plan-risk-gate, execute-risk-gate, review-risk-gate]
+    if: >-
+      ${{ always() &&
+          (github.event.action != 'edited' || github.event.changes.base.ref.from != null) &&
+          (github.event.action != 'closed' || github.event.pull_request.merged == false) }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Download evidence review artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: risk-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/risk-review-publish
+
+      - name: Validate, comment, and publish head-bound risk status
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/risk-review-publish
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          EXECUTION_RESULT: ${{ needs.execute-risk-gate.result }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: >
-          python scripts/run_risk_gate_tool.py
-          --scenario normal
-          --pr-number "$PR_NUMBER"
-          --head-sha "$HEAD_SHA"
-          --pr-url "$PR_URL"
+          INIT_RESULT: ${{ needs.initialize-risk-gate.result }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PLAN_RESULT: ${{ needs.plan-risk-gate.result }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_RESULT: ${{ needs.review-risk-gate.result }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        with:
+          script: |
+            const crypto = require("crypto");
+            const childProcess = require("child_process");
+            const fs = require("fs");
+            const path = require("path");
+
+            const escapeMarkdown = (value) => String(value ?? "").replace(/[\\`|\r\n]/g, " ").replace(/[<>]/g, "");
+            const artifactPath = path.join(process.env.ARTIFACT_DIR, "risk-gate-review.json");
+            const digestPath = path.join(process.env.ARTIFACT_DIR, "risk-gate-review.sha256");
+            let artifact = null;
+            let artifactError = "";
+            try {
+              if (process.env.DOWNLOAD_OUTCOME !== "success") throw new Error("review artifact download failed");
+              if (!fs.existsSync(artifactPath) || !fs.existsSync(digestPath)) throw new Error("review artifact or digest is missing");
+              const raw = fs.readFileSync(artifactPath);
+              if (raw.length < 2 || raw.length > 2 * 1024 * 1024) throw new Error(`review artifact size is invalid: ${raw.length}`);
+              const expectedDigest = fs.readFileSync(digestPath, "utf8").trim().split(/\s+/)[0];
+              const actualDigest = crypto.createHash("sha256").update(raw).digest("hex");
+              if (!/^[0-9a-f]{64}$/.test(expectedDigest) || expectedDigest !== actualDigest) throw new Error("review artifact SHA-256 mismatch");
+              artifact = JSON.parse(raw.toString("utf8"));
+              const expectedBindings = {
+                schema_version: 1,
+                artifact_type: "agentic-risk-gate-review",
+                repository: `${context.repo.owner}/${context.repo.repo}`,
+                pr_number: Number(process.env.PR_NUMBER),
+                base_sha: process.env.BASE_SHA,
+                head_sha: process.env.HEAD_SHA,
+                run_id: process.env.RUN_ID,
+                run_attempt: process.env.RUN_ATTEMPT,
+                workflow_sha: process.env.WORKFLOW_SHA,
+              };
+              for (const [key, value] of Object.entries(expectedBindings)) {
+                if (artifact[key] !== value) throw new Error(`review artifact binding mismatch: ${key}`);
+              }
+              if (!/^[0-9a-f]{64}$/.test(artifact.catalog_sha256 ?? "")) throw new Error("catalog digest is invalid");
+              const pythonPath = path.join(process.env.RISK_CI_PYTHON_BASE, "bin", "python");
+              const pythonDigest = crypto.createHash("sha256").update(fs.readFileSync(pythonPath)).digest("hex");
+              if (pythonDigest !== process.env.RISK_CI_PYTHON_SHA256) throw new Error("publisher Python hash mismatch");
+              const canonicalValidator = String.raw`
+            import hashlib
+            import json
+            import sys
+
+            def digest(value):
+                encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+            artifact = json.load(open(sys.argv[1], encoding="utf-8"))
+            task = dict(artifact["task"])
+            task_claim = task.pop("artifact_sha256")
+            if digest(task) != task_claim:
+                raise SystemExit("canonical dynamic task digest mismatch")
+            plan = dict(artifact["plan"])
+            plan_claim = plan.pop("plan_digest")
+            if digest(plan) != plan_claim:
+                raise SystemExit("canonical plan digest mismatch")
+            review = dict(artifact["review"])
+            review_claim = review.pop("artifact_sha256")
+            if digest(review) != review_claim:
+                raise SystemExit("canonical review digest mismatch")
+            evidence = artifact.get("evidence")
+            if evidence is not None:
+                evidence_copy = dict(evidence)
+                evidence_claim = evidence_copy.pop("artifact_sha256")
+                if digest(evidence_copy) != evidence_claim:
+                    raise SystemExit("canonical evidence digest mismatch")
+                expected_evidence = digest(evidence_copy)
+            else:
+                expected_evidence = digest({"applicability": artifact["plan"]["applicability"], "plan_digest": plan_claim})
+            if artifact["review"]["evidence_digest"] != expected_evidence:
+                raise SystemExit("review evidence digest mismatch")
+            if artifact["task"]["binding"] != artifact["plan"]["binding"]:
+                raise SystemExit("dynamic task and execution plan binding mismatch")
+            expected_nested_binding = {
+                "repository": artifact["repository"],
+                "pr_number": artifact["pr_number"],
+                "base_sha": artifact["base_sha"],
+                "head_sha": artifact["head_sha"],
+            }
+            for nested_name in ("task", "plan", "review"):
+                if artifact[nested_name].get("binding") != expected_nested_binding:
+                    raise SystemExit(f"{nested_name} binding differs from package binding")
+            if artifact.get("evidence") is not None and artifact["evidence"].get("binding") != expected_nested_binding:
+                raise SystemExit("evidence binding differs from package binding")
+            if artifact["plan"].get("task_digest") != task_claim:
+                raise SystemExit("execution plan task digest mismatch")
+            if artifact["review"].get("task_digest") != task_claim:
+                raise SystemExit("review task digest mismatch")
+            decision = artifact["task"]["trigger"]["decision"]
+            applicability = artifact["plan"]["applicability"]
+            if decision == "not_required" and applicability != "not_applicable":
+                raise SystemExit("not-required task has an applicable execution plan")
+            if decision == "indeterminate" and applicability != "not_evaluable":
+                raise SystemExit("indeterminate task did not fail closed")
+            if evidence is None and applicability == "evaluable":
+                raise SystemExit("evaluable plan has no evidence")
+            if evidence is not None:
+                if (
+                    decision != "required"
+                    or not artifact["task"].get("execution_ready")
+                    or not artifact["task"].get("scope", {}).get("coverage", {}).get("complete")
+                    or artifact["task"].get("scope", {}).get("unknowns")
+                    or artifact["task"].get("missing_requirements")
+                ):
+                    raise SystemExit("task did not authorize automatic evidence execution")
+                requests = {
+                    item["request_id"]: item
+                    for item in artifact["task"].get("execution_requests", [])
+                }
+                steps = {
+                    item["step_id"]: item
+                    for item in artifact["task"].get("process", [])
+                }
+                request = requests.get(artifact["plan"].get("request_id"))
+                step = steps.get(artifact["plan"].get("step_id"))
+                adapter = artifact["plan"].get("adapter") or {}
+                if (
+                    request is None
+                    or step is None
+                    or request.get("step_id") != step.get("step_id")
+                    or request.get("capability_id") != step.get("capability_id")
+                    or adapter.get("adapter_id") != request.get("capability_id")
+                ):
+                    raise SystemExit("plan capability request is absent from dynamic task")
+                plan_projection = {
+                    "applicability": artifact["plan"]["applicability"],
+                    "subjects": artifact["plan"].get("subjects", []),
+                    "data_requests": artifact["plan"].get("data_requests", []),
+                    "adapter_id": adapter.get("adapter_id"),
+                    "adapter_parameters": artifact["plan"].get("adapter_parameters", {}),
+                    "window": artifact["plan"].get("window"),
+                    "execution_policy": artifact["plan"].get("execution_policy"),
+                    "benchmark": artifact["plan"].get("benchmark"),
+                    "risk_policy_id": artifact["plan"]["risk_policy_id"],
+                    "rationale": artifact["plan"]["rationale"],
+                    "missing_requirements": artifact["plan"].get("missing_requirements", []),
+                }
+                if request.get("parameters", {}).get("risk_gate_plan") != plan_projection:
+                    raise SystemExit("plan content differs from dynamic task request")
+                if evidence.get("task_digest") != task_claim:
+                    raise SystemExit("evidence task digest mismatch")
+                if evidence.get("step_id") != artifact["plan"].get("step_id"):
+                    raise SystemExit("evidence step binding mismatch")
+                if evidence.get("request_id") != artifact["plan"].get("request_id"):
+                    raise SystemExit("evidence request binding mismatch")
+                if artifact["review"].get("completed_step_ids") != [evidence.get("step_id")]:
+                    raise SystemExit("review required-step coverage mismatch")
+            print("ok")
+            `;
+              childProcess.execFileSync(
+                pythonPath,
+                ["-I", "-S", "-c", canonicalValidator, artifactPath],
+                {
+                  encoding: "utf8",
+                  env: {
+                    PATH: "/usr/bin:/bin",
+                    HOME: "/tmp",
+                    LANG: "C.UTF-8",
+                    LC_ALL: "C.UTF-8",
+                    LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH,
+                    PYTHONDONTWRITEBYTECODE: "1",
+                    PYTHONNOUSERSITE: "1",
+                    PYTHONSAFEPATH: "1",
+                  },
+                  maxBuffer: 1024 * 1024,
+                  timeout: 10000,
+                },
+              );
+              const task = artifact.task;
+              const plan = artifact.plan;
+              const review = artifact.review;
+              const expectedNestedBinding = {
+                repository: `${context.repo.owner}/${context.repo.repo}`,
+                pr_number: Number(process.env.PR_NUMBER),
+                base_sha: process.env.BASE_SHA,
+                head_sha: process.env.HEAD_SHA,
+              };
+              const sameBinding = (value) => JSON.stringify(value) === JSON.stringify(expectedNestedBinding);
+              if (!task || !plan || !review || !sameBinding(task.binding) || !sameBinding(plan.binding) || !sameBinding(review.binding) || (artifact.evidence && !sameBinding(artifact.evidence.binding))) {
+                throw new Error("task/plan/review binding is invalid");
+              }
+              if (!/^[0-9a-f]{64}$/.test(task.artifact_sha256 ?? "") || !/^[0-9a-f]{64}$/.test(plan.plan_digest ?? "") || !/^[0-9a-f]{64}$/.test(review.artifact_sha256 ?? "")) {
+                throw new Error("task, plan, or review digest format is invalid");
+              }
+              if (!/^[0-9a-f]{64}$/.test(review.evidence_digest ?? "") || !/^[0-9a-f]{64}$/.test(review.policy_digest ?? "")) {
+                throw new Error("evidence or policy digest format is invalid");
+              }
+              if (review.plan_digest !== plan.plan_digest || review.binding?.head_sha !== process.env.HEAD_SHA) throw new Error("review is not bound to plan/head");
+              if (JSON.stringify(task.binding) !== JSON.stringify(plan.binding)) throw new Error("dynamic task is not bound to execution plan");
+              if (plan.task_digest !== task.artifact_sha256 || review.task_digest !== task.artifact_sha256) throw new Error("task digest chain is invalid");
+              if (artifact.evidence) {
+                if (!/^[0-9a-f]{64}$/.test(artifact.evidence.artifact_sha256 ?? "")) throw new Error("evidence digest format is invalid");
+                if (artifact.evidence.plan_digest !== plan.plan_digest || artifact.evidence.binding?.head_sha !== process.env.HEAD_SHA) throw new Error("evidence is stale");
+                if (artifact.evidence.task_digest !== task.artifact_sha256 || artifact.evidence.step_id !== plan.step_id || artifact.evidence.request_id !== plan.request_id) throw new Error("evidence task step/request binding is invalid");
+                if (JSON.stringify(review.completed_step_ids) !== JSON.stringify([plan.step_id])) throw new Error("review required-step coverage is invalid");
+              } else if (plan.applicability === "evaluable") {
+                throw new Error("evaluable plan has no evidence");
+              }
+              if (!new Set(["pass", "needs_human", "block", "error", "not_applicable", "not_evaluable"]).has(review.verdict)) {
+                throw new Error("review verdict is invalid");
+              }
+              if (!artifact.evidence) {
+                const expectedNoEvidenceVerdict = plan.applicability === "not_applicable"
+                  ? "not_applicable"
+                  : plan.applicability === "not_evaluable"
+                    ? "not_evaluable"
+                    : null;
+                if (!expectedNoEvidenceVerdict || review.verdict !== expectedNoEvidenceVerdict) {
+                  throw new Error("no-evidence verdict does not match plan applicability");
+                }
+              }
+              if (review.verdict === "not_applicable" && ((review.findings ?? []).length || (review.missing_evidence ?? []).length || (review.completed_step_ids ?? []).length || review.human_gate_allowed)) {
+                throw new Error("not_applicable review is not a clean no-execution result");
+              }
+            } catch (error) {
+              artifactError = error instanceof Error ? error.message : String(error);
+              artifact = null;
+            }
+
+            const {data: currentPull} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const sameRepository = process.env.HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            const isCurrent = currentPull.head.sha === process.env.HEAD_SHA && currentPull.base.sha === process.env.BASE_SHA;
+            const isOpen = currentPull.state === "open";
+            const isReady = process.env.IS_DRAFT === "false" && currentPull.draft === false;
+            const dependenciesComplete = process.env.INIT_RESULT === "success" && process.env.PLAN_RESULT === "success" && process.env.REVIEW_RESULT === "success";
+            const verdict = artifact?.review?.verdict ?? "error";
+            const acceptedVerdict = verdict === "pass" || verdict === "not_applicable";
+            const passed = sameRepository && isCurrent && isOpen && isReady && dependenciesComplete && artifact !== null && acceptedVerdict;
+
+            if (sameRepository && isCurrent && isOpen && isReady) {
+              const marker = `<!-- quantcode:risk-gate:agentic:${process.env.HEAD_SHA} -->`;
+              let body;
+              if (!artifact) {
+                body = `${marker}\n> [!CAUTION]\n> Agentic Risk Gate could not validate its evidence artifact: ${escapeMarkdown(artifactError)}\n\n` +
+                  `**Head SHA:** \`${process.env.HEAD_SHA}\`  \n**Workflow:** [run ${process.env.RUN_ID}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+              } else {
+                const task = artifact.task;
+                const plan = artifact.plan;
+                const review = artifact.review;
+                const domains = (task.trigger?.risk_domains ?? []).map(escapeMarkdown).join(", ") || "none";
+                const scopedTargets = (task.scope?.included ?? []).map((item) => `- **${escapeMarkdown(item.target)}**: ${escapeMarkdown(item.rationale)}`).join("\n") || "- None";
+                const processSteps = (task.process ?? []).map((item) => `- **${escapeMarkdown(item.step_id)}** · \`${escapeMarkdown(item.capability_id)}\`: ${escapeMarkdown(item.objective)}`).join("\n") || "- None";
+                const subjects = (plan.subjects ?? []).map((item) => `${escapeMarkdown(item.kind)}:${escapeMarkdown(item.identifier)}`).join(", ") || "none";
+                const findings = (review.findings ?? []).map((item) => `- **${escapeMarkdown(item.code)}**: ${escapeMarkdown(item.message)}`).join("\n") || "- None";
+                const missing = (review.missing_evidence ?? []).map((item) => `- ${escapeMarkdown(item)}`).join("\n") || "- None";
+                const metrics = artifact.evidence?.metrics ?? null;
+                const metricRows = metrics
+                  ? Object.entries(metrics).map(([name, value]) => `| ${escapeMarkdown(name)} | ${value === null ? "n/a" : escapeMarkdown(Number(value).toPrecision(6))} |`).join("\n")
+                  : "| evidence | n/a |";
+                body = `${marker}\n> [!WARNING]\n> Advisory, head-bound Risk Gate. A bounded Risk Scout dynamically chose the business scope and process; trusted code controls capabilities, evidence validation, and the final status.\n\n` +
+                  `## QuantCode Agentic Risk Gate\n\n**Verdict:** \`${escapeMarkdown(review.verdict)}\`  \n` +
+                  `**Scout decision:** \`${escapeMarkdown(task.trigger?.decision)}\`  \n**Execution ready:** \`${escapeMarkdown(task.execution_ready)}\`  \n` +
+                  `**Dynamic risk domains:** ${domains}  \n**Applicability:** \`${escapeMarkdown(plan.applicability)}\`  \n**Compiled subjects:** ${subjects}  \n` +
+                  `**Planner:** \`${escapeMarkdown(plan.planner_model)}\`  \n**Risk policy:** \`${escapeMarkdown(plan.risk_policy_id)}\`  \n` +
+                  `**Head SHA:** \`${process.env.HEAD_SHA}\`  \n**Task digest:** \`${task.artifact_sha256}\`  \n**Plan digest:** \`${plan.plan_digest}\`  \n` +
+                  `**Evidence digest:** \`${review.evidence_digest}\`\n\n### Dynamic scope\n\n${scopedTargets}\n\n### Dynamic process\n\n${processSteps}\n\n### Evidence metrics\n\n| Metric | Value |\n|---|---:|\n${metricRows}\n\n` +
+                  `### Findings\n\n${findings}\n\n### Missing evidence\n\n${missing}\n\n` +
+                  `[Open workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+              }
+              body = body.slice(0, 65000);
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
+              });
+              const previous = comments.find((comment) => comment.user?.type === "Bot" && comment.body?.includes(marker));
+              if (previous) {
+                await github.rest.issues.updateComment({owner: context.repo.owner, repo: context.repo.repo, comment_id: previous.id, body});
+              } else {
+                await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body});
+              }
+            }
+
+            const descriptions = {
+              pass: "Agent-planned risk evidence passed",
+              not_applicable: "No risk-bearing change detected",
+              needs_human: "Validated risk evidence needs human approval",
+              not_evaluable: "Risk-bearing change lacks an executable contract",
+              block: "Risk evidence or policy blocked this head",
+              error: "Risk Gate failed to produce valid evidence",
+            };
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.HEAD_SHA,
+              state: passed ? "success" : "failure",
+              context: "Quant Risk Gate",
+              description: descriptions[verdict] ?? descriptions.error,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            const detail = `same-repository=${sameRepository} current=${isCurrent} open=${isOpen} ready=${isReady} init=${process.env.INIT_RESULT} plan=${process.env.PLAN_RESULT} execute=${process.env.EXECUTION_RESULT} review=${process.env.REVIEW_RESULT} verdict=${verdict}`;
+            core.info(`Published Quant Risk Gate for ${process.env.HEAD_SHA}: ${detail}`);
+            if (!passed) core.setFailed(`Quant Risk Gate failed: ${detail}${artifactError ? ` artifact=${artifactError}` : ""}`);

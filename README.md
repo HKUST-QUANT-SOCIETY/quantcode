@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-589%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-597%20passed-brightgreen.svg)](tests/)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
 [Quick Start](#quick-start) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
@@ -17,7 +17,7 @@
 
 ## What is QuantCode?
 
-QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) each work through their own ReAct-style agent — no manual handoffs, no Slack threads asking "did you finish the backtest?" The platform enforces **schema contracts** at every boundary: your factor submission must validate against `FactorSpec`, your model PR triggers automatic `RiskProfile` generation, and cross-group state flows through a type-safe Blackboard.
+QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) each work through their own ReAct-style agent — no manual handoffs, no Slack threads asking "did you finish the backtest?" The platform enforces **schema contracts** at every boundary: factor submissions validate against `FactorSpec`, risk-bearing PRs receive a dynamically scoped `RiskGateTaskArtifact`, and cross-group state flows through a type-safe Blackboard.
 
 **Core thesis**: Replace "people negotiating over Slack" with "machines validating against schemas." Replace "does this look okay?" with "`assert` pass/fail + deterministic gates."
 
@@ -48,9 +48,9 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 ```
 User intent → Group-specific AgentRunner → Tool chain → Schema validation → Output artifact
      ↓
-  Factor: match_main → gen_schema → autoeval → RiskProfile
+  Factor: match_main → gen_schema → autoeval → FactorReport
   Model: read_pr → extract_metadata → generate_model_spec → (triggers Risk flow)
-  Risk: read_blackboard → calc_risk → generate_risk_profile → check_gate → HumanGate
+  Risk: spawn Risk Scout → dynamic scope/process → trusted capability (v1: one step) → evidence reducer
      ↓
   All outputs: JSON artifacts under artifacts/{group}/ + optional PR comments
 ```
@@ -58,11 +58,11 @@ User intent → Group-specific AgentRunner → Tool chain → Schema validation 
 **Three production patterns:**
 
 1. **Pattern 1 (Push)** — Factor group submits FactorSpec → AutoEval returns IC/IR → merges to main if IR > threshold
-2. **Pattern 2 (Pull + Human Gate)** — Model group opens PR → Risk agent auto-generates RiskProfile → human approves if max_drawdown > 15%
+2. **Pattern 2 (Orchestrator-Worker + Human Gate)** — PR/business event → Risk Scout plans the case-specific gate → trusted capabilities collect evidence; current CI v1 publishes `needs_human` but does not yet provide interactive approval
 3. **Pattern 5 (Interrupt-Resume)** — Any tool can `interrupt()` mid-flow for human decision, then `resume(decision=...)` to continue
 
 > **Don't pre-define DAGs. Let agents route.**  
-> The platform provides deterministic routing (`route_next_step`) based on state fingerprints, loop detection, and risk thresholds — but the **sequence** of tool calls emerges from LLM reasoning, not hardcoded graphs.
+> The platform provides deterministic safety routing, head/digest binding and fail-closed validation — but the **business scope and sequence** of Risk Gate checks emerge from a bounded subagent, not a hardcoded metric graph.
 
 **Key primitives:**
 
@@ -70,7 +70,7 @@ User intent → Group-specific AgentRunner → Tool chain → Schema validation 
 - **ToolRegistry** — Global singleton. Each group's `_register.py` declares tools at import time. Tests use `importlib.reload()` to re-register after other tests clear the registry.
 - **Blackboard** — SQLite-backed shared state with 5-scope isolation (SESSION/THREAD/GROUP/PROJECT/GLOBAL). Model group writes `ModelSpec` to PROJECT scope → Risk group reads it.
 - **Memory** — FTS5 full-text search + 5-scope ACL. Factor agent can't read Model group's memory.
-- **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskProfile`, `StrategyReport`, etc.
+- **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskGateTaskArtifact`, `RiskProfile` attachments, `StrategyReport`, etc.
 
 ---
 
@@ -111,9 +111,10 @@ idea = "高ROE低PB价值因子"
 PR #42 opened → read_pr → extract model type/params from diff
   ↓ generate_model_spec → {"model_name": "pb_roe_ranker", "model_type": "ml", ...}
   ↓ write_blackboard(scope=PROJECT) → triggers Risk flow
-  ↓ Risk agent reads ModelSpec → calculates risk_metrics → generates RiskProfile
-  ↓ check_gate → HumanGate if max_drawdown > 15%
-  ↓ write_pr_comment → posts RiskProfile JSON to PR
+  ↓ Risk orchestrator spawns a Risk Scout child task
+  ↓ Scout locates scope/process/evidence and returns RiskGateTaskArtifact
+  ↓ trusted capabilities produce evidence; reducer returns final RiskGateArtifact
+  ↓ publisher posts the head-bound Artifact; interactive HumanGate wiring is pending
 ```
 
 **Cross-group contract**: `ModelSpec` schema (must include `model_name`, `expected_sharpe`, `capacity_estimate`).
@@ -122,25 +123,48 @@ PR #42 opened → read_pr → extract model type/params from diff
 
 ### 3. Risk (Owner: 杨欣琳)
 
-**Goal**: Automated risk gate for model PRs — generate `RiskProfile`, check thresholds, trigger HumanGate if needed.
+**Goal**: For each PR or business handoff, spawn a bounded Risk Scout subagent that locates the
+actual Risk Gate scope, designs the evidence-producing process, and returns a source-bound
+`RiskGateTaskArtifact`.
 
-**Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `check_gate`, `write_pr_comment`, `request_human_review`
+**Scout tools**: PR workers use `list_changed_files` / `read_changed_files`; runtime workers use
+`list_risk_context` / `read_risk_context`. Both can inspect trusted capability/policy metadata and
+submit one canonical task Artifact. The scout has no shell, write, secret, raw-data, GitHub-publish,
+or HumanGate capability.
 
 **Flow**:
-```python
-ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, position_limit}
-  ↓ generate_risk_profile → enriched RiskProfile with thresholds
-  ↓ check_gate → {requires_human: true, reasons: ["max_drawdown", "tail_risk_var_99"]}
-  ↓ route_next_step detects risk_profile + threshold breach → HUMAN_GATE
-  ↓ _human_gate_node → interrupt() → waits for Command(resume={"decision": "approve"})
-  ↓ write_pr_comment → GitHub PR comment with full RiskProfile JSON
+```text
+PR / business event
+  → spawn Risk Scout child task
+  → persisted ComposeTask child dynamically locates scope, process, and evidence
+  → requested business Gate: required | indeterminate (the child cannot self-waive)
+  → PR docs/media only: not_required remains available after trusted path validation
+  → deterministic task validator (head SHA, coverage, DAG, tool ids, evidence refs, digest)
+  → v1: dispatch exactly one task-bound trusted capability request
+  → evidence reducer → final RiskGateArtifact
+  → needs_human: publish a head/task/plan/evidence-bound advisory result
+  → checkout-free publisher updates the PR comment and Quant Risk Gate status
 ```
 
-**HumanGate**: Deterministic routing — if `risk_metrics` exceed thresholds AND `risk_profile` exists, route to `human_gate` node. Agent pauses until user resumes with `approve` or `reject`.
+Risk domains and process steps are open strings/structured tasks, so a new business risk does not
+require adding a Python enum or editing the workflow. Automatic execution remains restricted to the
+trusted capability registry; an unknown capability stays visible in the Artifact and fails closed.
 
-**Demo**: `pytest tests/test_risk_react_ready.py -v`
+`RiskProfile` remains available as a quantitative-risk attachment and legacy UI contract; it is no
+longer the universal Risk Gate contract.
 
-**Production**: GitHub Actions workflow calls `run_agent(group="risk", task="Run risk gate for PR #{pr_number}")`
+The risk MCP surface exposes only `spawn_risk_scout` plus `run_agent`; child context tools require a
+bounded in-memory session, and legacy fixed RiskProfile tools cannot be invoked through MCP by name.
+
+**Tests**: `pytest tests/test_dynamic_risk_gate_subagent.py tests/test_runtime_risk_gate_orchestrator.py -v`
+
+**Current boundary**: OpenCode/MCP now creates a persisted, context-bound Risk Scout child and returns
+its `RiskGateTaskArtifact`; redacted handoff content is ephemeral, while locators, summaries, hashes,
+task events, and the final Artifact are persisted. The peer Server B workflow plans against the real
+PR diff. Only the single-asset backtest capability is execution-ready; other dynamically requested
+specialists return `not_evaluable` until a trusted handler/data contract is registered. v1 supports exactly one required
+step/request; multi-step specialist dispatch and interactive HumanGate approval are not yet wired.
+The status remains advisory and is not investment-risk approval.
 
 ---
 
@@ -259,7 +283,7 @@ python runner/jerry_demos.py --track options
 ## Testing
 
 ```bash
-# Full suite (589 tests)
+# Full suite (597 tests)
 pytest
 
 # Specific group
@@ -269,7 +293,7 @@ pytest tests/test_risk_react_ready.py -v
 QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ```
 
-**Test status**: 589 passed, 8 skipped (as of 2026-07-16). The 8 skipped tests require real LLM API access.
+**Test status**: 597 passed, 8 skipped (as of 2026-08-25). The 8 skipped tests require real LLM API access.
 
 **Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (5-scope isolation), Memory (FTS5), routing logic (loop detection + risk gates), HumanGate (interrupt-resume), cross-group handoff (Model→Risk).
 
@@ -345,7 +369,7 @@ git push origin feat/your-feature
 gh pr create
 ```
 
-> **IMPORTANT**: Ready internal PRs trigger both the product Risk Gate and repository-wide Multi-Agent Review. The review workflow is loaded from `main`, and its head-bound `Quant Review Gate` status reports failure when either physical or agent review does not complete. On the current GitHub Free/private-repository plan this status is advisory; see [`docs/MULTI_AGENT_REVIEW.md`](docs/MULTI_AGENT_REVIEW.md) before treating it as an enforced merge gate. Risk threshold changes may additionally pause at HumanGate for a human decision.
+> **IMPORTANT**: Ready internal PRs trigger both the dynamic Risk Gate and repository-wide Multi-Agent Review on the selected Server B runner group. They are logical peers but queue on the current single listener. Both workflows load executable authority from `main` and publish head-bound advisory statuses; see [`docs/MULTI_AGENT_REVIEW.md`](docs/MULTI_AGENT_REVIEW.md) before treating either as an enforced merge or investment-risk gate. Risk Gate business scope/process is selected by a bounded subagent; GitHub status and evidence validation remain deterministic. Interactive CI HumanGate approval is not yet wired.
 
 **Code style**: Black (line length 100), Ruff (target py312), type hints required.
 

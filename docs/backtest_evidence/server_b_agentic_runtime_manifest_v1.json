@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "runtime_id": "quant-risk-backtest-py310-57fbab-v1",
+  "server_role": "server-b-risk-executor",
+  "provisioning": "one-time-prebuilt-no-per-pr-install",
+  "runtime": {
+    "path": "/srv/quant/envs/quant-risk-backtest-py310-57fbab-v1",
+    "python_path": "/srv/quant/envs/quant-risk-backtest-py310-57fbab-v1/bin/python",
+    "python_version": "3.10.12",
+    "python_sha256": "d6bca2b84e73c7775a0dd5e6a76899cfe4ee62863d7c8f88513811d1fda23f49",
+    "pip_freeze_sha256": "6b4dfaad38bf23064c4592c1bfdc9edd0ddb8c7b8afe0e82fb4a01017acc3a97",
+    "payload_tree_sha256_excluding_manifest": "374d98cd5e49ffaf586fef862aeb8360ce79d233dde3fac2cd2eda3ede9f409d",
+    "editable_import_shims_present": false
+  },
+  "engine": {
+    "path": "/srv/quant/envs/quant-risk-engine-57fbab670666-v1",
+    "source_commit": "57fbab67066656dd2c933fc60864d7a5fe58f2d6",
+    "tree_sha256": "6df52f40989ccc9dd5080b64e2e997479ef28653263bb9b23edff42b54b32c6d",
+    "single_asset_adapter_sha256": "40f3ab6b1454f3818db67cff955c7d75b94b3bd0c66dc9bf1a61715c84067888"
+  },
+  "snapshot": {
+    "path": "/srv/quant/envs/quant-risk-snapshot-rb-1m-d31e17-v1",
+    "snapshot_id": "quant-risk-rb-1m-d31e17-v1",
+    "manifest_sha256": "4fc621a0cf6380be29a2c76a689dda0de30af2d4cdfdc3b817f52d48857db83e",
+    "content_sha256": "60c3961a0f7c9fb4befd4cd4d32415ef93adc25da6fb4dd1f06e140e14fa29db",
+    "tree_sha256": "89d7c4980b2bfdfb25201a561e8b98eb0e79682ec5b11a8646274846c2cd0931"
+  },
+  "access": {
+    "owner": "root",
+    "runner_identity": "gha-multiagent-review",
+    "runner_access": "read-execute-only",
+    "network_policy": "executor-must-run-in-a-new-network-namespace",
+    "raw_cos_credentials_present": false
+  },
+  "limitations": [
+    "The current registered handler runs the external engine built-in dual_ma strategy and does not execute pull-request strategy source.",
+    "A pull-request strategy remains not_evaluable until a sandboxed target-position adapter binds the exact head blob and manifest digest.",
+    "Correlation and capacity evidence are not available in the current snapshot and must not be replaced by zero."
+  ]
+}

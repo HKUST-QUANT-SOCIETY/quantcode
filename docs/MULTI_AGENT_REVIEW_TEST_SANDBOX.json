@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sandbox_id": "quantcode-test-sandbox-a3cd117-v8",
+  "sandbox_id": "quantcode-test-sandbox-a3cd117-v11",
   "built_on": "2026-08-24",
   "platform": {
     "os": "ubuntu",
@@ -24,8 +24,15 @@
     "pip_check": "passed"
   },
   "wrapper": {
-    "path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh",
-    "sha256": "9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3",
+    "path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v8/run_quantcode_review_tests.sh",
+    "sha256": "cf1589793397bd4683098b1b0a2ca7102dcc0081ae11cee81ece463e0b73225d",
+    "sandbox_parent_env": "QUANT_REVIEW_SANDBOX_PARENT",
+    "supported_modes": [
+      "pytest",
+      "risk-gate"
+    ],
+    "risk_gate_source": "legacy trusted-base integration smoke only; production uses dynamic Risk Scout workflow",
+    "risk_gate_github_token_in_sandbox": false,
     "network_namespace": "isolated",
     "ipc_namespace": "isolated",
     "uts_namespace": "isolated",
@@ -86,14 +93,15 @@
     "runner_can_write_trusted_assets": false
   },
   "verification": {
-    "quantcode_tests_passed": 589,
+    "quantcode_tests_passed": 597,
     "quantcode_tests_skipped": 8,
     "warnings": 1,
-    "elapsed_seconds": 19.19,
+    "elapsed_seconds": 19.18,
     "runner_process_restart_seconds": 10,
     "runner_broker_reconnect_seconds_observed": 71,
     "runner_single_listener_recovery": "passed",
     "stale_sandbox_cleanup": "passed",
+    "risk_gate_mode": "legacy smoke completed with acceptance pass and no GitHub side effect",
     "test_mode": "offline isolated chroot",
     "project_import_source": "PR checkout only"
   }

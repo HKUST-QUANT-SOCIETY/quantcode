@@ -9,6 +9,14 @@ from schemas.risk_profile import RiskProfile, RiskThresholds
 from tools.common.request_human_review import request_human_review_tool
 from tools.registry import ToolDef, register_tool
 from tools.risk import risk_tools
+from tools.risk.dynamic_scout import (
+    get_risk_policy_tool,
+    list_risk_capabilities_tool,
+    list_risk_context_tool,
+    read_risk_context_tool,
+    spawn_risk_scout_tool,
+    submit_risk_gate_task_tool,
+)
 from tools.risk_stub_tool import calc_risk_stub_tool
 
 
@@ -138,6 +146,12 @@ register_tool(generate_risk_profile_tool)
 register_tool(check_gate_tool)
 register_tool(write_pr_comment_tool)
 register_tool(request_human_review_tool)  # Day 4 俞高磊：注册 HumanGate interrupt tool
+register_tool(spawn_risk_scout_tool)
+register_tool(list_risk_context_tool)
+register_tool(read_risk_context_tool)
+register_tool(list_risk_capabilities_tool)
+register_tool(get_risk_policy_tool)
+register_tool(submit_risk_gate_task_tool)
 
 __all__ = [
     "read_blackboard_tool",
@@ -147,4 +161,10 @@ __all__ = [
     "check_gate_tool",
     "write_pr_comment_tool",
     "request_human_review_tool",
+    "spawn_risk_scout_tool",
+    "list_risk_context_tool",
+    "read_risk_context_tool",
+    "list_risk_capabilities_tool",
+    "get_risk_policy_tool",
+    "submit_risk_gate_task_tool",
 ]

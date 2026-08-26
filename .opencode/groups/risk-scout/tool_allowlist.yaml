@@ -1,0 +1,8 @@
+# Child-only Risk Scout capability boundary. The parent risk agent receives
+# only spawn_risk_scout; these tools are visible inside the persisted child.
+allowlist:
+  - list_risk_context
+  - read_risk_context
+  - list_risk_capabilities
+  - get_risk_policy
+  - submit_risk_gate_task

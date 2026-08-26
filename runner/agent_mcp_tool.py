@@ -19,6 +19,7 @@ Day 7 新增 start/resume 两阶段协议：
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, Literal
 
@@ -98,7 +99,10 @@ ORCHESTRATOR_DISPATCH: dict[str, list[tuple[tuple[str, ...], str]]] = {
 
 def _resolve_skill_name(skill_name: str | None, group: str, task: str) -> str | None:
     """若 skill_name 是通用编排器，尝试匹配执行器子 skill。"""
-    if skill_name is None or group not in ORCHESTRATOR_DISPATCH:
+    if skill_name is None:
+        # Risk no longer defaults to the legacy fixed RiskProfile pipeline.
+        return "risk-gate" if group == "risk" else None
+    if group not in ORCHESTRATOR_DISPATCH:
         return skill_name
     task_lower = task.lower()
     for patterns, sub_skill in ORCHESTRATOR_DISPATCH[group]:
@@ -215,13 +219,20 @@ def _start_mode(
         f"{make_thread_id(group, 'mcp_compose')}-{uuid.uuid4().hex[:8]}"
     )
 
-    # Day 5 fix: risk 组启动时读取 pending_risk_reviews，接收 model→risk 跨组流触发
+    # Read the shared model -> risk queue and give the parent only bounded,
+    # redacted handoff context. The child Scout will create its own evidence.
     task = args.task
+    risk_parent_context_items: list[dict[str, Any]] = []
+    risk_parent_context_required = False
     if group == "risk":
         try:
-            from tools.blackboard.blackboard_service import get_blackboard_service, BlackboardScope
-            from schemas.groups import GroupName
-            service = get_blackboard_service()
+            from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
+            from schemas import BlackboardScope, GroupName
+
+            service = BlackboardService(
+                session_id=DEFAULT_SESSION_ID,
+                requester_group=GroupName.RISK,
+            )
             queue_entry = service.get_entry(
                 BlackboardScope.PROJECT,
                 None,
@@ -231,7 +242,47 @@ def _start_mode(
             if queue_entry and isinstance(queue_entry.value, dict):
                 reviews = queue_entry.value.get("reviews", {})
                 if reviews:
-                    task = f"{task}\n\n[Pending risk reviews from model group: {len(reviews)} items]"
+                    for review_id, review in sorted(reviews.items()):
+                        if not isinstance(review, dict):
+                            continue
+                        if review.get("status", "pending") != "pending":
+                            continue
+                        risk_parent_context_required = True
+                        context_ref = (
+                            "handoff-"
+                            + hashlib.sha256(str(review_id).encode("utf-8")).hexdigest()[:16]
+                        )
+                        content = review.get("context_snapshot")
+                        if not isinstance(content, (dict, list, str, int, float, bool)):
+                            content = {
+                                key: review.get(key)
+                                for key in ("model_name", "pr_url", "commit_sha", "from_group")
+                            }
+                        risk_parent_context_items.append(
+                            {
+                                "context_ref": context_ref,
+                                "kind": "model-risk-handoff",
+                                "locator": (
+                                    "blackboard:project:shared.pending_risk_reviews:"
+                                    f"{review_id}"
+                                ),
+                                "summary": (
+                                    f"Redacted {review.get('from_group', 'upstream')} handoff "
+                                    f"for {review.get('model_name') or review_id}"
+                                )[:2048],
+                                "content": content,
+                                "redacted": True,
+                            }
+                        )
+                    # Do not put even redacted handoff descriptors in the
+                    # parent prompt: the child receives them through its
+                    # in-memory, tool-gated session. This avoids prompt
+                    # injection and accidental provider egress at the parent.
+                    task = (
+                        f"{task}\n\n[RISK_HANDOFF_AVAILABLE] "
+                        f"{len(risk_parent_context_items)} bounded item(s); "
+                        "spawn the Risk Scout child now."
+                    )
         except Exception:
             pass  # 读取失败不影响正常流程
 
@@ -240,6 +291,28 @@ def _start_mode(
         model=model,
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
+        allowed_tool_ids=(
+            {"spawn_risk_scout"}
+            if group == "risk" and resolved_skill in {"risk", "risk-gate"}
+            else None
+        ),
+        tool_context={
+            "risk_parent_context_items": risk_parent_context_items,
+            "risk_parent_context_required": risk_parent_context_required,
+            "risk_project_id": "quantcode",
+            "risk_event_id": (
+                "handoff-"
+                + hashlib.sha256(
+                    "|".join(
+                        item["context_ref"] for item in risk_parent_context_items
+                    ).encode("utf-8")
+                ).hexdigest()[:16]
+                if risk_parent_context_items
+                else "runtime-" + hashlib.sha256(task.encode("utf-8")).hexdigest()[:16]
+            ),
+            "risk_parent_task_id": "T1",
+            "risk_child_task_id": "T1.1",
+        },
     )
 
     final_state: dict[str, Any] = {}
@@ -645,8 +718,12 @@ def _format_result(state: dict, group: str) -> dict[str, Any]:
     if last_msg is not None:
         final_text = str(getattr(last_msg, "content", "")) if hasattr(last_msg, "content") else ""
 
+    task_status = state.get("task_status")
+    status = {"done": "completed", "abandoned": "error"}.get(
+        task_status, "stopped"
+    )
     result: dict[str, Any] = {
-        "status": "completed" if state.get("task_status") == "done" else "stopped",
+        "status": status,
         "iterations": state.get("iterations", 0),
         "thread_id": state.get("thread_id", ""),
         "final_message": final_text,

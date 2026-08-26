@@ -1,0 +1,239 @@
+schema_version: 1
+
+orchestration:
+  # Current trusted dispatcher binds exactly one request/step to one evidence
+  # Artifact. Multi-step plans remain valid planning Artifacts but are not
+  # marked execution-ready until the DAG dispatcher is deployed.
+  max_auto_steps: 1
+  min_not_required_confidence: 0.90
+
+# This is a trusted capability registry, not a fixed Risk Gate checklist.
+# The Risk Scout may design new domains and process steps for each PR.  Only
+# steps mapped to an execution_ready capability may run automatically; unknown
+# capabilities remain visible in the task Artifact and fail closed.
+capabilities:
+  single-asset-backtrader-v1:
+    description: Execute a head-bound single-asset quantitative backtest against an immutable snapshot.
+    handler: trusted-backtest-adapter
+    input_contract: RiskGatePlanProposal
+    output_contract: BacktestEvidence
+    execution_ready: true
+    step_contract:
+      evidence_outputs: [backtest-evidence.json]
+      acceptance_criteria:
+        - Produce canonical BacktestEvidence bound to the task, plan, step, request, and immutable inputs.
+        - Satisfy every required temporal, cost, sandbox, reproducibility, metric, and policy check.
+      failure_action: block
+    execution_contract:
+      adapter_id: single-asset-backtrader-v1
+      risk_policy_id: quant-risk-v1
+      subject_kinds: [strategy, model]
+      data_request:
+        logical_dataset: cta-benchmark-rb-1m
+        fields: [timestamp, open, high, low, close, volume]
+        symbols: [rb]
+        start_date: '2020-01-01'
+        end_date: '2020-12-13'
+        require_immutable_snapshot: true
+      window:
+        oos_start: '2020-01-01'
+        oos_end: '2020-12-13'
+      execution_policy:
+        fill_time: next bar open
+        lag_bars: 1
+        commission_bps: {exclusive_minimum: 0}
+        slippage_bps: {exclusive_minimum: 0}
+        stamp_duty_bps: 0
+        enforce_suspension: false
+        enforce_price_limits: false
+        enforce_t_plus_one: false
+      adapter_parameters:
+        strategy_name: {const: dual_ma}
+        strategy_version: {const: '1.0'}
+        short_window: {type: integer, minimum: 1}
+        long_window: {type: integer, minimum: 2}
+        position_size: {type: number, exclusive_minimum: 0, maximum: 1}
+        constraint: short_window must be smaller than long_window
+      limitations:
+        - The handler evaluates the catalog-pinned external dual_ma engine, not PR strategy source.
+        - Correlation and capacity evidence are not yet materialized, so the final gate cannot pass.
+  portfolio-backtest-v1:
+    description: Execute a point-in-time portfolio backtest with governed universe and cost semantics.
+    handler: trusted-backtest-adapter
+    input_contract: RiskGatePlanProposal
+    output_contract: BacktestEvidence
+    execution_ready: false
+  factor-temporal-leakage-v1:
+    description: Trace observation, signal, decision, and execution timestamps for factor research.
+    handler: trusted-specialist-subagent
+    input_contract: DynamicRiskCheck
+    output_contract: RiskEvidenceArtifact
+    execution_ready: false
+  options-greeks-stress-v1:
+    description: Design and execute scenario shocks for options Greeks and nonlinear exposure.
+    handler: trusted-specialist-subagent
+    input_contract: DynamicRiskCheck
+    output_contract: RiskEvidenceArtifact
+    execution_ready: false
+  model-robustness-v1:
+    description: Evaluate stability, leakage, split integrity, and sensitivity for a changed model.
+    handler: trusted-specialist-subagent
+    input_contract: DynamicRiskCheck
+    output_contract: RiskEvidenceArtifact
+    execution_ready: false
+  portfolio-correlation-v1:
+    description: Measure contribution and correlation against the governed current portfolio snapshot.
+    handler: trusted-specialist-subagent
+    input_contract: DynamicRiskCheck
+    output_contract: RiskEvidenceArtifact
+    execution_ready: false
+  market-capacity-impact-v1:
+    description: Estimate capacity and market-impact risk from a governed liquidity snapshot.
+    handler: trusted-specialist-subagent
+    input_contract: DynamicRiskCheck
+    output_contract: RiskEvidenceArtifact
+    execution_ready: false
+
+risk_policies:
+  quant-risk-v1:
+    required_temporal_checks:
+      - strict_timestamp
+      - non_overlapping_oos
+      - next_bar_fill
+    required_cost_checks:
+      - commission_nonzero
+      - slippage_nonzero
+    required_sandbox_checks:
+      - network_disabled
+      - raw_data_read_only
+      - pr_strategy_source_bound
+    required_metrics:
+      - sharpe
+      - volatility
+      - max_drawdown
+      - tail_risk_var_99
+      - turnover
+      - trading_cost
+      - position_limit
+      - correlation_with_existing
+      - capacity_estimate_usd
+    thresholds:
+      - code: NEGATIVE_SHARPE
+        metric: sharpe
+        comparator: min
+        limit: 0.0
+        disposition: needs_human
+        message: Validated out-of-sample Sharpe is negative.
+      - code: MAX_DRAWDOWN
+        metric: max_drawdown
+        comparator: max
+        limit: 0.15
+        disposition: needs_human
+        message: Validated out-of-sample drawdown exceeds the current risk-appetite limit.
+      - code: POSITION_CONCENTRATION
+        metric: position_limit
+        comparator: max
+        limit: 0.80
+        disposition: needs_human
+        message: Peak position concentration exceeds the current risk-appetite limit.
+      - code: CORRELATION_LIMIT
+        metric: correlation_with_existing
+        comparator: abs_max
+        limit: 0.60
+        disposition: needs_human
+        message: Absolute correlation with the existing portfolio exceeds the diversification limit.
+    reviewer_finding_rules:
+      - code: REGIME_SENSITIVITY
+        disposition: needs_human
+      - code: UNMODELLED_TAIL
+        disposition: block
+    non_overridable_blocks:
+      - missing_provenance
+      - missing_cost_model
+      - temporal_leakage
+      - non_reproducible
+      - missing_required_metric
+
+adapters:
+  single-asset-backtrader-v1:
+    entrypoint: single_asset_backtest.runner:run_single_asset_backtest
+    code_blob_sha256: 40f3ab6b1454f3818db67cff955c7d75b94b3bd0c66dc9bf1a61715c84067888
+    engine_id: quantsociety_backend@57fbab67066656dd2c933fc60864d7a5fe58f2d6
+    engine_digest: 40f3ab6b1454f3818db67cff955c7d75b94b3bd0c66dc9bf1a61715c84067888
+    input_contract: single_asset_ohlcv_and_strategy_adapter_v1
+    execution_zone: dedicated-risk-backtest
+    execution_ready: true
+    allowed_datasets: [cta-benchmark-rb-1m]
+  portfolio-backtest-v1:
+    entrypoint: backtest_layer/portfolio_backtest/run_from_config.py
+    code_blob_sha256: 5b089d13331c9e071de6ac572861a420e3e691bb048ad3e826d083580360ea3f
+    engine_id: quantsociety_backend@57fbab67066656dd2c933fc60864d7a5fe58f2d6
+    engine_digest: 5b089d13331c9e071de6ac572861a420e3e691bb048ad3e826d083580360ea3f
+    input_contract: holdings_kline_tradable_benchmark_v1
+    execution_zone: dedicated-risk-backtest
+    execution_ready: false
+    allowed_datasets:
+      - ashare-stock-daily-bar
+      - ashare-index-constituent
+
+datasets:
+  cta-benchmark-rb-1m:
+    catalog_only: false
+    execution_ready: true
+    execution_zone: server-b-shared-readonly
+    fields: [timestamp, symbol, open, high, low, close, volume, open_interest]
+    frequency: 1min
+    immutable_identity: content_sha256
+  ashare-stock-daily-bar:
+    catalog_only: true
+    execution_ready: false
+    execution_zone: risk-materializer
+    logical_uri: clean_data/ashare/lqtp_data/StockDailyBar/{date}.parquet
+    fields: [TradeDate, Symbol, Open, High, Low, Close, PreClose, Volume, Amount, Return, Factor, Vwap, IsSuspend]
+    units:
+      Return: basis_points
+    immutable_identity: cos_version_id_and_sha256
+  ashare-stock-valuation-daily:
+    catalog_only: true
+    execution_ready: false
+    execution_zone: risk-materializer
+    logical_uri: clean_data/ashare/lqtp_data/StockValuationDaily/{date}.parquet
+    fields: [TradeDate, Symbol, PbRatio, MarketCap, TurnoverRatio]
+    immutable_identity: cos_version_id_and_sha256
+  ashare-stock-indicator:
+    catalog_only: true
+    execution_ready: false
+    execution_zone: risk-materializer
+    logical_uri: clean_data/ashare/lqtp_data/StockIndicator/{date}.parquet
+    fields: [PubDate, ReportPeriodEndDate, Symbol, Roe]
+    units:
+      Roe: percent
+    temporal_policy: pit_asof_backward_by_pub_date_next_trading_day
+    semantic_limitations:
+      - Roe is not equivalent to roe_ttm; planner must not silently substitute it.
+    immutable_identity: cos_version_id_and_sha256
+  ashare-index-constituent:
+    catalog_only: true
+    execution_ready: false
+    execution_zone: risk-materializer
+    logical_uri: clean_data/ashare/lqtp_data/IndexConstituent/{date}.parquet
+    fields: [IndexSymbol, Symbol, Weight]
+    units:
+      Weight: percent
+    aliases:
+      CSI1000: 000852.SH
+    immutable_identity: cos_version_id_and_sha256
+
+planner_capabilities:
+  allowed_operations:
+    - list_changed_files
+    - read_changed_files
+    - list_risk_capabilities
+    - get_policy_ref
+    - submit_risk_gate_task
+  forbidden_operations:
+    - arbitrary_shell
+    - raw_cos_read
+    - production_write
+    - github_comment
+    - tool_outside_execution_allowlist

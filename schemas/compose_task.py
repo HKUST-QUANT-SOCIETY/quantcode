@@ -22,7 +22,6 @@ Changelog vs initial draft at end of file.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
 from typing import Generic, TypeVar
 from uuid import UUID, uuid4
 
@@ -34,6 +33,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from ._compat import StrEnum
 
 # ---------------------------------------------------------------------------
 # Identifiers & constants

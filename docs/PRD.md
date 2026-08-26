@@ -72,10 +72,10 @@
 
 **模型组同学的"明天"**：
 1. 在 QuantCode 用 `model` Compose 流（`model:pr-submit` skill 自动填风控元数据）
-2. 自动触发风控组的 `risk` Compose 流（`risk:detect → analyze → schema-gen → ci-gate`）
-3. 10 分钟内 PR 评论里出现 `RiskProfile` JSON + 自动结论
-4. 越过阈值 → 走 `HumanGate`，等风控组同学人工审批；通过阈值 → 自动 approve 等人 review
-5. 风控组只需要 review JSON，不用从 0 开始算
+2. 自动创建 Risk Scout subagent，定位这次是否需要 Risk Gate、范围、流程和证据
+3. PR 评论里出现 head-bound `RiskGateTaskArtifact` 和动态检查进度
+4. 受信 specialist 产出 evidence；缺能力/证据 fail closed，`needs_human` 才进入 HumanGate
+5. 风控组 review 结构化 Artifact 和证据，不用从 0 开始定位检查内容
 
 ---
 
@@ -90,7 +90,7 @@
 | `fundamental` | 基本面研究 + 研报 PDF | 用户（Lead） |
 | `factor` | 因子开发 → AutoEval → 主线 | 肖骥超 |
 | `model` | 模型 PR 元数据 → 跨组发起 | 陈镇鸿 |
-| `risk` | PR 风控门禁 → HumanGate | 杨欣琳 |
+| `risk` | 业务事件 → 动态 Risk Scout → Artifact / HumanGate | 杨欣琳 |
 | `strategy` | 组合构建、回测、上线 | 待定 |
 | `options` | 波动率曲面、Greeks、对冲 | 刘炽 |
 
@@ -136,37 +136,50 @@
 
 每套流 = 一组 SKILL.md + 调度规则 + 默认 tool 集 + MEMORY.md。详细 skill 列表见 `docs/QuantCode_Design.md` §4.3。
 
-#### 4.1.1 risk Compose 流（PR 风控门禁）
+#### 4.1.1 risk Compose 流（动态业务 Risk Gate）
 
 **用户故事**：
 > 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，不用等风控组人工 review 就知道哪里要改。
 
-**Available Tools**（Agent 可调用）：
-- `read_blackboard(key)` - 读取 model 组写入的 ModelSpec
-- `calc_risk(returns)` - 计算风控指标（VaR/MaxDD/Sharpe 等）
-- `generate_risk_profile(metrics)` - 生成结构化的 RiskProfile
-- `check_gate(profile)` - 判断是否需要触发 HumanGate
-- `write_pr_comment(pr_number, comment)` - 写风控分析结果到 PR
+该用户故事只是量化策略场景。产品总契约不得把所有 Risk Gate 固定为这些指标；权限、数据、
+组合、期权、模型稳定性或未来新业务风险均由 Risk Scout 根据本次上下文动态定位。
+
+**Risk Scout Tools**（只读/提交型）：
+- `list_changed_files` / `read_changed_files`
+- `list_risk_context` / `read_risk_context`（OpenCode / MCP 业务 handoff）
+- `list_risk_capabilities` / `get_policy_ref` / `get_risk_policy`
+- `submit_risk_gate_task`
+
+PR provider egress 仅包含 changed-file diff 和受信 capability/policy metadata；业务运行时只发送
+父任务显式提供、通过大小与 credential scan 的 redacted context。原始 context 不写入 task 文件，
+只持久化 locator、摘要、内容哈希、task event 和最终 Artifact。
 
 **System Prompt**（核心指令）：
-> 你是 risk 组的风控分析 Agent。当接到任务时，你需要：
-> 1. 读取 model 组提交的模型元数据（从 Blackboard）
-> 2. 调用风控计算工具获得各项指标
-> 3. 生成符合 RiskProfile schema 的结构化报告
-> 4. 如果 VaR/MaxDD 超阈值，触发人工审批
-> 5. 最终把分析结果写回 PR
+> 你是新创建的 Risk Scout subagent。检查本次 PR / 业务事件，定位 Risk Gate 的
+> 纳入/排除范围、要引用的政策和证据、检查步骤与受信 capability；不要套用固定指标清单。
+> 你没有 shell、写权限、密钥、原始数据或 GitHub/HumanGate 副作用。最终只提交
+> `RiskGateTaskArtifact`。
 
-**输入**：任务描述（"分析 PR #123 的风控"）+ Blackboard key（`model.pr.123`）
+**输入**：repository / PR / base+head SHA、bounded diff、Blackboard / Artifact context refs
 
-**输出**：符合 `schemas/risk-profile.schema.json` 的 `RiskProfile`，写入 PR comment
+**输出**：`RiskGateTaskArtifact` → specialist evidence → 最终 `RiskGateArtifact`；`RiskProfile`
+仅作为量化策略 attachment。
+
+**当前交付边界**：Server B PR v1 和 OpenCode/MCP 业务 runtime 均已实现 dynamic Scout task
+Artifact；runtime 会真实创建、运行并持久化 `ComposeTask` child。业务父任务既然已经请求 Gate，
+child 只能返回 `required | indeterminate`，不能自行取消。multi-step specialist dispatcher、通用
+evidence reducer 与交互式 HumanGate resume 仍未完成，当前必须 `not_evaluable` / advisory failure，
+不能伪装 pass。
 
 **验收标准**：
 ```python
-assert risk_json["max_drawdown"] <= 0.20
-assert risk_json["position_limit"] <= 0.30
-assert abs(risk_json["correlation_with_existing"]) <= 0.60
-assert risk_json["tail_risk_var_99"] is not None
-# 越过阈值时自动触发 HumanGate
+assert artifact["binding"]["head_sha"] == current_pr_head  # PR adapter
+# 或 artifact["binding"]["context_sha256"] == canonical_context_digest
+assert artifact["scope"]["coverage"]["complete"] is True
+assert all(reason["evidence_refs"] for reason in artifact["trigger"]["reasons"])
+assert artifact["artifact_sha256"] == canonical_sha256(artifact_without_digest)
+# 未注册 capability、缺证据、stale head、异常或 indeterminate 均不能 pass
+# 只有 validated final verdict == needs_human 才创建 HumanGate
 ```
 
 #### 4.1.2 fundamental Compose 流（基本面 + PIT-RAG）

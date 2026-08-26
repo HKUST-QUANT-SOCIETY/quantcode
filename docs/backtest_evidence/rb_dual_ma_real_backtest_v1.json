@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "artifact_type": "real_backtest",
+  "run_id": "fa1d647581d0aa518e2a10c4",
+  "data": {
+    "dataset_id": "cta-benchmark-rb-1m-500k",
+    "source_sha256": "d31e17b4d1410acc43039ef0a8d70965122c3c5bdd21aa068d5f454e7b6582cc",
+    "source_size_bytes": 22292909,
+    "normalized_sha256": "60c3961a0f7c9fb4befd4cd4d32415ef93adc25da6fb4dd1f06e140e14fa29db",
+    "rows": 500000,
+    "symbol": "rb",
+    "start": "2020-01-01T09:00:00",
+    "end": "2020-12-13T14:19:00",
+    "frequency": "1min",
+    "strict_temporal_validation": true
+  },
+  "strategy": {
+    "name": "dual_ma",
+    "version": "1.0",
+    "params": {
+      "short_window": 20,
+      "long_window": 100,
+      "position_size": 1.0
+    }
+  },
+  "execution": {
+    "initial_cash": 1000000.0,
+    "commission": 0.0001,
+    "slippage_perc": 0.0001,
+    "metrics_profile": "industrial",
+    "risk_free_rate_annual": 0.0,
+    "frequency": "1min",
+    "allow_short": false,
+    "signal_execution": "Backtrader order generated on close-derived signal and executed on a later bar",
+    "engine_repo_sha": "57fbab67066656dd2c933fc60864d7a5fe58f2d6",
+    "engine_data_fingerprint": "3e24773ed863a8a34bf1cdf3949a6a11dd8aa11e165f6356525cd136058752c9"
+  },
+  "metrics": {
+    "total_return": -0.7406258184617642,
+    "annual_return": -0.6245369205749354,
+    "volatility": 0.09037823587446978,
+    "sharpe": -6.910257923626453,
+    "max_drawdown": -0.7464468916716153,
+    "turnover": 6663.44506020242,
+    "trades": 6689,
+    "commission_paid": 364510.67379108776,
+    "downside_volatility": 0.07755509492634309,
+    "sortino": -8.052816145323282,
+    "calmar": -0.8366796453212216,
+    "hit_rate_bar": 0.2401115420853329,
+    "alpha": 0.0,
+    "beta": 0.0,
+    "capacity_estimate": 0.0,
+    "turnover_sensitivity": {
+      "x0_5": 182255.33689554388,
+      "x1_0": 364510.67379108776,
+      "x1_5": 546766.0106866317
+    },
+    "information_ratio": 0.0,
+    "tracking_error": 0.0,
+    "treynor": 0.0,
+    "up_market_capture": 0.0,
+    "down_market_capture": 0.0,
+    "r_squared": 0.0,
+    "skew": -0.0372886071354444,
+    "kurtosis": 3.11588332628235,
+    "var_95": -0.000273309573392555,
+    "cvar_95": -0.00037690435688948775,
+    "max_drawdown_duration_bars": 498082,
+    "avg_drawdown": -0.4571187688406678,
+    "commission_to_turnover": 54.70303581673333,
+    "turnover_annualized": 4837.01961677663,
+    "ulcer_index": 0.5050201145969501,
+    "mar_ratio": -0.8366796453212216,
+    "sterling_ratio": -2.4761965408874707,
+    "burke_ratio": -0.8366203736643308,
+    "tail_ratio": 0.979430926409621,
+    "omega_ratio": 0.9380589424482063,
+    "recovery_factor": -0.9922016244225826,
+    "hurst_exponent": -0.0001944231221494047,
+    "time_in_market": 0.48466396346476603,
+    "exposure": 0.4827477893879358,
+    "win_rate_trade": 0.25269138755980863,
+    "profit_factor": 0.5542357462015458,
+    "max_consecutive_losses": 22,
+    "avg_holding_period_bars": 72.42165071770334,
+    "expectancy": -221.61489444028786,
+    "kelly_fraction": -0.20323623762790022,
+    "avg_mfe": 0.0020708605850644135,
+    "avg_mae": -0.0015641374861405928
+  },
+  "risk_inputs": {
+    "max_drawdown": 0.7464468916716153,
+    "tail_risk_var_99": 0.00044271152099262245,
+    "position_limit": 0.9999972682856246,
+    "correlation_with_existing": null,
+    "capacity_estimate_usd": null,
+    "missing_evidence": [
+      "existing portfolio return series for correlation",
+      "ADV/participation/impact inputs for capacity"
+    ]
+  },
+  "summary": {
+    "schema_version": "1.0",
+    "bars": 499901,
+    "start": "2020-01-01T10:39:00",
+    "end": "2020-12-13T14:19:00",
+    "initial_cash": 1000000.0,
+    "final_equity": 259374.18153823575,
+    "strategy_name": "dual_ma",
+    "strategy_version": "1.0"
+  },
+  "artifacts": {
+    "normalized_ohlcv": "normalized_ohlcv.parquet",
+    "equity_curve": "equity_curve.parquet"
+  }
+}

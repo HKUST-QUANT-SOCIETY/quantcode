@@ -387,11 +387,8 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
     assert "autoeval" in tool_names, f"factor group 应有 autoeval,got {tool_names}"
 
 
-def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
-    """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call check_gate。
-
-    端到端:subprocess → stdio → tools/call → 真实 check_gate 执行 → 返 JSON 响应。
-    """
+def test_mcp_subprocess_stdio_risk_group_denies_legacy_check_gate(tmp_path):
+    """Risk MCP exposes dynamic Scout only and rejects a legacy tool by name."""
     import os
     import subprocess
     import sys
@@ -415,8 +412,8 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 1. tools/list(确认 check_gate 可用)
-    # 2. tools/call check_gate with high_risk profile
+    # 1. tools/list confirms only the dynamic entrypoint is visible.
+    # 2. a caller that knows the legacy name still cannot invoke it.
     list_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
     call_req = json.dumps({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
@@ -439,6 +436,13 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     lines = [l for l in stdout.split("\n") if l.strip()]
     assert len(lines) >= 2, f"应有 ≥2 行响应(list + call),got {lines}"
 
+    list_resp = json.loads(lines[0])
+    listed_names = {
+        item["name"] for item in list_resp["result"].get("tools", [])
+    }
+    assert "spawn_risk_scout" in listed_names
+    assert "check_gate" not in listed_names
+
     # 解析第二行(tools/call 响应)
     try:
         call_resp = json.loads(lines[1])
@@ -447,14 +451,6 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     assert call_resp.get("id") == 2, f"call 响应 id 应是 2, got {call_resp}"
     assert "result" in call_resp, f"call 响应缺 result: {call_resp}"
     result = call_resp["result"]
+    assert result.get("isError") is True
     assert "content" in result, f"call 缺 content: {result}"
-    # content[0].text 是 str,parse 成 dict
-    text = result["content"][0]["text"]
-    call_data = json.loads(text)
-    # check_gate 应返 requires_human=True(因 var 0.06 > 0.04 阈值)
-    assert call_data.get("requires_human") is True, (
-        f"check_gate 应返 requires_human=True,got {call_data}"
-    )
-    assert "tail_risk_var_99" in call_data.get("reasons", []), (
-        f"reasons 应含 tail_risk_var_99,got {call_data.get('reasons')}"
-    )
+    assert "PermissionError" in result["content"][0]["text"]

@@ -1,10 +1,10 @@
 """QuantCode Pattern 5 — HumanGate (Human-in-the-Loop Gate)."""
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from ._compat import StrEnum
 
 
 class HumanGateStatus(StrEnum):

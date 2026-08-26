@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "quant-risk-rb-1m-d31e17-v1",
+  "dataset_id": "cta-benchmark-rb-1m-500k",
+  "source_content_sha256": "d31e17b4d1410acc43039ef0a8d70965122c3c5bdd21aa068d5f454e7b6582cc",
+  "source_size_bytes": 22292909,
+  "normalized_content_sha256": "60c3961a0f7c9fb4befd4cd4d32415ef93adc25da6fb4dd1f06e140e14fa29db",
+  "rows": 500000,
+  "symbol": "rb",
+  "frequency": "1min",
+  "start": "2020-01-01T09:00:00",
+  "end": "2020-12-13T14:19:00",
+  "columns": ["timestamp", "open", "high", "low", "close", "volume"],
+  "strict_temporal_validation": true,
+  "materialization": {
+    "timestamp_source": "datetime",
+    "symbol_selection": "largest row-count series",
+    "invalid_ohlc_rejected": true,
+    "duplicate_timestamp_rejected": true,
+    "negative_volume_clipped_to_zero": true
+  },
+  "immutable": true
+}

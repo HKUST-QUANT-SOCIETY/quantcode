@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from runner.blackboard import BlackboardService
+from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
 from schemas import BlackboardScope, GroupName, WritePolicy
 from tools.model.write_blackboard import _synthesize_task_id
 from tools.registry import ToolDef
@@ -20,6 +20,42 @@ class TriggerRiskFlowArgs(BaseModel):
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _redact_handoff_value(value: Any, *, depth: int = 0) -> Any:
+    """Bound a cross-group context snapshot and remove credential-shaped keys."""
+
+    if depth > 6:
+        return "[truncated-depth]"
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in list(value.items())[:100]:
+            lowered = str(key).lower()
+            if any(
+                part in lowered
+                for part in (
+                    "secret",
+                    "token",
+                    "password",
+                    "api_key",
+                    "apikey",
+                    "access_key",
+                    "private_key",
+                    "credential",
+                    "authorization",
+                )
+            ) or lowered in {"key", "auth"}:
+                result[str(key)] = "[redacted]"
+            else:
+                result[str(key)] = _redact_handoff_value(item, depth=depth + 1)
+        return result
+    if isinstance(value, list):
+        return [_redact_handoff_value(item, depth=depth + 1) for item in value[:100]]
+    if isinstance(value, str):
+        return value[:4096]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:4096]
 
 
 def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
@@ -42,12 +78,12 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
     db_path_str = ctx.get("blackboard_db_path")
     db_path = Path(db_path_str) if db_path_str else None
 
-    service = BlackboardService(
+    source_service = BlackboardService(
         db_path=db_path,
         session_id=thread_id,
         requester_group=from_group,
     )
-    source_entry = service.get_entry(
+    source_entry = source_service.get_entry(
         BlackboardScope.PROJECT,
         None,
         args.blackboard_key,
@@ -59,8 +95,15 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
         else {}
     )
 
+    # Cross-group handoffs use one shared control-plane session. The source is
+    # read in the producer session, then copied as a bounded redacted snapshot.
+    queue_service = BlackboardService(
+        db_path=db_path,
+        session_id=DEFAULT_SESSION_ID,
+        requester_group=from_group,
+    )
     queue_key = "shared.pending_risk_reviews"
-    existing = service.get_entry(
+    existing = queue_service.get_entry(
         BlackboardScope.PROJECT,
         None,
         queue_key,
@@ -86,10 +129,11 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
         "model_name": source_value.get("model_name"),
         "pr_url": source_value.get("pr_url"),
         "commit_sha": source_value.get("commit_sha"),
+        "context_snapshot": _redact_handoff_value(source_value),
         "triggered_at": _now_iso(),
     }
     reviews[str(review_id)] = review
-    queue_entry = service.write_value(
+    queue_entry = queue_service.write_value(
         scope=BlackboardScope.PROJECT,
         key=queue_key,
         value={"reviews": reviews},
@@ -97,6 +141,17 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
         written_by_task_id=task_id,
         written_by_group=from_group,
     )
+    if thread_id != DEFAULT_SESSION_ID:
+        # Keep the producer-session mirror for existing clients while the
+        # shared control-plane session is the cross-group source of truth.
+        source_service.write_value(
+            scope=BlackboardScope.PROJECT,
+            key=queue_key,
+            value={"reviews": reviews},
+            write_policy=WritePolicy.GROUP_APPEND,
+            written_by_task_id=task_id,
+            written_by_group=from_group,
+        )
     return {
         "risk_queue_key": queue_entry.key,
         "risk_queue_version": queue_entry.version,

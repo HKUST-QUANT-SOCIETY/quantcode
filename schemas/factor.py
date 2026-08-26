@@ -9,7 +9,6 @@ Business schemas are used as ComposeTask[TIn, TOut] type parameters:
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -20,6 +19,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from ._compat import StrEnum
 
 
 OperatorName = Annotated[str, StringConstraints(min_length=1)]

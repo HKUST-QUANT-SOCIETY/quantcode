@@ -13,6 +13,7 @@ from runner.agent_mcp_tool import (
     RunAgentArgs,
     _format_result,
     _run_agent_execute,
+    _start_mode,
     run_agent_tool,
 )
 
@@ -97,6 +98,72 @@ class TestRunAgentExecuteErrors:
         )
         assert result["status"] == "error"
         assert "thread_id" in result["error"].lower()
+
+
+def test_risk_start_spawns_only_dynamic_scout_and_hides_raw_handoff_from_parent_prompt(
+    tmp_path, monkeypatch
+):
+    import runner.agent_engine as engine_module
+    import runner.blackboard as blackboard_module
+
+    captured: dict = {}
+
+    class FakeEntry:
+        value = {
+            "reviews": {
+                "model-42": {
+                    "from_group": "model",
+                    "model_name": "alpha-v2",
+                    "context_snapshot": {
+                        "model_name": "alpha-v2",
+                        "deployment_target": "paper-trading",
+                    },
+                }
+            }
+        }
+
+    class FakeBlackboardService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_entry(self, *args, **kwargs):
+            return FakeEntry()
+
+    class FakeRunner:
+        def __init__(self, **kwargs):
+            captured["runner_kwargs"] = kwargs
+
+        def stream(self, **kwargs):
+            captured["stream_kwargs"] = kwargs
+            return {
+                "task_status": "done",
+                "thread_id": kwargs["thread_id"],
+                "messages": [],
+                "output_data": {"ok": True},
+                "artifacts": [],
+                "errors": [],
+            }
+
+    monkeypatch.setattr(blackboard_module, "BlackboardService", FakeBlackboardService)
+    monkeypatch.setattr(engine_module, "AgentRunner", FakeRunner)
+    result = _start_mode(
+        RunAgentArgs(task="Review pending model handoff", group="risk"),
+        "risk",
+        lambda messages, tools=None: None,
+        tmp_path / "checkpoints.db",
+        "risk-gate",
+    )
+
+    assert result["status"] == "completed"
+    assert captured["runner_kwargs"]["allowed_tool_ids"] == {"spawn_risk_scout"}
+    trusted_items = captured["runner_kwargs"]["tool_context"][
+        "risk_parent_context_items"
+    ]
+    assert trusted_items[0]["content"]["deployment_target"] == "paper-trading"
+    parent_task = captured["stream_kwargs"]["task"]
+    assert "RISK_HANDOFF_AVAILABLE" in parent_task
+    assert "deployment_target" not in parent_task
+    assert "context_snapshot" not in parent_task
 
 
 import pytest

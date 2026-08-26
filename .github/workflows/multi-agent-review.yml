@@ -8,7 +8,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
 
 concurrency:
-  group: quantcode-multi-agent-review-${{ github.event.pull_request.number }}
+  # A title/body edit is intentionally skipped by every job. Give that no-op
+  # run a unique key so it cannot cancel the real synchronize/base-change run.
+  group: >-
+    quantcode-multi-agent-review-${{ github.event.pull_request.number }}-${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && format('ignored-edit-{0}', github.run_id) || 'review' }}
   cancel-in-progress: true
 
 permissions: {}
@@ -24,7 +27,7 @@ env:
   PYTHONNOUSERSITE: "1"
   PYTHONSAFEPATH: "1"
   REVIEW_CI_RUNTIME: /srv/quant/envs/quant-review-374e0176-a3cd117-v2
-  REVIEW_CI_MANIFEST_SHA256: 43e2e59a9d88b3813d31d307746463f2d8c270719318d1002eaa039dad982d9c
+  REVIEW_CI_MANIFEST_SHA256: 9e55af41d56b94569faf073ecc3f8db2a7eefd31d31f03b8bbeb9e8fa5efbaa4
   REVIEW_CI_REQUIREMENTS_SHA256: 3b64c225ea6e20ed5be9ff966d4026c9dd85eea8fff54da1a9b3b5cb08a585a1
   REVIEW_CI_PIP_INSPECT_SHA256: ae198ba40f2773a40d80540a7281d77b887273c2a517b7c05e76648bfc9a19b9
   REVIEW_CI_TEST_DEPS: /srv/quant/envs/quantcode-testdeps-a3cd117-v1
@@ -50,10 +53,10 @@ env:
   REVIEW_CI_PYTHON_BASE: /srv/quant/envs/python-3.12.13-review-stable
   REVIEW_CI_PYTHON_SHA256: 547a8cb634bc4d7a58248b35c373612f5dd87cca3efcf7f80a8c338256c703cc
   REVIEW_CI_LIBPYTHON_SHA256: 407fd314d57b58aae561c7184ead0ad68d7a2c0621792a1d0480f89f5d4da114
-  REVIEW_CI_TEST_WRAPPER: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh
-  REVIEW_CI_TEST_WRAPPER_SHA256: 9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3
-  REVIEW_CI_TEST_SANDBOX_MANIFEST: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/test-sandbox-manifest-v8.json
-  REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256: c65a521fde6a4ad4512634cf1a8da965f70615f5ce7ef75b05ae674a00276449
+  REVIEW_CI_TEST_WRAPPER: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v8/run_quantcode_review_tests.sh
+  REVIEW_CI_TEST_WRAPPER_SHA256: cf1589793397bd4683098b1b0a2ca7102dcc0081ae11cee81ece463e0b73225d
+  REVIEW_CI_TEST_SANDBOX_MANIFEST: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v8/test-sandbox-manifest-v11.json
+  REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256: 8793cf8fe1b97016f180043f2b481750a881c808460f39c9d063b6508c70bf94
   LD_LIBRARY_PATH: /srv/quant/envs/python-3.12.13-review-stable/lib
 
 jobs:
@@ -127,7 +130,7 @@ jobs:
             exit 1
           fi
 
-          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v11.json"
           requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
           pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
           python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"
@@ -349,7 +352,7 @@ jobs:
           PR_REPO: ${{ github.workspace }}/quantcode
           REVIEW_CI_BIN: ${{ steps.runtime.outputs.cli }}
           REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
-          RUNNER_TEMP: ${{ env.REVIEW_CI_SANDBOX_TEMP }}
+          QUANT_REVIEW_SANDBOX_PARENT: ${{ env.REVIEW_CI_SANDBOX_TEMP }}
           PYTHONSAFEPATH: "1"
         working-directory: ${{ runner.temp }}
         run: |
@@ -453,7 +456,7 @@ jobs:
             echo "REVIEW_CI_REF must be a full 40-character commit SHA." >&2
             exit 1
           fi
-          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v11.json"
           requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
           pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
           python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"

@@ -1,29 +1,27 @@
 ---
 name: risk
-description: 风控组 Compose 主 skill——消费模型 PR，生成 RiskProfile，阈值 gate 与 HumanGate 审批
+description: 风控组 Compose 主 skill——按业务上下文创建 Risk Scout / specialist subagents，生成可追溯 Risk Gate Artifact
 group: risk
 owner: 杨欣琳
 pattern: Pattern 5 (Human-in-the-Loop Gate) + Pattern 1 (Orchestrator-Worker)
 tools:
-  - github_pr_comment
-  - risk_metrics
-  - backtest_run
-  - memory_read
-  - memory_write
-  - request_human_review
+  - spawn_risk_scout
 flows:
   - risk-gate
-schema_in: schemas.model.ModelSpec
-schema_out: schemas.risk_profile.RiskProfile
+schema_in: schemas.compose_task.ComposeTask
+schema_out: schemas.risk_gate_task.RiskGateTaskArtifact
 ---
 
 # Risk Group Agent
 
 ## 你是谁
 
-你是 **风控组（risk）** 的 Compose Orchestrator。当模型组提交 PR 或 handoff 风控 review 时，你分析策略风险、填充 `RiskProfile`，跑程序化阈值检查，必要时触发 **HumanGate** 并在 PR 上写结论评论。
+你是 **风控组（risk）** 的 Compose Orchestrator。当 PR、研究 Artifact 或业务 handoff 到达时，
+你先创建 Risk Scout subagent，让它动态定位需要 Risk Gate 的内容和流程；再按计划创建受限
+specialist subagents，汇总 evidence，必要时触发 **HumanGate**。
 
-**你是最后一道程序化闸门**；`needs_human` 时必须等人，不可自行 merge。
+业务检查内容不得写死成单一指标清单。固定的只能是 Artifact、安全、证据和审批边界；
+`needs_human` 时必须等人，不可自行 merge。
 
 ## 何时加载本 skill
 
@@ -35,66 +33,51 @@ schema_out: schemas.risk_profile.RiskProfile
 
 | Tool | 用途 | 注意 |
 |------|------|------|
-| `github_pr_comment` | 把 gate 结论写到 PR | `@dedupe_within`，key=`{pr_url}:{head_sha}:{verdict}` |
-| `risk_metrics` | 计算/读取 max_drawdown、VaR、相关性等 | Day 3 可用 `tools/risk_stub` + fixture |
-| `backtest_run` | 历史回测（stub 或 Server SSH） | 输入需含 `as_of_date`，防 lookahead |
-| `memory_read` / `memory_write` | 风控口径、历史案例 | 阈值变更写 GROUP MEMORY |
-| `request_human_review` | HumanGate 等人审批 | verdict=`needs_human` 时必调 |
+| `spawn_risk_scout` | 创建真实 ComposeTask child，返回动态任务 Artifact | 只传 redacted context；child 有独立 allowlist |
 
-## Compose 子 skill（按依赖顺序）
+## Compose 子任务（动态生成）
 
 ```
-risk:detect      → 发现新 PR / handoff 事件
-risk:analyze     → 读代码 + 回测（或 stub metrics）
-risk:schema-gen  → 填充 RiskProfile
-risk:ci-gate     → evaluate_verdict(thresholds)
-risk:feedback    → PR 评论 + 通知 model 组
+risk:locate      → 创建 Risk Scout，定位是否需要 Gate、范围与证据
+risk:plan        → Scout 返回动态 process[] / capability requests
+risk:specialist  → 按 process[] 创建一个或多个受限 specialist
+risk:reduce      → 确定性验证 evidence / policy / digest
+risk:feedback    → 发布最终 Artifact；needs_human 才创建 HumanGate
 ```
+
+OpenCode/MCP 已落地 `risk:locate` / `risk:plan`：`spawn_risk_scout` 创建、运行、持久化真实
+`ComposeTask` child，并返回 context-bound `RiskGateTaskArtifact`。`risk:specialist` 的通用多步骤
+dispatcher、通用 reducer 和交互式 HumanGate resume 仍待接入，不能宣称完整 Gate 已完成。
 
 主实现：`.opencode/groups/risk/skills/risk-gate/SKILL.md`。
 
 ## 核心 schema
 
-**输入**（来自 model 组）：`schemas.model.ModelSpec` + PR 元数据
+**输入**：PR binding，或 project / business event + redacted handoff / Artifact context refs
 
-**输出契约**：`schemas.risk_profile.RiskProfile`
+**正式输出契约**：`schemas.risk_gate_task.RiskGateTaskArtifact` + 最终 `RiskGateArtifact`
 
-```python
-# 关键字段
-strategy_id, as_of_date
-max_drawdown, position_limit, correlation_with_existing
-capacity_estimate_usd, tail_risk_var_99
-pr_url, analyst_notes
-
-# 判定
-profile.evaluate_verdict(RiskThresholds())  # pass | needs_human | rejected
-```
-
-**默认阈值**（`RiskThresholds`，与 stub 对齐，团队可覆盖）：
-
-| 指标 | 默认上限 |
-|------|----------|
-| max_drawdown | 0.15 |
-| position_limit | 0.80 |
-| tail_risk_var_99 | 0.05 |
-| correlation_with_existing | 0.60 |
-
-> PRD acceptance 曾写 0.20/0.30；实现以 `RiskThresholds` + 组内确认为准。
+`RiskProfile` 是量化策略审查可能产生的一种 attachment，不再是总契约。原有阈值表仅为
+`quant-risk-v1` policy 的当前版本，不代表所有业务 Risk Gate 都必须运行同一流程。
 
 ## 工作流 tips
 
-1. **先读 ModelSpec 再算 metrics**：没有结构化输入时标记 `analyst_notes`，不要猜 universe。
-2. **fixture 双场景**：`tests/fixtures/risk_metrics_normal.json` → `pass`；`risk_metrics_breach.json` → `needs_human`。
-3. **breach 必走 HumanGate**：任一 `breached_thresholds()` 非空 → `NEEDS_HUMAN`，禁止自动 approve。
-4. **PR 评论格式**：结论 + fenced `RiskProfile` JSON +  breached 列表 + 改进建议。
-5. **不写 model 私有数据到 PROJECT scope**；只共享 verdict 与脱敏 metrics。
+1. 业务父任务已请求 Gate 时必须创建 Scout；child 只能 `required | indeterminate`，不能自我豁免。
+2. PR 仅对 trusted docs/media surface 允许 `not_required`，仍需完整 coverage Artifact；代码、配置、
+   workflow、policy 和未知路径不能由单个 Scout 标绿。
+3. 先列出 changed files / context refs，再读取需要的契约、政策和上下文 Artifact；每个范围判断都引用 evidence id。
+4. process 由 Scout 设计，但自动执行只能引用 trusted capability id，不能携带任意命令。
+5. Risk Scout 不能写 PR、触发 HumanGate 或读取 secrets；这些副作用由后续独立阶段处理。
+6. 原始业务 context 不进入 ComposeTask 持久化；Artifact 只保存 locator、hash 和脱敏摘要。
 
 ## 验收标准（组级）
 
-- [ ] 正常 fixture → `RiskGateVerdict.PASS`
-- [ ] 超阈值 fixture → `NEEDS_HUMAN` + `request_human_review` 触发
-- [ ] `RiskProfile` 通过 Pydantic 校验
-- [ ] PR 评论去重生效（同 sha + 同 verdict 5 分钟内不重复）
+- [ ] 新业务风险领域无需新增 enum 即可进入 Artifact
+- [x] runtime required / indeterminate 绑定 context digest；PR decision 绑定当前 head SHA
+- [x] OpenCode/MCP 创建真实 ComposeTask child，并记录 parent/subagent/task event
+- [ ] 未注册 capability、缺失 evidence、stale head 或步骤失败均不能 pass
+- [ ] HumanGate 绑定 task / plan / evidence digest
+- [ ] PR 评论按 head SHA + Artifact digest 去重
 
 ## 跨组接口
 
