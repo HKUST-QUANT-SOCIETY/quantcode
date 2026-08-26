@@ -1,4 +1,8 @@
-# risk:gate Day 3/4 说明
+# risk:gate Day 3/4 说明（Legacy Fixture Path）
+
+> 本文记录历史固定 `RiskProfile` demo pipeline。生产 CI 不得把 `normal/high_risk` scenario
+> 当作 Risk Gate 定义；当前设计会创建 bounded Risk Scout subagent 并返回
+> `RiskGateTaskArtifact`。参见 [`MULTI_AGENT_REVIEW.md`](MULTI_AGENT_REVIEW.md#peer-server-b-risk-gate)。
 
 > risk 组 · Day 3 交付：`risk:gate` LangGraph flow + HumanGate 人审断点
 > Day 4 状态：risk tool / GitHub comment / dedupe 已就绪；完整 ReAct 迁移等待
@@ -182,7 +186,11 @@ export QUANTCODE_POST_RISK_COMMENT=1
 
 ### GitHub Actions
 
-见 `.github/workflows/risk-gate.yml`：`pull_request` 触发时注入 `GITHUB_TOKEN`、`GITHUB_REPOSITORY`、`QUANTCODE_POST_RISK_COMMENT=1`，并**连续跑两次**同场景以验证 marker dedupe（第二次不应新建评论）。
+以下是历史 workflow 行为，已被替换：旧版曾在 `pull_request` 下注入写 token，并连续跑
+两次固定 scenario 验证 marker dedupe。当前 `.github/workflows/risk-gate.yml` 使用
+`pull_request_target` + Server B dynamic Risk Scout；生产流不调用本页的 scenario wrapper。
+`scripts/ci/run_quantcode_review_tests.sh risk-gate ...` 仅保留为离线 legacy integration smoke，
+且强制 `QUANTCODE_POST_RISK_COMMENT=0`。
 
 ### 去重两层
 

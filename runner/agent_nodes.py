@@ -152,6 +152,7 @@ def make_llm_node(
 
 def make_tool_node(
     registry: ToolRegistry,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
 
@@ -188,6 +189,15 @@ def make_tool_node(
 
         for call in tool_calls:
             c = _to_tool_call_dict(call)
+            if allowed_tool_ids is not None and c["name"] not in allowed_tool_ids:
+                content = f"Tool '{c['name']}' denied by execution allowlist."
+                tool_errors.append(content)
+                executed_tools.append(c["name"])
+                executed_args.append(c["args"])
+                results.append(
+                    ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                )
+                continue
             try:
                 output = registry.call(c["name"], c["args"], ctx=ctx)
                 content = output if isinstance(output, str) else str(output)

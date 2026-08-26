@@ -15,6 +15,33 @@ readonly chroma_tree_sha256="21dd9e6ccaf517de6f60d3cb52e144a4f8703eec76da27d7fef
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 : "${QUANT_REVIEW_SANDBOX_PARENT:?QUANT_REVIEW_SANDBOX_PARENT is required}"
 
+readonly mode="${1:-pytest}"
+readonly risk_pr_number="${2:-}"
+readonly risk_head_sha="${3:-}"
+readonly risk_pr_url="${4:-}"
+case "$mode" in
+  pytest)
+    if (( $# > 1 )); then
+      echo "pytest mode accepts no arguments." >&2
+      exit 1
+    fi
+    ;;
+  risk-gate)
+    # Legacy offline wrapper smoke only. Production .github/workflows/risk-gate.yml
+    # uses the dynamic Risk Scout Artifact pipeline and never invokes this mode.
+    if (( $# != 4 )) || [[ ! "$risk_pr_number" =~ ^[1-9][0-9]*$ ]] ||
+       [[ ! "$risk_head_sha" =~ ^[0-9a-f]{40}$ ]] ||
+       [[ "$risk_pr_url" != "https://github.com/HKUST-QUANT-SOCIETY/quantcode/pull/$risk_pr_number" ]]; then
+      echo "risk-gate mode requires an exact PR number, 40-character head SHA, and canonical PR URL." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Unsupported sandbox mode: $mode" >&2
+    exit 1
+    ;;
+esac
+
 readonly sandbox_parent="/srv/quant/runner-sandboxes"
 if [[ "$QUANT_REVIEW_SANDBOX_PARENT" != "$sandbox_parent" ]]; then
   echo "Refusing an unbounded sandbox parent: $QUANT_REVIEW_SANDBOX_PARENT" >&2
@@ -124,6 +151,20 @@ export QUANT_REVIEW_PYTHON_BASE="$python_base"
 export QUANT_REVIEW_SKILL_BUNDLE="$skill_bundle"
 export QUANT_REVIEW_MODEL_CACHE="$model_cache"
 
+declare -a sandbox_command
+if [[ "$mode" == "risk-gate" ]]; then
+  sandbox_command=(
+    "$test_deps/bin/python"
+    scripts/run_risk_gate_tool.py
+    --scenario normal
+    --pr-number "$risk_pr_number"
+    --head-sha "$risk_head_sha"
+    --pr-url "$risk_pr_url"
+  )
+else
+  sandbox_command=("$test_deps/bin/python" -m pytest -q tests)
+fi
+
 unshare \
   --user \
   --map-root-user \
@@ -170,6 +211,7 @@ unshare \
       PYTHONNOUSERSITE=1 \
       PYTHONSAFEPATH=1 \
       PYTHONPATH=. \
+      QUANTCODE_POST_RISK_COMMENT=0 \
       /usr/bin/bash -c '"'"'
         ulimit -c 0
         ulimit -f 1048576
@@ -179,6 +221,5 @@ unshare \
         ulimit -v 8388608
         cd /workspace/quantcode
         exec "$@"
-      '"'"' bash \
-      "$QUANT_REVIEW_TEST_DEPS/bin/python" -m pytest -q tests
-  '
+      '"'"' bash "$@"
+  ' bash "${sandbox_command[@]}"

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "runtime_id": "quant-review-374e0176-a3cd117-v2",
-  "attestation_id": "quant-review-374e0176-a3cd117-attestation-v8",
+  "attestation_id": "quant-review-374e0176-a3cd117-attestation-v11",
   "built_on": "2026-08-24",
   "platform": {
     "os": "ubuntu",
@@ -61,8 +61,8 @@
     "chroma_extracted_tree_sha256": "21dd9e6ccaf517de6f60d3cb52e144a4f8703eec76da27d7fef5dcf665389004"
   },
   "test_sandbox": {
-    "manifest_path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v7/test-sandbox-manifest-v9.json",
-    "manifest_sha256": "265996bf08935f1e8e8453c42da29d819d8f1ac644c285a263768b8dc30fab8e",
+    "manifest_path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v8/test-sandbox-manifest-v11.json",
+    "manifest_sha256": "8793cf8fe1b97016f180043f2b481750a881c808460f39c9d063b6508c70bf94",
     "test_dependencies_path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1",
     "review_engine_exposed_to_pr_tests": false,
     "network": "disabled"
@@ -78,7 +78,7 @@
     "pip_check": "passed",
     "central_config_load": "passed",
     "elf_dependencies": "passed",
-    "quantcode_tests_passed": 589,
+    "quantcode_tests_passed": 597,
     "quantcode_tests_skipped": 8,
     "quantcode_test_mode": "offline isolated chroot",
     "quantcode_project_import_source": "PR checkout only"

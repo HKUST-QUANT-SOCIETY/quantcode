@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from ._compat import StrEnum
 
 
 class ModelType(StrEnum):

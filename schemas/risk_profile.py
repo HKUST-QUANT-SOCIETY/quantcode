@@ -9,9 +9,9 @@ Owner: 杨欣琳（实现）/ 刘炽（schema + fixtures）
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+from ._compat import StrEnum
 
 
 class RiskGateVerdict(StrEnum):

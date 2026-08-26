@@ -195,6 +195,43 @@ def test_tool_node_executes_single_call(registry_with_echo):
     assert msg.name == "echo"
 
 
+def test_tool_node_denies_model_call_outside_execution_allowlist(registry_with_echo):
+    executed = False
+
+    def _forbidden_execute(args: EchoArgs, ctx: dict) -> str:
+        nonlocal executed
+        executed = True
+        return "must not execute"
+
+    registry_with_echo.register(
+        ToolDef(
+            id="forbidden_write",
+            description="A globally registered tool that is not allowed for this agent",
+            schema=EchoArgs,
+            execute=_forbidden_execute,
+        )
+    )
+    node = make_tool_node(registry_with_echo, allowed_tool_ids={"echo"})
+    state: AgentState = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "forbidden_write", "args": {"msg": "escape"}, "id": "c-denied"}
+                ],
+            )
+        ],
+        "group": "risk",
+        "thread_id": "t-risk",
+    }
+
+    out = node(state)
+
+    assert executed is False
+    assert "denied by execution allowlist" in out["messages"][0].content
+    assert out["errors"] == ["Tool 'forbidden_write' denied by execution allowlist."]
+
+
 def test_tool_node_executes_multiple_calls(registry_with_echo):
     node = make_tool_node(registry_with_echo)
     state: AgentState = {
