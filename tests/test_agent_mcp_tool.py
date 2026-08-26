@@ -161,7 +161,7 @@ def test_risk_start_spawns_only_dynamic_scout_and_hides_raw_handoff_from_parent_
     ]
     assert trusted_items[0]["content"]["deployment_target"] == "paper-trading"
     parent_task = captured["stream_kwargs"]["task"]
-    assert "RISK_HANDOFF_CONTEXT_INVENTORY" in parent_task
+    assert "RISK_HANDOFF_AVAILABLE" in parent_task
     assert "deployment_target" not in parent_task
     assert "context_snapshot" not in parent_task
 

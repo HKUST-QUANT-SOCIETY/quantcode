@@ -226,8 +226,6 @@ def _start_mode(
     risk_parent_context_required = False
     if group == "risk":
         try:
-            import json
-
             from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
             from schemas import BlackboardScope, GroupName
 
@@ -276,24 +274,14 @@ def _start_mode(
                                 "redacted": True,
                             }
                         )
+                    # Do not put even redacted handoff descriptors in the
+                    # parent prompt: the child receives them through its
+                    # in-memory, tool-gated session. This avoids prompt
+                    # injection and accidental provider egress at the parent.
                     task = (
-                        f"{task}\n\n[RISK_HANDOFF_CONTEXT_INVENTORY]\n"
-                        + json.dumps(
-                            [
-                                {
-                                    key: item[key]
-                                    for key in (
-                                        "context_ref",
-                                        "kind",
-                                        "locator",
-                                        "summary",
-                                    )
-                                }
-                                for item in risk_parent_context_items
-                            ],
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        )
+                        f"{task}\n\n[RISK_HANDOFF_AVAILABLE] "
+                        f"{len(risk_parent_context_items)} bounded item(s); "
+                        "spawn the Risk Scout child now."
                     )
         except Exception:
             pass  # 读取失败不影响正常流程
