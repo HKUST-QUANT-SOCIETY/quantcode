@@ -9,6 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "risk-gate.yml"
+MULTI_AGENT_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "multi-agent-review.yml"
 
 
 def _workflow() -> dict:
@@ -76,6 +77,17 @@ def test_workflow_is_base_owned_and_fixture_free() -> None:
     assert "scripts.ci.plan_risk_gate" in text
     assert "scripts.ci.run_agentic_backtest" in text
     assert "RISK_GATE_CATALOG_RELATIVE" in text
+
+
+def test_noop_pr_edits_cannot_cancel_real_server_b_reviews() -> None:
+    for path in (WORKFLOW_PATH, MULTI_AGENT_WORKFLOW_PATH):
+        text = path.read_text(encoding="utf-8")
+        concurrency = yaml.safe_load(text)["concurrency"]
+        group = concurrency["group"]
+        assert "ignored-edit-{0}" in group
+        assert "github.run_id" in group
+        assert "github.event.changes.base.ref.from == null" in group
+        assert concurrency["cancel-in-progress"] is True
 
 
 def test_permissions_split_planner_executor_review_and_token_publisher() -> None:

@@ -8,7 +8,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
 
 concurrency:
-  group: quantcode-multi-agent-review-${{ github.event.pull_request.number }}
+  # A title/body edit is intentionally skipped by every job. Give that no-op
+  # run a unique key so it cannot cancel the real synchronize/base-change run.
+  group: >-
+    quantcode-multi-agent-review-${{ github.event.pull_request.number }}-${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && format('ignored-edit-{0}', github.run_id) || 'review' }}
   cancel-in-progress: true
 
 permissions: {}

@@ -8,7 +8,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
 
 concurrency:
-  group: quantcode-risk-gate-${{ github.event.pull_request.number }}
+  # Keep skipped title/body edits outside the real review cancellation group.
+  group: >-
+    quantcode-risk-gate-${{ github.event.pull_request.number }}-${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && format('ignored-edit-{0}', github.run_id) || 'review' }}
   cancel-in-progress: true
 
 permissions: {}
