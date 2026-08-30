@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import operator
+import os
+import time
 from typing import Annotated, Any, Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -34,12 +36,128 @@ from tools.registry import ToolRegistry
 # ---------------------------------------------------------------------------
 
 
+def _msg_identity(msg: Any) -> Any:
+    """给无 id 的消息派生稳定标识（供去重 diff）。
+
+    - 有 ``id`` 属性（LangGraph add_messages 会赋 id）用 id
+    - 否则 (类名, content, tool_call_id, tool_calls 指纹)：空 content 的
+      AIMessage 各带不同 tool_calls，不能仅凭空 content 合并成一条
+    """
+    mid = getattr(msg, "id", None)
+    if mid:
+        return ("id", mid)
+    tcs = tuple(
+        (
+            (c.get("name", "") if isinstance(c, dict) else getattr(c, "name", "")),
+            (c.get("id", "") if isinstance(c, dict) else getattr(c, "id", "")),
+        )
+        for c in (getattr(msg, "tool_calls", None) or [])
+    )
+    return (
+        "content",
+        type(msg).__name__,
+        str(getattr(msg, "content", "") or ""),
+        str(getattr(msg, "tool_call_id", "") or ""),
+        tcs,
+    )
+
+
+def merge_messages(current: list[Any] | None, update: list[Any] | None) -> list[Any]:
+    """messages 通道的自定义 reducer（替代 operator.add）。
+
+    翻倍根因：operator.add 把"节点返回的新消息"追加进累计值没问题，但
+    truncate / 摘要类节点返回的是 **整个消息列表**，每个 superstep 都会把
+    累计值原样再 add 一遍 → 长度每轮翻倍。
+
+    修复（两层）：
+    - 节点返回 ``_ReplaceMessages``（整体替换语义，truncate / rebuild 用）
+      → 直接取该列表，不做合并
+    - 正常节点返回普通 list（只带新消息）→ 按 ``_msg_identity`` 去重追加，
+      行为与 operator.add 一致，且即使误传全量列表也不翻倍
+    """
+    if update is None:
+        return list(current or [])
+    if isinstance(update, _ReplaceMessages):
+        return list(update)
+    if current is None:
+        return list(update)
+
+    existing_keys = {_msg_identity(m) for m in current}
+    merged = list(current)
+    for m in update:
+        key = _msg_identity(m)
+        if key not in existing_keys:
+            merged.append(m)
+            existing_keys.add(key)
+        else:
+            # 同 id 消息重发 → 用新版本覆盖（truncate 改写 content 的场景）
+            for i, old in enumerate(merged):
+                if _msg_identity(old) == key:
+                    merged[i] = m
+                    break
+    return merged
+
+
+# P0-8 §4.4：context 占用阈值（占用比）
+CONTEXT_SNAPSHOT_RATIO = 0.7
+CONTEXT_REBUILD_RATIO = 0.9
+
+
+def _context_token_limit() -> int:
+    """上下文窗口上限（tokens）。env ``QUANTCODE_CONTEXT_TOKENS``，默认 128000。"""
+    try:
+        return int(os.environ.get("QUANTCODE_CONTEXT_TOKENS", "128000"))
+    except ValueError:
+        return 128000
+
+
+def estimate_context_chars(state: dict[str, Any]) -> float:
+    """估算当前 context 占用 tokens。
+
+    公式：messages content 长度之和 + system_prompt 长度，每 4 字符 ≈ 1 token。
+    # ponytail: 字符/4 近似 token，升级路径=tiktoken 实测
+    """
+    chars = len(state.get("system_prompt") or "")
+    for m in state.get("messages") or []:
+        content = getattr(m, "content", "")
+        if not isinstance(content, str):
+            content = repr(content)
+        chars += len(content)
+    return chars / 4.0
+
+
+def context_usage_ratio(state: dict[str, Any]) -> float:
+    """context 占用比 = 估算 tokens / 窗口上限。"""
+    return estimate_context_chars(state) / max(_context_token_limit(), 1)
+
+
+def make_checkpoint_event(
+    *,
+    thread_id: str,
+    ratio: float,
+    kind: str = "snapshot",
+) -> dict[str, Any]:
+    """构造一个 checkpoint_snapshot 事件 dict（往 execution_trace 追加用）。
+
+    thread_id 是 state 里的 thread id（唯一执行流），与 checkpoint_id 解耦；
+    ratio 为占用比（0-1+），kind 为 snapshot（>70% 快照）或 rebuild（>90% 重建）。
+    """
+    return {
+        "event_type": "checkpoint_snapshot",
+        "thread_id": thread_id,
+        "kind": kind,
+        "ratio": round(float(ratio), 4),
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+    }
+
+
 class AgentState(BaseFlowState, total=False):
     """Agent 引擎的 state schema，继承 BaseFlowState。
 
     字段必须 msgpack 可序列化（LangGraph checkpointer 限制）：
 
-    - messages      — LangChain BaseMessage 列表（**operator.add 累积**）
+    - messages      — LangChain BaseMessage 列表（**merge_messages 去重合并**，
+                      修复原 operator.add 每 superstep 翻倍的 bug）
     - iterations    — 已执行步数（最后一次返回值覆盖）
     - system_prompt — SKILL.md 拼装出的系统提示（最后一次覆盖）
     - risk_metrics  — 风控指标（由 calc_risk_stub 写入，router.py 消费）
@@ -55,6 +173,8 @@ class AgentState(BaseFlowState, total=False):
     - output_data   — 标准化产出（给 MCP / OpenCode 状态回流消费）
     - artifacts     — 产物路径列表（operator.add 累积）
     - gate          — OpenCode 可展示的 HumanGate payload
+    - context_rebuilt — P0-8 §4.4: >90% 重建后 messages 已被压缩为摘要时置 true
+    - checkpoint_snapshot — P0-8 §4.4: 快照/重建事件列表（operator.add 累积）
 
     **不放进 state 的字段**（通过闭包注入）：
     - tools         — ToolDef 列表（Pydantic 模型，msgpack 不支持）
@@ -62,7 +182,9 @@ class AgentState(BaseFlowState, total=False):
      不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
     """
 
-    messages: Annotated[list[Any], operator.add]  # 累积所有 node 返回的新消息
+    # P0-8 §4.4: messages 改用自定义 reducer（去重合并），修复 truncate/摘要
+    # 节点把整个列表再 add 一遍导致的翻倍 bug（原 Annotated[..., operator.add]）。
+    messages: Annotated[list[Any], merge_messages]
     iterations: int
     system_prompt: str
     risk_metrics: dict | None
@@ -78,6 +200,11 @@ class AgentState(BaseFlowState, total=False):
     output_data: dict[str, Any] | None
     artifacts: Annotated[list[str], operator.add] | None
     gate: dict[str, Any] | None
+    # P0-8 §4.4: >90% 重建后置 true（新字段，最后一个返回值覆盖，无 reducer）
+    context_rebuilt: bool
+    # P0-8 §4.4: checkpoint_snapshot 事件列表（operator.add 累积，快照/重建各一条，
+    # 随 state/trace 流出；前端按未知类型降级渲染）
+    checkpoint_snapshot: Annotated[list[dict[str, Any]], operator.add]
 
 
 # ---------------------------------------------------------------------------
@@ -734,8 +861,8 @@ def init_agent_state(
 
 # ---------------------------------------------------------------------------
 # Token 估算 + truncate 节点 — Day 4 尹一帆（Day 5 从 main 移植回 PR25 引擎）
-# 注意：当前 truncate 用 operator.add reducer 会导致 messages 累积翻倍（已知限制），
-# Week 2 配合自定义 reducer 优化。demo 场景不长，不触发。
+# P0-8：messages reducer 已换成 merge_messages（去重合并），truncate 返回整个
+# 列表不再翻倍；同 id 同内容重发会被去重，改写 content 的同 id 项按 id 覆盖。
 # ---------------------------------------------------------------------------
 try:
     import tiktoken  # type: ignore
@@ -796,9 +923,8 @@ def make_truncate_node(
     """构造 ``truncate_node``:tool 后置 token 裁剪。
 
     检查 ``state["messages"]`` 总 token 数,超 ``max_tokens`` 时,截断中段消息(头 N + 尾 M 保留)。
-    截断后的 messages 列表作为整体返回(LangGraph ``operator.add`` reducer 追加,
-    等效"替换"——LangGraph 后续会处理,实际行为是 messages 累积翻倍;
-    接受这个 trade-off,后续可改 AgentState 的 messages reducer 为 replace_if_truncated)。
+    截断后的 messages 列表作为整体返回;messages 通道用 ``merge_messages`` reducer,
+    同 id 消息按 id 覆盖旧项（改写 content 的截断生效）,未裁掉的项去重后不翻倍。
 
     Args:
         max_tokens: 总 messages 的 token 预算;超此值才裁剪
@@ -806,8 +932,8 @@ def make_truncate_node(
         head_preserve: 头 N 条消息不裁(系统提示 + 早期对话)
         tail_preserve: 尾 M 条消息不裁(最近上下文)
 
-    注意:本节点不动 state["messages"] 的旧内容,只返回新的 truncated 列表。
-    累积翻倍是已知限制,可后续通过自定义 reducer 优化。
+    注意:本节点只改写中段消息的 content,不动消息条数;同 id 覆盖由 reducer 处理,
+    不会再出现"累积翻倍"。
     """
     def truncate_node(state: AgentState) -> dict:
         messages = state.get("messages", [])
@@ -862,18 +988,102 @@ def make_truncate_node(
                 truncated_middle.append(m)
 
         truncated = head + truncated_middle + tail
-        # 标记已截断,让后续节点知道
+        # 标记已截断,让后续节点知道;_ReplaceMessages 让 reducer 整体替换,不翻倍
         return {
-            "messages": truncated,
+            "messages": _ReplaceMessages(truncated),
             "_truncated": True,
         }
 
     return truncate_node
 
 
+# ---------------------------------------------------------------------------
+# P0-8 §4.4: context >90% 重建节点 — 把旧 messages 压缩成一条 summary 消息
+# ---------------------------------------------------------------------------
+
+
+class _ReplaceMessages(list):
+    """list 标记子类：节点用它返回 messages 表示"整体替换"（truncate / 摘要重建）。
+
+    merge_messages 看到 _ReplaceMessages 直接取值，不再去重合并——
+    这是 truncate 裁剪和 rebuild 压缩能真正生效、且不翻倍的关键。
+    """
+
+
+def _summarize_rebuild(
+    reason: str,
+    messages: list,
+    task_goal: str | None,
+) -> str:
+    """生成重建摘要：工具名序列 + 最近 user input + 保留说明。"""
+    tool_seq: list[str] = []
+    recent_user_input = ""
+    for m in messages:
+        if isinstance(m, AIMessage):
+            for tc in getattr(m, "tool_calls", None) or []:
+                c = _to_tool_call_dict(tc)
+                if c.get("name"):
+                    tool_seq.append(c["name"])
+        elif isinstance(m, HumanMessage):
+            recent_user_input = str(getattr(m, "content", "") or "")[:300]
+    lines = [
+        f"[context rebuilt: {reason}]",
+        f"工具调用序列: {tool_seq}" if tool_seq else "无工具调用记录",
+    ]
+    if recent_user_input:
+        lines.append(f"最近用户输入: {recent_user_input}")
+    if task_goal:
+        lines.append(f"任务目标: {str(task_goal)[:200]}")
+    lines.append("早期对话与工具输出已压缩；最后 2 条消息保留原文。请基于以上摘要继续任务。")
+    return "\n".join(lines)
+
+
+def make_rebuild_context_node() -> Callable[[AgentState], dict]:
+    """构造 ``rebuild_context`` 节点：context 用量 > CONTEXT_REBUILD_RATIO 时被路由触发。
+
+    把旧 messages（除内联 SystemMessage 外）压缩成一条 AIMessage 摘要
+    （工具名序列 + 最近 user input），保留最后 2 条消息原文；
+    state 置 ``context_rebuilt=True``，并返回 ``checkpoint_snapshot``
+    事件（kind=rebuild）随 state/trace 流出。
+    """
+    def rebuild_context_node(state: AgentState) -> dict:
+        messages = list(state.get("messages") or [])
+        summary = _summarize_rebuild(
+            "over 90% context limit",
+            messages,
+            state.get("task_goal") or (state.get("input_data") or {}).get("task", ""),
+        )
+        # system 消息原样保留（节点机制里 system_prompt 不入 messages，这里兜底）
+        system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
+        tail = [m for m in messages if not isinstance(m, SystemMessage)][-2:]
+        rebuilt: list[Any] = list(system_msgs)
+        rebuilt.append(AIMessage(content=summary))
+        rebuilt.extend(tail)
+        return {
+            "messages": _ReplaceMessages(rebuilt),
+            "context_rebuilt": True,
+            "checkpoint_snapshot": [
+                make_checkpoint_event(
+                    thread_id=state.get("thread_id", ""),
+                    ratio=context_usage_ratio(state),
+                    kind="rebuild",
+                )
+            ],
+        }
+
+    return rebuild_context_node
+
+
 
 __all__ = [
     "AgentState",
+    "merge_messages",
+    "CONTEXT_SNAPSHOT_RATIO",
+    "CONTEXT_REBUILD_RATIO",
+    "estimate_context_chars",
+    "context_usage_ratio",
+    "make_checkpoint_event",
+    "make_rebuild_context_node",
     "make_llm_node",
     "make_tool_node",
     "make_should_continue",

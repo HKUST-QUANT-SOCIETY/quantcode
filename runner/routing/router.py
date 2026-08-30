@@ -18,11 +18,10 @@ from enum import StrEnum
 from typing import Any
 
 from .guards import detect_loop
-from tools.risk_stub import (
-    VAR_99_LIMIT,
-    MAX_DRAWDOWN_LIMIT,
-    POSITION_LIMIT_LIMIT,
-)
+from schemas.risk_profile import RiskThresholds
+
+# 阈值定义权归 schemas.risk_profile.RiskThresholds（单一事实来源）。
+_THRESHOLDS = RiskThresholds()
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +60,7 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
       - tool_call_history      : list[str]
       - fingerprint_history    : list[str]
       - execution_trace        : list[dict]  (for TF-IDF + error detection)
-      - risk_metrics           : dict | None (output of calc_risk_stub)
+      - risk_metrics           : dict | None (output of calc_risk)
       - task_status            : str | None  ("done" triggers finish)
     """
 
@@ -102,7 +101,7 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
     #
     # Day 5 fix: 只在 risk_profile 存在时触发（确保 generate_risk_profile 已运行），
     # 避免在 calc_risk 之后立即触发，导致 generate_risk_profile 和 check_gate 无法执行。
-    # calc_risk_stub_tool 会自动注入 risk_profile，所以测试场景也能正常触发。
+    # generate_risk_profile_tool 会写入 risk_profile，所以生产路径也能正常触发。
     risk_profile = state.get("risk_profile")
     if (
         risk_metrics
@@ -132,21 +131,16 @@ def route_next_step(state: dict[str, Any]) -> RouteResult:
 # ---------------------------------------------------------------------------
 
 def _risk_exceeds_threshold(metrics: dict[str, Any]) -> bool:
-    """Return True if any risk metric exceeds its threshold."""
-    thresholds = metrics.get("thresholds") or {}
-    var_limit = thresholds.get("VAR_99_LIMIT", VAR_99_LIMIT)
-    dd_limit = thresholds.get("MAX_DRAWDOWN_LIMIT", MAX_DRAWDOWN_LIMIT)
-    pos_limit = thresholds.get("POSITION_LIMIT_LIMIT", POSITION_LIMIT_LIMIT)
-
-    if metrics.get("tail_risk_var_99", 0) > var_limit:
+    """Return True if any risk metric exceeds its RiskThresholds limit."""
+    if metrics.get("tail_risk_var_99", 0) > _THRESHOLDS.tail_risk_var_99:
         return True
-    if metrics.get("max_drawdown", 0) > dd_limit:
+    if metrics.get("max_drawdown", 0) > _THRESHOLDS.max_drawdown:
         return True
-    if metrics.get("position_limit", 0) > pos_limit:
+    if metrics.get("position_limit", 0) > _THRESHOLDS.position_limit_usage:
         return True
     # Day 4 俞高磊：加上 correlation_with_existing 检查（杨欣琳 RiskProfile 对齐）
     # 使用 abs() — 负相关（如 -0.7）同样意味着与现有持仓高度相关，应触发人审
-    if abs(metrics.get("correlation_with_existing", 0)) > 0.6:
+    if abs(metrics.get("correlation_with_existing", 0)) > _THRESHOLDS.correlation_limit:
         return True
     return False
 

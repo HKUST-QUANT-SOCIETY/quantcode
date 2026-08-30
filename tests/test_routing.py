@@ -9,7 +9,7 @@ from runner.routing.router import (
     route_next_step,
 )
 from runner.routing.guards import MAX_ITERATIONS
-from tools.risk_stub import calc_risk_stub
+from tools.risk.statistics_stub import calc_risk_stub
 
 
 # ---------------------------------------------------------------------------

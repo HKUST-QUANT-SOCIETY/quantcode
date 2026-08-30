@@ -19,7 +19,7 @@ AgentRunner 负责：
 """
 from __future__ import annotations
 
-import uuid
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,19 +29,48 @@ from langgraph.types import Command
 
 from runner.agent_nodes import (
     AgentState,
+    CONTEXT_REBUILD_RATIO,
+    CONTEXT_SNAPSHOT_RATIO,
+    context_usage_ratio,
+    estimate_context_chars as estimate_context_state_chars,
     init_agent_state,
     make_llm_node,
     make_rlhf_collect_node,
+    make_rebuild_context_node,
     make_routing_edge,
     make_tool_node,
     make_tool_routing_edge,
     make_truncate_node,
 )
-from runner.langgraph_base import get_checkpointer, make_thread_id
+from runner.langgraph_base import CHECKPOINTS_DB, get_checkpointer, make_thread_id
 from runner.routing.guards import MAX_ITERATIONS
 from tools.loop_detector import LoopDetector
 from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
+
+try:  # ponytail: metrics 是 best-effort 旁路，缺模块/坏环境不影响主流程
+    from runner.metrics import estimate_context_chars, record_run
+except ImportError:
+    pass
+
+
+def _record_run_safe(**kwargs: Any) -> None:
+    """metrics 钩子兜底：未导入成功或写失败都静默（ponytail: 一行防御）。"""
+    fn = globals().get("record_run")
+    if fn is not None:
+        try:
+            fn(**kwargs)
+        except Exception:
+            pass
+
+
+# 计算 status 的共用规则：waiting_for_human > completed > stopped
+def _run_status(final_state: dict) -> str:
+    if final_state.get("status") == "waiting_for_human":
+        return "waiting_for_human"
+    if final_state.get("task_status") == "done":
+        return "completed"
+    return "stopped"
 
 # ---------------------------------------------------------------------------
 # AgentRunner
@@ -96,6 +125,11 @@ class AgentRunner:
         self.loop_detector = loop_detector or LoopDetector()
         self.max_iterations = max_iterations
         self.checkpoint_db = Path(checkpoint_db) if checkpoint_db else None
+        # P0-8 §4.4：自动快照/重建需要 checkpointer 才能在 >70% 时落盘；
+        # 未显式传 checkpoint_db 时按 langgraph_base.CHECKPOINTS_DB 默认创建一次。
+        # ponytail: 只加这一个默认值，其他行为不变。
+        if self.checkpoint_db is None:
+            self.checkpoint_db = Path(CHECKPOINTS_DB)
         # Day 5: truncate_node 从 main 移植回来（可选）。传 truncate_tokens 时，
         # 在 tool 之后挂一个 token 裁剪节点，防止长任务 context 爆。
         self.truncate_tokens = truncate_tokens
@@ -175,6 +209,10 @@ class AgentRunner:
             if self.truncate_tokens
             else None
         )
+        # P0-8 §4.4：context >90% 重建节点（在 tool routing 前检查占用，超限则
+        # 把旧 messages 压缩成 summary）。与 truncate 并存：truncate 管 token 预算，
+        # rebuild 管 context 窗口占比。
+        rebuild_node = make_rebuild_context_node()
 
         # human_gate 节点：区分 risk gate 和 loop gate — Day 4 俞高磊接入杨欣琳 HumanGate 接口
         # Day 7: risk gate 在此节点直接调 interrupt()（不再依赖 LLM 主动调
@@ -220,18 +258,23 @@ class AgentRunner:
                 thread_id = state.get("thread_id", "")
                 risk_metrics = state.get("risk_metrics") or {}
                 reasons = list(risk_metrics.get("breached_limits", []))
-                if not reasons:
-                    # 从阈值对比推算原因
-                    from tools.risk_stub import VAR_99_LIMIT, MAX_DRAWDOWN_LIMIT, POSITION_LIMIT_LIMIT
-                    var_val = risk_metrics.get("tail_risk_var_99", 0)
-                    md_val = risk_metrics.get("max_drawdown", 0)
-                    pos_val = risk_metrics.get("position_limit", 0)
-                    if var_val and var_val > VAR_99_LIMIT:
-                        reasons.append(f"tail_risk_var_99 ({var_val} > {VAR_99_LIMIT})")
-                    if md_val and md_val > MAX_DRAWDOWN_LIMIT:
-                        reasons.append(f"max_drawdown ({md_val} > {MAX_DRAWDOWN_LIMIT})")
-                    if pos_val and pos_val > POSITION_LIMIT_LIMIT:
-                        reasons.append(f"position_limit ({pos_val} > {POSITION_LIMIT_LIMIT})")
+                if not reasons and risk_metrics:
+                    # 复用 RiskProfile.breached_thresholds 单一实现（schemas 默认阈值）
+                    from pydantic import ValidationError
+
+                    from schemas import RiskProfile, RiskThresholds
+
+                    try:
+                        profile = RiskProfile(
+                            **{
+                                k: v
+                                for k, v in risk_metrics.items()
+                                if k in RiskProfile.model_fields
+                            }
+                        )
+                        reasons = profile.breached_thresholds(RiskThresholds())
+                    except ValidationError:
+                        reasons = []
 
                 gate_id = make_gate_id(thread_id)
                 payload = build_interrupt_payload(
@@ -296,6 +339,8 @@ class AgentRunner:
         workflow.add_node("rlhf", rlhf_node)   # Day 5: rlhf 节点始终存在
         if truncate_node is not None:
             workflow.add_node("truncate", truncate_node)
+        # P0-8 §4.4：rebuild 节点常驻 graph（工件便宜，路由层负责何时进）
+        workflow.add_node("rebuild_context", rebuild_node)
 
         workflow.set_entry_point("llm")
         # llm 之后：有 tool_calls → tool，否则 → end
@@ -310,9 +355,75 @@ class AgentRunner:
         if truncate_node is not None:
             workflow.add_edge("tool", "truncate")
             routing_source = "truncate"
-        # tool（或 truncate）之后：route_next_step 综合判断
+        # P0-8 §4.4：每次 tool routing 前检查 context 占用——
+        # >70% 且尚无快照 → 先过 checkpoint_gate 节点（发 kind=snapshot 事件）；
+        # >90%（已有快照时）或例行检查再次超限 → 走 rebuild_context 压缩旧 messages；
+        # 未超限 → 直接原路路由（tool_routing）。
+        def _pre_tool_routine(state: AgentState) -> str:
+            ratio = context_usage_ratio(state)
+            snapshotted = any(
+                isinstance(e, dict) and e.get("kind") == "snapshot"
+                for e in (state.get("checkpoint_snapshot") or [])
+            )
+            if ratio > CONTEXT_SNAPSHOT_RATIO:
+                return "checkpoint_gate"
+            if ratio > CONTEXT_REBUILD_RATIO:
+                return "rebuild"
+            return tool_routing(state)
+
+        # tool（或 truncate）之后：先 context 例行检查（快照/重建），再 route_next_step
         workflow.add_conditional_edges(
             routing_source,
+            _pre_tool_routine,
+            {
+                "rlhf": "rlhf",
+                "max_iter": END,
+                "end": END,
+                "human_gate": "human_gate",
+                "rebuild": "rebuild_context",
+                "checkpoint_gate": "checkpoint_gate",
+            },
+        )
+        # P0-8 快照节点：首次经过时追加 checkpoint_snapshot(kind=snapshot) 事件；
+        # 快照后本步占用若仍 >90% → rebuild，否则回原 tool_routing（语义不变）。
+        # 返回 delta（operator.add 通道），避免全量重写造成事件滚雪球重复。
+        def _checkpoint_gate_node(state: AgentState) -> dict:
+            events = list(state.get("checkpoint_snapshot") or [])
+            if any(
+                isinstance(e, dict) and e.get("kind") == "snapshot" for e in events
+            ):
+                return {}
+            return {
+                "checkpoint_snapshot": [{
+                    "event_type": "checkpoint_snapshot",
+                    "thread_id": state.get("thread_id", ""),
+                    "kind": "snapshot",
+                    "ratio": round(context_usage_ratio(state), 4),
+                    "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+                }]
+            }
+
+        workflow.add_node("checkpoint_gate", _checkpoint_gate_node)
+
+        def _post_checkpoint_gate(state: AgentState) -> str:
+            if context_usage_ratio(state) > CONTEXT_REBUILD_RATIO:
+                return "rebuild"
+            return tool_routing(state)
+
+        workflow.add_conditional_edges(
+            "checkpoint_gate",
+            _post_checkpoint_gate,
+            {
+                "rlhf": "rlhf",
+                "max_iter": END,
+                "end": END,
+                "human_gate": "human_gate",
+                "rebuild": "rebuild_context",
+            },
+        )
+        # P0-8 重建节点：压缩完 old messages 回到原 tool routing（复用既有判断）
+        workflow.add_conditional_edges(
+            "rebuild_context",
             tool_routing,
             {
                 "rlhf": "rlhf",
@@ -336,7 +447,8 @@ class AgentRunner:
         # Day 4 俞高磊：interrupt 通过 request_human_review tool 内的
         # langgraph.types.interrupt() 实现（杨欣琳 HumanGate 接口），
         # 不需要全局 interrupt_before——避免 loop gate 也被误暂停。
-        checkpointer = get_checkpointer(self.checkpoint_db) if self.checkpoint_db else None
+        # P0-8：checkpoint_db 已在 __init__ 兜底为 CHECKPOINTS_DB，这里始终有 saver。
+        checkpointer = get_checkpointer(self.checkpoint_db)
         app = workflow.compile(checkpointer=checkpointer)
         return app
 
@@ -367,7 +479,7 @@ class AgentRunner:
             最终 state dict（含 messages / iterations / output_data 等）。
 
         Note:
-            默认 thread_id 生成时会追加 ``uuid.uuid4().hex[:8]`` 作为后缀，
+            默认 thread_id 由 ``make_thread_id`` 生成（uuid8 收尾），
             确保同秒同 group+flow_name 不碰撞（避免 checkpoint 互相覆盖）。
             如果 caller 显式传 ``thread_id``，则原样使用，不追加。
         """
@@ -390,20 +502,36 @@ class AgentRunner:
 
         config = {"configurable": {"thread_id": thread_id}}
 
-        if resume:
-            # 恢复模式：init_state 为 None，LangGraph 从 checkpoint 加载
-            final = app.invoke(None, config=config)
-        else:
-            init_state = init_agent_state(
-                group=self.group,
-                flow_name=flow_name,
-                thread_id=thread_id,
-                system_prompt=system_prompt,
-                tools=[],  # tools 已通过闭包注入 llm_node，不入 state
-                input_data={"task": task},
+        # Metrics hook (best-effort): record run duration/status on all paths.
+        _started_at = time.time()
+        try:
+            if resume:
+                # 恢复模式：init_state 为 None，LangGraph 从 checkpoint 加载
+                final = app.invoke(None, config=config)
+            else:
+                init_state = init_agent_state(
+                    group=self.group,
+                    flow_name=flow_name,
+                    thread_id=thread_id,
+                    system_prompt=system_prompt,
+                    tools=[],  # tools 已通过闭包注入 llm_node，不入 state
+                    input_data={"task": task},
+                )
+                final = app.invoke(init_state, config=config)
+        except Exception as exc:
+            _record_run_safe(
+                group=self.group, flow=flow_name, thread_id=thread_id,
+                started_at=_started_at, ended_at=time.time(), status="error",
+                error=f"{type(exc).__name__}: {exc}",
+                trace_events=None, context_chars=None,
             )
-            final = app.invoke(init_state, config=config)
-
+            raise
+        _record_run_safe(
+            group=self.group, flow=flow_name, thread_id=thread_id,
+            started_at=_started_at, ended_at=time.time(),
+            status=_run_status(final), error=None,
+            trace_events=None, context_chars=None,
+        )
         return final
 
     # ----- stream()：带 execution_trace 的执行入口 -----
@@ -481,6 +609,7 @@ class AgentRunner:
             )
 
         final_state: dict[str, Any] = {}
+        _started_at = time.time()
 
         try:
             # LangGraph returns chunks like {"llm": {...}}, {"tool": {...}},
@@ -519,8 +648,20 @@ class AgentRunner:
                         node_name=node_name,
                         iteration=iteration,
                     )
+                    # P0-8 §4.4：checkpoint_snapshot 事件随 state 流出 → 进 trace。
+                    # 兼容扩展：未知事件类型前端按降级渲染，无需前端改动。
+                    for ev in update.get("checkpoint_snapshot") or []:
+                        if isinstance(ev, dict) and ev.get("event_type") == "checkpoint_snapshot":
+                            emit("checkpoint_snapshot", node=node_name, iteration=iteration, data=dict(ev))
         except Exception as exc:
             emit("error", data={"error": f"{type(exc).__name__}: {exc}"})
+            _record_run_safe(
+                group=self.group, flow=flow_name, thread_id=thread_id,
+                started_at=_started_at, ended_at=time.time(), status="error",
+                error=f"{type(exc).__name__}: {exc}",
+                trace_events=trace, context_chars=estimate_context_chars(trace)
+                if "estimate_context_chars" in globals() else None,
+            )
             raise
 
         # If checkpointing is enabled, recover full final state from app.get_state()
@@ -558,6 +699,18 @@ class AgentRunner:
             "status": status,
             "iterations": final_state.get("iterations", 0),
         })
+
+        # Metrics hook (best-effort): ctx_chars 粗估自 trace 文本，取不到即 None。
+        _ctx_chars = (
+            estimate_context_chars(trace)
+            if "estimate_context_chars" in globals()
+            else None
+        )
+        _record_run_safe(
+            group=self.group, flow=flow_name, thread_id=thread_id,
+            started_at=_started_at, ended_at=time.time(), status=status,
+            error=None, trace_events=trace, context_chars=_ctx_chars,
+        )
 
         final_state["thread_id"] = thread_id
         final_state["execution_trace"] = trace
@@ -600,7 +753,23 @@ class AgentRunner:
             system_prompt=system_prompt or "",
         )
         config = {"configurable": {"thread_id": thread_id}}
-        final = app.invoke(Command(resume=resume_payload), config=config)
+        _started_at = time.time()
+        try:
+            final = app.invoke(Command(resume=resume_payload), config=config)
+        except Exception as exc:
+            _record_run_safe(
+                group=self.group, flow=flow_name, thread_id=thread_id,
+                started_at=_started_at, ended_at=time.time(), status="error",
+                error=f"{type(exc).__name__}: {exc}",
+                trace_events=None, context_chars=None,
+            )
+            raise
+        _record_run_safe(
+            group=self.group, flow=flow_name, thread_id=thread_id,
+            started_at=_started_at, ended_at=time.time(),
+            status=_run_status(final), error=None,
+            trace_events=None, context_chars=None,
+        )
         return final
 
     @staticmethod
@@ -734,14 +903,14 @@ class AgentRunner:
 
     # ----- 内部工具 -----
     def _generate_thread_id(self, thread_id: str | None, flow_name: str) -> str:
-        """生成 thread_id：caller 显式传 → 原样返回；否则 ``make_thread_id`` + uuid 后缀。
+        """生成 thread_id：caller 显式传 → 原样返回；否则统一走 ``make_thread_id``。
 
-        uuid 后缀确保同秒同 group+flow_name 不会碰撞（Day 3 review 决策 #6 修复点）。
+        make_thread_id 默认以 uuid8 收尾，同秒同 group+flow_name 不碰撞
+        （Day 3 review 决策 #6 修复点；原 uuid 后缀逻辑已统一进 langgraph_base）。
         """
         if thread_id is not None:
             return thread_id
-        base = make_thread_id(self.group, flow_name)
-        return f"{base}-{uuid.uuid4().hex[:8]}"
+        return make_thread_id(self.group, flow_name)
 
     def _is_meta_skill(self, skill_name: str) -> bool:
         """判断 skill_name 是否是元 skill（来自 MimoCode .bundle/）。"""

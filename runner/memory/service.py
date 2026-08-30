@@ -387,13 +387,29 @@ class MemoryService:
         logger.debug("memory.write: %s type=%s (idx=%s)", path, final_type, scope_id)
         return str(path)
 
-    def get(self, *, scope: str, key: str, scope_id: str | None = None) -> str | None:
+    def get(
+        self,
+        *,
+        scope: str,
+        key: str,
+        scope_id: str | None = None,
+        requester_group: str | None = None,
+    ) -> str | None:
         """读单条 memory 的 body 内容（直接走磁盘）。文件不存在返 None。
 
         Args:
             scope, scope_id, key: 与 :meth:`write` 同。
+            requester_group: 覆盖实例默认 requester（P0-2：对齐 search()，
+                ``groups`` scope 跨组读一律拦截）。
         """
         from .paths import build_path
+
+        # P0-2：get() 此前绕过了 GROUP 读权限校验（search/write/delete 都有）。
+        rgroup = requester_group if requester_group is not None else self.requester_group
+        if scope == "groups":
+            if not scope_id:
+                raise ValueError("get: scope=groups 必须传 scope_id")
+            _check_group_read_allowed(scope, scope_id, rgroup)
 
         if scope == "tasks":
             raise NotImplementedError("get(scope='tasks'): 暂不支持，见 write() 说明")

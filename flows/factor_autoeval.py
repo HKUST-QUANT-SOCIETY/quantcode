@@ -36,12 +36,59 @@ class FactorFlowState(TypedDict, total=False):
     eval_result: dict[str, Any]
     report: dict[str, Any]
     acceptance: dict[str, Any]
+    _memory: Any  # compose_executor 注入的 MemoryService handle（node 端经 _memory() 解析）
+
+
+def _memory(state: FactorFlowState) -> Any:
+    """解析 compose_executor 注入的 MemoryService（state["_memory"] handle）。
+
+    直接调 node（单测）或未注入 memory 时返回 None，各 node 据此跳过 memory 读写。
+    """
+    handle = state.get("_memory")
+    if isinstance(handle, dict) and "_tid" in handle:
+        from runner.compose_executor import get_memory
+
+        return get_memory(handle["_tid"])
+    return None
 
 
 def validate_factor_spec(state: FactorFlowState) -> dict[str, Any]:
-    """Validate raw input_data against FactorSpec."""
+    """Validate raw input_data against FactorSpec; memory 注入时做 dedupe + 写 progress。"""
     spec = FactorSpec(**state["input_data"])
-    return {"input_spec": spec.model_dump(mode="json")}
+    input_spec = spec.model_dump(mode="json")
+
+    memory = _memory(state)
+    if memory is None:
+        return {"input_spec": input_spec}
+
+    group = state.get("group", "factor")
+    # 先看是否已跑过同 input（dedupe：memory 当作跨 invoke 的"缓存"）
+    cached = memory.search(
+        query=spec.name,
+        scope="groups",
+        scope_id=group,
+        type="progress",
+        limit=1,
+    )
+    errors: list[str] = []
+    if cached and cached[0].snippet:
+        errors.append(
+            f"validate_factor_spec: 命中 dedupe cache，跳过：{cached[0].path}"
+        )
+    else:
+        memory.write(
+            scope="groups",
+            scope_id=group,
+            type="progress",
+            key="factor_validation",
+            body=(
+                "# validate_factor_spec\n\n"
+                f"- factor_name: {spec.name}\n"
+                "- validated_at: <ts>\n"
+            ),
+            requester_group=group,
+        )
+    return {"input_spec": input_spec, "errors": errors}
 
 
 def call_autoeval_api(state: FactorFlowState) -> dict[str, Any]:
@@ -49,9 +96,24 @@ def call_autoeval_api(state: FactorFlowState) -> dict[str, Any]:
 
     Real AutoFactorEvaluation integration is intentionally deferred. This node
     preserves the public shape needed by report generation and acceptance tests.
+    memory 注入时顺带查 history 上的 AutoEval 版本数。
     """
     spec = FactorSpec(**state["input_spec"])
-    return {"eval_result": _mock_autoeval_result(spec)}
+    eval_result = _mock_autoeval_result(spec)
+
+    memory = _memory(state)
+    if memory is not None:
+        history = memory.search(
+            query="autoeval_version",
+            scope="groups",
+            scope_id=state.get("group", "factor"),
+            type="memory",
+            limit=3,
+        )
+        if history:
+            eval_result["historical_versions_count"] = len(history)
+
+    return {"eval_result": eval_result}
 
 
 def generate_factor_report(state: FactorFlowState) -> dict[str, Any]:
@@ -97,6 +159,26 @@ def generate_factor_report(state: FactorFlowState) -> dict[str, Any]:
     )
 
     artifact = artifact_path.as_posix()
+
+    # 写一条 notes 到 Memory（量化组员后续会读；未注入 memory 时跳过）
+    memory = _memory(state)
+    if memory is not None:
+        group = state.get("group", "factor")
+        memory.write(
+            scope="groups",
+            scope_id=group,
+            type="notes",
+            key=f"factor_report_{spec.name}",
+            body=(
+                "# factor_report\n\n"
+                f"- factor: {spec.name}\n"
+                f"- ic: {eval_result['ic_mean']}\n"
+                f"- ir: {eval_result['ir']}\n"
+                f"- artifact: {artifact}\n"
+            ),
+            requester_group=group,
+        )
+
     return {
         "report": report_data,
         "output_data": report_data,
@@ -145,9 +227,9 @@ def _mock_autoeval_result(spec: FactorSpec) -> dict[str, Any]:
     return payload
 
 
-# Day 4 起:把 mock 字典提到模块级常量,供 tools/factor/autoeval_stub.py 共享,
+# Day 4 起:把 mock 字典提到模块级常量,tools/factor/autoeval.py 降级路径共享,
 # 避免双维护。Lead 接真 AutoEval API 时只需替换 _mock_autoeval_result 函数体,
-# autoeval_stub 自动跟新(import 同一个常量)。
+# autoeval 降级路径自动跟新(import 同一个常量)。
 MOCK_AUTOEVAL_PAYLOAD_V1: dict[str, Any] = {
     "factor_version": "day2-mock",
     "eval_run_id": "stub-eval",  # generic;_mock_autoeval_result(spec) 会用 spec.name 覆盖

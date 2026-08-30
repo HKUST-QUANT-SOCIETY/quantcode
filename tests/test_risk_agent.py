@@ -35,7 +35,6 @@ def test_risk_allowlist_matches_registered_tools():
     assert {t.id for t in tools} == {
         "read_blackboard",
         "calc_risk",
-        "calc_risk_stub",
         "generate_risk_profile",
         "check_gate",
         "write_pr_comment",

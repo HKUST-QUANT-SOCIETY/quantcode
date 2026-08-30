@@ -19,6 +19,7 @@ Day 7 新增 start/resume 两阶段协议：
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +27,8 @@ from pydantic import BaseModel, Field
 
 from tools.registry import ToolDef, registry
 
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -114,12 +117,14 @@ def _resolve_skill_name(skill_name: str | None, group: str, task: str) -> str | 
 def _mcp_checkpoint_db() -> Path:
     """返回 MCP run_agent 专用的稳定 checkpoint DB 路径。
 
-    MCP run 与 OpenCode CLI 共用同一 DB，这样通过 CLI 暂停的 gate
-    也可以通过 MCP resume。
+    统一复用 runner.langgraph_base.CHECKPOINTS_DB，MCP run 与 OpenCode CLI
+    共用同一 DB，这样通过 CLI 暂停的 gate 也可以通过 MCP resume。
+    （原 .quantcode/opencode-checkpoints.db 硬编码已删除；旧 db 不迁移。）
     """
-    db_path = PROJECT_ROOT / ".quantcode" / "opencode-checkpoints.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return db_path
+    from runner.langgraph_base import CHECKPOINTS_DB
+
+    CHECKPOINTS_DB.parent.mkdir(parents=True, exist_ok=True)
+    return CHECKPOINTS_DB
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +153,8 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
             "status": "error",
             "error": (
                 "No group configured. Either pass 'group' in run_agent args, or set "
-                "QUANTCODE_GROUP environment variable "
-                "(e.g., QUANTCODE_GROUP=model) in opencode.local.jsonc or your shell."
+                "QUANTCODE_GROUP environment variable (e.g., QUANTCODE_GROUP=model) "
+                "via shell export or the mcp.<server>.environment block in opencode.jsonc."
             ),
         }
 
@@ -173,7 +178,7 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
             "status": "error",
             "error": (
                 "No LLM model configured. Set QUANTCODE_API_KEY "
-                "(or STEPFUN_PLAN_API_KEY, or ANTHROPIC_API_KEY) "
+                "(and optionally QUANTCODE_MODEL_PROVIDER / QUANTCODE_MODEL_NAME) "
                 "environment variable."
             ),
         }
@@ -189,6 +194,42 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
 
     # ── start mode ──
     return _start_mode(args, group, model, checkpoint_db, resolved_skill)
+
+
+def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
+    """risk 组启动时读取 PROJECT scope 的 ``shared.pending_risk_reviews`` 队列条数。
+
+    P0-2 修复：session/key 一律走 :mod:`runner.blackboard_keys` 归一层
+    （与 write_blackboard / trigger_risk_flow 写读两端一致），不再引用
+    不存在的 ``tools.blackboard.blackboard_service``；读取失败记 warning
+    并返回 0，不阻塞 risk 组正常流程。
+    """
+    try:
+        import sqlite3
+
+        from runner.blackboard import BlackboardService
+        from runner.blackboard_keys import KEY_PENDING_RISK_REVIEWS, PROJECT_SESSION_ID
+        from schemas import BlackboardScope, GroupName
+
+        service = BlackboardService(
+            db_path=db_path,
+            session_id=PROJECT_SESSION_ID,
+            requester_group=GroupName.RISK,
+        )
+        queue_entry = service.get_entry(
+            BlackboardScope.PROJECT,
+            None,
+            KEY_PENDING_RISK_REVIEWS,
+            requester_group=GroupName.RISK,
+        )
+        if queue_entry and isinstance(queue_entry.value, dict):
+            reviews = queue_entry.value.get("reviews", {})
+            if isinstance(reviews, dict):
+                return len(reviews)
+    except (ImportError, sqlite3.Error, ValueError) as exc:
+        # 不再静默吞掉——记 warning 便于排障。
+        logger.warning("risk 组读取 pending_risk_reviews 失败（忽略）: %s", exc)
+    return 0
 
 
 def _start_mode(
@@ -218,22 +259,9 @@ def _start_mode(
     # Day 5 fix: risk 组启动时读取 pending_risk_reviews，接收 model→risk 跨组流触发
     task = args.task
     if group == "risk":
-        try:
-            from tools.blackboard.blackboard_service import get_blackboard_service, BlackboardScope
-            from schemas.groups import GroupName
-            service = get_blackboard_service()
-            queue_entry = service.get_entry(
-                BlackboardScope.PROJECT,
-                None,
-                "shared.pending_risk_reviews",
-                requester_group=GroupName.RISK,
-            )
-            if queue_entry and isinstance(queue_entry.value, dict):
-                reviews = queue_entry.value.get("reviews", {})
-                if reviews:
-                    task = f"{task}\n\n[Pending risk reviews from model group: {len(reviews)} items]"
-        except Exception:
-            pass  # 读取失败不影响正常流程
+        review_count = _read_pending_risk_reviews()
+        if review_count:
+            task = f"{task}\n\n[Pending risk reviews from model group: {review_count} items]"
 
     runner = AgentRunner(
         group=group,
@@ -307,241 +335,6 @@ def _start_mode(
             "error": f"{type(e).__name__}: {e}",
             "traceback": tb[-500:],
         }
-
-
-def _start_risk_gate_mode(
-    args: RunAgentArgs,
-    checkpoint_db: Path,
-) -> dict[str, Any]:
-    """
-    DEPRECATED: risk-gate 专用 start 模式，已弃用。统一走 AgentRunner。
-
-    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径，走确定性
-    build_risk_agent pipeline 而非 ReAct。现已统一至 AgentRunner ReAct 路径。
-    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
-    """
-    if not args.task:
-        return {
-            "status": "error",
-            "error": "task is required for start mode (no decision provided).",
-        }
-
-    from runner.langgraph_base import make_thread_id
-    import uuid
-    thread_id = args.thread_id or (
-        f"{make_thread_id('risk', 'mcp_compose')}-{uuid.uuid4().hex[:8]}"
-    )
-
-    # 将自然语言 task 映射为 risk:gate 的最小 input_data。
-    task_lower = args.task.lower()
-    scenario = "high_risk" if any(k in task_lower for k in (
-        "high_risk", "high risk", "var99", "var 99", "max_drawdown", "position limit", "position_limit"
-    )) else "normal"
-
-    from scripts.run_risk_gate_tool import _fixture_model_spec
-    from runner.risk_agent import build_risk_agent
-    from runner.human_gate import extract_interrupt_payload, format_waiting_for_human
-
-    app = build_risk_agent(checkpoint_db=checkpoint_db)
-    input_data = {
-        "scenario": scenario,
-        "model_spec": _fixture_model_spec(),
-        "pr_number": "303",
-        "head_sha": f"mcp-{thread_id}",
-        "pr_url": f"https://github.com/hkust-quant-society/quantcode/pull/303",
-        "artifacts_root": str(PROJECT_ROOT / "artifacts" / "risk" / "opencode" / scenario),
-        "dedupe_db_path": str(PROJECT_ROOT / ".quantcode" / "opencode-dedupe.sqlite"),
-    }
-    init_state = {
-        "group": "risk",
-        "flow_name": "risk:gate",
-        "thread_id": thread_id,
-        "input_data": input_data,
-        "output_data": None,
-        "artifacts": [],
-        "errors": [],
-    }
-    final_state = app.invoke(init_state, config={"configurable": {"thread_id": thread_id}})
-    interrupt = extract_interrupt_payload(final_state)
-    if interrupt is not None:
-        waiting = format_waiting_for_human(thread_id=thread_id, interrupt_payload=interrupt)
-        waiting["execution_trace"] = [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "agent_start",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"task": args.task or ""},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "risk_metrics",
-                "node": "run_tool_pipeline",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"metrics": final_state.get("risk_metrics", {})},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 3,
-                "type": "human_gate",
-                "node": "human_review",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": "waiting_for_human", "gate": waiting.get("gate", {})},
-            },
-        ]
-        return waiting
-
-    output = final_state.get("output_data") or {}
-    return {
-        "status": output.get("status", "completed"),
-        "thread_id": thread_id,
-        "output_data": output,
-        "artifacts": final_state.get("artifacts", []),
-        "risk_metrics": final_state.get("risk_metrics", {}),
-        "execution_trace": [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "agent_start",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"task": args.task or ""},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "risk_metrics",
-                "node": "run_tool_pipeline",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"metrics": final_state.get("risk_metrics", {})},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 3,
-                "type": "output_data",
-                "node": "finalize_output",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"output_data": output},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 4,
-                "type": "agent_end",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": output.get("status", "completed")},
-            },
-        ],
-    }
-
-
-def _resume_risk_gate_mode(
-    args: RunAgentArgs,
-    checkpoint_db: Path,
-) -> dict[str, Any]:
-    """
-    DEPRECATED: risk-gate 专用 resume 模式，已弃用。统一走 AgentRunner。
-
-    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径。
-    现已统一至 _resume_mode 的 AgentRunner 路径。
-    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
-    """
-    if not args.thread_id:
-        return {
-            "status": "error",
-            "error": "thread_id is required for resume mode.",
-        }
-
-    from runner.human_gate import normalize_external_decision
-    from runner.risk_agent import build_risk_agent, resume_risk_gate
-
-    decision = normalize_external_decision(args.decision or "reject")
-    risk_decision = "approve" if decision == "approve" else "reject"
-    app = build_risk_agent(checkpoint_db=checkpoint_db)
-    final_state = resume_risk_gate(app, args.thread_id, risk_decision)
-    output = final_state.get("output_data") or {}
-    status = output.get("status", "completed")
-    artifacts = final_state.get("artifacts", [])
-    return {
-        "status": status,
-        "thread_id": args.thread_id,
-        "human_decision": decision,
-        "output_data": output,
-        "artifacts": artifacts,
-        "risk_metrics": final_state.get("risk_metrics", {}),
-        "execution_trace": [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "human_gate",
-                "node": "human_review",
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"human_decision": decision, "status": status},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "output_data",
-                "node": "finalize_output",
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"output_data": output},
-            },
-            *[
-                {
-                    "schema_version": "agent_trace.v1",
-                    "seq": i + 3,
-                    "type": "artifact",
-                    "node": "write_pr_comment",
-                    "thread_id": args.thread_id,
-                    "group": "risk",
-                    "flow_name": "risk:gate",
-                    "iteration": 0,
-                    "data": {"path": str(path)},
-                }
-                for i, path in enumerate(artifacts)
-            ],
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": len(artifacts) + 3,
-                "type": "agent_end",
-                "node": None,
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": status},
-            },
-        ],
-    }
 
 
 def _resume_mode(

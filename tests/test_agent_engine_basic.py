@@ -515,14 +515,23 @@ def test_explicit_thread_id_is_preserved(tmp_db, clean_registry):
 
 
 def test_agent_triggers_human_gate_end_to_end_via_risk_tool(tmp_db, clean_registry):
-    """端到端验证 human_gate：LLM 调用 calc_risk_stub(high_risk) 后自动注入 risk_metrics。"""
-    from tools.risk_stub_tool import calc_risk_stub_tool
+    """端到端验证 human_gate：LLM 调 calc_risk(high_risk) + generate_risk_profile 后自动注入。"""
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    register_tool(calc_risk_stub_tool)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
 
     llm = ScriptedLLM(
         [
-            _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], "step1"),
+            _ai_with_tools([("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"})], "step1"),
+            _ai_with_tools(
+                [("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics})],
+                "step2",
+            ),
             AIMessage(content="Risk is high but I think it is fine."),
         ]
     )
@@ -551,7 +560,7 @@ def test_agent_triggers_human_gate_end_to_end_via_risk_tool(tmp_db, clean_regist
 def test_agent_triggers_human_gate_when_risk_metrics_exceed_thresholds(tmp_db, clean_registry):
     """当 state 中 risk_metrics 超过阈值时，tool 条件边应触发 human_gate 直接 END。"""
     from langchain_core.messages import HumanMessage
-    from tools.risk_stub import calc_risk_stub
+    from tools.risk.statistics_stub import calc_risk_stub
 
     register_tool(READ_PR)
 
@@ -932,20 +941,32 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
     """验证 human_gate 条件边触发后端到端工作。
 
     场景：
-    1. mock LLM 调 read_pr + calc_risk_stub(high_risk)
-    2. tool_node 把高风险数据注入 state["risk_metrics"]
+    1. mock LLM 调 read_pr，然后一步调 calc_risk(high_risk) + generate_risk_profile
+    2. tool_node 把高风险数据注入 state["risk_metrics"] / state["risk_profile"]
     3. tool_routing → route_next_step → HUMAN_GATE → human_gate node
-    4. _human_gate_routing 当前默认返回 "end" → END
-    5. 验证 iterations 在 calc_risk_stub 之后立即停止（不会继续回到 llm）
+    4. human_gate node interrupt 暂停（测试断言 iterations 停在 gate 触发点）
+    5. 验证 iterations 在风险超标后立即停止（不会继续回到 llm）
     """
-    from tools.risk_stub_tool import calc_risk_stub_tool as risk_tool
-    register_tool(READ_PR)
-    register_tool(risk_tool)
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    # 第 1 步调 read_pr，第 2 步调 calc_risk_stub(high_risk)
+    register_tool(READ_PR)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
+
+    # 第 1 步调 read_pr，第 2 步同时调 calc_risk(high_risk) + generate_risk_profile
     llm = ScriptedLLM([
         _ai_with_tools([("read_pr", {"pr_number": 42})], call_id_prefix="hg"),
-        _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], call_id_prefix="hg2"),
+        _ai_with_tools(
+            [
+                ("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"}),
+                ("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics}),
+            ],
+            call_id_prefix="hg2",
+        ),
     ])
 
     runner = AgentRunner(
@@ -962,10 +983,10 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
         thread_id="human-gate-e2e-1",
     )
 
-    # 关键断言：calc_risk_stub 返回 high_risk 后 human_gate 应立即终止
-    # iterations=2 表示：step1(read_pr) → step2(calc_risk_stub) → human_gate → END
+    # 关键断言：风险超标后 human_gate 应立即暂停
+    # iterations=2 表示：step1(read_pr) → step2(calc_risk + generate_risk_profile) → human_gate
     assert final["iterations"] == 2, (
-        f"Expected human_gate after calc_risk_stub but got {final['iterations']} iterations"
+        f"Expected human_gate after risk tools but got {final['iterations']} iterations"
     )
 
     # 验证 risk_metrics 确实被注入到 final state

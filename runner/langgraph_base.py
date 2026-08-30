@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import time
+import uuid
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypedDict
 
@@ -39,7 +39,10 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 # .quantcode/ 位于仓库根（与 runner/ 同级）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CHECKPOINT_DB = PROJECT_ROOT / ".quantcode" / "checkpoints.db"
+# 统一 checkpoint DB：compose / agent / MCP 所有入口共用这一个文件。
+# （原 MCP 侧 opencode-checkpoints.db 已停用；旧 db 不迁移。）
+CHECKPOINTS_DB = PROJECT_ROOT / ".quantcode" / "checkpoints.db"
+DEFAULT_CHECKPOINT_DB = CHECKPOINTS_DB  # 向后兼容别名
 
 
 # ---------------------------------------------------------------------------
@@ -173,29 +176,39 @@ def make_thread_id(
     *,
     ts: int | None = None,
     suffix: str = "",
+    task_id: str | None = None,
 ) -> str:
     """生成统一格式的 thread_id。
 
-    规则：``<group>-<flow>-<epoch_seconds>[-suffix]``
+    规则：
+    - 传 ``task_id``：``<group>-<flow>-<task_id>-<uuid8>``
+    - 未传：``<group>-<flow>-<uuid8>``（uuid 截 8 位；同秒同参不碰撞）
+    - 显式传 ``ts``（测试/演示注入固定值）：保留旧格式 ``<group>-<flow>-<ts>[-suffix]``
 
     Args:
         group: 6 组之一（fundamental/factor/model/risk/strategy/options）。
         flow_name: 流名（例 ``factor:autoeval``）。自动把冒号替换成下划线以兼容文件名。
-        ts: 时间戳（秒），默认 ``time.time()``；测试时可注入固定值。
+        ts: 时间戳（秒）。显式传入时作为唯一段（旧行为，确定性 id）；默认用 uuid8。
         suffix: 可选后缀（例 ``"retry-1"`` ``"step3-debug"``）。
+        task_id: 可选任务 id（例 OpenCode 任务号）；有则插在 flow 之后、唯一段之前。
 
     Returns:
         thread_id 字符串。
 
     Examples:
-        >>> make_thread_id("factor", "factor:autoeval")
+        >>> make_thread_id("factor", "factor:autoeval", ts=1719876543)
         'factor-factor_autoeval-1719876543'
-        >>> make_thread_id("factor", "factor:autoeval", suffix="retry-1")
-        'factor-factor_autoeval-1719876543-retry-1'
+        >>> make_thread_id("factor", "factor:autoeval", task_id="T42", ts=1719876543)
+        'factor-factor_autoeval-T42-1719876543'
+        >>> make_thread_id("factor", "factor:autoeval")  # doctest: +SKIP
+        'factor-factor_autoeval-1a2b3c4d'   # uuid8 每次调用不同
     """
     safe_flow = flow_name.replace(":", "_").replace("/", "_")
-    epoch = int(ts if ts is not None else time.time())
-    base = f"{group}-{safe_flow}-{epoch}"
+    unique = str(int(ts)) if ts is not None else uuid.uuid4().hex[:8]
+    parts = [group, safe_flow]
+    if task_id:
+        parts.append(str(task_id))
+    base = "-".join(parts) + f"-{unique}"
     return f"{base}-{suffix}" if suffix else base
 
 
@@ -234,6 +247,7 @@ def default_compose_edges(steps: list[str]) -> list[tuple[str, str]]:
 
 __all__ = [
     "BaseFlowState",
+    "CHECKPOINTS_DB",
     "DEFAULT_CHECKPOINT_DB",
     "PROJECT_ROOT",
     "create_workflow",

@@ -167,12 +167,23 @@ def test_stream_trace_includes_output_data_and_artifacts(tmp_db, clean_registry)
 
 
 def test_stream_trace_contains_human_gate(tmp_db, clean_registry):
-    from tools.risk_stub_tool import calc_risk_stub_tool
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    register_tool(calc_risk_stub_tool)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
 
     llm = ScriptedLLM([
-        _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], "step1"),
+        _ai_with_tools(
+            [
+                ("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"}),
+                ("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics}),
+            ],
+            "step1",
+        ),
     ])
     runner = AgentRunner(group="risk", model=llm, checkpoint_db=tmp_db)
     result = runner.stream(

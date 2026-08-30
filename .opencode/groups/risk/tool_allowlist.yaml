@@ -3,7 +3,6 @@ allowlist:
   - run_agent
   - read_blackboard
   - calc_risk
-  - calc_risk_stub
   - generate_risk_profile
   - check_gate
   - request_human_review

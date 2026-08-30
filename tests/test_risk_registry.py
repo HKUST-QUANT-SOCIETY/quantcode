@@ -42,11 +42,11 @@ def test_risk_allowlist_filters_tools(monkeypatch):
     assert names == {
         "read_blackboard",
         "calc_risk",
-        "calc_risk_stub",
         "check_gate",
         "generate_risk_profile",
         "write_pr_comment",
         "request_human_review",
+        "list_runs",  # meta tool：run_agent 同路，所有组的 MCP server 可见
     }
 
 

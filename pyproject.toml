@@ -27,10 +27,15 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.4",
 ]
+# P0-7（A09-04/05）：SSH 读各组主线服务器（runner/server_ssh.py）为可选能力，
+# 不进核心依赖；缺包时读主线自动降级（match_main 静默跳过）。
+ssh = [
+  "paramiko>=3.4",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["runner*", "pipelines*", "tools*", "schemas*", "flows*"]
+include = ["runner*", "tools*", "schemas*", "flows*"]
 exclude = ["vendor*", "templates*", "docs*", "tests*"]
 
 [tool.ruff]

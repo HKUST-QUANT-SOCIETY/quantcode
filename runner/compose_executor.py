@@ -177,6 +177,7 @@ def execute_compose_flow(
     input_data: dict[str, Any],
     *,
     thread_id: str | None = None,
+    task_id: str | None = None,
     inject_memory: Callable[[str], Any] | None = None,
     config: dict[str, Any] | None = None,
     resume: bool = False,
@@ -190,6 +191,9 @@ def execute_compose_flow(
                     当 ``resume=True`` 时忽略（从 checkpoint 恢复已有 state）。
         thread_id: 可显式指定，否则按 ``make_thread_id(group, flow_name)`` 生成。
                    ``resume=True`` 时必须显式传入（指向要恢复的 checkpoint）。
+        task_id: 可选任务 id（例 OpenCode 任务号）。只在生成新 thread_id 时生效
+                 （显式传 ``thread_id`` 或 ``resume=True`` 时忽略）；
+                 没有就不带，上层无须强制改造。
         inject_memory: 一个 ``(group) -> MemoryService`` 的工厂；
                        传 None 时不注入 ``_memory``。Day 3+ 由 Memory 模块提供。
         config: 透传给 ``app.invoke`` 的额外 config。
@@ -226,7 +230,7 @@ def execute_compose_flow(
             f"已注册：{sorted(FLOW_REGISTRY.keys())}"
         )
 
-    tid = thread_id or make_thread_id(g, f)
+    tid = thread_id or make_thread_id(g, f, task_id=task_id)
 
     # 构造 initial state（resume 时为 None，LangGraph 从 checkpoint 恢复）
     init_state: dict[str, Any] | None
@@ -347,3 +351,18 @@ def _self_check() -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     _self_check()
+
+
+# ---------------------------------------------------------------------------
+# 内置 Compose 流统一注册（import 即注册）
+# ---------------------------------------------------------------------------
+#
+# 任务要求：四条流的注册不依赖 demo 脚本手工 register_flow，改为
+# ``import flows.<module>`` 即注册；本文件底部统一 import，保证
+# ``quantcode.mcp_server`` 主路径 import compose_executor 时注册即生效。
+# （factor:autoeval 沿用 demo 脚本注册方式，保持既有测试/query 习惯不变。）
+
+import flows.fundamental_research  # noqa: E402,F401  register ("fundamental", "fundamental:research")
+import flows.model_submit  # noqa: E402,F401  register ("model", "model:submit")
+import flows.options_compose  # noqa: E402,F401  register ("options", "options:compose")
+import flows.strategy_compose  # noqa: E402,F401  register ("strategy", "strategy:compose")

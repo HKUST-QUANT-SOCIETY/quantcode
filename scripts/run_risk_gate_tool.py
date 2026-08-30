@@ -15,7 +15,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from flows.risk_gate import build_workflow, resume_risk_gate  # noqa: E402
+from runner.risk_agent import build_risk_agent as build_workflow, resume_risk_gate  # noqa: E402
 from runner.compose_executor import execute_compose_flow, register_flow, unregister_flow  # noqa: E402
 from runner.langgraph_base import clear_checkpointer_cache, make_thread_id  # noqa: E402
 from tools.risk.risk_tools import clear_write_pr_comment_dedupe_cache  # noqa: E402

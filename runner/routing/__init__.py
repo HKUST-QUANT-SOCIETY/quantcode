@@ -28,6 +28,7 @@ from .rlhf_logger import (
     make_rlhf_entry,
 )
 from .session_review import (
+    apply_judged_session,
     apply_session_verdict,
     reviewer_review_session,
 )
@@ -55,7 +56,8 @@ __all__ = [
     "RLHF_PATH",
     "log_rlhf_entry",
     "make_rlhf_entry",
-    # Session review
+    # Session review (post-hoc label 回填 + judge 分支)
+    "apply_judged_session",
     "apply_session_verdict",
     "reviewer_review_session",
 ]

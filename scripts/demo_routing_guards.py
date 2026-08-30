@@ -12,7 +12,7 @@ Run:
 from __future__ import annotations
 
 from runner.routing.router import RouteDecision, route_next_step
-from tools.risk_stub import calc_risk_stub
+from tools.risk.statistics_stub import calc_risk_stub
 
 
 def _label(r: RouteDecision) -> str:

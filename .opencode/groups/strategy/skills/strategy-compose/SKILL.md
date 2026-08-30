@@ -11,6 +11,13 @@ tools:
   - deploy_strategy
 schema_in: schemas.strategy.StrategySpec
 schema_out: schemas.strategy.StrategyReport
+# Compose 流拓扑（runner/compose_executor FLOW_REGISTRY 键 ("strategy", "strategy:compose")，
+# 注册于 flows/strategy_compose.py，import 即注册）
+flow:
+  - select_signals
+  - combine_signals
+  - run_strategy_backtest
+  - verdict  # 内联阈值 sharpe>=0.5 且 max_dd<=0.25；deploy_strategy 留在工具层（needs_human）
 ---
 
 # Strategy Group Agent

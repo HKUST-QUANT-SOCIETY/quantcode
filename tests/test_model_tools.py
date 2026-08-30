@@ -237,9 +237,12 @@ def test_write_blackboard_creates_project_entry(tmp_path):
     assert result["project_entry"]["value"] == {"model_id": "m1"}
     assert result["project_entry"]["version"] == 1
 
+    # P0-2：session 归一为 PROJECT_SESSION_ID（不再用 thread_id 当 session）
+    from runner.blackboard_keys import PROJECT_SESSION_ID
+
     risk_board = BlackboardService(
         db_path,
-        session_id="model-agent-1700000000",
+        session_id=PROJECT_SESSION_ID,
         requester_group=GroupName.RISK,
     )
     assert risk_board.get_entry(
@@ -442,9 +445,12 @@ def test_trigger_risk_flow_writes_project_queue(tmp_path):
     assert result["review_id"] == "abcdef1"
     assert result["review"]["to_group"] == "risk"
 
+    # P0-2：session 归一为 PROJECT_SESSION_ID（写读两端一致）
+    from runner.blackboard_keys import PROJECT_SESSION_ID
+
     risk_board = BlackboardService(
         db_path,
-        session_id=VALID_SESSION,
+        session_id=PROJECT_SESSION_ID,
         requester_group=GroupName.RISK,
     )
     queue = risk_board.get_entry(
