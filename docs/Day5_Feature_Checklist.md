@@ -2,7 +2,7 @@
 
 > **用途**：对照 PRD §3.1 P0 + Design §4 功能清单，逐条核对实现状态。
 > **图例**：✅ 已实现 / 🔶 降级实现（标注降级到什么）/ ❌ 未实现（标注原因 + Week 2 计划）
-> **最后更新**：2026-07-10（Lead）
+> **最后更新**：2026-08-30（Lead；本轮已实现项转 ✅，commit 待补）
 
 ---
 
@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | model | read_pr(真GitHub) / extract_metadata / generate_model_spec / write_blackboard / trigger_risk_flow | ✅ AgentRunner | ModelSpec | ✅ |
 | risk | read_blackboard / calc_risk / generate_risk_profile / check_gate / write_pr_comment / request_human_review | ✅ AgentRunner + 确定性 gate | RiskProfile | ✅ |
-| factor | match_main / gen_schema / autoeval | ✅ AgentRunner + 线性 flow | FactorReport | 🔶 match_main/gen_schema 真 LLM 收口进行中；autoeval 待真 API |
+| factor | match_main / gen_schema / autoeval | ✅ AgentRunner + 线性 flow | FactorReport | ✅ 三工具恒注册真 LLM/API 实现，API 失败自动降级 `_is_mock`（commit 待补）；`merge_to_main`/`check_factor_gate` 仍未实现，验收止于 verdict |
 | fundamental | pit_rag_search / extract_financial / dcf_valuation / render_report | 🔶 通用 AgentRunner | ResearchSpec | 🔶 tools 部分 stub，pit_rag 需真 Chroma |
 | strategy | select_signals / combine_signals / run_strategy_backtest / deploy_strategy | 🔶 通用 AgentRunner | StrategyReport | 🔶 tools 部分 stub |
 | options | build_vol_surface / calc_greeks / run_options_backtest_stub | 🔶 通用 AgentRunner | OptionsRisk | 🔶 backtest 为 stub |
@@ -66,15 +66,18 @@
 | 能力 | 实现 | 状态 |
 |---|---|---|
 | Memory FTS5（5-scope + BM25 + CJK + GROUP 隔离） | `runner/memory/` | ✅ |
-| 自动 Checkpoint（SqliteSaver + resume） | `runner/langgraph_base.py` | ✅ |
+| 自动 Checkpoint（SqliteSaver + resume） | `runner/langgraph_base.py`（单 db：`.quantcode/checkpoints.db`） | ✅（context>70% 快照 / >90% 重建见下行） |
+| 上下文自动快照/重建（PRD §4.4） | `runner/agent_nodes.py`（CONTEXT_SNAPSHOT_RATIO=0.7 / CONTEXT_REBUILD_RATIO=0.9，字符/4 近似 token，`QUANTCODE_CONTEXT_TOKENS` 可调；messages reducer 翻倍 bug 已修 `merge_messages`） | ✅（Wave5 实现，commit 待补） |
+| replay（thread 反查 + list/show/resume） | `scripts/replay.py`（thread_id 含 task_id 段，`make_thread_id` 可传） | ✅（最小版，Wave5 实现，commit 待补） |
+| 运行监控 metrics | `runner/metrics.py` 写 `.quantcode/metrics.jsonl`（agent_engine 完成钩子）；只读 `list_runs` MCP tool + 桌面 Monitor 面板 | ✅（Wave5 新增，commit 待补） |
 | ReAct 引擎（自搭 StateGraph） | `runner/agent_engine.py` | ✅ |
 | 死循环检测 / 迭代上限 / 状态指纹 | `tools/loop_detector.py` / `runner/routing/` | ✅ |
-| RLHF 接入点（rules-only 重构） | `runner/routing/rlhf_logger.py` | ✅ |
-| token 截断（长任务 context） | `runner/agent_nodes.py::make_truncate_node`（可选，已知 reducer 累积限制） | 🔶 Week 2 配自定义 reducer |
-| Dream 知识提取 | `dream/dream_prototype.py` | 🔶 见 §5 |
-| Distill 自动化 | `dream/distill_prototype.py` | 🔶 Day5 新增原型，见 §5 |
-| Schema 动态生成 | `tools/factor/gen_schema_stub.py`（Pydantic 代码生成 + exec 校验） | 🔶 真 LLM 收口进行中 |
-| match_main（主线匹配） | `tools/factor/match_main_stub.py`（fixture-backed，backend 可换真 LLM） | 🔶 真 LLM 收口进行中 |
+| RLHF 接入点（rules-only 重构） | `runner/routing/rlhf_logger.py`；judge/Goal 消费端已建（`/goal` → judge verdict → `apply_judged_session` 回填） | ✅（消费端 Wave5 实现，commit 待补） |
+| token 截断（长任务 context） | `runner/agent_nodes.py::make_truncate_node` + 上下文快照/重建（见上行） | ✅（自动 Checkpoint 主路径已实现） |
+| Dream 知识提取 | `dream/dream_prototype.py` | 🔶 见 §5（dream_events 仍未接） |
+| Distill 自动化 | `dream/distill_prototype.py` | 🔶 原型级 |
+| Schema 动态生成 | `tools/factor/gen_schema.py`（真 LLM 生成 + FactorSpec 契约补齐，失败降级 rule-based） | ✅（降级 `_fallback` 标注；commit 待补） |
+| match_main（主线匹配） | `tools/factor/match_main.py`（真 LLM，API 失败自动降级；可经 `runner/server_ssh.py` SSH 读主线，`pip install 'quantcode[ssh]'`） | ✅（commit 待补） |
 
 ---
 
@@ -89,7 +92,7 @@
 
 | 链路 | 机制 | 状态 |
 |---|---|---|
-| model → risk | trigger_risk_flow 写 `shared.pending_risk_reviews`（方式2 队列标志，Architecture §3.2 定型） | ✅ |
+| model → risk | trigger_risk_flow 写 `shared.pending_risk_reviews`（方式2 队列标志，Architecture §3.2 定型）；session 固定 `PROJECT_SESSION_ID` + `shared.model_entries.` 前缀归一（`runner/blackboard_keys.py`），E2E 锁死 `tests/test_model_risk_handoff_e2e.py` | ✅ |
 | factor → strategy | Blackboard PROJECT scope（因子池 → 策略消费） | 🔶 Week 2 |
 
 ---
@@ -102,15 +105,17 @@
 | run_agent 入口（start/resume 两阶段） | `runner/agent_mcp_tool.py` | ✅ |
 | execution_trace 状态回流（10 事件类型） | `runner/agent_engine.py` | ✅ |
 | Python 侧接口契约 | `docs/IDE_Python_Interface_Contract.md` | ✅ |
-| OpenCode fork 六面板 UI | `../opencode/packages/app` | 🔶 见 阶段4 |
+| 桌面端七 Tab 面板（compose/tasks/gate/schema/memory/resume/monitor） | trace 接线 `updateQuantCodeTrace`、gate 面板 Approve/Reject 按钮（→ run_agent resume）、组切换 segmented 六组、Monitor 面板、/goal 命令 | ✅（Wave5 实现，commit 待补） |
 
 ---
 
 ## 8. 已知降级项（写入 handoff.md）
 
-- **truncate_node**：operator.add reducer 累积翻倍，demo 不触发，Week 2 配自定义 reducer。
-- **fundamental/strategy/options tools**：部分 stub，demo 用 fixture，标注非真实接入。
-- **factor autoeval**：待真 AutoEval API（肖骥超协助）。
-- **Distill**：原型级，识别 ≥1 pattern 即达标，Week 2 完整化。
+- **SSH 完整认证面**：组身份 SSH 绑定已最小闭环（指纹→组映射→fail-closed），但 SSH key 级别的完整认证/审计面仍待建设。
+- **compose SKILL frontmatter 自动注册**：flow 注册仍靠 `runner/compose_executor.py` 统一 import，SKILL.md frontmatter 自动声明未实现。
+- **fundamental/strategy/options tools**：部分 stub，demo 用 fixture，标注非真实接入（风控 calc_risk 已支持 returns 真值，无 returns 时标注 `_is_stub`）。
+- **factor autoeval 降级**：真 API 已接，未配置/失败时自动降级 mock 并标 `_is_mock`（真实服务端点仍待稳定接入）。
+- **merge_to_main / check_factor_gate**：未实现，验收止于 verdict，合并人工决策。
+- **Distill**：原型级，识别 ≥1 pattern 即达标。
 - **factor→strategy 跨组**：Week 2。
-- **Memory 浏览器 / checkpoint 列表 MCP 只读入口**：Day5 前端先直接读 SQLite，Week 2 补只读 tool。
+- **Dream 消费端**：judge/review 消费端已建，dream_events 产生/接入仍未完成。

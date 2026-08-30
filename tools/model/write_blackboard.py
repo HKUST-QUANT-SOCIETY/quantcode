@@ -24,6 +24,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from runner.blackboard import BlackboardService
+from runner.blackboard_keys import PROJECT_SESSION_ID, make_read_key
 from schemas import BlackboardEntry, BlackboardScope, GroupName, WritePolicy
 from tools.registry import ToolDef
 from tools.utils.dedupe import dedupe_within
@@ -52,13 +53,15 @@ def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
     """写一个 dict 值到 blackboard 的 PROJECT scope。
 
     读自 ctx：
-    - ``thread_id`` (或 ``session_id``) — 会话 ID
+    - ``thread_id`` (或 ``session_id``) — 仅用于派生合成 task_id 与 dedupe
     - ``group`` — 写者所在 group
     - ``task_id`` — 真实 task_id（可选，缺省从 thread_id 派生）
     - ``blackboard_db_path`` — 可选覆盖默认 db 路径
 
     构造 BlackboardService，调 ``write_value``：
-    - PROJECT scope：key 前缀 ``shared.model_entries.``，跨组可读
+    - session 固定 ``PROJECT_SESSION_ID``（跨组共享条目归一层，P0-2）
+    - PROJECT scope：key 经 ``make_read_key`` 归一（裸名补 ``shared.model_entries.``
+      前缀，幂等），跨组可读
 
     返回：
         ``{"project_entry": {...}}``，即 BlackboardEntry 的 dict 形式
@@ -79,13 +82,13 @@ def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
 
     service = BlackboardService(
         db_path=db_path,
-        session_id=thread_id,
+        session_id=PROJECT_SESSION_ID,
         requester_group=group,
     )
 
     project_entry: BlackboardEntry = service.write_value(
         scope=BlackboardScope.PROJECT,
-        key=f"shared.model_entries.{args.key}",
+        key=make_read_key(args.key),
         value=args.value,
         write_policy=WritePolicy.GROUP_APPEND,
         written_by_task_id=task_id,

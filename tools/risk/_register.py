@@ -9,7 +9,6 @@ from schemas.risk_profile import RiskProfile, RiskThresholds
 from tools.common.request_human_review import request_human_review_tool
 from tools.registry import ToolDef, register_tool
 from tools.risk import risk_tools
-from tools.risk_stub_tool import calc_risk_stub_tool
 
 
 class ReadBlackboardArgs(BaseModel):
@@ -133,7 +132,6 @@ write_pr_comment_tool = ToolDef(
 
 register_tool(read_blackboard_tool)
 register_tool(calc_risk_tool)
-register_tool(calc_risk_stub_tool)
 register_tool(generate_risk_profile_tool)
 register_tool(check_gate_tool)
 register_tool(write_pr_comment_tool)
@@ -142,7 +140,6 @@ register_tool(request_human_review_tool)  # Day 4 俞高磊：注册 HumanGate i
 __all__ = [
     "read_blackboard_tool",
     "calc_risk_tool",
-    "calc_risk_stub_tool",
     "generate_risk_profile_tool",
     "check_gate_tool",
     "write_pr_comment_tool",

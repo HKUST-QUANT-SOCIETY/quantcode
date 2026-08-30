@@ -1,21 +1,22 @@
 # QuantCode 用户手册
 
 > **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员  
-> **版本**：v1.0  
-> **最后更新**：2026-07-16
+> **版本**：v1.1  
+> **最后更新**：2026-08-30
 
 ---
 
 ## 📚 目录
 
 1. [快速开始](#快速开始)
-2. [Factor组（因子开发）](#factor组因子开发)
-3. [Model组（模型建模）](#model组模型建模)
-4. [Risk组（风险评估）](#risk组风险评估)
-5. [Fundamental组（基本面研究）](#fundamental组基本面研究)
-6. [Strategy组（策略构建）](#strategy组策略构建)
-7. [Options组（期权定价）](#options组期权定价)
-8. [常见问题](#常见问题)
+2. [供应商绑定](#供应商绑定桌面端)
+3. [Factor组（因子开发）](#factor组因子开发)
+4. [Model组（模型建模）](#model组模型建模)
+5. [Risk组（风险评估）](#risk组风险评估)
+6. [Fundamental组（基本面研究）](#fundamental组基本面研究)
+7. [Strategy组（策略构建）](#strategy组策略构建)
+8. [Options组（期权定价）](#options组期权定价)
+9. [常见问题](#常见问题)
 
 ---
 
@@ -34,7 +35,7 @@ cd /path/to/QUANTcode
 ./scripts/start-quantcode.sh
 ```
 
-**方式2：手动启动**
+**方式2：手动启动**（需先完成 LLM 环境变量配置，见 README Quick Start）
 ```bash
 # 1. 启动桌面端
 cd opencode && bun run dev:desktop
@@ -49,7 +50,22 @@ cd opencode && bun run dev:desktop
 2. **描述你的任务** → 例如："我想开发一个动量因子"
 3. **Agent自动执行** → 调用工具、生成报告
 4. **审查结果** → 查看生成的artifact（JSON/PDF/图表）
-5. **人工审批**（如需要）→ 风险超阈值时会暂停等待你的批准
+5. **人工审批**（如需要）→ 风险超阈值时gate面板出现 Approve/Reject 按钮
+
+---
+
+## 供应商绑定（桌面端）
+
+桌面端 **Settings → Providers** 只支持第三方供应商（DeepSeek / StepFun / Kimi / GLM / OpenRouter 等）。官方供应商直连与 OAuth 登录入口已移除。
+
+**绑定步骤**：
+
+1. 打开设置 → Providers → **添加自定义供应商**
+2. 填写统一表单：**显示名称** / **Base URL** / **API Key**（三项都必需；Base URL 形如 `https://api.deepseek.com/v1`）
+3. 点击 **获取模型列表** 按钮 — 系统实时请求该供应商的 `/models` 接口，拉取可用模型供选择
+4. 选中默认模型，保存
+
+绑定完成后，Agent 的 LLM 调用即走该供应商。也可用环境变量方式（`QUANTCODE_API_KEY` / `QUANTCODE_MODEL_PROVIDER` / `QUANTCODE_MODEL_NAME` / `QUANTCODE_MODEL_BASE_URL`），见 README Quick Start。
 
 ---
 
@@ -76,13 +92,16 @@ QuantCode:
 ✓ 提交AutoEval评估...
 
 评估结果：
-- IC均值: 0.042
-- IR: 1.85
-- 月度换手率: 15.3%
-- t统计量: 4.23 (显著)
+- IC均值: 0.045
+- IR: 0.8
+- 月度换手率: 0.25
+- t统计量: 2.5 (显著)
 
-建议: IC稳定，IR较高，可以进入回测阶段。
+验收判定 (阈值见 runner/acceptance.py)：pass
+建议: IC均值与IR达到验收线，可以进入下一步。
 ```
+
+> **注意**：以上为示例数字。实际指标来自 AutoEval 评估（API 不可用时降级为 mock 数据并明确标注 `_is_mock`），是否通过以 `runner/acceptance.py` 的验收阈值判定为准（|ic_mean| ≥ 0.03、ir ≥ 0.5、turnover ≤ 0.8、t_stat ≥ 2.0）。
 
 ### 关键工具
 
@@ -94,16 +113,15 @@ QuantCode:
 
 ### 输出Artifact
 
-- `artifacts/factor/{factor_name}_spec.json` — FactorSpec定义
-- `artifacts/factor/{factor_name}_eval.json` — AutoEval评估结果
+- `artifacts/factor/{factor_name}-report.json` — AutoEval评估报告（含 IC/IR/turnover 与验收判定）
 
 ### 常见问题
 
 **Q: AutoEval评估需要多久？**  
-A: 通常2-5分钟。如果超过10分钟请联系Agent组。
+A: 取决于因子复杂度与 API 状态。若 AutoEval 服务不可用，工具会降级返回 mock 数据并标注 `_is_mock`，请据此判断结果可信度。
 
-**Q: IC<0.03是否值得继续？**  
-A: 需要综合IR和t统计量判断。IR>1.5且t>3.0仍有价值。
+**Q: IC均值低于0.03还有价值吗？**  
+A: 验收判定（`runner/acceptance.py`）会返回 fail。可以综合 IR / t统计量人工判断是否继续优化，但当前不会进入合并流程（`merge_to_main` 尚未实现，合并/拒绝由人工决策）。
 
 **Q: 如何修改因子定义？**  
 A: 直接告诉Agent："修改因子公式，改用EPS增速替代营收增速"
@@ -211,12 +229,14 @@ QuantCode:
 ### HumanGate机制
 
 **何时触发**：任一风险指标超过阈值  
-**如何审批**：
-1. Agent暂停并显示RiskProfile
-2. 你输入`approve`或`reject`
+**如何审批（桌面gate面板）**：
+1. Agent暂停，gate面板显示RiskProfile（含 risk_metrics、reasons、thread_id）
+2. 点击面板上的 **Approve** 或 **Reject** 按钮 → 自动以 resume 方式恢复该会话
 3. Agent继续执行或终止
 
-**阈值配置**：`pipelines/risk_gate/config.yaml`
+（命令行等价操作：`python scripts/replay.py resume --decision approve`）
+
+**阈值配置**：默认阈值内置于 `schemas/risk_profile.py` 的 `RiskThresholds`（max_drawdown/VaR/position_limit 等，如 max_drawdown 0.15）；factor/risk 验收阈值与默认值统一见 `runner/acceptance.py`。
 
 ---
 
@@ -247,7 +267,7 @@ QuantCode:
   - 上涨空间: 15.5%
 ✓ 生成PDF研报...
 
-研报已保存: artifacts/fundamental/0700_HK_research_20260716.pdf
+研报已保存: artifacts/research/0700_HK_research_20260716.md（Typst 环境可用时渲染 PDF，否则降级 markdown）
 ```
 
 ### 关键工具
@@ -340,7 +360,7 @@ QuantCode:
   - Theta: -0.35
 ✓ 生成可视化图表...
 
-曲面已保存: artifacts/options/SPX_vol_surface_20260716.png
+曲面已保存: artifacts/options/{symbol}_vol_surface.png（示例路径）
 ```
 
 ### 关键工具
@@ -367,10 +387,10 @@ A: 1) 等待30秒；2) 如仍卡住，点击"停止"按钮；3) 联系Agent组
 A: 只有Agent组可以修改。如有需求，提Issue到GitHub仓库。
 
 **Q: 生成的artifact在哪里？**  
-A: `artifacts/{你的组}/` 目录下，按日期和任务ID组织
+A: `artifacts/{你的组}/` 目录下（如 factor 报告在 `artifacts/factor/{name}-report.json`、fundamental 研报在 `artifacts/research/`）
 
-**Q: 如何分享结果给团队？**  
-A: Artifact路径可以直接发到Slack，或使用`/export`命令导出为压缩包
+**Q: 如何查看最近运行情况？**  
+A: 会话内打开桌面端 Monitor 面板，或让 Agent 调用只读 `list_runs` 工具（数据源 `.quantcode/metrics.jsonl`）。
 
 ### 错误排查
 
@@ -379,12 +399,12 @@ A: Artifact路径可以直接发到Slack，或使用`/export`命令导出为压�
 解决：检查你是否登录到正确的组账号
 
 **错误：API key未配置**  
-原因：config.json缺失或格式错误  
-解决：联系Agent组重新配置
+原因：`QUANTCODE_API_KEY` 环境变量未设置，或桌面供应商绑定未填 API Key  
+解决：设置环境变量（见 README Quick Start）或重新完成供应商绑定
 
-**错误：HumanGate超时**  
-原因：24小时内未审批  
-解决：重新运行任务并及时审批
+**错误：卡在等待人工审批**  
+原因：风控gate触发 waiting for human  
+解决：在桌面gate面板点击 Approve/Reject，或用 `python scripts/replay.py resume --decision approve|reject` 恢复
 
 ---
 
@@ -396,4 +416,4 @@ A: Artifact路径可以直接发到Slack，或使用`/export`命令导出为压�
 
 ---
 
-**提示**：本手册假设你已经有量化投研背景。如果对某个术语不理解（如IC/IR/DCF），请参考`docs/GLOSSARY.md`。
+**提示**：本手册假设你已经有量化投研背景。IC/IR/DCF 等术语解释为示例性简述，实际指标口径以 `schemas/` 下的 Pydantic 模型字段与 `runner/acceptance.py` 验收逻辑为准。

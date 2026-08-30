@@ -8,6 +8,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from runner.blackboard import BlackboardService
+from runner.blackboard_keys import (
+    KEY_PENDING_RISK_REVIEWS,
+    PROJECT_SESSION_ID,
+    make_read_key,
+)
 from schemas import BlackboardScope, GroupName, WritePolicy
 from tools.model.write_blackboard import _synthesize_task_id
 from tools.registry import ToolDef
@@ -26,10 +31,14 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
     """把 pending risk review 写入 PROJECT scope，供 risk group 消费。
 
     读自 ctx：
-    - ``thread_id`` / ``session_id`` — Blackboard session_id
+    - ``thread_id`` / ``session_id`` — 仅用于派生合成 task_id（dedupe key 也带上
+      thread_id 维度，避免不同线程互吞）
     - ``group`` — 发起组，默认 model
     - ``task_id`` — 可选；缺省从 thread_id 派生
     - ``blackboard_db_path`` — 可选覆盖默认 db 路径
+
+    P0-2：session 固定 ``PROJECT_SESSION_ID``，source/queue key 经归一层解析，
+    与写侧（write_blackboard）及读侧（risk read_blackboard）两端一致。
     """
     thread_id = (
         ctx.get("thread_id")
@@ -44,13 +53,13 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
 
     service = BlackboardService(
         db_path=db_path,
-        session_id=thread_id,
+        session_id=PROJECT_SESSION_ID,
         requester_group=from_group,
     )
     source_entry = service.get_entry(
         BlackboardScope.PROJECT,
         None,
-        args.blackboard_key,
+        make_read_key(args.blackboard_key),
         requester_group=from_group,
     )
     source_value: dict[str, Any] = (
@@ -59,7 +68,7 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
         else {}
     )
 
-    queue_key = "shared.pending_risk_reviews"
+    queue_key = KEY_PENDING_RISK_REVIEWS
     existing = service.get_entry(
         BlackboardScope.PROJECT,
         None,
@@ -107,9 +116,10 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
 
 # 去重窗口 600 秒，scope 仅在 ``trigger_risk_flow_execute`` 这一个函数内。
 # key 函数的签名匹配 execute 的签名 ``(args: TriggerRiskFlowArgs, ctx: dict)``。
+# P0-2：dedupe key 加 thread_id 维度——不同线程触发同一 blackboard_key 互不吞并。
 trigger_risk_flow_wrapped_execute = dedupe_within(
     seconds=600,
-    key=lambda args, ctx: f"{args.blackboard_key}",
+    key=lambda args, ctx: f"{ctx.get('thread_id', 'default')}::{args.blackboard_key}",
 )(trigger_risk_flow_execute)
 
 
