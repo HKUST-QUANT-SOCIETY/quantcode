@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 # 诊断日志：stderr（不污染 stdout JSON-RPC），Dev 模式默认开启
 logger = logging.getLogger("quantcode.mcp")
 
@@ -45,66 +47,107 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tools.registry import registry, ToolDef
 from tools.schema_utils import pydantic_to_json_schema  # Day 4: 提取到公共模块
+from quantcode import identity  # P0-7: SSH key → group 绑定解析
 
 # Day 3 评审修复（🟢#6）：MCP server 暴露的 tool 集合受 ``QUANTCODE_GROUP`` 环境变量过滤。
 # 默认（未设置）保持原行为：返回所有已注册 tool（兼容 day3-merge 后尚未分组的 tool）。
 # 设置如 ``QUANTCODE_GROUP=model`` 后只返回该组 allowlist 内的 tool，避免泄漏
 # 尚未上线或跨组的内部 tool。
 #
-# Day 4 俞高磊：改为惰性函数 _get_mcp_group()，每次请求实时读环境变量，
-# 避免切换组时需要 importlib.reload。
-def _strip_jsonc_comments(text: str) -> str:
-    result = []
-    in_string = False
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == '"' and (i == 0 or text[i - 1] != "\\"):
-            in_string = not in_string
-            result.append(ch)
-            i += 1
-        elif not in_string and text[i:i + 2] == "//":
-            while i < len(text) and text[i] != "\n":
-                i += 1
-        else:
-            result.append(ch)
-            i += 1
-    return "".join(result)
+# P0-7：组身份解析升级为三级（SSH key → 组长期绑定，会话内不可变，
+# 见 ``docs/Architecture_Spec.md`` §2.1 与 ``quantcode/identity.py``）：
+#   a) env ``QUANTCODE_SSH_KEY_FINGERPRINT``（别名 ``QUANTCODE_SSH_FINGERPRINT``）
+#      存在 → 查绑定映射；命中 → 返回该组并进程内缓存；未命中 → fail-closed。
+#   b) 无指纹且映射文件缺失/为空 → 沿用 ``QUANTCODE_GROUP`` env（本地单用户降级）。
+#   c) 无指纹但映射文件有绑定 → fail-closed，除非 ``QUANTCODE_ALLOW_UNAUTH=1``
+#      （此时 env 兜底 + warning）。
+# 会话内不可变：指纹一旦解析出组即锁定为会话组（一个 MCP server 进程 = 一个会话），
+# 之后即使 env 指纹消失或绑定文件被改，会话组身份也不变（防会话中途降权/换组）。
+_SESSION_GROUP: str | None = None
 
 
-def _load_local_mcp_env() -> dict[str, str]:
-    """从 ``opencode.local.jsonc`` 读取 ``mcp.quantcode.environment`` 作为 fallback。"""
-    local_config = PROJECT_ROOT / "opencode.local.jsonc"
-    if not local_config.exists():
-        return {}
-    try:
-        text = local_config.read_text(encoding="utf-8")
-        config = json.loads(_strip_jsonc_comments(text))
-        return config.get("mcp", {}).get("quantcode", {}).get("environment", {}) or {}
-    except Exception:
-        return {}
+def _get_ssh_fingerprint() -> str | None:
+    """读取宿主注入的 SSH 公钥指纹 env（主名 + 兼容别名）。"""
+    fp = (
+        os.environ.get("QUANTCODE_SSH_KEY_FINGERPRINT")
+        or os.environ.get("QUANTCODE_SSH_FINGERPRINT")
+        or ""
+    ).strip()
+    return fp or None
+
+
+def _env_group() -> str | None:
+    return os.environ.get("QUANTCODE_GROUP", "").strip() or None
 
 
 def _get_mcp_group() -> str | None:
-    """读取当前活跃组，三级优先级：
-    1. QUANTCODE_GROUP 环境变量（静态注入，支持 OpenCode MCP environment 块）
-    2. .quantcode_group 文件（动态切换，set_group.py 写入，秒级生效无需重启）
-    3. opencode.local.jsonc 的 mcp.quantcode.environment.QUANTCODE_GROUP（兜底）
+    """解析当前活跃组（P0-7 三级，见模块头注释）。
+
+    途径：
+    1. SSH 指纹 env（``QUANTCODE_SSH_KEY_FINGERPRINT``/``QUANTCODE_SSH_FINGERPRINT``）
+       → ``.opencode/authorized_groups.yaml`` 绑定映射（命中后进程内锁定为会话组）
+    2. 无绑定配置时降级：``QUANTCODE_GROUP`` env（shell export 或
+       opencode.jsonc 的 ``mcp.<server>.environment.QUANTCODE_GROUP``）
+    3. 有绑定配置但无指纹：fail-closed，或显式 ``QUANTCODE_ALLOW_UNAUTH=1`` 降级
     """
-    g = os.environ.get("QUANTCODE_GROUP", "").strip() or None
-    if g is not None:
-        return g
+    global _SESSION_GROUP
+    if _SESSION_GROUP is not None:
+        # 会话内已通过指纹解析 → 不可变，直接返回
+        return _SESSION_GROUP
 
-    # 2. 动态文件（Day 5 组绑定）—— 解决硬编码在 local.jsonc 的静态注入问题
-    group_file = PROJECT_ROOT / ".quantcode_group"
-    if group_file.exists():
-        g = group_file.read_text(encoding="utf-8").strip() or None
-        if g is not None:
+    fp = _get_ssh_fingerprint()
+    if fp is not None:
+        group = identity.resolve_group(fp, identity.load_bindings())
+        if group is None:
+            raise RuntimeError(
+                f"P0-7 fail-closed: SSH 指纹 {fp} 未在 "
+                f"{identity.DEFAULT_BINDINGS_PATH} 命中任何组绑定。"
+                "如何修复: python -m quantcode.identity add --group <group> "
+                "--public-key <pubkey_path> "
+                "（指纹可用 ssh-keygen -lf <pubkey> 或 "
+                "python -m quantcode.identity list 核对）。"
+            )
+        _SESSION_GROUP = group
+        return group
+
+    bindings = identity.load_bindings()
+    if bindings:
+        # 有绑定配置但本会话未提供指纹 → 默认 fail-closed
+        if os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1":
+            g = _env_group()
+            logger.warning(
+                "_get_mcp_group: 已配置 SSH 组绑定但未提供指纹，"
+                "QUANTCODE_ALLOW_UNAUTH=1 显式降级，组身份来自环境变量 (%s)。",
+                g or "(unset)",
+            )
             return g
+        raise RuntimeError(
+            f"P0-7 fail-closed: 检测到 {len(bindings)} 条 SSH 组绑定 "
+            f"({identity.DEFAULT_BINDINGS_PATH}) 但本会话未提供指纹。三条出路: "
+            "1) export QUANTCODE_SSH_KEY_FINGERPRINT=SHA256:... "
+            "(或别名 QUANTCODE_SSH_FINGERPRINT，指纹来自 ssh-keygen -lf "
+            "/ python -m quantcode.identity list); "
+            "2) python -m quantcode.identity add --group <group> "
+            "--public-key <pubkey_path> 绑定本机; "
+            "3) 本地单用户显式降级: export QUANTCODE_ALLOW_UNAUTH=1。"
+        )
 
-    # 3. opencode.local.jsonc 兜底
-    local_env = _load_local_mcp_env()
-    g = local_env.get("QUANTCODE_GROUP", "").strip() or None
+    # 无绑定配置 → 沿用 env（本地单用户降级）
+    g = _env_group()
+    if g is None:
+        logger.warning(
+            "_get_mcp_group: 未配置 SSH 绑定（绑定文件缺失或为空），"
+            "QUANTCODE_GROUP 也未设置 — 组过滤关闭，返回全部 tool。"
+            "配置途径: 1) shell export, 2) mcp.<server>.environment in opencode.jsonc, "
+            "3) python -m quantcode.identity add 绑定 SSH key。"
+        )
+    else:
+        logger.warning(
+            "_get_mcp_group: 未配置 SSH 绑定，组身份来自环境变量 "
+            "QUANTCODE_GROUP=%s（本地单用户降级）。生产部署请改用 "
+            "python -m quantcode.identity add 绑定 SSH key。",
+            g,
+        )
     return g
 
 
@@ -128,55 +171,90 @@ import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4
 
 
 # ---------------------------------------------------------------------------
+# list_runs 只读工具（metrics 查询，monitor Tab 数据源）
+# ---------------------------------------------------------------------------
+
+
+class ListRunsArgs(BaseModel):
+    """list_runs 的输入参数 — 只读查询 `.quantcode/metrics.jsonl`。"""
+
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="返回最近 N 条 run 记录（1-200，默认 20）。",
+    )
+
+
+def _list_runs_execute(args: ListRunsArgs, ctx: dict) -> dict:
+    """执行 list_runs：read_recent + aggregate 汇总。只读，best-effort。"""
+    from runner import metrics
+
+    return {
+        "recent_runs": metrics.read_recent(args.limit),
+        "aggregate": metrics.aggregate(window=max(args.limit, 20)),
+    }
+
+
+list_runs_tool = ToolDef(
+    id="list_runs",
+    description=(
+        "Read-only query of recent agent run metrics from .quantcode/metrics.jsonl. "
+        "Returns recent runs (group/flow/status/duration/tool_calls) and aggregate "
+        "stats (runs/success_rate/avg_duration_s/error_rate/by_group)."
+    ),
+    schema=ListRunsArgs,
+    execute=_list_runs_execute,
+)
+# ponytail: 走 run_agent 同款 _meta 通道 — 不进各组 allowlist 也能被所有 6 组
+# MCP server 的 tools/list 列出（list_tools 末尾统一附加 meta tool），只读无副作用。
+list_runs_tool._meta = True  # type: ignore[attr-defined]
+# 幂等：register_tool 覆盖式注册（模块 reload 安全，registry.register 会因重复 id 抛错）
+registry._tools[list_runs_tool.id] = list_runs_tool
+
+
+# ---------------------------------------------------------------------------
 # LLM 模型工厂（Day 4 俞高磊）
 # ---------------------------------------------------------------------------
 
 
 def _get_model():
-    """从环境变量或 ``opencode.local.jsonc`` 实例化 LLM 模型，供 run_agent tool 使用。
+    """从环境变量实例化 LLM 模型，供 run_agent tool 使用（P0-6/C30 收敛：仅 env）。
 
-    优先级：环境变量 > ``opencode.local.jsonc`` 的 ``mcp.quantcode.environment``。
-    支持的环境变量 / 配置项：
-    - QUANTCODE_API_KEY / ANTHROPIC_API_KEY / STEPFUN_PLAN_API_KEY：API key
-    - QUANTCODE_MODEL_NAME：模型名（默认 step-3.7-flash）
-    - QUANTCODE_MODEL_PROVIDER：anthropic | stepfun（默认 stepfun）
-    - QUANTCODE_MODEL_BASE_URL：自定义 API base URL
+    - QUANTCODE_API_KEY：API key（唯一 key 入口）
+    - QUANTCODE_MODEL_PROVIDER：deepseek | anthropic | stepfun（默认 deepseek）
+    - QUANTCODE_MODEL_NAME：模型名（默认按 provider：deepseek-chat / claude-sonnet-4-5 / step-3.7-flash）
+    - QUANTCODE_MODEL_BASE_URL：自定义 API base URL（deepseek 默认 https://api.deepseek.com/v1，stepfun 默认 step_plan/v1）
 
     返回一个可调用对象，签名 ``(messages, tools=...) -> AIMessage``，
     适配 AgentRunner 的 model 接口。配置失败返回 None。
     """
-    local_env = _load_local_mcp_env()
-
-    api_key = (
-        os.environ.get("QUANTCODE_API_KEY")
-        or os.environ.get("STEPFUN_PLAN_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY", "")
-        or local_env.get("QUANTCODE_API_KEY")
-        or local_env.get("STEPFUN_PLAN_API_KEY")
-        or local_env.get("ANTHROPIC_API_KEY", "")
-    )
+    api_key = os.environ.get("QUANTCODE_API_KEY", "").strip()
     if not api_key:
         # ★ 诊断：列出所有包含 KEY / API 的环境变量键名，帮助定位问题
         all_keys = sorted(os.environ.keys())
-        key_candidates = [k for k in all_keys if any(kw in k.upper() for kw in ("KEY", "API", "STEPFUN", "ANTHROPIC", "QUANTCODE"))]
+        key_candidates = [k for k in all_keys if any(kw in k.upper() for kw in ("KEY", "API", "STEPFUN", "ANTHROPIC", "QUANTCODE", "DEEPSEEK"))]
         logger.warning(
             "_get_model: no API key found. "
-            "Checked env: QUANTCODE_API_KEY=%s, STEPFUN_PLAN_API_KEY=%s, ANTHROPIC_API_KEY=%s. "
-            "Checked local: QUANTCODE_API_KEY=%s, STEPFUN_PLAN_API_KEY=%s, ANTHROPIC_API_KEY=%s. "
+            "Checked env: QUANTCODE_API_KEY=MISSING. "
             "Relevant env keys present: %s. Total env vars: %d",
-            "set" if os.environ.get("QUANTCODE_API_KEY") else "MISSING",
-            "set" if os.environ.get("STEPFUN_PLAN_API_KEY") else "MISSING",
-            "set" if os.environ.get("ANTHROPIC_API_KEY") else "MISSING",
-            "set" if local_env.get("QUANTCODE_API_KEY") else "MISSING",
-            "set" if local_env.get("STEPFUN_PLAN_API_KEY") else "MISSING",
-            "set" if local_env.get("ANTHROPIC_API_KEY") else "MISSING",
             key_candidates, len(all_keys),
         )
         return None
 
-    provider = os.environ.get("QUANTCODE_MODEL_PROVIDER", "stepfun") or local_env.get("QUANTCODE_MODEL_PROVIDER", "stepfun")
-    model_name = os.environ.get("QUANTCODE_MODEL_NAME", "step-3.7-flash") or local_env.get("QUANTCODE_MODEL_NAME", "step-3.7-flash")
-    base_url = os.environ.get("QUANTCODE_MODEL_BASE_URL", "https://api.stepfun.com/step_plan/v1") or local_env.get("QUANTCODE_MODEL_BASE_URL", "https://api.stepfun.com/step_plan/v1")
+    provider = os.environ.get("QUANTCODE_MODEL_PROVIDER", "deepseek") or "deepseek"
+
+    _DEFAULT_MODELS = {
+        "deepseek": "deepseek-chat",
+        "anthropic": "claude-sonnet-4-5",
+        "stepfun": "step-3.7-flash",
+    }
+    _DEFAULT_BASE_URLS = {
+        "deepseek": "https://api.deepseek.com/v1",
+        "stepfun": "https://api.stepfun.com/step_plan/v1",
+    }
+    model_name = os.environ.get("QUANTCODE_MODEL_NAME", "") or _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["deepseek"])
+    base_url = os.environ.get("QUANTCODE_MODEL_BASE_URL", "") or _DEFAULT_BASE_URLS.get(provider, "")
 
     def _build_model():
         if provider == "anthropic":
@@ -185,6 +263,13 @@ def _get_model():
                 model=model_name, api_key=api_key, temperature=0.1, max_tokens=4096,
             )
         elif provider == "stepfun":
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=model_name, api_key=api_key, base_url=base_url,
+                temperature=0.1, max_tokens=4096,
+            )
+        elif provider == "deepseek":
+            # ponytail: deepseek 是 OpenAI 兼容 API，直接复用 ChatOpenAI，不再引独立适配层
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 model=model_name, api_key=api_key, base_url=base_url,
@@ -271,13 +356,14 @@ def list_tools() -> dict:
         tools = registry.list_all()
         logger.info("list_tools: no group → %d tools (all)", len(tools))
 
-    # 附加 run_agent meta tool（如果已注册且不在列表中）
-    try:
-        run_agent = registry.get("run_agent")
-        if getattr(run_agent, '_meta', False) and run_agent not in tools:
-            tools = tools + [run_agent]
-    except KeyError:
-        pass
+    # 附加 meta tool（run_agent / list_runs 等，_meta=True 不进 allowlist，
+    # 但所有组的 MCP server 都应能列出）。原 run_agent 硬编码推广为遍历 _meta。
+    meta_tools = [
+        t for t in registry.list_all()
+        if getattr(t, '_meta', False) and t not in tools
+    ]
+    if meta_tools:
+        tools = tools + meta_tools
 
     tool_ids = [t.id for t in tools]
     logger.debug("list_tools: returning %s", tool_ids)
@@ -375,11 +461,10 @@ def serve_stdio() -> None:
     协议：每行一条 JSON。响应可选（notifications 无 id 时不写）。
     """
     logger.info("MCP server starting: cwd=%s python=%s group=%s "
-                "STEPFUN_PLAN_API_KEY=%s QUANTCODE_API_KEY=%s",
+                "QUANTCODE_API_KEY=%s",
                 os.getcwd(), sys.executable,
                 _get_mcp_group() or "(unset)",
-                "set(len=%d)" % len(os.environ["STEPFUN_PLAN_API_KEY"]) if "STEPFUN_PLAN_API_KEY" in os.environ else "MISSING",
-                "set" if "QUANTCODE_API_KEY" in os.environ else "MISSING")
+                "set" if os.environ.get("QUANTCODE_API_KEY") else "MISSING")
     for line in sys.stdin:
         line = line.strip()
         if not line:

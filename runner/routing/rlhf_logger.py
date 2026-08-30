@@ -16,14 +16,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ._utils import _repo_root
+from schemas.risk_profile import RiskThresholds
 
-# Import thresholds from risk_stub to stay in sync
-from tools.risk_stub import VAR_99_LIMIT, MAX_DRAWDOWN_LIMIT, POSITION_LIMIT_LIMIT
+# 阈值定义权归 schemas.risk_profile.RiskThresholds（单一事实来源，与 router 同步）。
+_THRESHOLDS = RiskThresholds()
 
 
 # ---------------------------------------------------------------------------
@@ -53,15 +55,15 @@ _GATE_PURPOSE_MAP: dict[str, str] = {
 def _compute_risk_score(risk_features: dict[str, Any] | None) -> float | None:
     """综合风险评分，0-1，越高越危险。
 
-    阈值从 ``tools/risk_stub.py`` import，自动与 router 同步。
+    阈值取自 ``schemas.risk_profile.RiskThresholds``，自动与 router 同步。
     返回 None 表示无风险数据。
     """
     if not risk_features:
         return None
     ratios = [
-        risk_features.get("tail_risk_var_99", 0) / VAR_99_LIMIT,
-        risk_features.get("max_drawdown", 0) / MAX_DRAWDOWN_LIMIT,
-        risk_features.get("position_limit", 0) / POSITION_LIMIT_LIMIT,
+        risk_features.get("tail_risk_var_99", 0) / _THRESHOLDS.tail_risk_var_99,
+        risk_features.get("max_drawdown", 0) / _THRESHOLDS.max_drawdown,
+        risk_features.get("position_limit", 0) / _THRESHOLDS.position_limit_usage,
         risk_features.get("volatility", 0) / 0.25,
     ]
     # Guard NaN and negative values
@@ -113,7 +115,7 @@ def make_rlhf_entry(
     label 推导规则（仅 gate_purpose="risk"）:
       - human_gate + human_decision="abort"  → label=1  (gate_correct: 系统拦对了)
       - human_gate + human_decision="proceed"→ label=0  (gate_false_positive: 误报)
-      - continue  + 事后 session_verdict      → 由 apply_session_verdict 回填
+      - continue  + 事后 session_verdict      → 事后人工回填（session_review 已移除）
     """
     # ── gate_purpose ──
     gate_purpose = _GATE_PURPOSE_MAP.get(system_decision, "")
@@ -202,3 +204,46 @@ def load_rlhf_dataset(
             dataset.append({"risk_features": risk_features, "label": int(label)})
 
     return dataset
+
+
+def rewrite_session_records(
+    thread_id: str,
+    updated: list[dict[str, Any]],
+) -> None:
+    """原孔回填该 thread 的记录：读旧内容 → 写同目录临时文件 → Path.replace。
+
+    写路径恒为本模块常量 :data:`RLHF_PATH`；临时文件由 tempfile 在
+    RLHF_PATH 同目录创建（文件名系统生成、无路径成分），目标路径不来自
+    任何调用方输入（Mimosa L3 路径穿越守卫）。
+    """
+    import tempfile
+
+    keep_lines: list[str] = []
+    if RLHF_PATH.exists():
+        with open(RLHF_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                except json.JSONDecodeError:
+                    keep_lines.append(line)
+                    continue
+                if record.get("thread_id") == thread_id:
+                    continue
+                keep_lines.append(line)
+    for record in updated:
+        keep_lines.append(json.dumps(record, ensure_ascii=False))
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=RLHF_PATH.name + ".tmp.", dir=str(RLHF_PATH.parent), suffix=".jsonl"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("".join(line + "\n" for line in keep_lines))
+        tmp.replace(RLHF_PATH)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise

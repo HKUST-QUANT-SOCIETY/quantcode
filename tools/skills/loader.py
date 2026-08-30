@@ -20,11 +20,10 @@ GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
 # 实际布局：packages/opencode/src/skill/compose/.bundle（含 src/）。
 # 同时保留不含 src/ 的备选，兼容历史布局。
 #
-# Day 5：优先用仓库内 vendored 副本（vendor/mimo-code/...），这是最稳定的来源——
-# 不依赖用户在仓库外克隆 MiMo-Code。保留仓库外的兄弟目录路径作为回退。
-_VENDORED_BASE = PROJECT_ROOT / "vendor" / "mimo-code" / "packages" / "opencode"
-MIMOCODE_SKILLS_DIR_VENDORED = _VENDORED_BASE / "src" / "skill" / "compose" / ".bundle"
-MIMOCODE_SKILLS_DIR_VENDORED_LEGACY = _VENDORED_BASE / "skill" / "compose" / ".bundle"
+# 仓库内受跟踪的 meta-skill 副本（15 个 compose skill，132KB，替代已删除的
+# 144MB vendor/mimo-code fork 镜像——见 docs/audit/DEVIATION_REGISTRY.md P0-11）。
+TRACKED_BUNDLE = PROJECT_ROOT / ".opencode" / "meta-skills"
+MIMOCODE_SKILLS_DIR_VENDORED = TRACKED_BUNDLE
 
 _MIMOCODE_BASE = PROJECT_ROOT.parent / "MiMo-Code" / "packages" / "opencode"
 _MIMOCODE_BASE_FALLBACK = PROJECT_ROOT.parent / "Mimo-code" / "packages" / "opencode"
@@ -54,8 +53,7 @@ def _find_meta_skill(skill_name: str) -> Path | None:
     同时检查带 src/ 和不带 src/ 的两种布局。
     """
     for base in (
-        MIMOCODE_SKILLS_DIR_VENDORED,          # Day 5：优先仓库内 vendored 副本
-        MIMOCODE_SKILLS_DIR_VENDORED_LEGACY,
+        MIMOCODE_SKILLS_DIR_VENDORED,          # 优先仓库内受跟踪副本（.opencode/meta-skills）
         MIMOCODE_SKILLS_DIR,
         MIMOCODE_SKILLS_DIR_LEGACY,
         MIMOCODE_SKILLS_DIR_FALLBACK,

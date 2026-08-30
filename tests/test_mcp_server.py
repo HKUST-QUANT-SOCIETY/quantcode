@@ -7,14 +7,27 @@ import json
 import pytest
 
 from quantcode import mcp_server
+from quantcode import identity
 from tools.registry import registry as global_registry
 import tools.model._register  # noqa: F401  注册 model 5 个 tool
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry(monkeypatch):
+def _clean_registry(monkeypatch, tmp_path):
     """清空 + 重新注册 model tools。"""
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
+    # P0-7：隔离身份解析 — 清指纹/降级 env，绑定文件指向 tmp（不存在）→ 走 env 降级路径，
+    # 不被开发者本机真实 .opencode/authorized_groups.yaml 干扰。
+    for _var in (
+        "QUANTCODE_SSH_KEY_FINGERPRINT",
+        "QUANTCODE_SSH_FINGERPRINT",
+        "QUANTCODE_ALLOW_UNAUTH",
+    ):
+        monkeypatch.delenv(_var, raising=False)
+    monkeypatch.setattr(
+        identity, "DEFAULT_BINDINGS_PATH", tmp_path / "nonexistent" / "authorized_groups.yaml"
+    )
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
     global_registry._tools.clear()
     importlib.reload(tools.model._register)
     yield
@@ -131,7 +144,8 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "read_file",
         "write_file",
         "bash",
-    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash'}}"
+        "list_runs",  # meta tool：reload(mcp_server) 后经 meta 通道附加
+    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs'}}"
 
     # Case 2: 不设置 → 全部
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
@@ -189,6 +203,75 @@ def test_list_tools_excludes_non_model_tools_when_quantcode_group_is_model(monke
         assert len(all_names) >= 5, f"兜底模式 tool 太少: {all_names}"
     finally:
         global_registry._tools.pop("factor_only_tool", None)
+
+
+# ---------------------------------------------------------------------------
+# list_runs 只读工具（metrics monitor）
+# ---------------------------------------------------------------------------
+
+
+def test_list_tools_includes_list_runs_for_all_groups(monkeypatch):
+    """list_runs 走 _meta 通道：不进各组 allowlist，但 6 组 MCP server 都能列出。
+
+    list_runs 注册在 quantcode.mcp_server 模块体 → reload(mcp_server) 即恢复
+    （fixture 清空 registry 后仍可重现）。run_agent 注册在 agent_mcp_tool
+    （registry.register 严格模式），其 6 组可见性由既有 Meta 通道保证。
+    """
+    for group in ("model", "risk", "factor", "fundamental", "strategy", "options"):
+        monkeypatch.setenv("QUANTCODE_GROUP", group)
+        importlib.reload(mcp_server)
+        names = {t["name"] for t in mcp_server.list_tools()["tools"]}
+        assert "list_runs" in names, f"group={group} 缺 list_runs: {names}"
+
+
+def test_run_agent_still_listed_via_meta_channel(monkeypatch):
+    """推广 list_tools meta 通道后 run_agent 不回归：无组过滤时仍被列出。
+
+    run_agent 在 agent_mcp_tool 模块体经严格 register 注册；fixture 清空后
+    需 reload(runner.agent_mcp_tool) 才回来（registry 已空 → 不重复）。
+    """
+    import runner.agent_mcp_tool  # noqa: F401
+
+    monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
+    importlib.reload(mcp_server)
+    importlib.reload(runner.agent_mcp_tool)
+    names = {t["name"] for t in mcp_server.list_tools()["tools"]}
+    assert "run_agent" in names
+    assert "list_runs" in names
+
+
+def test_call_tool_list_runs_returns_recent_and_aggregate(tmp_path, monkeypatch):
+    """tools/call list_runs → read_recent + aggregate 结构。
+
+    fixture 清空了 registry，先 reload(mcp_server) 让 list_runs（模块体注册）回来。
+    """
+    importlib.reload(mcp_server)
+    from runner import metrics as run_metrics
+
+    monkeypatch.setattr(run_metrics, "METRICS_PATH", tmp_path / "metrics.jsonl")
+    run_metrics.record_run(
+        group="model", flow="mcp_compose", thread_id="t-list",
+        started_at=0.0, ended_at=1.5, status="completed",
+    )
+    result = mcp_server.call_tool("list_runs", {"limit": 10})
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["aggregate"]["runs"] == 1
+    assert payload["aggregate"]["success_rate"] == 1.0
+    assert any(r["thread_id"] == "t-list" for r in payload["recent_runs"])
+
+
+def test_list_runs_not_visible_to_internal_agent_groups_via_allowlist():
+    """list_runs 是 meta tool：不出现在任何 allowlist 匹配里（仅靠 meta 通道暴露）。
+
+    直接验证 registry.get_tools_for_group 的默认行为不带 meta——保证 ReAct 内部
+    agent 看不到 list_runs，LLM 不会无意义地刷 metrics。
+    """
+    from tools.registry import registry as reg
+
+    internal = {t.id for t in reg.get_tools_for_group("model")}
+    assert "list_runs" not in internal
+    assert "run_agent" not in internal
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +429,9 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
 
     env = os.environ.copy()
     env["QUANTCODE_GROUP"] = "factor"
+    # P0-7：subprocess 无法 monkeypatch 绑定路径，显式允许 env 降级，
+    # 避免被开发者本机真实 .opencode/authorized_groups.yaml 干扰。
+    env["QUANTCODE_ALLOW_UNAUTH"] = "1"
     # 确保 Python 路径包含项目根
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
@@ -412,6 +498,7 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
 
     env = os.environ.copy()
     env["QUANTCODE_GROUP"] = "risk"
+    env["QUANTCODE_ALLOW_UNAUTH"] = "1"  # P0-7：允许 subprocess env 降级（见上个测试）
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
 

@@ -2,10 +2,17 @@
 from __future__ import annotations
 
 import json
-import os
-import urllib.error
-import urllib.request
+import re
 from typing import Any
+
+import httpx
+
+# ponytail: SSRF 守卫（Mimosa L3 high 修复）——repo 只接受 owner/repo 形式，
+# API path 白名单前缀且禁 ".."；官方 API host 为常量，httpx client 以
+# base_url + 相对路径发请求，不存在拼接任意 URL 的 sink。
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_ALLOWED_PATH_PREFIXES = ("/issues/", "/pulls/", "/repos/")
+_API_HOST = "https://api.github.com"
 
 
 def github_request(
@@ -15,24 +22,37 @@ def github_request(
     token: str,
     payload: dict[str, Any] | None = None,
 ) -> Any:
-    """Send a GitHub REST API request."""
-    api_base = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
-    url = f"{api_base}/repos/{repo}{path}"
-    data = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
+    """Send a GitHub REST API request.
 
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            body = response.read().decode("utf-8")
-            return json.loads(body) if body else {}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API {method} {url} failed: {exc.code} {detail}") from exc
+    ponytail: SSRF 守卫——repo 必须是 owner/repo 全字匹配；path 白名单前缀 +
+    禁 ".."；请求经 httpx base_url 客户端发出，URL 协议与主机由常量唯一确定。
+    """
+    if not _REPO_RE.fullmatch(repo):
+        raise ValueError(f"invalid repo identifier: {repo!r}")
+    if not path.startswith(_ALLOWED_PATH_PREFIXES) or ".." in path:
+        raise ValueError(f"disallowed API path: {path!r}")
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    with httpx.Client(
+        base_url=_API_HOST,
+        timeout=20.0,
+        follow_redirects=False,
+        headers=headers,
+    ) as client:
+        response = client.request(method, "/repos/" + repo + path, json=payload)
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"GitHub API {method} {response.request.url} failed: "
+            f"{response.status_code} {response.text[:500]}"
+        )
+    if not response.content:
+        return {}
+    return response.json()
 
 
 def find_existing_comment(

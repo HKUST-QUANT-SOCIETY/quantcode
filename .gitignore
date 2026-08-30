@@ -28,6 +28,9 @@ OpenCode*.html
 opencode.local.jsonc
 .opencode/**/*.local.*
 
+# SSH key→组绑定（P0-7，含敏感映射，不入库；样例见 authorized_groups.example.yaml）
+.opencode/authorized_groups.yaml
+
 # 构建产物
 artifacts/
 .quantcode/
@@ -43,3 +46,7 @@ docs/Day2_to_Day5_Roadmap.md
 # SDD working artifacts(plan / brief / report / review / progress),不入库
 .superpowers/
 
+
+# 本地工具状态不入库
+.mimosa/
+.zcode/

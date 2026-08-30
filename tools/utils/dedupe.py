@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-import pickle
+import json
 import sqlite3
 import time
 from typing import ParamSpec, TypeVar
@@ -79,7 +79,12 @@ def dedupe_within(
                 if row is not None:
                     first_call_at, cached = row
                     if now - float(first_call_at) <= seconds:
-                        return pickle.loads(cached)
+                        try:
+                            return json.loads(cached)
+                        except (TypeError, ValueError):
+                            # ponytail: 反序列化安全化（Mimosa high 修复）——
+                            # 旧记录或损坏缓存一律视为未命中，重算
+                            pass
 
                 result = fn(*args, **kwargs)
                 conn.execute(
@@ -88,7 +93,7 @@ def dedupe_within(
                         (cache_key, fn_name, first_call_at, result)
                     VALUES (?, ?, ?, ?)
                     """,
-                    (cache_key, fn_name, now, pickle.dumps(result)),
+                    (cache_key, fn_name, now, json.dumps(result, ensure_ascii=False, default=str)),
                 )
                 conn.commit()
                 return result
