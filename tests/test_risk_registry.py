@@ -52,6 +52,8 @@ def test_risk_allowlist_filters_tools(monkeypatch):
         "list_algorithms",
         "describe_algorithm",
         "run_algorithm",
+        # A4 蒸馏闭环：consume_status 只读状态工具同走 _meta 通道，六组可见
+        "consume_status",
     }
 
 

@@ -318,6 +318,40 @@ registry._tools[list_skills_tool.id] = list_skills_tool
 
 
 # ---------------------------------------------------------------------------
+# consume_status 只读工具（dream consumer 状态：候选数/最近消费/rlhf 行数，ROADMAP A4）
+# ---------------------------------------------------------------------------
+
+
+class ConsumeStatusArgs(BaseModel):
+    """consume_status 的输入参数 — 只读查询蒸馏闭环消费端状态。"""
+
+    pass
+
+
+def _consume_status_execute(args: ConsumeStatusArgs, ctx: dict) -> dict:
+    """执行 consume_status：候选数 / 最近消费时间 / rlhf 行数。只读，best-effort。"""
+    from runner.dream_consumer import consume_status
+
+    return consume_status()
+
+
+consume_status_tool = ToolDef(
+    id="consume_status",
+    description=(
+        "Read-only status of the dream distill consumer loop (ROADMAP A4): "
+        "number of pending SKILL.md candidates in .quantcode/distill_candidates/, "
+        "last consume timestamp, and RLHF record count in .quantcode/rlhf_data.jsonl."
+    ),
+    schema=ConsumeStatusArgs,
+    execute=_consume_status_execute,
+)
+# 走 list_runs 同款 _meta 通道：所有 6 组 MCP server 的 tools/list 都能列出，只读无副作用。
+consume_status_tool._meta = True  # type: ignore[attr-defined]
+# 幂等：覆盖式注册（模块 reload 安全）
+registry._tools[consume_status_tool.id] = consume_status_tool
+
+
+# ---------------------------------------------------------------------------
 # subagent 元工具（P-04：spawn/check/kill/list 经 _meta 通道注册）
 # ---------------------------------------------------------------------------
 
