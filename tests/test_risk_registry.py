@@ -47,6 +47,7 @@ def test_risk_allowlist_filters_tools(monkeypatch):
         "write_pr_comment",
         "request_human_review",
         "list_runs",  # meta tool：run_agent 同路，所有组的 MCP server 可见
+        "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
     }
 
 

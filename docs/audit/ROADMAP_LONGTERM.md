@@ -1,0 +1,118 @@
+# QuantCode 中长期总计划（对标 Z code，迈向工业级组合研究平台）
+
+> 版本：v1（2026-09-01）。方法：6 个域规划 subagent（R1 对标审计 / R2 引擎沙箱 / R3 数据回测 / R4 风控合规运维 / R5 产品协作 / R6 算法研究）各自只读调研 + 出规划，主 Agent 整合交叉依赖与协作机制。
+> 现状基线：后端 34 簇偏差修复收官（702 tests）、lens UI 品牌壳渲染成功（513 tests）、qs-cold 数据湖已勘察（247 因子池，PIT 字段内建）。
+
+---
+
+## 0. 对标结论（Z code 能力维度 × 量化独有域）
+
+| 维度 | 现状评级 | 主要缺口 |
+|---|---|---|
+| 多会话/并行 agent | 无 | parallel_scheduler、spawn_subagent、任务树 |
+| 终端/代码执行+review | 部分 | 幽灵 tool 清理、PR diff 只读 tool |
+| MCP 生态 | 有 | SchemaTask 接线（最小） |
+| 权限与沙箱 | 部分 | permission_engine、SSH 完整认证、三层沙箱 |
+| 记忆与回放 | 有 | dream/RLHF 消费端闭环 |
+| 可观测性 | 部分 | token 预算、告警、成本核算 |
+| **行情数据接入** | **无** | tools/market/（**最高优先级，多域依赖**） |
+| **PIT 因子面板** | 部分 | FactorPanel 契约（qs-cold schema 直接映射） |
+| **回测引擎** | **无** | vectorbt/自研（A 股 T+1/涨跌停/费用） |
+| **组合构建** | 部分 | Portfolio 层（construct_portfolio/风险预算/rebalance） |
+| 实盘/模拟盘接口 | 无 | execution 组（模拟盘先行，permission 挂钩） |
+
+**核心判断**：平台骨架（双形态执行+MCP+Blackboard+HumanGate）是对的；真正的差距在**数据→回测→组合这条量化主线完全空缺**。本计划以此为主轴。
+
+---
+
+## 1. 四季度总路线（跨域汇总）
+
+### Q1（2026Q4——当前季度）：契约与地基础石
+| 域 | 里程碑 |
+|---|---|
+| 数据 R3 | D1 数据契约层（FactorPanel/ReturnsDataset/StrategyManifest 真实 schema 映射）+ D2 本地 staging dev 后端 |
+| 引擎 R2 | R0 三执行形态收敛（AgentRunner 唯一动态引擎 + compose_executor 声明态）+ R1 tiktoken 实测 + R2 token 预算硬约束 |
+| 风控 R4 | G1-L1 组合级事前约束内建 + G2-A1 全链路审计日志★ + G3-A1 metrics 分组 + G4-A1 permission_engine 三态 |
+| 算法 R6 | A1 因子挖掘工具化（submit_candidate→真评估→入池治理），autoeval 去 mock |
+| 产品 R5 | U1 会话页三栏化 + 指标卡组件族（BigNumber/ProgressGauge/Checklist） |
+| 修复债 | replay.py bootstrap 自愈、三组 allowlist 幽灵 tool 注释化清理、consistency 断言测试 |
+
+### Q2（2027Q1）：服务化与并行
+| 域 | 里程碑 |
+|---|---|
+| 引擎 | R3 spawn_subagent（签名+预算隔离+共享 Blackboard 写策略）+ R4 kill/task registry + R5 会话树 |
+| 数据 | D2a qs-data 只读服务（Server A，group 粒度 key）+ D2b COS 凭据服务化边界 + D3a 回测引擎选型 PoC |
+| 算法 | A2 组合因子模型（正交化+XGB/LGBM 对比，产出 composite_score） |
+| 风控 | G1-L2 模拟盘持续监控（cron 阈值扫描）+ G2-A2 产物不可变指纹★ + G3-B1 三机部署拓扑（A=dev/CI，B=主线+模拟盘 cron，C=对外+凭据宿主）+ G4-B1 SSH 全操作认证 |
+| 产品 | U2 四屏逐屏落地（因子评估屏→审批屏），Linux 打包补齐 |
+
+### Q3（2027Q2）：真实引擎与合规交付
+| 域 | 里程碑 |
+|---|---|
+| 数据 | D3b 回测真算（vectorbt/自研，对账误差=0）+ D3c 因子评估真实化（IC/分层/换手，对齐 RQAlpha 基线）+ D3d sharpe 收尾 |
+| 引擎 | R6 三层沙箱（L1 研究执行/L2 数据拉取/L3 生产部署）+ R7 qs-data 服务化 + R8 流式 trace（SSE，10 类事件+2 新类，向后兼容） |
+| 风控 | G2-B1 evidence chain 合规报告生成★（给投资人/学校：run 指纹链+决策署名 PDF）+ G3-B2 告警与 token 成本 + G4-C1 Secret 管理（注入+90 天轮换） |
+| 算法 | A3 算法实验管理（A/B 对比、排行榜、OOS 纪律由 acceptance 强制） |
+| 产品 | U3 通知中心+artifact 分享+approver/analyst 权限差 |
+
+### Q4（2027Q3）：组合与实时
+| 域 | 里程碑 |
+|---|---|
+| 数据 | D4 组合层全量（TargetPortfolio/RiskBudget 契约、construct_portfolio 风险平价/min-var/scipy 优化、rebalance_plan 成本模型、check_portfolio_gate 复用 HumanGate，阈值进 portfolio.yaml） |
+| 引擎 | R9 韧性全面化（崩溃恢复不重跑成功 tool）+ R10 跨机 checkpoint 共享（Server A 统一存储）+ R11 任务树前端化 |
+| 算法 | A4 自进化闭环激活（distill→SKILL.md 转正 ≥3 个被实际调用；judge RLHF ≥200 条标注）+ A5 本地模型路由（qs-gpu 小模型 schema 合法率 ≥95% 且成本 <1/5 的任务切本地） |
+| 产品 | U4 三平台发布+beta 通道热更+反馈回流闭环 |
+| 风控 | G1-L3 实时风控（前置：L2 连续一季度零降级事故）+ G2-C1 审计日志 COS 冷归档（WORM）+ G3-C1 容量演练（RTO/RPO） |
+
+---
+
+## 2. 关键架构决策（已定案）
+
+1. **执行形态收敛为两态**：AgentRunner（ReAct 动态，唯一引擎）+ compose_executor（声明式 DAG，仅确定性流水线）。risk_agent 固定 DAG 废弃为 skill 配置。
+2. **数据进 Blackboard，不进 prompt**：typed 契约对象（`_contract: FactorPanel/v1` 版本戳）走 `shared.datasets.*`，LLM 只见 key+摘要+工件引用——防 stub 假数据再混入，新算法工具间即插即用。
+3. **配置不喂 LLM**：阈值/算法注册表（portfolio.yaml / algorithms.yaml / acceptance.{group}.yaml）给引擎与 acceptance 读，带 schema 校验；LLM 白名单由注册表**生成**，根治 allowlist 漂移。组合权重等数值必须确定性代码，LLM 只表达意图且经 gate 校验。
+4. **权限三态引擎**（ask/deny/allow）挂钩：render_report/deploy/publish/pit 链路 + 组合 gate；沙箱三级：L1 研究代码（容器/无网）→ L2 数据（只经 qs-data tool）→ L3 部署（仅 HumanGate approve 后专用 tool）。
+5. **合规脊柱**（学校/投资人 must，优先于一切实时化）：组身份 → permission_engine → 全链路审计日志 → 产物不可变指纹 → evidence chain 报告。
+
+## 3. 交叉依赖主线（跨域硬依赖）
+
+```
+数据契约(D1) ──→ 回测真实化(D3c) ──→ 算法A2组合因子 ──→ 组合层(D4) ──→ 模拟盘(G1-L2) ──→ 实时(G1-L3)
+     │
+     └──→ qs-data 服务化(D2a) ──→ 跨机 checkpoint(R10) ──→ 沙箱(L2 数据访问)
+审计日志(G2-A1) ──→ 不可变指纹(G2-A2) ──→ evidence chain(G2-B1）
+trace 流式(R8) ──→ lens 四屏实时渲染(U1/U2)
+token 预算(R2) ──→ spawn_subagent 预算扣减(R3)
+蒸馏闭环(A4) ←── A3 实验归档（trace 来源）
+```
+
+**最高优先级单点**：`tools/market/`（qs-cold 数据接入）——R3/R4/R6 三域共同依赖，无它则回测/组合/真实评估全部空转。
+
+## 4. Subagent 协作机制（每个域常驻协作代理）
+
+| 代理 | 角色 | 协作触发点 |
+|---|---|---|
+| R1 对标审计 | 季度末对照 Z code 能力维度复评，产 delta 报告 | 每季度末 + 大版本后 |
+| R2 引擎 | 执行层设计的 design review（并行/沙箱/流式接口草案评审） | 引擎 PR 前 |
+| R3 数据回测 | 数据契约与选型评审（schema 变更/引擎选型对账口径） | 契约变更时 |
+| R4 风控合规 | 合规 must 清单守护（每个里程碑出"合规红线检查"） | 每里程碑 |
+| R5 产品协作 | 设计稿 vs 实现的像素级偏差 review（v5 PPT 四屏对照） | UI PR 前 |
+| R6 算法 | 研究方法论审稿（OOS 纪律/过拟合风险/入池规则） | 算法入池前 |
+
+**工作约定（继承既有纪律）**：执行 agent 只读改自己的文件集 + 禁 git 操作；每域产出必须带"数据依赖+验收标准"；PonyTail 方法论全文注入；每季度末跑一轮"对原始发现反查"的独立红队核验（吸取 P1-6/replay 两处遗漏的教训：**验收即用户路径 + 配置体必须有 consistency 测试**）。
+
+## 5. 风险与缓释
+
+| 风险 | 缓释 |
+|---|---|
+| COS 凭据权限解锁卡进度（root 拥有 .ro 配置） | 本地 staging 为 dev 后端先行；Q1 末凭据服务化 |
+| qs-cold 无行情收益数据（只有因子值） | D2 Q2 增补行情接入项；先用 backend 现有行情表验证 D3 |
+| 247 池过拟合风险（IC 是筛选期算的） | D3c 用 OOS 复核全池；acceptance 加 oos_discipline |
+| 并行 agent 复杂度失控 | Q2 单季度只做 spawn/kill/树三件事，沙箱先于并行调度验证 |
+| 实时风控过早启动 | 硬门槛：L2 模拟盘连续一季度零降级事故 |
+
+## 5. 立即可启动（下一轮 3 件事）
+
+1. **D1+D2-dev**：`schemas/data_contracts.py`（FactorPanel）+ staging dev 后端 + `load_factor_panel` 工具 → 一个入选因子（GTJA191_M019）跑通真实 IC 报告替换 mock；
+2. **两处遗漏小修**（replay bootstrap + allowlist 注释化）+ allowlist 一致性断言测试（P1-6 教训制度化）；
+3. **U1 前置**：lens 会话页三栏布局骨架 + metric-cards 组件（先渲染现有 output_data 字段）。

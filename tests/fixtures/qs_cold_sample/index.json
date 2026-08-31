@@ -1,0 +1,8 @@
+{
+  "algorithm": "min_degree_greedy_tiebreak_abs_rank_ic",
+  "candidates": 979,
+  "selected": 247,
+  "max_abs_corr": 0.7,
+  "family_distribution": {"lqtp_1014": 158, "abs_rankic": 44,
+                          "cogalpha": 26, "alphasage": 17, "quantalpha": 2}
+}

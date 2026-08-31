@@ -49,6 +49,7 @@ deploy_strategy_tool = ToolDef(
     ),
     schema=DeployStrategyArgs,
     execute=deploy_strategy_execute,
+    permission="ask",  # G4-A1：部署需人审；执行策略由 configs/permissions.yaml 决定
 )
 
 __all__ = ["deploy_strategy_tool", "DeployStrategyArgs", "deploy_strategy_execute"]

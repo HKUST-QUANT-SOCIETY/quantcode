@@ -4,11 +4,15 @@
 # 配合共享工具 4 个,AgentRunner(group="factor") 可跑通 idea → match_main → gen_schema → autoeval
 allowlist:
   # 共享工具
-  - search_memory
-  - read_file
-  - write_file
-  - bash
+  - search_memory  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - read_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - write_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - bash  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
   # factor 专属 tool(Day 4 尹一帆)
   - match_main
   - gen_schema
   - autoeval
+  # qs-cold 数据工具（P-01，specs/data/SPEC.md §2.4；load_returns 推迟 — SPEC §5）
+  - list_factors
+  - load_factor_panel
+  - pool_browse

@@ -145,7 +145,8 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "write_file",
         "bash",
         "list_runs",  # meta tool：reload(mcp_server) 后经 meta 通道附加
-    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs'}}"
+        "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills'}}"
 
     # Case 2: 不设置 → 全部
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)

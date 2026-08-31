@@ -41,6 +41,19 @@ GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
 ExecuteFn = Callable[[BaseModel, dict], Any]
 FormatErrorFn = Callable[[Exception], str]
 
+# G4-A1：permission 合法值（None = 未声明，执行层按缺省配置/allow 处理）
+VALID_PERMISSIONS = ("allow", "ask", "deny")
+
+
+def _validate_permission(tool: "ToolDef") -> None:
+    """注册时校验 permission 字段（None 或 allow/ask/deny），非法值抛 ValueError。"""
+    p = getattr(tool, "permission", None)
+    if p is not None and p not in VALID_PERMISSIONS:
+        raise ValueError(
+            f"Tool '{tool.id}' has invalid permission {p!r}; "
+            f"expected one of {VALID_PERMISSIONS} or None"
+        )
+
 
 class ToolDef(BaseModel):
     """量化工具的统一契约（Pydantic 模型）。
@@ -56,13 +69,16 @@ class ToolDef(BaseModel):
     - shell: TS 专属特性，Python 无 shell-mode 概念
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     id: str
     description: str
     schema: type[BaseModel]
     execute: ExecuteFn
     format_validation_error: Optional[FormatErrorFn] = None
+    # G4-A1：权限三态声明（ask/deny/allow）。None = 未声明（执行层默认 allow）。
+    # 仅元数据；实际执行策略由 runner/permission_engine 读 configs/permissions.yaml。
+    permission: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +108,7 @@ class ToolRegistry:
     # ----- 注册 -----
     def register(self, tool: ToolDef) -> ToolDef:
         """注册一个 tool；id 重复会抛错。"""
+        _validate_permission(tool)
         if tool.id in self._tools:
             raise ValueError(
                 f"Tool '{tool.id}' already registered "
@@ -189,6 +206,7 @@ def register_tool(tool: ToolDef) -> ToolDef:
         raise TypeError(
             f"register_tool 需要 ToolDef 实例，得到 {type(tool).__name__}"
         )
+    _validate_permission(tool)
     # 幂等：直接覆盖，不报错（让模块重 import 安全）
     registry._tools[tool.id] = tool
     return tool
@@ -234,6 +252,7 @@ __all__ = [
     "ToolRegistry",
     "ExecuteFn",
     "FormatErrorFn",
+    "VALID_PERMISSIONS",
     "registry",
     "register_tool",
     "load_group_config",

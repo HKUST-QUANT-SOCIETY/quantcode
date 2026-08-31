@@ -10,7 +10,7 @@ AgentRunner 负责：
 5. 提供 ``run()`` / ``stream()`` / ``resume()`` 三个执行入口
 
 设计要点：
-- 依赖全部通过构造器注入（registry / model；rlhf_collector 已弃用，仅保留兼容）
+- 依赖全部通过构造器注入（registry / model）
   便于测试时 mock，也便于 Day 4 替换 LLM / DB。
 - 不修改 ``compose_executor.py``：ReAct 是动态创建的，绕过它的固定 DAG 注册。
 - 复用 ``runner.langgraph_base`` 的 ``get_checkpointer`` + ``make_thread_id``。
@@ -19,6 +19,7 @@ AgentRunner 负责：
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -31,9 +32,12 @@ from runner.agent_nodes import (
     AgentState,
     CONTEXT_REBUILD_RATIO,
     CONTEXT_SNAPSHOT_RATIO,
+    budget_total,
+    budget_warning_event,
     context_usage_ratio,
     estimate_context_chars as estimate_context_state_chars,
     init_agent_state,
+    make_budget_check_node,
     make_llm_node,
     make_rlhf_collect_node,
     make_rebuild_context_node,
@@ -52,6 +56,35 @@ try:  # ponytail: metrics 是 best-effort 旁路，缺模块/坏环境不影响�
     from runner.metrics import estimate_context_chars, record_run
 except ImportError:
     pass
+
+try:  # ponytail: evidence chain 是 metrics 同款 best-effort 旁路，缺席不砸主流程
+    from runner.evidence import append_event as _evidence_append
+except ImportError:
+    _evidence_append = None
+
+
+def _append_evidence_safe(
+    run_id: str, kind: str, payload: dict, *, evidence_dir: Any | None = None
+) -> None:
+    """evidence 钩子兜底：未导入成功或写失败都静默（ponytail: 一行防御）。
+
+    run_id = LangGraph thread_id（=metrics.jsonl thread 记录，SPEC governance §3）。
+    evidence_dir：可配置证据目录（测试用）；None → runner.evidence 默认。
+    """
+    fn = globals().get("_evidence_append")
+    if fn is not None:
+        try:
+            if evidence_dir is not None:
+                fn(run_id, kind, payload, evidence_dir)
+            else:
+                fn(run_id, kind, payload)
+        except Exception:
+            pass
+
+
+def _evidence_dir_from_env() -> Any | None:
+    """QUANTCODE_EVIDENCE_DIR env → 自定义证据目录（测试隔离用，未设返回 None）。"""
+    return os.environ.get("QUANTCODE_EVIDENCE_DIR") or None
 
 
 def _record_run_safe(**kwargs: Any) -> None:
@@ -100,13 +133,13 @@ class AgentRunner:
         *,
         model: Callable[..., AIMessage] | None = None,
         registry: ToolRegistry | None = None,
-        rlhf_collector: Any | None = None,  # Deprecated since Day 5 RLHF refactor (rlhf_collector.py deleted). Parameter retained for API compatibility, value is ignored.
         loop_detector: LoopDetector | None = None,
         max_iterations: int = MAX_ITERATIONS,
         checkpoint_db: str | Path | None = None,
         truncate_tokens: int | None = None,
         retry_max_retries: int = 0,  # Day 5:LLM 重试次数,0=不启用
         retry_base_delay: float = 0.5,
+        budget_tokens: int | None = None,  # R2 token budget；None=不启用
     ) -> None:
         self.group = group
         # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
@@ -121,7 +154,6 @@ class AgentRunner:
         else:
             self.model = model  # 可选：build 时若不传则用占位（mock 用）
         self.registry = registry or default_registry
-        self.rlhf_collector = rlhf_collector
         self.loop_detector = loop_detector or LoopDetector()
         self.max_iterations = max_iterations
         self.checkpoint_db = Path(checkpoint_db) if checkpoint_db else None
@@ -133,6 +165,8 @@ class AgentRunner:
         # Day 5: truncate_node 从 main 移植回来（可选）。传 truncate_tokens 时，
         # 在 tool 之后挂一个 token 裁剪节点，防止长任务 context 爆。
         self.truncate_tokens = truncate_tokens
+        # R2 token budget：累计 LLM 消耗超限时 interrupt(kind=budget) 等人审批。
+        self.budget_tokens = budget_tokens
 
     # ----- 构造 StateGraph -----
     def build(
@@ -191,12 +225,10 @@ class AgentRunner:
             )
         llm_node = make_llm_node(self.model, tools=tools)  # tools 通过闭包注入
         tool_node = make_tool_node(self.registry)
-        # Day 5 RLHF 重构：rlhf_collect_node 始终添加到图中（不再依赖 rlhf_collector 参数）。
-        # rlhf_collector 仅用于向后兼容双写（可选）。
         # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
         # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
         fingerprint_history: list[str] = []
-        rlhf_node = make_rlhf_collect_node(self.rlhf_collector, fingerprint_history)
+        rlhf_node = make_rlhf_collect_node(None, fingerprint_history)
         # Day 3 评审后：llm 用轻量路由（有无 tool_calls），tool 用 route_next_step
         llm_routing = make_routing_edge(max_iterations=self.max_iterations)
         tool_routing = make_tool_routing_edge(
@@ -441,7 +473,12 @@ class AgentRunner:
                 "end": END,                # 审核拒绝 → 终止
             },
         )
-        workflow.add_edge("rlhf", "llm")
+        # R2 token budget：budget gate 节点常驻 graph（未启用预算时是 no-op 工件）。
+        # 位置：rlhf 之后、llm 之前——即每次回到 LLM 前检查累计消耗。
+        budget_gate_node = make_budget_check_node()
+        workflow.add_node("budget_gate", budget_gate_node)
+        workflow.add_edge("rlhf", "budget_gate")
+        workflow.add_edge("budget_gate", "llm")
 
         # 5. compile + 接 checkpointer
         # Day 4 俞高磊：interrupt 通过 request_human_review tool 内的
@@ -516,6 +553,7 @@ class AgentRunner:
                     system_prompt=system_prompt,
                     tools=[],  # tools 已通过闭包注入 llm_node，不入 state
                     input_data={"task": task},
+                    budget_tokens=self.budget_tokens,
                 )
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
@@ -532,6 +570,9 @@ class AgentRunner:
             status=_run_status(final), error=None,
             trace_events=None, context_chars=None,
         )
+        _append_evidence_safe(thread_id, "output_data", {
+            "status": _run_status(final), "flow_name": flow_name,
+        })
         return final
 
     # ----- stream()：带 execution_trace 的执行入口 -----
@@ -606,6 +647,7 @@ class AgentRunner:
                 system_prompt=system_prompt,
                 tools=[],
                 input_data={"task": task},
+                budget_tokens=self.budget_tokens,
             )
 
         final_state: dict[str, Any] = {}
@@ -630,6 +672,22 @@ class AgentRunner:
                             "status": "waiting_for_human",
                             "gate": waiting.get("gate", {}),
                         })
+                        # P1 evidence：human_gate 环（payload=interrupt payload），
+                        # DecisionRecord 生产可达（SPEC governance §2.2 G2-A4/A5）。
+                        _append_evidence_safe(
+                            thread_id, "human_gate", dict(interrupt_payload),
+                            evidence_dir=_evidence_dir_from_env(),
+                        )
+                        # R2 token budget：budget interrupt → trace 补 budget_warning
+                        # 事件（超限暂停的可见性；前端按未知类型降级渲染）。
+                        if interrupt_payload.get("kind") == "budget":
+                            emit("budget_warning", node="budget_gate", data=dict(
+                                budget_warning_event(
+                                    budget_used=int(interrupt_payload.get("budget_used") or 0),
+                                    budget_tokens=int(interrupt_payload.get("budget_tokens") or 0),
+                                    over_by=int(interrupt_payload.get("over_by") or 0),
+                                )
+                            ))
                         final_state.update(waiting)
                         final_state["__interrupt__"] = chunk.get("__interrupt__")
                     continue
@@ -653,6 +711,22 @@ class AgentRunner:
                     for ev in update.get("checkpoint_snapshot") or []:
                         if isinstance(ev, dict) and ev.get("event_type") == "checkpoint_snapshot":
                             emit("checkpoint_snapshot", node=node_name, iteration=iteration, data=dict(ev))
+                    # R2 token budget：budget_warning 事件（枚举外扩展，前端降级渲染）。
+                    # 未超限时节点 no-op；接近/超过预算的可见性由这里统一发事件，
+                    # 超限本身走 interrupt（下方 human_gate/waiting 分支统一呈现）。
+                    if node_name == "budget_gate":
+                        used = int(update.get("budget_used") or 0)
+                        budget = budget_total(final_state)
+                        if budget is not None and used > 0 and not any(
+                            e["type"] == "budget_warning" for e in trace
+                        ):
+                            emit("budget_warning", node=node_name, iteration=iteration, data=dict(
+                                budget_warning_event(
+                                    budget_used=used,
+                                    budget_tokens=budget,
+                                    over_by=max(used - budget, 0),
+                                )
+                            ))
         except Exception as exc:
             emit("error", data={"error": f"{type(exc).__name__}: {exc}"})
             _record_run_safe(
@@ -689,6 +763,24 @@ class AgentRunner:
                     "status": "waiting_for_human",
                     "gate": waiting.get("gate", {}),
                 })
+                # get_state 恢复出的 interrupt 同样落 evidence 环
+                #（幂等护栏：chunk 分支已 emit 时 trace 已含 human_gate）。
+                if not any(e["type"] == "human_gate" for e in trace):
+                    _append_evidence_safe(
+                        thread_id, "human_gate", dict(interrupt_payload),
+                        evidence_dir=_evidence_dir_from_env(),
+                    )
+            # R2 token budget：budget interrupt 恢复自 get_state 时补同一事件。
+            if interrupt_payload.get("kind") == "budget" and not any(
+                e["type"] == "budget_warning" for e in trace
+            ):
+                emit("budget_warning", node="budget_gate", data=dict(
+                    budget_warning_event(
+                        budget_used=int(interrupt_payload.get("budget_used") or 0),
+                        budget_tokens=int(interrupt_payload.get("budget_tokens") or 0),
+                        over_by=int(interrupt_payload.get("over_by") or 0),
+                    )
+                ))
 
         status = (
             "waiting_for_human" if final_state.get("status") == "waiting_for_human"
@@ -710,6 +802,39 @@ class AgentRunner:
             group=self.group, flow=flow_name, thread_id=thread_id,
             started_at=_started_at, ended_at=time.time(), status=status,
             error=None, trace_events=trace, context_chars=_ctx_chars,
+        )
+        # Evidence hooks keyed by thread_id（=SPEC 的 run_id）。
+        # human_gate 环已在 __interrupt__ 分支落（payload=interrupt payload），
+        # 这里不再重复 append trace 里的 human_gate 事件。
+        # artifact 环按 G2-A6 绑 path/sha256/bytes——文件不存在/不可读则跳过
+        # （写入必挂 verify 的残环只会污染链，宁缺勿假）。
+        _evidence_dir = _evidence_dir_from_env()
+        for e in trace:
+            if e["type"] in ("tool_call", "tool_result", "output_data"):
+                _append_evidence_safe(
+                    thread_id, e["type"], dict(e["data"]), evidence_dir=_evidence_dir
+                )
+            elif e["type"] == "artifact":
+                path_str = e["data"].get("path")
+                try:
+                    artifact_path = Path(path_str)
+                    if path_str and artifact_path.is_file():
+                        import hashlib
+
+                        _append_evidence_safe(
+                            thread_id, "artifact", {
+                                "path": str(path_str),
+                                "sha256": hashlib.sha256(
+                                    artifact_path.read_bytes()
+                                ).hexdigest(),
+                                "bytes": artifact_path.stat().st_size,
+                            },
+                            evidence_dir=_evidence_dir,
+                        )
+                except OSError:
+                    pass
+        _append_evidence_safe(
+            thread_id, "output_data", {"status": status}, evidence_dir=_evidence_dir
         )
 
         final_state["thread_id"] = thread_id
@@ -770,6 +895,10 @@ class AgentRunner:
             status=_run_status(final), error=None,
             trace_events=None, context_chars=None,
         )
+        _append_evidence_safe(thread_id, "output_data", {
+            "status": _run_status(final),
+            "flow_name": flow_name, "resume": True,
+        })
         return final
 
     @staticmethod
@@ -843,63 +972,6 @@ class AgentRunner:
             trace_emit("human_gate", node=node_name, iteration=iteration, data={
                 "gate": update["gate"],
             })
-
-    @staticmethod
-    def _extract_trace_from_messages(
-        messages: list, risk_metrics: dict | None = None
-    ) -> list[dict]:
-        """从消息历史中后处理提取执行追踪事件。
-
-        遍历 LangChain 消息列表（HumanMessage → AIMessage → ToolMessage），
-        重建 agent 的推理步骤：用户输入 → LLM 思考 → tool 调用 → tool 结果。
-        """
-        trace: list[dict] = []
-
-        for msg in messages:
-            cls_name = type(msg).__name__
-
-            if cls_name == "HumanMessage":
-                content = str(getattr(msg, "content", ""))
-                trace.append({
-                    "type": "user_input",
-                    "content": content[:500],
-                })
-            elif cls_name == "AIMessage":
-                tool_calls = getattr(msg, "tool_calls", None) or []
-                for tc in tool_calls:
-                    tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
-                    tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
-                    trace.append({
-                        "type": "tool_call",
-                        "tool": tc_name,
-                        "args": tc_args,
-                    })
-                content = str(getattr(msg, "content", ""))
-                if content.strip():
-                    trace.append({
-                        "type": "llm_thought",
-                        "content": content[:1000],
-                    })
-            elif cls_name == "ToolMessage":
-                result_text = str(getattr(msg, "content", ""))
-                trace.append({
-                    "type": "tool_result",
-                    "tool": getattr(msg, "name", ""),
-                    "result": result_text[:500],
-                    "is_error": "error" in result_text.lower() or "failed" in result_text.lower(),
-                })
-
-        if risk_metrics:
-            trace.append({
-                "type": "risk_metrics",
-                "metrics": (
-                    dict(risk_metrics)
-                    if isinstance(risk_metrics, dict)
-                    else str(risk_metrics)[:500]
-                ),
-            })
-
-        return trace
 
     # ----- 内部工具 -----
     def _generate_thread_id(self, thread_id: str | None, flow_name: str) -> str:

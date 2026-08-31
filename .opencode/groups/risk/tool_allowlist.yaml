@@ -8,7 +8,7 @@ allowlist:
   - request_human_review
   - write_pr_comment
   # 共享工具
-  - search_memory
-  - read_file
-  - write_file
-  - bash
+  - search_memory  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - read_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - write_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - bash  # openai 内建（平台侧提供，QuantCode registry 无此 tool）

@@ -18,10 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
-from runner.langgraph_base import CHECKPOINTS_DB
+# 裸跑自愈：`python scripts/replay.py` 无 PYTHONPATH 时，先注入仓库根再 import 项目包
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from runner.langgraph_base import CHECKPOINTS_DB  # noqa: E402
 
 # resume 仅支持的流：risk:gate（thread_id 由 make_thread_id 生成，flow 段为 risk_gate）
 SUPPORTED_RESUME_PREFIX = "risk-risk_gate"

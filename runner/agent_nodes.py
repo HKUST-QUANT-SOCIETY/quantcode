@@ -12,7 +12,7 @@
 
 设计要点：
 - 每个节点函数都是纯函数工厂（不持有状态），依赖通过闭包注入
-- 依赖（model / tools / registry；rlhf_collector 已弃用仅保留兼容）由 ``AgentRunner`` 接线
+- 依赖（model / tools / registry）由 ``AgentRunner`` 接线
 - tools 通过 ``make_llm_node(model, tools)`` 闭包注入，**不放入 state**（ToolDef 不可 msgpack 序列化）
 - 节点函数本身可单测（mock LLM + mock tool）
 """
@@ -26,6 +26,7 @@ from typing import Annotated, Any, Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.langgraph_base import BaseFlowState
+from runner.human_gate import normalize_external_decision, parse_resume_decision
 from runner.routing.fingerprint import compute_state_fingerprint
 from runner.routing.router import RouteDecision, route_next_step
 from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
@@ -205,6 +206,12 @@ class AgentState(BaseFlowState, total=False):
     # P0-8 §4.4: checkpoint_snapshot 事件列表（operator.add 累积，快照/重建各一条，
     # 随 state/trace 流出；前端按未知类型降级渲染）
     checkpoint_snapshot: Annotated[list[dict[str, Any]], operator.add]
+    # R2 token budget：budget_tokens 限额（None=不限）；budget_used 每次该 agent
+    # LLM 调用累计消耗（usage 真值优先，取不到 _estimate_tokens 近似）；
+    # budget_grants 记录人审 approve 后的追加额（节点整体返回，最后值覆盖）。
+    budget_tokens: int | None
+    budget_used: int
+    budget_grants: list[int] | None
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +279,21 @@ def make_llm_node(
                     names.append(getattr(call, "name", ""))
             updates["current_step"] = names
 
+        # R2 token budget：每次 LLM 返回后累计消耗。
+        # usage_metadata 真值优先（input+output tokens）；
+        # ponytail: 取不到时退回 _estimate_tokens(全文) 近似，升级路径=provider 统一回报 usage
+        usage = getattr(response, "usage_metadata", None) or {}
+        if usage.get("total_tokens"):
+            spent = int(usage["total_tokens"])
+        else:
+            prompt_chars = len(state.get("system_prompt") or "")
+            for m in history:
+                content = getattr(m, "content", "")
+                prompt_chars += len(content if isinstance(content, str) else repr(content))
+            response_chars = len(str(getattr(response, "content", "") or ""))
+            spent = (prompt_chars + response_chars) // 4
+        updates["budget_used"] = int(state.get("budget_used") or 0) + spent
+
         return updates
 
     return llm_node
@@ -316,6 +338,12 @@ def make_tool_node(
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
+                # G4-A1 权限钩子：yaml 配 deny → PermissionError 转 tool_result
+                # error；ask 未批准 → LangGraph interrupt 冒泡（等 HumanGate
+                # resume）。未配置 permission 的 tool → allow，行为与改动前一致。
+                from runner.permission_engine import enforce
+
+                enforce(c["name"], ctx.get("group", ""), ctx)
                 output = registry.call(c["name"], c["args"], ctx=ctx)
                 content = output if isinstance(output, str) else str(output)
                 # 注入逻辑：非 str 的 dict 输出 → 根据 tool name 写入 state
@@ -721,14 +749,14 @@ def make_post_tool_check(
 
 
 def make_rlhf_collect_node(
-    rlhf_collector: Any,  # 保留兼容（可为 None），但不再写入旧格式
+    rlhf_collector: Any,  # 未使用（None 即可）；占位签名保持既有测试兼容
     fingerprint_history: list[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``rlhf_collect_node``。
 
     Day 5 RLHF 重构：改用 ``make_rlhf_entry()`` + ``log_rlhf_entry()`` 新格式。
     重算路由决策获取 system_decision，记录 risk_features / risk_score / label。
-    rlhf_collector 参数保留向后兼容但不再用于写日志。
+    rlhf_collector 形参未使用（传 None 即可），保留只为既有测试签名兼容。
 
     ``fingerprint_history`` 由 ``AgentRunner.build()`` 创建并共享给
     ``make_tool_routing_edge``，确保两处使用相同的指纹历史。
@@ -834,6 +862,7 @@ def init_agent_state(
     system_prompt: str,
     tools: list,
     input_data: dict | None = None,
+    budget_tokens: int | None = None,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -854,6 +883,8 @@ def init_agent_state(
         artifacts=[],
         errors=[],
         gate=None,
+        budget_tokens=budget_tokens,
+        budget_used=0,
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
@@ -1038,6 +1069,84 @@ def _summarize_rebuild(
     return "\n".join(lines)
 
 
+def budget_total(state: dict[str, Any]) -> int | None:
+    """当前有效预算 = budget_tokens + 已追加额之和（无 budget_tokens → None=不限）。"""
+    base = state.get("budget_tokens")
+    if not base:
+        return None
+    grants = state.get("budget_grants") or []
+    return int(base) + sum(int(g) for g in grants)
+
+
+def make_budget_check_node(
+    *,
+    grant_tokens: int = 50000,
+) -> Callable[[AgentState], dict]:
+    """构造 budget_gate 节点：budget_used 超预算时 interrupt(kind="budget") 暂停。
+
+    - 未超限且未发过警告 → 返回 budget_warning 事件（进 checkpoint_snapshot/
+      execution_trace，前端按未知类型降级渲染），继续正常路由。
+    - 超限 → interrupt(payload) 等外部 Command(resume={"decision": ...})：
+      approve → budget_grants 追加 grant_tokens 继续跑；
+      reject/其他 → output_data.budget_exhausted=True 正常收尾。
+    """
+    def budget_gate_node(state: AgentState) -> dict:
+        used = int(state.get("budget_used") or 0)
+        budget = budget_total(state)
+        over_by = used - int(budget or 0)
+        if budget is None or over_by <= 0:
+            return {}
+
+        decision = None
+        if not state.get("human_review_result"):
+            from langgraph.types import interrupt as lg_interrupt
+
+            decision = parse_resume_decision(
+                lg_interrupt({
+                    "kind": "budget",
+                    "budget_tokens": budget,
+                    "budget_used": used,
+                    "over_by": over_by,
+                })
+            )
+            external = normalize_external_decision(decision or "")
+            decision = "proceed" if external == "approve" else "abort"
+
+        if decision == "proceed":
+            return {
+                "human_review_result": "proceed",
+                "_gate_purpose": "budget",
+                "budget_grants": [grant_tokens],
+            }
+        # reject → 正常收尾（completed + budget_exhausted 标记）
+        output = dict(state.get("output_data") or {})
+        output["budget_exhausted"] = True
+        return {
+            "human_review_result": "abort",
+            "_gate_purpose": "budget",
+            "task_status": "done",
+            "output_data": output,
+        }
+
+    return budget_gate_node
+
+
+def budget_warning_event(
+    *,
+    budget_used: int,
+    budget_tokens: int,
+    over_by: int,
+) -> dict[str, Any]:
+    """构造 budget_warning 事件（execution_trace 扩展类型，前端降级渲染）。"""
+    return {
+        "event_type": "budget_warning",
+        "budget_used": budget_used,
+        "budget_tokens": budget_tokens,
+        "over_by": over_by,
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+    }
+
+
 def make_rebuild_context_node() -> Callable[[AgentState], dict]:
     """构造 ``rebuild_context`` 节点：context 用量 > CONTEXT_REBUILD_RATIO 时被路由触发。
 
@@ -1084,6 +1193,9 @@ __all__ = [
     "context_usage_ratio",
     "make_checkpoint_event",
     "make_rebuild_context_node",
+    "budget_total",
+    "budget_warning_event",
+    "make_budget_check_node",
     "make_llm_node",
     "make_tool_node",
     "make_should_continue",

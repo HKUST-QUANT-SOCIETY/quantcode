@@ -317,6 +317,7 @@ render_report_tool = ToolDef(
     ),
     schema=RenderReportArgs,
     execute=render_report_execute,
+    permission="ask",  # G4-A1：研报发布前需人审；执行策略由 configs/permissions.yaml 决定
 )
 
 __all__ = ["render_report_tool", "RenderReportArgs", "render_report_execute"]

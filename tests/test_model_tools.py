@@ -308,12 +308,13 @@ def test_write_blackboard_requires_key():
 
 
 def test_synthesize_task_id_is_deterministic_and_distinct():
-    """🟢P2-8：_synthesize_task_id 单测。
+    """🟢P2-8 + audit #18：_synthesize_task_id 单测。
 
     验证：
     1. 稳定：相同 thread_id 两次调用返回相同 task_id
     2. 区分：不同 thread_id 返回不同 task_id
     3. 严格满足 TASK_ID_PATTERN (``^T\\d+(\\.\\d+){0,4}$``)
+    4. 诚实占位：缺失 ctx task_id 时写 T0 前缀（未分配任务），不冒充真实 task
     """
     from tools.model.write_blackboard import _synthesize_task_id
 
@@ -341,6 +342,12 @@ def test_synthesize_task_id_is_deterministic_and_distinct():
         tid_out = _synthesize_task_id(tid)
         assert re.match(TASK_ID_PATTERN, tid_out), (
             f"{tid!r} -> {tid_out!r} 不满足 TASK_ID_PATTERN"
+        )
+
+    # 4. 诚实占位（audit #18）：未分配任务一律 T0.*，不冒充 T1 起的真实 task
+    for tid in samples:
+        assert _synthesize_task_id(tid).startswith("T0."), (
+            f"{tid!r} 占位 task_id 必须以 T0. 开头（诚实缺失）"
         )
 
 

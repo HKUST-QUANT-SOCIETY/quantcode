@@ -31,10 +31,10 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
     """把 pending risk review 写入 PROJECT scope，供 risk group 消费。
 
     读自 ctx：
-    - ``thread_id`` / ``session_id`` — 仅用于派生合成 task_id（dedupe key 也带上
+    - ``thread_id`` / ``session_id`` — 用于占位 task_id 派生（dedupe key 也带上
       thread_id 维度，避免不同线程互吞）
     - ``group`` — 发起组，默认 model
-    - ``task_id`` — 可选；缺省从 thread_id 派生
+    - ``task_id`` — 可选；缺失时用 T0.<thread_hash> 占位（诚实缺失，不冒充真实 task）
     - ``blackboard_db_path`` — 可选覆盖默认 db 路径
 
     P0-2：session 固定 ``PROJECT_SESSION_ID``，source/queue key 经归一层解析，
@@ -47,7 +47,7 @@ def trigger_risk_flow_execute(args: TriggerRiskFlowArgs, ctx: dict) -> dict:
     )
     raw_group = ctx.get("group") or "model"
     from_group = GroupName(raw_group)
-    task_id = ctx.get("task_id") or _synthesize_task_id(thread_id)
+    task_id = str(ctx.get("task_id") or "") or _synthesize_task_id(thread_id)
     db_path_str = ctx.get("blackboard_db_path")
     db_path = Path(db_path_str) if db_path_str else None
 

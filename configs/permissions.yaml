@@ -1,0 +1,12 @@
+# permissions.yaml — G4-A1 权限三态（allow / ask / deny）
+# key: `<group>.<tool_id>`（组内精确）或裸 `<tool_id>`（全组生效）；缺省 → allow。
+# 执行点：agent tool_node 执行前（runner/permission_engine.enforce）。
+#   deny → tool_result error；ask → LangGraph interrupt（复用 HumanGate，
+#   resume approve 后放行）。缺失本文件 → 全部 allow（向后兼容）。
+#
+# 声明式示例（改注释为生效条目即启用；启用后相应组 e2e 需带 human_approved
+# 或走 HumanGate resume 流程）：
+#   fundamental.render_report: ask
+#   strategy.deploy_strategy: ask
+permissions:
+  fundamental.publish: deny

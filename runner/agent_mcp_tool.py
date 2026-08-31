@@ -20,6 +20,7 @@ Day 7 新增 start/resume 两阶段协议：
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,6 +32,19 @@ from tools.registry import ToolDef, registry
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# R2 token budget 默认值（RunAgentArgs.max_total_tokens 未传时用）
+DEFAULT_TOKEN_BUDGET = 200_000
+
+
+def _resolve_budget(max_total_tokens: int | None) -> int | None:
+    """args 显式值 > env QUANTCODE_TOKEN_BUDGET > DEFAULT_TOKEN_BUDGET。"""
+    if max_total_tokens is not None:
+        return max_total_tokens
+    try:
+        return int(os.environ.get("QUANTCODE_TOKEN_BUDGET", DEFAULT_TOKEN_BUDGET))
+    except ValueError:
+        return DEFAULT_TOKEN_BUDGET
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +71,12 @@ class RunAgentArgs(BaseModel):
     max_iterations: int = Field(
         default=50,
         description="最大 ReAct 迭代次数，超限后强制停止（默认 50）。",
+    )
+    # R2 token budget：None → env QUANTCODE_TOKEN_BUDGET（缺省 200000）
+    max_total_tokens: int | None = Field(
+        default=None,
+        description="可选：本次 run 的总 token 预算。超限时暂停待人审批。"
+        "不传则读环境变量 QUANTCODE_TOKEN_BUDGET（缺省 200000）。",
     )
 
     # ── Day 7: resume 协议字段 ──
@@ -268,6 +288,7 @@ def _start_mode(
         model=model,
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
+        budget_tokens=_resolve_budget(args.max_total_tokens),
     )
 
     final_state: dict[str, Any] = {}
@@ -362,6 +383,7 @@ def _resume_mode(
         model=model,
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
+        budget_tokens=_resolve_budget(args.max_total_tokens),
     )
 
     try:

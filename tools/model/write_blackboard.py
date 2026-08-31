@@ -13,9 +13,9 @@ Day 3 评审后改造（leader 指令 2）：
 4. 返回 BlackboardEntry.model_dump()
 
 注：BlackboardEntry.written_by_task_id 受 schemas.compose_task 的 TASK_ID_PATTERN
-约束（``^T\\d+(\\.\\d+){0,4}$``）。ReAct loop 暂无真正的 task_id，这里从 thread_id
-派生一个稳定的合成 task_id（``T1.{thread_hash}``），后续接入 ComposeTask 时
-由 tool_node 注入真正的 task_id 替换。
+约束（``^T\\d+(\\.\\d+){0,4}$``）。ReAct loop 暂无真正的 task_id：ctx 未提供时
+写 ``T0.<thread_hash>``（T0 = 未分配任务的诚实占位，可追溯到 thread，不冒充
+真实 ComposeTask 署名；接入 ComposeTask 后由 tool 注入真正的 task_id）。
 """
 from __future__ import annotations
 
@@ -36,26 +36,28 @@ class WriteBlackboardArgs(BaseModel):
 
 
 def _synthesize_task_id(thread_id: str) -> str:
-    """从 thread_id 派生一个稳定的合成 task_id（满足 TASK_ID_PATTERN ``^T\\d+(\\.\\d+){0,4}$``）。
+    """thread_id 无对应 ComposeTask 时的诚实占位 task_id（audit #18）。
 
-    规则：``T1.<digits8>``，其中 digits8 是 thread_id 的稳定 8 位数字摘要
-    （取 sha1 hex 后只保留数字字符，不足 8 位补 0）。
+    TASK_ID_PATTERN 只接受 ``^T\\d+(\\.\\d+){0,4}$``，无法表达"缺失"；
+    因此统一用 ``T0.<digits8>`` 前缀：``T0`` 明确表示"未分配任务"（0 号任务
+    即无任务），digits8 是 thread_id 的稳定 8 位数字摘要——可追溯到 thread，
+    且不会被误读成真实 ComposeTask 署名（真实 task 从 T1 起）。
     """
     import hashlib
 
     hex_digest = hashlib.sha1(thread_id.encode("utf-8")).hexdigest()
     digits_only = "".join(ch for ch in hex_digest if ch.isdigit())
     segment = (digits_only + "0" * 8)[:8]
-    return f"T1.{segment}"
+    return f"T0.{segment}"
 
 
 def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
     """写一个 dict 值到 blackboard 的 PROJECT scope。
 
     读自 ctx：
-    - ``thread_id`` (或 ``session_id``) — 仅用于派生合成 task_id 与 dedupe
+    - ``thread_id`` (或 ``session_id``) — 用于占位 task_id 派生与 dedupe
     - ``group`` — 写者所在 group
-    - ``task_id`` — 真实 task_id（可选，缺省从 thread_id 派生）
+    - ``task_id`` — 真实 task_id（可选；缺失时用 T0.<thread_hash> 占位）
     - ``blackboard_db_path`` — 可选覆盖默认 db 路径
 
     构造 BlackboardService，调 ``write_value``：
@@ -75,7 +77,7 @@ def write_blackboard_execute(args: WriteBlackboardArgs, ctx: dict) -> dict:
     raw_group = ctx.get("group") or "model"
     group: GroupName = GroupName(raw_group)
 
-    task_id = ctx.get("task_id") or _synthesize_task_id(thread_id)
+    task_id = str(ctx.get("task_id") or "") or _synthesize_task_id(thread_id)
 
     db_path_str = ctx.get("blackboard_db_path")
     db_path = Path(db_path_str) if db_path_str else None

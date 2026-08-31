@@ -165,6 +165,7 @@ from tools.options._register import (  # noqa: F401  触发 options tool 注册
 )
 import tools.risk._register  # noqa: F401  触发 risk tool 注册
 import tools.factor._register  # noqa: F401  触发 factor tool 注册(Day 4 尹一帆)
+import tools.market._register  # noqa: F401  触发 market tool 注册(P-01)
 import tools.strategy._register  # noqa: F401  触发 strategy tool 注册
 import tools.fundamental._register  # noqa: F401  触发 fundamental tool 注册
 import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4 俞高磊）
@@ -211,6 +212,88 @@ list_runs_tool = ToolDef(
 list_runs_tool._meta = True  # type: ignore[attr-defined]
 # 幂等：register_tool 覆盖式注册（模块 reload 安全，registry.register 会因重复 id 抛错）
 registry._tools[list_runs_tool.id] = list_runs_tool
+
+
+# ---------------------------------------------------------------------------
+# list_skills 只读工具（`.opencode/groups/<group>/skills/` 目录枚举，lens Skill 下拉数据源）
+# ---------------------------------------------------------------------------
+
+
+class ListSkillsArgs(BaseModel):
+    """list_skills 的输入参数 — 只读枚举某组的 SKILL.md 目录。"""
+
+    group: str = Field(
+        description="组名（model / risk / factor / fundamental / options / strategy）。",
+    )
+
+
+# SKILL.md frontmatter 解析：PyYAML（仓库已依赖，与 tools/registry.py 同源），
+# 与 tools/skills/loader.py::_strip_frontmatter 的 "---...\n---\n" 边界语义一致。
+# 非法/非 dict frontmatter → 返回空字段 dict（try/except 兜底，best-effort）。
+def _parse_skill_frontmatter(md_text: str) -> dict:
+    """提取 SKILL.md frontmatter 里的 name/description/pattern（缺失字段值为 ""）。"""
+    import yaml
+
+    out = {"name": "", "description": "", "pattern": ""}
+    if not md_text.startswith("---"):
+        return out
+    try:
+        _head, fm_text, _body = md_text.split("---", 2)
+        data = yaml.safe_load(fm_text)
+    except (ValueError, yaml.YAMLError):
+        return out
+    if not isinstance(data, dict):
+        return out
+    for key in out:
+        value = data.get(key)
+        if isinstance(value, str):
+            out[key] = value.strip()
+    return out
+
+
+def _list_skills_execute(args: ListSkillsArgs, ctx: dict) -> dict:
+    """扫描 .opencode/groups/<group>/skills/*/SKILL.md，返回目录（只读）。"""
+    group = args.group.strip()
+    groups_root = PROJECT_ROOT / ".opencode" / "groups"
+    group_dir = groups_root / group
+    skills_dir = group_dir / "skills"
+    # 组合法性 = 组目录存在；组目录在但 skills/ 为空 → 空列表（合法的空组）
+    if not group_dir.is_dir():
+        available = sorted(
+            p.name for p in groups_root.glob("*") if (p / "skills").is_dir()
+        ) if groups_root.is_dir() else []
+        return {"error": f"invalid group '{group}', valid: {', '.join(available) or '(none)'}"}
+    skills: list[dict] = []
+    if skills_dir.is_dir():
+        for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+            md = d / "SKILL.md"
+            if not md.is_file():
+                continue
+            fm = _parse_skill_frontmatter(md.read_text(encoding="utf-8", errors="replace"))
+            skills.append({
+                "id": d.name,               # 目录名（load_skill 的 skill_name 参数）
+                "name": fm["name"] or d.name,
+                "description": fm["description"],
+                "pattern": fm["pattern"],
+            })
+    return {"group": group, "skills": skills}
+
+
+list_skills_tool = ToolDef(
+    id="list_skills",
+    description=(
+        "Read-only catalog of available skills for a group: scans "
+        ".opencode/groups/<group>/skills/*/SKILL.md and returns "
+        "{group, skills:[{id, name, description, pattern]}. Use before "
+        "load_skill to discover skill ids per group."
+    ),
+    schema=ListSkillsArgs,
+    execute=_list_skills_execute,
+)
+# 走 list_runs 同款 _meta 通道：所有 6 组 MCP server 的 tools/list 都能列出，只读无副作用。
+list_skills_tool._meta = True  # type: ignore[attr-defined]
+# 幂等：覆盖式注册（模块 reload 安全）
+registry._tools[list_skills_tool.id] = list_skills_tool
 
 
 # ---------------------------------------------------------------------------
