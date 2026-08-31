@@ -54,6 +54,10 @@ def test_risk_allowlist_filters_tools(monkeypatch):
         "run_algorithm",
         # A4 蒸馏闭环：consume_status 只读状态工具同走 _meta 通道，六组可见
         "consume_status",
+        # A3/P-05（2026-09-01）：AB 实验三件套同走 _meta 通道，六组可见
+        "run_ab_experiment",
+        "list_experiments",
+        "get_experiment",
     }
 
 

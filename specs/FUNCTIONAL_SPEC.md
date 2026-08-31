@@ -92,7 +92,7 @@
 
 **验收**：PIT 检索结果 `published_at` 全部 ≤ as_of_date（零违规）；StrategyReport.weights ⊆ selected_signals。
 
-**状态**：🔶 可跑（test_flows_six）。缺口：options backtest、extract_financial 为 stub；deploy_strategy 仅建议；SKILL frontmatter 自动注册未实现。
+**状态**：🔶 可跑（test_flows_six）。缺口：options backtest、extract_financial 为 stub（strategy 回测已接真引擎 internal_v1，见 `tools/strategy/backtest_engine.py`）；deploy_strategy 仅建议；SKILL frontmatter 自动注册未实现。
 
 ### F-09 Monitor 可观测 ✅
 **用户故事**：作为工程师，我想在 Monitor 面板查看每次 run 状态并用任务 ID 回放，以诊断失败与验证回归。
@@ -101,13 +101,13 @@
 
 **验收**：run 完成 → metrics 追加一行且 list_runs 可见；`replay show <task_id>` 可反查并 resume。
 
-**状态**：✅。缺口：token 成本核算与告警（ROADMAP R2/G3）；Monitor 仅有列表视图。
+**状态**：✅。缺口：告警未做（token 预算已有 `QUANTCODE_TOKEN_BUDGET` 硬约束，见 `runner/agent_mcp_tool.py`；成本核算与告警剩 ROADMAP R2/G3）；Monitor 仅有列表视图。
 
 ---
 
 ## 第二部分：计划功能（P-XX）
 
-### P-01 数据接入（qsdata 组 + FactorPanel 契约）——P0，Q1
+### P-01 数据接入（qsdata 组 + FactorPanel 契约）——P0，Q1（✅ 已实现：`schemas/data_contracts.py` + `tools/market/` 四工具，见 `specs/data/SPEC.md`）
 **动机**：ROADMAP"最高优先级单点"——回测/组合/真实评估全部空转的前置。qs-cold 已勘察（247 因子，长表 PIT 字段内建）。
 **契约草案**：[新增] `schemas/data_contracts.py`：`FactorPanel`（dates/assets 值矩阵 + is_valid 过滤 + PIT calc_time<=as_of + `_contract:"FactorPanel/v1"`）、`ReturnsDataset`、`StrategyManifest`；工具 [新增] `tools/market/`：`list_factors/load_factor_panel/load_returns/pool_browse`。数据走 Blackboard `shared.datasets.*`（typed 对象），LLM 只见 key+摘要。详见 [specs/data/SPEC.md](data/SPEC.md)。
 **依赖**：COS 凭据（Q2 服务化）；本地 staging dev 后端先行。**验收草案**：GTJA191_M019 因子跑出替换 mock 的真实 IC 报告；无权限组 fail-closed。
@@ -142,7 +142,7 @@
 | F-06 | Factor AutoEval 流 | 现有 | 🔶 |
 | F-07 | Model→Risk 跨组流 | 现有 | ✅ |
 | F-08 | 三条 Compose 流 | 现有 | 🔶 |
-| F-09 | Monitor 可观测 | 现有 | ✅ |
-| P-01..P-06 | 数据接入/回测/组合/并行/实验/evidence chain | 计划 | Q1→Q4 |
+| F-09 | Monitor 可观测 | 现有 | ✅（告警未做） |
+| P-01..P-06 | 数据接入/回测/组合/并行/实验/evidence chain | 计划 | P-01 ✅ 已实现；余项 Q1→Q4 |
 
 > 维护声明：本文件为功能唯一活文档；schemas/ 或 tools/ 每次改动必须同步更新状态列。历史快照不再修改。

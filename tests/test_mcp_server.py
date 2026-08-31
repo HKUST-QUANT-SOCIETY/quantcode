@@ -152,7 +152,11 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "run_algorithm",
         # A4 蒸馏闭环：consume_status 只读状态工具同走 _meta 通道，六组可见
         "consume_status",
-    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills','list_algorithms','describe_algorithm','run_algorithm','consume_status'}}"
+        # A3/P-05（2026-09-01）：AB 实验三件套同走 _meta 通道，六组可见
+        "run_ab_experiment",
+        "list_experiments",
+        "get_experiment",
+    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills','list_algorithms','describe_algorithm','run_algorithm','consume_status','run_ab_experiment','list_experiments','get_experiment'}}"
 
     # Case 2: 不设置 → 全部
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)

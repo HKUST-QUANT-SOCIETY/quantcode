@@ -174,6 +174,12 @@ from tools.algorithms._register import (  # noqa: F401
     list_algorithms_tool,
     run_algorithm_tool,
 )
+import tools.experiments._register as _experiments_register  # noqa: F401  触发 AB 实验三工具注册(ROADMAP A3 / P-05)
+from tools.experiments._register import (  # noqa: F401
+    get_experiment_tool,
+    list_experiments_tool,
+    run_ab_experiment_tool,
+)
 import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4 俞高磊）
 
 
@@ -189,6 +195,19 @@ describe_algorithm_tool._meta = True  # type: ignore[attr-defined]
 run_algorithm_tool._meta = True  # type: ignore[attr-defined]
 # 幂等：覆盖式注册（register_tool 已是覆盖语义，重复 register 无害）
 for _t in (list_algorithms_tool, describe_algorithm_tool, run_algorithm_tool):
+    registry._tools[_t.id] = _t
+
+
+# ---------------------------------------------------------------------------
+# AB 实验三工具（artifacts/experiments 归档 + 排行榜，ROADMAP A3 / P-05）
+# ---------------------------------------------------------------------------
+
+# 走 algorithms 三件套同款 _meta 通道：平台级实验能力，所有组 MCP 可见，只读无副作用
+# （run_ab_experiment 只写 artifacts/，不碰 Blackboard/交易数据）。
+run_ab_experiment_tool._meta = True  # type: ignore[attr-defined]
+list_experiments_tool._meta = True  # type: ignore[attr-defined]
+get_experiment_tool._meta = True  # type: ignore[attr-defined]
+for _t in (run_ab_experiment_tool, list_experiments_tool, get_experiment_tool):
     registry._tools[_t.id] = _t
 
 

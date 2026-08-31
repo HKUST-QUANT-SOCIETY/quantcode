@@ -43,7 +43,7 @@
 | 引擎 | R3 spawn_subagent（签名+预算隔离+共享 Blackboard 写策略）+ R4 kill/task registry + R5 会话树 |
 | 数据 | D2a qs-data 只读服务（Server A，group 粒度 key）+ D2b COS 凭据服务化边界 + D3a 回测引擎选型 PoC |
 | 算法 | A2 组合因子模型（正交化+XGB/LGBM 对比，产出 composite_score） |
-| 风控 | G1-L2 模拟盘持续监控（cron 阈值扫描）+ G2-A2 产物不可变指纹★ + G3-B1 三机部署拓扑（A=dev/CI，B=主线+模拟盘 cron，C=对外+凭据宿主）+ G4-B1 SSH 全操作认证 |
+| 风控 | G1-L2 模拟盘持续监控（cron 阈值扫描）+ G2-A2 产物不可变指纹★ + G3-B1 三机部署拓扑（A=dev/CI，B=主线+模拟盘 cron，C=对外+凭据宿主——首期文档落地：`deploy/README.md` + `deploy/quantcode.service.example`）+ G4-B1 SSH 全操作认证 |
 | 产品 | U2 四屏逐屏落地（因子评估屏→审批屏），Linux 打包补齐 |
 
 ### Q3（2027Q2）：真实引擎与合规交付
