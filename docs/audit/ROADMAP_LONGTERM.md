@@ -120,3 +120,7 @@ token 预算(R2) ──→ spawn_subagent 预算扣减(R3)
 
 - **三套阈值口径从 YAML 单源**（架构决策 3「配置不喂 LLM」）：`configs/acceptance.factor.yaml`（0.03/0.5/0.8/2.0）+ `configs/acceptance.risk.yaml`（0.15/0.8/0.05/0.6）为唯一真源；`runner/config_loader.py`（lru_cache + `QUANTCODE_CONFIG_DIR` 覆盖 + 极简 schema 校验）→ `runner/acceptance.py` yaml 优先 / 代码默认兜底（缺文件 warning 一次）；`runner/risk_agent._risk_acceptance_thresholds` 改引同一出口 `runner.acceptance.risk_thresholds()`。数值 = 现默认，行为零变化。
 - **signal_algorithms 注册表首例**：`configs/algorithms.yaml` 两条目（equal_weight_composite_ranker 真实 demo 评分器 + pb_roe_ranker 占位→tools/factor PB-ROE 线注释映射）；执行端 `tools/algorithms/_register.py` 三工具 `list_algorithms` / `describe_algorithm` / `run_algorithm`，demo 评分器 `tools/algorithms/score_demo.py`（读 Blackboard `shared.datasets.panel/*` FactorPanel，最新截面等权 rank 合成，返回 top_n 资产表）；`quantcode/mcp_server.py` 经 `_meta` 通道六组 MCP server 可见（不进组 allowlist）。
+
+## 7. 真实数据因子评估首例（2026-09-01）：panel_real_v1
+
+- `flows/factor_eval_real.py`（engine=panel_real_v1）+ `tools/factor/eval_from_panel.py`：读 Blackboard `shared.datasets.panel/*` FactorPanel 契约，纯 numpy 算真实 Spearman rank IC / 换手（top decile Jaccard，21 交易日窗口）/ 5 分层多空差 → FactorReport 兼容 dict → verdict 按 `runner/acceptance.factor_thresholds()`（configs/acceptance.factor.yaml 单源）+ run_acceptance 复核 → 写 `artifacts/factor/{name}-report-real.json`。代理收益=次日因子值变化率（因子动量），已显著标注，R3 域接 StockDailyBar.Return 后在 build_returns_from_panel 单点替换。

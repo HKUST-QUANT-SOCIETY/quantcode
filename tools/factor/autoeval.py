@@ -3,6 +3,9 @@
 调用auto_factor_evaluation API提交FactorSpec并获取评估结果。
 保持与stub相同的schema，只替换_execute函数体。
 
+配 panel 数据时优先 tools/factor/eval_from_panel（真实数据统计直接出报告，
+无外部 API 依赖）；本工具面向 FactorSpec → AutoEval 服务路径。
+
 TODO: 需要真实的AutoEval API endpoint
 - 当前使用降级模式（返回mock数据）
 - 实际部署需要从团队获取API地址和认证信息
