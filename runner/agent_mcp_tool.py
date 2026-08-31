@@ -91,6 +91,14 @@ class RunAgentArgs(BaseModel):
         "推荐使用 approve/reject。proceed/abort 仅用于兼容内部路径。",
     )
 
+    # ── attach_stream：start run 执行轨迹旁落到 JSONL 通道 ──
+    attach_stream: bool = Field(
+        default=False,
+        description="start 模式可选：True 时把 execution_trace 事件逐条 append 到 "
+        ".quantcode/streams/<thread_id>.jsonl，控制器用 check_tool_stream 按游标"
+        "中途增量读取。False（默认）不建文件，行为不变。",
+    )
+
 
 # ── 任务→子 skill 路由（Day 5 修复） ──
 # 当 skill_name 是通用编排器（如 "model"）时，根据 task 关键词
@@ -215,7 +223,6 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     # ── start mode ──
     return _start_mode(args, group, model, checkpoint_db, resolved_skill)
 
-
 def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
     """risk 组启动时读取 PROJECT scope 的 ``shared.pending_risk_reviews`` 队列条数。
 
@@ -291,16 +298,41 @@ def _start_mode(
         budget_tokens=_resolve_budget(args.max_total_tokens),
     )
 
+    # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
+    def _stream_call() -> dict[str, Any]:
+        """包装 runner.stream()：拿到全量 trace 后逐条 emit 到通道。
+
+        # ponytail: emit 在 stream() 全量返回后补齐（终态结构 100% 不变）；
+        # 真·逐步中途可读需在 AgentRunner.stream() 循环内挂钩子（改 engine），
+        # 窗口秒级，需要更低延迟时再升级。
+        """
+        from runner import stream_channel
+
+        channel = stream_channel.get_or_open(thread_id)
+        final_state = runner.stream(
+            task=task,
+            skill_name=resolved_skill,
+            flow_name="mcp_compose",
+            thread_id=thread_id,
+        )
+        for ev in (final_state.get("execution_trace") or []):
+            if isinstance(ev, dict):
+                channel.emit(ev)
+        return final_state
+
     final_state: dict[str, Any] = {}
     try:
         # 优先用 stream()；回退到 run()
         if hasattr(runner, "stream"):
-            final_state = runner.stream(
-                task=task,
-                skill_name=resolved_skill,
-                flow_name="mcp_compose",
-                thread_id=thread_id,
-            )
+            if args.attach_stream:
+                final_state = _stream_call()
+            else:
+                final_state = runner.stream(
+                    task=task,
+                    skill_name=resolved_skill,
+                    flow_name="mcp_compose",
+                    thread_id=thread_id,
+                )
         else:
             final_state = runner.run(
                 task=task,

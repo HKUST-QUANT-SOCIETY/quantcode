@@ -325,6 +325,8 @@ registry._tools[list_skills_tool.id] = list_skills_tool
 # 工具，不进各组 tool_allowlist，经统一 _meta 通道向控制器（OpenCode compose /
 # monitor）暴露——与 list_runs / list_skills 同路。
 import tools.subagent._register  # noqa: F401,E402  触发 subagent tool 注册（P-04）
+import tools.stream._register  # noqa: F401,E402  触发 check_tool_stream 注册（_meta 通道）
+import tools.portfolio._register  # noqa: F401,E402  触发 portfolio 三工具注册（_meta 通道，确定性数值）
 
 
 # ---------------------------------------------------------------------------
