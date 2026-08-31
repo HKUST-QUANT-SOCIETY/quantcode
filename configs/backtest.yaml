@@ -4,3 +4,6 @@ commission_rate: 0.0003   # 佣金，双边（买/卖各收一次）
 stamp_tax: 0.0005         # 印花税，仅卖出
 # T+1 无参数：A 股硬规则，今日买入次日才可卖（引擎内置 day_bought 状态）。
 limit_pct: 0.10           # 涨跌停带宽：|price / prev_close - 1| > 10% 视为不可成交
+# 部署建议 verdict 阈值（ROADMAP D3b；strategy:compose 与 run_strategy_backtest 共同 import）：
+verdict_sharpe_min: 0.5
+verdict_max_dd_max: 0.25

@@ -31,9 +31,10 @@ from tools.registry import registry
 # 触发 strategy 组 tool 注册（幂等）
 import tools.strategy._register  # noqa: F401
 
-# verdict 内联阈值（与 tools/strategy/run_strategy_backtest.py 的工具层规则一致）
-SHARPE_MIN = 0.5
-MAX_DD_MAX = 0.25
+# verdict 阈值单源 = configs/backtest.yaml（经 tools/strategy/backtest_engine.outlet，
+# 与工具层共用；yaml 缺键回退代码默认）。
+from tools.strategy.backtest_engine import VERDICT_MAX_DD_MAX as MAX_DD_MAX
+from tools.strategy.backtest_engine import VERDICT_SHARPE_MIN as SHARPE_MIN
 
 
 class StrategyComposeFlowState(TypedDict, total=False):

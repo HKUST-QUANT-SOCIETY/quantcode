@@ -38,8 +38,27 @@ DEFAULT_FEES = {
 # verdict 阈值出处：与 flows/strategy_compose.py 内联规则一致（工具层同款）。
 # configs/acceptance.risk.yaml 只有 risk-gate 语义的 max_drawdown(0.15) 且无
 # sharpe 键——读不出本验收组合，故内联并注释（ROADMAP D3b：sharpe≥0.5 且 dd≤0.25）。
-VERDICT_SHARPE_MIN = 0.5
-VERDICT_MAX_DD_MAX = 0.25
+# verdict 阈值单源 = configs/backtest.yaml（verdict_sharpe_min / verdict_max_dd_max；
+# strategy:compose 与 run_strategy_backtest 共同 import 本模块出口，ROADMAP D3b）。
+# yaml 缺文件/缺键时回退代码默认（行为与历史内联值一致）。
+_VERDICT_DEFAULTS = {"sharpe_min": 0.5, "max_dd_max": 0.25}
+
+
+def verdict_thresholds() -> dict[str, float]:
+    try:
+        from runner.config_loader import load_yaml
+
+        cfg = load_yaml("backtest") or {}
+        return {
+            "sharpe_min": float(cfg.get("verdict_sharpe_min", cfg.get("sharpe_min", _VERDICT_DEFAULTS["sharpe_min"]))),
+            "max_dd_max": float(cfg.get("verdict_max_dd_max", cfg.get("max_dd_max", _VERDICT_DEFAULTS["max_dd_max"]))),
+        }
+    except Exception:
+        return dict(_VERDICT_DEFAULTS)
+
+
+VERDICT_SHARPE_MIN = verdict_thresholds()["sharpe_min"]
+VERDICT_MAX_DD_MAX = verdict_thresholds()["max_dd_max"]
 
 
 def load_fees() -> dict[str, float]:
