@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -151,18 +152,34 @@ def list_factors_impl(
 # ---------------------------------------------------------------------------
 
 
+# ponytail: 路径穿越守卫（Mimosa high 修复）——factor 类 key 在污点入口处归一化：
+# 只允许字母数字、点、下划线、连字符与单个斜杠分隔层级；含 ".."、以斜杠开头
+# 或出现反斜杠的输入直接拒绝，污点无法进入路径拼接。
+_FACTOR_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
+
+
+def sanitize_factor_key(factor_key: str) -> str | None:
+    """归一化 factor_id/factor_dir；非法（穿越/绝对路径/空段）返回 None。"""
+    key = (factor_key or "").strip().strip("/")
+    if not key or "\\" in key or ".." in key or "//" in key:
+        return None
+    if not _FACTOR_KEY_RE.fullmatch(key):
+        return None
+    return key
+
+
 def _factor_data_path(root: Path, factor_dir: str, year: int) -> Path | None:
     """SPEC §2.1 布局：factors/{factor_dir}/year={Y}/data.parquet。
 
     selected_pool.csv 的 factor_dir 是 qs-cold 内相对路径；staging 副本里
     长表按 factors/<factor_id>/year=... 归位，两种 key 都试。
-    路径穿越守卫：resolve 后必须仍落在_factors ROOT 内，逃逸返回 None。
+    路径穿越在 sanitize_factor_key 入口已掐断（含 ".." 直接 None）。
     """
+    key = sanitize_factor_key(factor_dir)
+    if key is None:
+        return None
     factors_root = (root / FACTORS_DIRNAME).resolve()
-    escaped = ".." in factor_dir
-    for base in (factors_root / factor_dir, factors_root / Path(factor_dir).name):
-        if escaped and not base.resolve().is_relative_to(factors_root):
-            return None
+    for base in (factors_root / key, factors_root / Path(key).name):
         p = base / f"year={year}" / "data.parquet"
         if p.is_file():
             return p
