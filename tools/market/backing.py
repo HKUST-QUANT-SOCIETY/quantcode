@@ -187,11 +187,16 @@ def _factor_data_path(root: Path, factor_dir: str, year: int) -> Path | None:
 
 
 def _resolve_factor_row(root: Path, factor_id: str) -> dict[str, str] | None:
+    # ponytail: 污点入口归一——比较 key 与 CSV 两侧都过白名单，穿越输入在此被拒
+    clean = sanitize_factor_key(factor_id)
+    if clean is None:
+        return None
     pool_csv = _pool_dir(root) / POOL_DIRNAME
     if not pool_csv.is_file():
         return None
     for row in _read_selected_pool(pool_csv):
-        if row.get("factor_name") == factor_id or row.get("factor_dir") == factor_id:
+        row_dir = sanitize_factor_key(row.get("factor_dir", ""))
+        if row.get("factor_name") == clean or row_dir == clean:
             return row
     return None
 
@@ -222,7 +227,7 @@ def load_factor_panel_impl(
             "bad_year_range", detail=f"year_end {year_end} < year_start {year_start}"
         )
 
-    row = _resolve_factor_row(root, factor_id)
+    row = _resolve_factor_row(root, sanitize_factor_key(factor_id) or "")
     paths: list[Path] = []
     if row is not None:
         for y in range(year_start, year_end + 1):

@@ -116,3 +116,7 @@ token 预算(R2) ──→ spawn_subagent 预算扣减(R3)
 1. **D1+D2-dev**：`schemas/data_contracts.py`（FactorPanel）+ staging dev 后端 + `load_factor_panel` 工具 → 一个入选因子（GTJA191_M019）跑通真实 IC 报告替换 mock；
 2. **两处遗漏小修**（replay bootstrap + allowlist 注释化）+ allowlist 一致性断言测试（P1-6 教训制度化）；
 3. **U1 前置**：lens 会话页三栏布局骨架 + metric-cards 组件（先渲染现有 output_data 字段）。
+## 6. A3 首期落地（2026-09-01）：配置单源 + 算法注册表
+
+- **三套阈值口径从 YAML 单源**（架构决策 3「配置不喂 LLM」）：`configs/acceptance.factor.yaml`（0.03/0.5/0.8/2.0）+ `configs/acceptance.risk.yaml`（0.15/0.8/0.05/0.6）为唯一真源；`runner/config_loader.py`（lru_cache + `QUANTCODE_CONFIG_DIR` 覆盖 + 极简 schema 校验）→ `runner/acceptance.py` yaml 优先 / 代码默认兜底（缺文件 warning 一次）；`runner/risk_agent._risk_acceptance_thresholds` 改引同一出口 `runner.acceptance.risk_thresholds()`。数值 = 现默认，行为零变化。
+- **signal_algorithms 注册表首例**：`configs/algorithms.yaml` 两条目（equal_weight_composite_ranker 真实 demo 评分器 + pb_roe_ranker 占位→tools/factor PB-ROE 线注释映射）；执行端 `tools/algorithms/_register.py` 三工具 `list_algorithms` / `describe_algorithm` / `run_algorithm`，demo 评分器 `tools/algorithms/score_demo.py`（读 Blackboard `shared.datasets.panel/*` FactorPanel，最新截面等权 rank 合成，返回 top_n 资产表）；`quantcode/mcp_server.py` 经 `_meta` 通道六组 MCP server 可见（不进组 allowlist）。

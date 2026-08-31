@@ -1,0 +1,7 @@
+# risk-gate 验收阈值，数值与 schemas/risk_profile.RiskThresholds 字段默认值同源。
+# 读取方：runner/acceptance.py（yaml 缺文件/缺键时回退代码默认并 warning 一次）。
+# 注：RiskThresholds.position_limit_usage 对应本文件的 position_limit（acceptance check 名）。
+max_drawdown: 0.15
+position_limit: 0.8
+tail_risk_var_99: 0.05
+correlation_limit: 0.6

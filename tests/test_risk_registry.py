@@ -48,6 +48,10 @@ def test_risk_allowlist_filters_tools(monkeypatch):
         "request_human_review",
         "list_runs",  # meta tool：run_agent 同路，所有组的 MCP server 可见
         "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+        # A3（2026-09-01）：algorithms.yaml 注册表三件套同走 _meta 通道，六组可见
+        "list_algorithms",
+        "describe_algorithm",
+        "run_algorithm",
     }
 
 

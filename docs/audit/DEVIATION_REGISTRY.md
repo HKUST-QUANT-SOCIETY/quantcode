@@ -196,3 +196,7 @@ P2-1（README/USER_MANUAL 失真 12 处）由本轮文档任务完成（✅，�
 4. **批次 D（面板接活）**：P0-1 接线 → P0-4 审批按钮 → P1-11 渲染增强 → P1-12 组切换。
 5. **批次 E（后端闭环）**：P0-2 handoff 修复、P0-8 最小 replay、P1-1/2/5/6 语义修复。
 6. **批次 F（文档真伪）**：P2-1/2/3 全量对齐。
+## A3 配置单源 + 算法注册表（2026-09-01，ROADMAP Q3 A3 + 架构决策 3）
+
+- 三处硬编码阈值收敛为 `configs/acceptance.{factor,risk}.yaml` 单源：`runner/acceptance.py`（RUNNER factor-eval 0.03/0.5/0.8/2.0、risk-gate 0.15/0.8/0.6 与 RiskThresholds 同源）、`flows/factor_autoeval._report_verdict` 同值删写。缺文件/缺键回退代码默认并 warning 一次，数值=现默认，行为零变化；新增 `runner/config_loader.py`（lru_cache、`QUANTCODE_CONFIG_DIR` 覆盖）。
+- `configs/algorithms.yaml` 算法注册表首例 + `tools/algorithms/` 执行端（`_register.py` 三工具 + `score_demo.py` 真实 demo：Blackboard `shared.datasets.panel/*` → 等权 rank top_n 资产表）；`mcp_server` 以 `_meta` 通道注册 list_algorithms 等，六组 MCP server 的 tools/list 可见、不进组 allowlist（平台级工具，与 list_runs/list_skills 同款）。

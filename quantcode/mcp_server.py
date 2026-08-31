@@ -168,7 +168,28 @@ import tools.factor._register  # noqa: F401  触发 factor tool 注册(Day 4 尹
 import tools.market._register  # noqa: F401  触发 market tool 注册(P-01)
 import tools.strategy._register  # noqa: F401  触发 strategy tool 注册
 import tools.fundamental._register  # noqa: F401  触发 fundamental tool 注册
+import tools.algorithms._register as _algorithms_register  # noqa: F401  触发算法注册表三工具注册(ROADMAP A3)
+from tools.algorithms._register import (  # noqa: F401
+    describe_algorithm_tool,
+    list_algorithms_tool,
+    run_algorithm_tool,
+)
 import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4 俞高磊）
+
+
+# ---------------------------------------------------------------------------
+# list_algorithms 只读工具（configs/algorithms.yaml 注册表目录，ROADMAP A3）
+# ---------------------------------------------------------------------------
+
+# ponytail: 走 list_runs 同款 _meta 通道 —— 不进各组 allowlist 也能被六组 MCP
+# server 的 tools/list 列出（list_tools 末尾统一附加 meta tool），只读无副作用。
+# 三件套（list/describe/run）全部 _meta：算法实验是平台级能力。
+list_algorithms_tool._meta = True  # type: ignore[attr-defined]
+describe_algorithm_tool._meta = True  # type: ignore[attr-defined]
+run_algorithm_tool._meta = True  # type: ignore[attr-defined]
+# 幂等：覆盖式注册（register_tool 已是覆盖语义，重复 register 无害）
+for _t in (list_algorithms_tool, describe_algorithm_tool, run_algorithm_tool):
+    registry._tools[_t.id] = _t
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +315,16 @@ list_skills_tool = ToolDef(
 list_skills_tool._meta = True  # type: ignore[attr-defined]
 # 幂等：覆盖式注册（模块 reload 安全）
 registry._tools[list_skills_tool.id] = list_skills_tool
+
+
+# ---------------------------------------------------------------------------
+# subagent 元工具（P-04：spawn/check/kill/list 经 _meta 通道注册）
+# ---------------------------------------------------------------------------
+
+# 实现（schema+execute）在 tools/subagent/_register.py。四个工具均为编排层元
+# 工具，不进各组 tool_allowlist，经统一 _meta 通道向控制器（OpenCode compose /
+# monitor）暴露——与 list_runs / list_skills 同路。
+import tools.subagent._register  # noqa: F401,E402  触发 subagent tool 注册（P-04）
 
 
 # ---------------------------------------------------------------------------

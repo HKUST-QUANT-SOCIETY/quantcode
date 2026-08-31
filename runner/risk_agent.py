@@ -17,7 +17,11 @@ from os import PathLike
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
-from runner.acceptance import AcceptanceResult, run_acceptance as run_acceptance_checks
+from runner.acceptance import (
+    AcceptanceResult,
+    risk_thresholds,
+    run_acceptance as run_acceptance_checks,
+)
 from runner.human_gate import (
     build_interrupt_payload,
     gate_check,
@@ -274,11 +278,16 @@ def resume_risk_gate(
 
 
 def _risk_acceptance_thresholds() -> dict[str, float]:
-    limits = RiskThresholds()
+    """acceptance 阈值单源：configs/acceptance.risk.yaml → RiskThresholds 兜底。
+
+    yaml 单值以 runner.acceptance.risk_thresholds() 为出口（risk 组 yaml 未配置
+    等场景回退 RiskThresholds 同源代码默认，行为与历史一致）。
+    """
+    limits = risk_thresholds()
     return {
-        "max_drawdown": limits.max_drawdown,
-        "position_limit": limits.position_limit_usage,
-        "correlation_limit": limits.correlation_limit,
+        "max_drawdown": limits["max_drawdown"],
+        "position_limit": limits["position_limit"],
+        "correlation_limit": limits["correlation_limit"],
     }
 
 

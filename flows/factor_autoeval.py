@@ -264,13 +264,18 @@ MOCK_AUTOEVAL_PAYLOAD_V1: dict[str, Any] = {
 
 
 def _report_verdict(eval_result: dict[str, Any]) -> FactorVerdict:
+    # 阈值单源 configs/acceptance.factor.yaml（架构决策 3「配置不喂 LLM」），
+    # 经 runner.acceptance.factor_thresholds() 出口（内部已回退代码默认）。
+    from runner.acceptance import factor_thresholds
+
+    t = factor_thresholds()
     if eval_result.get("fail_reasons"):
         return FactorVerdict.FAIL
     if (
-        abs(eval_result.get("ic_mean", 0.0)) >= 0.03
-        and eval_result.get("ir", 0.0) >= 0.5
-        and eval_result.get("turnover_monthly", 1.0) <= 0.8
-        and eval_result.get("t_stat", 0.0) >= 2.0
+        abs(eval_result.get("ic_mean", 0.0)) >= t["ic_abs_min"]
+        and eval_result.get("ir", 0.0) >= t["ir_min"]
+        and eval_result.get("turnover_monthly", 1.0) <= t["turnover_monthly_max"]
+        and eval_result.get("t_stat", 0.0) >= t["t_stat_min"]
     ):
         return FactorVerdict.PASS
     return FactorVerdict.MARGINAL
