@@ -212,6 +212,9 @@ class AgentState(BaseFlowState, total=False):
     budget_tokens: int | None
     budget_used: int
     budget_grants: list[int] | None
+    # P-01/F-06: Blackboard sqlite 路径透传（dataset 工具读同一 bb 文件；
+    # None → backing 默认路径 .quantcode/blackboard.db）。
+    _blackboard_db_path: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +328,15 @@ def make_tool_node(
             "thread_id": state.get("thread_id", ""),
             "session_id": state.get("thread_id", ""),  # alias
         }
+        # HumanGate approve（任何 kind：risk/merge/portfolio/permission/budget）
+        # resume 后注入 human_approved —— 副作用类 tool 据此放行（P-04/F-06）。
+        # ponytail: 首步无 review 时保持缺省，副作用 tool 自行 fail-closed。
+        if state.get("human_review_result") == "proceed":
+            ctx["human_approved"] = True
+        # Blackboard 路径透传（P-01/F-06：dataset 工具读同一 bb 文件；
+        # engine 默认 None → backing 默认路径 .quantcode/blackboard.db）。
+        if state.get("_blackboard_db_path"):
+            ctx["blackboard_db_path"] = state["_blackboard_db_path"]
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 
         results: list[ToolMessage] = []
@@ -863,6 +875,7 @@ def init_agent_state(
     tools: list,
     input_data: dict | None = None,
     budget_tokens: int | None = None,
+    blackboard_db_path: str | None = None,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -885,6 +898,7 @@ def init_agent_state(
         gate=None,
         budget_tokens=budget_tokens,
         budget_used=0,
+        _blackboard_db_path=str(blackboard_db_path) if blackboard_db_path else None,
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 

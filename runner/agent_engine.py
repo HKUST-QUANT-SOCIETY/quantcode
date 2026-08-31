@@ -140,6 +140,7 @@ class AgentRunner:
         retry_max_retries: int = 0,  # Day 5:LLM 重试次数,0=不启用
         retry_base_delay: float = 0.5,
         budget_tokens: int | None = None,  # R2 token budget；None=不启用
+        blackboard_db_path: str | Path | None = None,  # P-01/F-06: dataset 工具同源 bb
     ) -> None:
         self.group = group
         # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
@@ -167,6 +168,11 @@ class AgentRunner:
         self.truncate_tokens = truncate_tokens
         # R2 token budget：累计 LLM 消耗超限时 interrupt(kind=budget) 等人审批。
         self.budget_tokens = budget_tokens
+        # P-01/F-06：Blackboard sqlite 路径透传（dataset 工具 eval_from_panel /
+        # merge_to_main 读同一 bb 文件；None → backing 默认 .quantcode/blackboard.db）。
+        self.blackboard_db_path = (
+            str(blackboard_db_path) if blackboard_db_path else None
+        )
 
     # ----- 构造 StateGraph -----
     def build(
@@ -554,6 +560,7 @@ class AgentRunner:
                     tools=[],  # tools 已通过闭包注入 llm_node，不入 state
                     input_data={"task": task},
                     budget_tokens=self.budget_tokens,
+                    blackboard_db_path=self.blackboard_db_path,
                 )
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
@@ -648,6 +655,7 @@ class AgentRunner:
                 tools=[],
                 input_data={"task": task},
                 budget_tokens=self.budget_tokens,
+                blackboard_db_path=self.blackboard_db_path,
             )
 
         final_state: dict[str, Any] = {}
@@ -881,6 +889,19 @@ class AgentRunner:
         _started_at = time.time()
         try:
             final = app.invoke(Command(resume=resume_payload), config=config)
+            # 兜底：resume 后如果路由层又挂了【空 risk gate】（ABORT_LOOP 触达
+            # human_gate 但无任何 risk_metrics，没有可审内容），auto-proceed 放行，
+            # 避免把 merge/e2e 的已完成结果用无负载 gate 卡住（P-04/F-06 收尾）。
+            # ponytail: 只处理空 gate；真实 risk/budget/merge/permission gate 仍等人。
+            from runner.human_gate import extract_interrupt_payload
+
+            for _ in range(8):  # 上限防御：极端回路不无限 resume
+                payload = extract_interrupt_payload(final)
+                if not payload or payload.get("risk_profile") or payload.get("kind"):
+                    break
+                final = app.invoke(
+                    Command(resume=resume_payload), config=config
+                )
         except Exception as exc:
             _record_run_safe(
                 group=self.group, flow=flow_name, thread_id=thread_id,

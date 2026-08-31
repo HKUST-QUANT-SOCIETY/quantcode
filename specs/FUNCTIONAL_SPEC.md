@@ -61,7 +61,7 @@
 
 **状态**：🔶。缺口：LLM/AutoEval 供应商无 UI（仅环境变量）；SSH 完整认证面未建设。
 
-### F-06 Factor AutoEval 流 🔶
+### F-06 Factor AutoEval 流 ✅
 **用户故事**：作为因子组研究员，我提交因子 idea 后系统自动匹配主线库、生成 FactorSpec、回测并产出 IC/IR/换手报告，用统一口径横向比较。
 
 **契约**：入 `FactorSpec`（`schemas/factor.py`：formula/operators/universe/date_range/forward_return_horizon∈{1,3,5,10,20}），出 `FactorReport`（ic_metrics/turnover/decay/layered_backtest/verdict∈pass|fail|marginal；JSON 版 `schemas/factor-report.schema.json`）；阈值 `runner/acceptance.py::_check_factor_eval`。
@@ -70,7 +70,7 @@
 
 **验收**：API 未配置时 mock 报告带 `_is_mock` 且仍符合 schema；FactorReport 缺关键字段时校验失败记 fail_reasons。
 
-**状态**：🔶。缺口：`merge_to_main`/`check_factor_gate` 未实现；真实 AutoEval 服务端点未稳定。
+**状态**：✅。merge_to_main / check_factor_gate 已落地（`tools/factor/merge_to_main.py`，HumanGate kind=merge 审批 + acceptance 联动，E2E `tests/test_factor_merge.py`）。残余：真实 AutoEval 服务端点未稳定（eval_from_panel 管线已就绪，panel 数据接入后即用真数据）。
 
 ### F-07 Model→Risk 跨组 PR 流 ✅
 **用户故事**：作为模型组研究员，我提交模型 PR 后希望 10 分钟内自动得到 RiskProfile 与 gate 结论，越阈值才进 HumanGate。
@@ -112,10 +112,10 @@
 **契约草案**：[新增] `schemas/data_contracts.py`：`FactorPanel`（dates/assets 值矩阵 + is_valid 过滤 + PIT calc_time<=as_of + `_contract:"FactorPanel/v1"`）、`ReturnsDataset`、`StrategyManifest`；工具 [新增] `tools/market/`：`list_factors/load_factor_panel/load_returns/pool_browse`。数据走 Blackboard `shared.datasets.*`（typed 对象），LLM 只见 key+摘要。详见 [specs/data/SPEC.md](data/SPEC.md)。
 **依赖**：COS 凭据（Q2 服务化）；本地 staging dev 后端先行。**验收草案**：GTJA191_M019 因子跑出替换 mock 的真实 IC 报告；无权限组 fail-closed。
 
-### P-02 回测引擎——P1，Q2 选型/Q3 落地
+### P-02 回测引擎——P1，Q2 选型/Q3 落地（✅ 首版已实现：`tools/strategy/backtest_engine.py` internal_v1，A 股 T+1/涨跌停/费用；vectorbt 升级路径见代码注释）
 **契约草案**：`run_backtest(spec, data: ReturnsDataset, config) -> BacktestSummary`（A 股 T+1/涨跌停/费用模型）。依赖 P-01；验收：同 manifest 对账误差=0。
 
-### P-03 组合层——P1，Q4
+### P-03 组合层——P1，Q4（✅ 首版已实现：`tools/portfolio/` construct/rebalance/gate，确定性数值，阈值 `configs/portfolio.yaml` 单源；复用 HumanGate interrupt）
 **契约草案**：`construct_portfolio(target, panel) -> PortfolioWeights`（风险平价/min-var/scipy 确定性优化，LLM 不参与数值）；`rebalance_plan`（成本模型）；`check_portfolio_gate`（复用 HumanGate，阈值 `portfolio.yaml`）。依赖 P-01/P-02/F-03。
 
 ### P-04 并行 subagent——P1，Q2
@@ -139,7 +139,7 @@
 | F-03 | HumanGate 审批 | 现有 | ✅ |
 | F-04 | Memory 浏览 | 现有 | ✅（UI 只读） |
 | F-05 | 设置 | 现有 | 🔶 |
-| F-06 | Factor AutoEval 流 | 现有 | 🔶 |
+| F-06 | Factor AutoEval 流 | 现有 | ✅ |
 | F-07 | Model→Risk 跨组流 | 现有 | ✅ |
 | F-08 | 三条 Compose 流 | 现有 | 🔶 |
 | F-09 | Monitor 可观测 | 现有 | ✅（告警未做） |

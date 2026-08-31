@@ -18,12 +18,22 @@ from tools.factor.autoeval import autoeval_tool
 from tools.factor.eval_from_panel import eval_from_panel_tool
 from tools.factor.gen_schema import gen_schema_tool
 from tools.factor.match_main import match_main_tool
+from tools.factor.merge_to_main import check_factor_gate_tool, merge_to_main_tool
 from tools.registry import register_tool
 
 register_tool(match_main_tool)
 register_tool(gen_schema_tool)
 register_tool(autoeval_tool)
 register_tool(eval_from_panel_tool)
+register_tool(check_factor_gate_tool)
+register_tool(merge_to_main_tool)
 
 
-__all__ = ["match_main_tool", "gen_schema_tool", "autoeval_tool", "eval_from_panel_tool"]
+__all__ = [
+    "match_main_tool",
+    "gen_schema_tool",
+    "autoeval_tool",
+    "eval_from_panel_tool",
+    "check_factor_gate_tool",
+    "merge_to_main_tool",
+]
