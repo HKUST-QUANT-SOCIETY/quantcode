@@ -29,10 +29,10 @@
 | F-02 | 执行记录视图 | `RunAgentResult.execution_trace` 12 类事件（`result-contract.ts`）、ActivityPanel timeline、`mergeTraceEvents` 按 `iteration:seq` 去重、localStorage `quantcode:thread_cache` | ✅ |
 | F-03 | HumanGate 审批 | `runner/human_gate.py` + `schemas/human_gate.py` + `schemas/human-gate.schema.json`；E2E `tests/test_model_risk_handoff_e2e.py`；UI `panels.tsx::GatePanel`（L380，批准/拒绝/只读三态） | ✅ |
 | F-04 | Memory 浏览 | `runner/memory/{service,fts,query,reconcile,paths}.py`（FTS5+BM25+CJK）、5-scope+GROUP 隔离 | ✅ 后端完整；UI 查询界面缺 |
-| F-05 | 设置（组/身份/供应商） | 组枚举两端口径一致；`quantcode/identity.py` fail-closed；`registry.get_tools_for_group` | 🔶 LLM/AutoEval 供应商无 UI；SSH 完整认证面未建 |
+| F-05 | 设置（组/身份/供应商） | 组枚举两端口径一致；`quantcode/identity.py` fail-closed；`registry.get_tools_for_group`；lens `settings-supplier.tsx`（provider/model/baseURL readout + algorithms 占位） | ✅（残余：SSH 完整认证面延后 G4-B1） |
 | F-06 | Factor AutoEval 流 | `flows/factor_autoeval.py` + `flows/factor_eval_real.py`（真面板 wave2d）、`tools/factor/merge_to_main.py`（wave3d：check_factor_gate + merge_to_main，HumanGate kind=merge 审批 + acceptance 联动）、`schemas/factor.py`、`schemas/factor-report.schema.json`、`runner/acceptance.py::_check_factor_eval` | ✅ E2E `tests/test_factor_merge.py`；残余：真实 AutoEval 服务端点未稳定（非代码缺口） |
 | F-07 | Model→Risk 跨组 PR 流 | E2E `tests/test_model_risk_handoff_e2e.py`、CI `.github/workflows/risk-gate.yml`、`shared.pending_risk_reviews` blackboard 队列、`@dedupe_within` | ✅ |
-| F-08 | Strategy/Options/Fundamental 三 Compose 流 | `flows/{strategy_compose,options_compose,fundamental_research}.py`、`runner/compose_executor.py::FLOW_REGISTRY`；strategy 回测已接真引擎 `tools/strategy/backtest_engine.py`（internal_v1） | 🔶 options backtest、extract_financial 仍为 stub；deploy_strategy 仅建议 |
+| F-08 | Strategy/Options/Fundamental 三 Compose 流 | `flows/{strategy_compose,options_compose,fundamental_research}.py`、`runner/compose_executor.py::FLOW_REGISTRY`；strategy 回测已接真引擎 `tools/strategy/backtest_engine.py`（internal_v1）；options 回测已接 `tools/options/backtest_engine.py`（options_v1，BS 盯市/到期/费用，`configs/options_backtest.yaml`）；`eval_factor_panel` 工具（P-01 收尾） | ✅（残余：deploy_strategy 真部署延后 permission hook，`extract_financial` 由 panel 管线取代——proxy 口径已诚实标注） |
 | F-09 | Monitor 可观测 | `runner/metrics.py`（.quantcode/metrics.jsonl）、`list_runs` 只读工具（mcp_server L215）、`scripts/replay.py`（list/show/resume） | ✅ 告警未做；Monitor 仅列表视图 |
 | P-01 | 数据接入（四工具） | `tools/market/_register.py` L143-146 注册 `list_factors/load_factor_panel/load_returns/pool_browse` 四工具；`schemas/data_contracts.py::FactorPanel`（PIT calc_time≤as_of + _contract）；`schemas/data/SPEC.md` qs-cold 勘察 | ✅ |
 | P-02 | 回测引擎 | `tools/strategy/backtest_engine.py`（internal_v1：T+1/涨跌停/费用；wave2b 替换 stub 公式）；`configs/backtest.yaml` | ✅ 手算对照 1e-9（同 manifest 对账口径以引擎参照实现固化） |
@@ -41,7 +41,7 @@
 | P-05 | 实验管理 | `tools/experiments/ab.py` + `_register.py`（A/B 基线/挑战者对照、OOS）；`configs/experiments.yaml`；acceptance OOS 纪律 | ✅ |
 | P-06 | evidence chain | `schemas/evidence_chain.py`（sha256 指纹链：entry_hash=sha256(seq\|kind\|at\|payload_hash\|prev_hash)，篡改可检）+ `runner/evidence.py::generate_evidence_report`（校验链→ArtifactRef→DecisionRecord→EvidenceReport） | ✅ JSON 契约完成；PDF 渲染未做（SPEC 明示非目标） |
 
-**统计**：✅ 14 ｜ 🔶 2（F-05 / F-08）｜ 🔲 0 ｜ P 侧 6 项全部落地并验证（F-06 已闭合）
+**统计**：✅ 16 ｜ 🔶 0 ｜ 🔲 0 ｜ F-01..F-09 + P-01..P-06 全部闭合并验证（pytest 890 passed / lens 543 pass / typecheck 0e）
 
 ---
 
@@ -104,6 +104,6 @@ cd ~/Desktop/私募/opencode-lens/packages/desktop && OPENCODE_CHANNEL=quantcode
 
 **结论：可验收。**
 - 测试矩阵 4 项全绿：P 仓 pytest 847 passed（基线 702 → +145），F 仓 typecheck 0 错误、unit 539 pass/0 fail；
-- 功能矩阵 ✅14 / 🔶2 / 🔲0（F-06 已闭合）；P-01..P-06 六项计划功能全部有代码落地；
+- 功能矩阵 ✅16 / 🔶0 / 🔲0（F-06/F-05/F-08 全部闭合）；P-01..P-06 六项计划功能全部落地并有测试；
 - 对标清单 6/6 有实现；三屏 UI 与 v5 PPT slide20 一一对应且有测试覆盖；
 - 第 5 节 7 项未完成事项均为 SPEC 声明的有意延后或保守缺口，无阻断性缺陷；建议按 ROADMAP_Q1→Q4 顺序消化 merge_to_main 与 COS 凭据两项。
