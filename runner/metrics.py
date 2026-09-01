@@ -154,4 +154,112 @@ def aggregate(window: int = 20) -> dict[str, Any]:
     }
 
 
-__all__ = ["METRICS_PATH", "record_run", "read_recent", "aggregate", "estimate_context_chars"]
+# ---------------------------------------------------------------------------
+# P-08 Admin 跨组聚合（AG-D）：纯函数，入参为 run 记录列表（不读文件，可测）
+# ---------------------------------------------------------------------------
+
+# ponytail: metrics 记录无 person 字段，thread_id 是最接近"人/执行主体"的维度；
+# 权威源（G4）补充 user 字段后在 aggregate_runs 内映射即可，输出结构不变。
+
+
+def aggregate_runs(
+    runs: list[dict],
+    *,
+    status_filter: str | None = None,
+    group_filter: str | None = None,
+) -> dict[str, Any]:
+    """Admin 跨组聚合：按 **组 → 线程（人/会话维度）→ 状态/错误** 分组。纯函数。
+
+    - ``runs``：``read_recent`` 形态的 run 记录列表（本函数不读文件）；
+    - ``status_filter`` / ``group_filter``：``None`` 时不过滤；非空按精确匹配
+      （大小写敏感的 status 字面量 / 组名）。
+
+    返回::
+
+        {
+          "total": <过滤后记录数>,
+          "by_group": {
+            <group>: {
+              "runs": int,
+              "statuses": {<status>: count, ...},
+              "errors": [<error 消息，保序去重>, ...],
+              "by_thread": {
+                <thread_id>: {"runs": int, "statuses": {...}, "errors": [...]},
+              },
+            },
+          },
+        }
+    """
+    sf = (status_filter or "").strip()
+    gf = (group_filter or "").strip()
+    filtered = [
+        r for r in runs if isinstance(r, dict)
+        and (not sf or str(r.get("status") or "") == sf)
+        and (not gf or str(r.get("group") or "") == gf)
+    ]
+
+    by_group: dict[str, dict[str, Any]] = {}
+    for r in filtered:
+        g = str(r.get("group") or "unknown")
+        tid = str(r.get("thread_id") or "unknown")
+        slot = by_group.setdefault(
+            g, {"runs": 0, "statuses": {}, "errors": [], "by_thread": {}}
+        )
+        slot["runs"] += 1
+        thread_slot: dict[str, Any] = slot["by_thread"].setdefault(
+            tid, {"runs": 0, "statuses": {}, "errors": []}
+        )
+        thread_slot["runs"] += 1
+        for target in (slot, thread_slot):
+            target["statuses"] = _merge_counts(target["statuses"], r)
+            err = r.get("error")
+            if err and str(err) not in target["errors"]:
+                target["errors"].append(str(err))
+
+    return {"total": len(filtered), "by_group": by_group}
+
+
+def _merge_counts(counts: dict[str, int], run: dict) -> dict[str, int]:
+    """把单条 run 的 status 并入计数 dict（aggregate_runs 内部助手）。"""
+    s = str(run.get("status") or "unknown")
+    counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
+def error_digest(runs: list[dict]) -> dict[str, Any]:
+    """错误沉淀汇总：``status=="error"`` 或带非空 error 的记录按组归集。纯函数。
+
+    返回 ``{"total_errors": int, "by_group": {g: {"count": int, "errors":
+    [{"ts", "thread_id", "flow", "error"}, ...]}}}``；无错误 → 全零空态。
+    """
+    by_group: dict[str, dict[str, Any]] = {}
+    total = 0
+    for r in runs:
+        if not isinstance(r, dict):
+            continue
+        err = r.get("error")
+        is_error = (str(r.get("status") or "") == "error") or bool(err)
+        if not is_error:
+            continue
+        total += 1
+        g = str(r.get("group") or "unknown")
+        slot = by_group.setdefault(g, {"count": 0, "errors": []})
+        slot["count"] += 1
+        slot["errors"].append({
+            "ts": r.get("ts"),
+            "thread_id": str(r.get("thread_id") or ""),
+            "flow": str(r.get("flow") or ""),
+            "error": str(err) if err else "(status=error, no message)",
+        })
+    return {"total_errors": total, "by_group": by_group}
+
+
+__all__ = [
+    "METRICS_PATH",
+    "record_run",
+    "read_recent",
+    "aggregate",
+    "aggregate_runs",
+    "error_digest",
+    "estimate_context_chars",
+]
