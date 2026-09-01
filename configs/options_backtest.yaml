@@ -1,0 +1,5 @@
+# 期权日频回测参数（tools/options/backtest_engine.py 读取方；缺文件/缺键回退代码默认）
+initial_capital: 100000.0   # 期初现金（USD）
+commission: 1.0             # 每腿建仓一次性费用（绝对额，USD）
+risk_free_rate: 0.0         # BS 无风险利率（与手算对照一致取 0）
+implied_vol: 0.20           # 定价用固定隐含波动率（无曲面输入时）

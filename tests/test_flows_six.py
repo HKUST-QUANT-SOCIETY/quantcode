@@ -279,10 +279,10 @@ def test_options_compose_flow_state(tmp_path, monkeypatch):
     assert state["vol_surface"]["data_quality"] == "sample_bs_iv"
     portfolio = state["greeks"]["portfolio_greeks"]
     assert all(portfolio[k] != 0 for k in ("delta", "gamma", "vega", "theta"))
-    # stub 回测结果在 report 标注 "stub"（工具层 notes + 流层 backtest_note）
-    assert "stub" in state["stub_backtest"]["notes"]
+    # Day6 真实化：回测为引擎标注（原 notes 含 "stub"，现 engine=="options_v1"）
+    assert state["stub_backtest"]["engine"] == "options_v1"
     assert state["verdict"]["verdict"] == "pass"
-    assert state["verdict"]["backtest_note"] == "stub"
+    assert state["verdict"]["backtest_note"] == "options_v1"
     # build_vol_surface 落盘在工具层绝对路径 PROJECT_ROOT/artifacts/...（不改 cwd）
     assert (
         TOOL_PROJECT_ROOT / "artifacts" / "options" / "gc_covered_call_smoke" / "vol_surface.json"
@@ -300,7 +300,7 @@ def test_options_compose_langgraph_invoke(tmp_path, monkeypatch):
 
     assert result["errors"] == []
     assert result["output_data"]["verdict"] == "pass"
-    assert result["output_data"]["backtest_note"] == "stub"
+    assert result["output_data"]["backtest_note"] == "options_v1"
 
 
 # ---------------------------------------------------------------------------

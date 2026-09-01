@@ -155,4 +155,140 @@ eval_from_panel_tool = ToolDef(
     execute=_eval_from_panel_execute,
 )
 
-__all__ = ["EvalFromPanelArgs", "eval_from_panel_impl", "eval_from_panel_tool"]
+
+# ---------------------------------------------------------------------------
+# eval_factor_panel — dataset_key + IR 阈值口径的任务签名版
+# ---------------------------------------------------------------------------
+
+
+class EvalFactorPanelArgs(BaseModel):
+    """eval_factor_panel 输入（P-01 任务签名：dataset_key + ic_abs_threshold）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_key: str = Field(
+        min_length=1,
+        description=(
+            "Blackboard dataset key of a FactorPanel, e.g. "
+            "shared.datasets.panel/<factor_id>; a bare factor id is accepted "
+            "and expanded to that namespace."
+        ),
+    )
+    ic_abs_threshold: float = Field(
+        default=0.03,
+        description=(
+            "Acceptance gate on |ic_mean| (engine-level pre-check, aligned with "
+            "configs/acceptance.factor.yaml ic_abs_min)."
+        ),
+    )
+    date_range: list[str] | None = Field(
+        default=None,
+        description="Optional [start, end] (inclusive ISO dates) to trim the panel before eval.",
+    )
+    blackboard_db_path: str | None = Field(
+        default=None, description="Optional Blackboard sqlite path override (tests)."
+    )
+
+
+def _normalize_dataset_key(key: str) -> str:
+    """裸因子 id → shared.datasets.panel/<id>（已含 / 的完整 key 原样透传）。"""
+    return key if "/" in key else f"shared.datasets.panel/{key}"
+
+
+def eval_factor_panel_impl(
+    dataset_key: str,
+    ic_abs_threshold: float = 0.03,
+    *,
+    date_range: list[str] | None = None,
+    blackboard_db_path: str | None = None,
+) -> dict[str, Any]:
+    """核心实现（tests 与 ToolDef 共用；错误以 error 对象返回，不抛崩溃）。
+
+    读路径复用 eval_from_panel_impl（背书 tools/market/backing），在此之上
+    增加 |ic_mean| >= ic_abs_threshold 的 acceptance 复核与 key+摘要返回
+    （SPEC §2.3：大矩阵不进返回值）。
+    """
+    result = eval_from_panel_impl(
+        _normalize_dataset_key(dataset_key),
+        date_range=date_range,
+        blackboard_db_path=blackboard_db_path,
+    )
+    if "error" in result:
+        result.setdefault("dataset_key", dataset_key)
+        return result
+
+    summary = result["summary"]
+    ic_mean = float(summary.get("ic_metrics", {}).get("ic_mean", 0.0))
+    ic_pass = abs(ic_mean) >= ic_abs_threshold
+    if not ic_pass:
+        summary["fail_reasons"] = list(summary.get("fail_reasons", [])) + [
+            f"|ic_mean| {abs(ic_mean):.4f} < ic_abs_threshold {ic_abs_threshold}"
+        ]
+        summary["verdict"] = "fail"
+        result["acceptance"] = {
+            "verdict": "fail",
+            "checks": result["acceptance"]["checks"]
+            + [
+                {
+                    "name": "ic_abs_threshold",
+                    "passed": False,
+                    "message": f"|ic_mean| >= {ic_abs_threshold}",
+                }
+            ],
+        }
+
+    return {
+        "dataset_key": _normalize_dataset_key(dataset_key),
+        "factor_id": summary.get("factor_name"),
+        "engine": result["engine"],
+        "ic": {
+            "ic_mean": ic_mean,
+            "ir": float(summary.get("ic_metrics", {}).get("ir", 0.0)),
+        },
+        "turnover_monthly": float(summary.get("turnover", {}).get("monthly", 0.0)),
+        "verdict": summary.get("verdict"),
+        "fail_reasons": summary.get("fail_reasons", []),
+        "acceptance": result["acceptance"],
+        "summary": summary,
+        "artifacts": result["artifacts"],
+        "proxy_return_warning": result["proxy_return_warning"],
+        "note": (
+            "|ic_mean| gate: engine verdict uses configs/acceptance.factor.yaml; "
+            "ic_abs_threshold here re-checks the caller-supplied bar (default 0.03 "
+            "= yaml ic_abs_min). Proxy returns are factor momentum, not real PnL."
+        ),
+    }
+
+
+def _eval_factor_panel_execute(args: EvalFactorPanelArgs, ctx: dict) -> dict[str, Any]:
+    return eval_factor_panel_impl(
+        args.dataset_key,
+        args.ic_abs_threshold,
+        date_range=args.date_range,
+        blackboard_db_path=ctx.get("blackboard_db_path") or args.blackboard_db_path,
+    )
+
+
+eval_factor_panel_tool = ToolDef(
+    id="eval_factor_panel",
+    description=(
+        "Evaluate a FactorPanel dataset (Blackboard shared.datasets.panel/*) with "
+        "real cross-sectional statistics: spearman rank IC series -> IC mean/IR, "
+        "monthly turnover (top-decile Jaccard), 5-quantile layered proxy returns. "
+        "Acceptance = configs/acceptance.factor.yaml thresholds re-checked against "
+        "the caller-supplied ic_abs_threshold (default 0.03). Proxy returns are "
+        "next-day factor-value changes (momentum), NOT real PnL — flagged in every "
+        "result via proxy_return_warning. Writes artifacts/factor/{name}-report-real.json."
+    ),
+    schema=EvalFactorPanelArgs,
+    execute=_eval_factor_panel_execute,
+)
+
+__all__ = [
+    "EvalFactorPanelArgs",
+    "EvalFromPanelArgs",
+    "eval_factor_panel_impl",
+    "eval_factor_panel_tool",
+    "eval_from_panel_impl",
+    "eval_from_panel_tool",
+]

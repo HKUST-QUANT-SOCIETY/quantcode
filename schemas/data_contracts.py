@@ -138,8 +138,41 @@ class FactorPanel(BaseModel):
             raise ValueError("values must be an ndarray or nested list")
         return self
 
+    # DataFrame 等价表示（list-of-records），零外部依赖。
+    def to_records(self) -> list[dict[str, Any]]:
+        """面板 → 长表 records：每行 ``{"date", "asset", "value"}``。
+
+        不引 pandas（schemas 零重依赖，模块 docstring）；下游需要 pandas
+        DataFrame 时 ``pd.DataFrame(panel.to_records())`` 即可。value 为
+        float；NaN 保持 float('nan')（NaN 白名单口径，见 ReturnsDataset）。
+        """
+        return [
+            {"date": d, "asset": a, "value": float(row[c])}
+            for i, d in enumerate(self.dates)
+            for c, a in enumerate(self.assets)
+            for row in [self.values[i]]
+        ]
+
+    # 鸭子类型等价 pandas DataFrame(pivot) 的窄接口：调用方按
+    # frame["dates"] / frame["assets"] / frame["values"] 取，不绑定 pandas。
+    def to_frame(self) -> dict[str, Any]:
+        """面板 → 宽表等价表示（date 行 × asset 列，结构化 dict）。
+
+        values 是纯嵌套 list（ndarray 已 tolist），date 为 ISO 字符串；
+        供下游（如回测/组合域）零拷贝消费，不把 pandas 带进 schemas。
+        """
+        values = self.values
+        if hasattr(values, "tolist"):
+            values = values.tolist()
+        return {
+            "dates": [d.isoformat() for d in self.dates],
+            "assets": list(self.assets),
+            "values": values,
+        }
+
     def summary(self) -> dict[str, Any]:
         """SPEC §2.3：LLM 只见 key+摘要，大矩阵不进返回值。"""
+        n_cells = len(self.dates) * len(self.assets)
         return {
             "factor_id": self.factor_id,
             "factor_version": self.factor_version,
@@ -148,8 +181,42 @@ class FactorPanel(BaseModel):
             "date_start": self.dates[0].isoformat() if self.dates else None,
             "date_end": self.dates[-1].isoformat() if self.dates else None,
             "n_assets": len(self.assets),
+            "n_cells": n_cells,
             "meta": self.meta,
         }
+
+    @classmethod
+    def from_records(cls, records: list[dict[str, Any]], **overrides: Any) -> "FactorPanel":
+        """长表 records（见 :meth:`to_records`）→ FactorPanel（反向转换）。
+
+        排序口径：dates 严格升序（不变量①），assets 按首次出现顺序去重。
+        records 里缺失的 (date, asset) 组合填 NaN；非法 asset 格式由
+        契约校验器拒绝。
+        """
+        if not records:
+            raise ValueError("records must not be empty")
+        by_date: dict[date, dict[str, float]] = {}
+        for rec in records:
+            d = rec["date"]
+            if not isinstance(d, date):
+                d = date.fromisoformat(str(d))
+            a = str(rec["asset"])
+            by_date.setdefault(d, {})[a] = float(rec["value"])
+        dates = sorted(by_date)
+        assets: list[str] = []
+        for d in dates:
+            for a in by_date[d]:
+                if a not in assets:
+                    assets.append(a)
+        nan = float("nan")
+        values = [[by_date[d].get(a, nan) for a in assets] for d in dates]
+        kwargs: dict[str, Any] = {
+            "dates": dates,
+            "assets": assets,
+            "values": values,
+        }
+        kwargs.update(overrides)
+        return cls(**kwargs)
 
 
 class ReturnsDataset(BaseModel):
@@ -202,6 +269,67 @@ class ReturnsDataset(BaseModel):
                 )
         return self
 
+    def to_records(self) -> list[dict[str, Any]]:
+        """收益集 → 长表 records：每行 ``{"date", name_key, "return"}``。
+
+        dict 返回时 name_key 为资产代码；矩阵/list-of-vec 返回时用
+        ``asset_{col}`` 占位列名（顺序即列序）。cell = 行 t（date）× 列 c。
+        """
+        if isinstance(self.returns, dict):
+            return [
+                {"date": d, "asset": a, "return": float(vec[i])}
+                for i, d in enumerate(self.dates)
+                for a, vec in self.returns.items()
+            ]
+        rows = self.returns if isinstance(self.returns, list) else list(self.returns)
+        return [
+            {"date": d, "asset": f"asset_{c}", "return": float(rows[i][c])}
+            for i, d in enumerate(self.dates)
+            for c in range(len(rows[i]))
+        ]
+
+    def to_frame(self) -> dict[str, Any]:
+        """收益集 → 宽表等价表示（dict[asset, vec] 口径的纯容器版）。
+
+        dict 返回直接深拷贝；矩阵/list-of-vec 返回转成
+        ``{"asset_0": [...], ...}``，供下游按列消费。
+        """
+        if isinstance(self.returns, dict):
+            return {a: [float(v) for v in vec] for a, vec in self.returns.items()}
+        rows = self.returns if isinstance(self.returns, list) else list(self.returns)
+        return {
+            f"asset_{c}": [float(vec[c]) for vec in rows]
+            for c in range(next((len(r) for r in rows), 0))
+        }
+
+    @classmethod
+    def from_records(cls, records: list[dict[str, Any]], **overrides: Any) -> "ReturnsDataset":
+        """长表 records（见 :meth:`to_records`）→ ReturnsDataset。
+
+        dates 严格升序去重（不变量）；assets 按首次出现顺序；缺失
+        (date, asset) 组合填 NaN（白名单口径）。inf 由契约校验器拒绝。
+        """
+        if not records:
+            raise ValueError("records must not be empty")
+        by_date: dict[date, dict[str, float]] = {}
+        for rec in records:
+            d = rec["date"]
+            if not isinstance(d, date):
+                d = date.fromisoformat(str(d))
+            a = str(rec["asset"])
+            by_date.setdefault(d, {})[a] = float(rec["return"])
+        dates = sorted(by_date)
+        assets: list[str] = []
+        for d in dates:
+            for a in by_date[d]:
+                if a not in assets:
+                    assets.append(a)
+        nan = float("nan")
+        returns = {a: [by_date[d].get(a, nan) for d in dates] for a in assets}
+        kwargs: dict[str, Any] = {"dates": dates, "returns": returns}
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
     def summary(self) -> dict[str, Any]:
         n_assets = (
             len(self.returns)
@@ -214,6 +342,9 @@ class ReturnsDataset(BaseModel):
             "date_start": self.dates[0].isoformat() if self.dates else None,
             "date_end": self.dates[-1].isoformat() if self.dates else None,
             "n_assets": n_assets,
+            "n_cells": (
+                len(self.dates) * n_assets if n_assets is not None else None
+            ),
             "meta": self.meta,
         }
 

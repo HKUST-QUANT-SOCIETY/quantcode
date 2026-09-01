@@ -138,7 +138,7 @@ class GreeksProfile(BaseModel):
 
 
 class OptionsStrategySpec(BaseModel):
-    """run_options_backtest 输入（Day3 可 stub）。"""
+    """run_options_backtest 输入（引擎 options_v1 已实现）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -151,7 +151,7 @@ class OptionsStrategySpec(BaseModel):
 
 
 class OptionsBacktestReport(BaseModel):
-    """run_options_backtest_stub 输出。"""
+    """run_options_backtest 输出（引擎 options_v1；可选扩展字段向后兼容）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -163,3 +163,8 @@ class OptionsBacktestReport(BaseModel):
     sharpe: float | None = None
     trade_count: int = Field(ge=0)
     notes: str | None = None
+    engine: str | None = Field(default=None, max_length=32, description="回测引擎版本，如 options_v1")
+    net_value: list[float] = Field(default_factory=list, description="逐日净值（期初=1 归一化）")
+    legs_closed: int = Field(default=0, ge=0, description="已平值腿数（到期行权/归零）")
+    underlying: str | None = Field(default=None, max_length=16)
+    daily_pnl: list[float] = Field(default_factory=list, description="逐日盯市盈亏（USD）")

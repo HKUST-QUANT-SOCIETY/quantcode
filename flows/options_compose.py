@@ -1,11 +1,12 @@
-"""options:compose Compose 流 — 波动率曲面 → Greeks → stub 回测 → verdict。
+"""options:compose Compose 流 — 波动率曲面 → Greeks → 日频回测 → verdict。
 
 节点序列（node 本体零业务逻辑，只串 tools/options 已注册的真实 tool）：
     build_vol_surface = build_vol_surface（BS 反推 IV，落 vol_surface.json artifact）
     → calc_greeks       = calc_greeks（读 surface artifact 计算组合 Greeks）
-    → run_stub_backtest = run_options_backtest_stub（stub 回测报告）
+    → run_stub_backtest = run_options_backtest_stub（Day6 真实现：日频 BS 盯市
+                          回测 engine=="options_v1"，节点名保留历史 id 防链路断）
     → verdict           = 内联判定：surface quality != "mock" 且 Greeks 四项非零才 pass；
-                          stub 回测在 report notes 标注 "stub"（工具层已带 stub notes）。
+                          回测以 report.engine 标注真实引擎版本。
 
 input_data 约定（对齐 schemas.options.OptionsSpec 字段）：
     - strategy_name / underlying / as_of_date / data_path
@@ -103,7 +104,7 @@ def calc_greeks_node(state: OptionsComposeFlowState) -> dict[str, Any]:
 
 
 def run_options_backtest_stub_node(state: OptionsComposeFlowState) -> dict[str, Any]:
-    """run_options_backtest_stub：stub 回测报告（notes 已含 'stub backtest'）。"""
+    """run_stub_backtest：真实现日频 BS 盯市回测（engine == options_v1）。"""
     input_data = state.get("input_data") or {}
     as_of = _parse_date(input_data["as_of_date"])
     end_raw = input_data.get("backtest_end_date")
@@ -120,15 +121,16 @@ def run_options_backtest_stub_node(state: OptionsComposeFlowState) -> dict[str, 
         },
         _ctx(state),
     )
-    if "stub" not in str(report.get("notes", "")):
+    # Day6 真实化：守卫从「notes 含 stub」升级为引擎标注（契约单源 schemas/options.py）
+    if report.get("engine") != "options_v1":
         raise RuntimeError(
-            "run_options_backtest_stub report must carry a 'stub' note; refusing flow output"
+            "run_options_backtest_stub report must carry engine == 'options_v1'; refusing flow output"
         )
     return {"stub_backtest": report}
 
 
 def options_verdict_node(state: OptionsComposeFlowState) -> dict[str, Any]:
-    """内联 verdict：quality != mock 且 Greeks 四项齐才 pass；stub 回测标注。"""
+    """内联 verdict：quality != mock 且 Greeks 四项齐才 pass；回测 engine 标注。"""
     surface = state["vol_surface"]
     greeks = state["greeks"]
     backtest = state["stub_backtest"]
@@ -154,7 +156,7 @@ def options_verdict_node(state: OptionsComposeFlowState) -> dict[str, Any]:
         "surface_backend": surface.get("interpolation_method"),
         "greeks": portfolio,
         "stub_backtest": backtest,
-        "backtest_note": "stub",  # 标注：回测为 stub 实现，非真实策略回测
+        "backtest_note": backtest.get("engine"),  # Day6：真引擎标注（原恒 "stub"）
         "tool_notes": backtest.get("notes"),
         "verdict": verdict,
         "fail_reasons": fail_reasons,
