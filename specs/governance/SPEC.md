@@ -73,4 +73,4 @@ risk-gate 越界 → HumanGate interrupt → lens UI 审批 → resume
 | G2-A1..A6（新增段） | tests/test_evidence_chain.py | blocked | — |
 | G2-A7 新增快照断言部分 | tests/test_evidence_chain.py::test_existing_human_gate_contract_unchanged | blocked | — |
 | G2-A7 现状段 | tests/test_human_gate.py · tests/test_risk_profile.py | pass（702 个测试既有覆盖） | 2026-09-01 |
-| G2-A8 [v0.2 新增] | tests/test_human_gate_narrowing.py | pass（a/b/c 全绿：evaluate_verdict→fail、研报审阅非阻断标记、组合 gate fail；merge/ask/budget 写闸回归绿；d=SSH 待 AG-F 落地回填） | 2026-09-01 |
+| G2-A8 [v0.2 新增] | tests/test_human_gate_narrowing.py · tests/test_ssh_gate.py | pass（a/b/c/d 全绿：(a) 研究流零 interrupt、(b) evaluate_verdict→fail、(c) 研报审阅非阻断 + 组合 gate fail + merge/ask/budget 写闸回归绿；(d) SSH 生产写 gate(kind=deploy) test_ssh_prod_write_gate——AG-F 落地、AG-I 终验收填） | 2026-09-01 |

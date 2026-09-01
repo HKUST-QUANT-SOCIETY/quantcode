@@ -69,7 +69,7 @@
 
 **验收**：跨组读抛 `MemoryPermissionError`（fail-closed）；能力卡片常驻摘要进入组上下文；无权限组检索不到被 Mask 条目。
 
-**状态**：✅ 后端完整（UI 只读）；能力目录与权限 Mask 落地 = P-07。
+**状态**：✅ 后端完整 + 能力目录/查询视图已落地（memory-query fetcher 占位待 memory_search 后端通道，挂账 ACCEPTANCE #8）。
 
 ### F-05 设置（组/身份/供应商/SSH 登录）🔶
 **用户故事**：作为研究员，我想通过完整的 SSH **登录界面**完成身份认证与组绑定，配置供应商与默认 Skill，使每次提交无需重复配置。
@@ -78,7 +78,7 @@
 
 **验收**：切组=options 后 tools/list 只返回 options allowlist 内 tool；断连时提交被阻断；登录界面完成 host/user/key → 连接状态 → 组绑定显示的完整流程。
 
-**状态**：🔶。**用户点名**：要的是完整登录界面（不是只读连接卡片），尚未建设；供应商 readout 已落地（`settings-supplier.tsx`）；SSH 完整认证面 = G4-B1。
+**状态**：✅ 登录界面已建设（`ssh-login.tsx` 四态，数据层 stub 待 ssh_status 可查询 surface）；供应商 readout 已落地；SSH 完整认证面 = G4-B1（Q2）。
 
 ### F-06 外部评估器注册与部署适配（原 Factor AutoEval 流）✅（重定义）
 **用户故事（v0.2 重定义）**：作为因子组研究员，我已用 Codex 把论文算法落成可运行代码并完成本地调优；QuantCode 要做的是——(a) 让我和 Agent 都知道组织有哪些现成评估能力并正确调用，(b) 把我调好的代码适配进 AlphaFlow 部署库，(c) 在我违反数据口径契约时及时发现。
@@ -126,7 +126,7 @@
 
 **验收**：Admin 问"最近各组 run 状态"能跨组汇总；非 Admin 跨组查询被拒；repo 有更新时 pop 通知可见。
 
-**状态**：✅ 基础可观测已实现；Admin 语义层与 Git graph = P-08。
+**状态**：✅ Admin 中枢全套已落地（admin-console/gitgraph-panel/双类 pop，AG-K+W4 打磨）；pop 自动推送 = Q2。
 
 ---
 
@@ -150,7 +150,7 @@
 ### P-06 evidence chain 报告 ✅（已实现 JSON 契约）
 `schemas/evidence_chain.py`（哈希指纹链，篡改可检）+ `runner/evidence.py::generate_evidence_report`；详见 [specs/governance/SPEC.md](governance/SPEC.md)。
 
-### P-07 组织资产蒸馏管线——**P0** [新增 v0.2]
+### P-07 组织资产蒸馏管线——**P0** [新增 v0.2]（✅ 已实现：ASSET_INVENTORY 14 核心repo + 六卡 + Mask + 常驻摘要，tests/test_capability_cards.py 31 用例）
 **动机**：最大复用原则的落地件。现状痛点：目标收益表已在数据仓却各自重算；库的功能没进 Agent 记忆（"我必须明确告诉它要用这个库，不说它就自己新造一个"）。
 
 **契约草案**：**Step 0 资产调研（先行，2026-09-01 补——禁止凭会议记忆手写卡片）**：gh 只读扫描 `HKUST-QUANT-SOCIETY` org（实测 69 repo，核心层 14 个活跃），产出 `docs/audit/ASSET_INVENTORY.md`（每个核心 repo 一行：定位/语言/接口入口/活跃度/属组归属；归档层如 infra-*/test* 标注不蒸馏）→ repo → 蒸馏为**能力卡片**（功能/接口面/何时用/何时别自造/权限属组；**type 字段区分 资产卡/口径契约卡 两类**）→ **权限过滤**（用户组权限分配方案为权威源；游客组 Mask 数据字段清单）→ Memory GROUP scope + **常驻目录摘要**。蒸馏粒度：蒸 API 面，不蒸实现细节。
@@ -163,7 +163,7 @@
 
 **依赖**：F-04 Memory 底座；Git 权限 ↔ 用户组权限对齐。**验收草案**：组员问"目标收益怎么取"Agent 指向契约表而非自算；游客组检索不到被 Mask 的数据字段卡片；能力卡片常驻摘要出现在每次 run 的组上下文。
 
-### P-08 Admin 组与中枢管理面——**P0** [新增 v0.2]
+### P-08 Admin 组与中枢管理面——**P0** [新增 v0.2]（✅ 已实现：admin_scope + 六工具 + lens 全套 UI，tests/test_admin_scope.py 35 用例）
 **动机**："中枢管理平台，不只是信息平台"——以前是直连后台数据的面板，现在把整个平台囊括进 AI：问 Agent 得到比面板固有信息更灵活的答案（各组进展、模块运行、错误沉淀）。
 
 **契约草案**：Admin 组 = 唯一跨组 scope（**实现为角色而非第七研究组**——不进 `GroupName` 枚举，走 identity/permission role 判定，避免两仓组枚举联动）；跨组 list_runs（按人/组/状态/错误聚合）+ blackboard 跨组只读 + 错误记录查询（各组错误 Admin 可见）。
@@ -175,7 +175,7 @@
 
 **依赖**：F-09 metrics、permission_engine（Admin 角色权威源）、GitHub API 只读客户端（复用 read_pr 通道）。**验收草案**：Admin 自然语言查询跨组汇总成功；非 Admin 查询他组被拒；GitGraph 更新节点标红；两类 pop 均可触达全组。
 
-### P-09 AlphaFlow 部署适配命令（/deploy 黑盒）——**P1** [新增 v0.2]
+### P-09 AlphaFlow 部署适配命令（/deploy 黑盒）——**P1** [新增 v0.2]（✅ staging 已实现：黑盒字段面锁死 + kind=deploy gate + evidence 留痕；真适配器 blocked 待外部规格）
 **动机**：研究员已调试代码与 AlphaFlow 部署库之间的适配是当前人工环节；同时 AlphaFlow 底层对普通研究员保密（"我能让他们部署，但不希望他们了解底层"）。
 
 **契约草案**：`/deploy` 命令（lens 会话命令）→ 黑盒适配管线（已调试代码 → AlphaFlow 部署库格式适配 → 部署入库）；**黑盒约束**：过程中不向非授权用户暴露 AlphaFlow 底层结构（权限 Mask；正常询问 AI 时不得透露），部署转换只能经此指令进行；部署动作 = 写生产环境 → 挂 HumanGate（F-03 触发点 ②）。
@@ -186,7 +186,7 @@
 
 ---
 
-### P-10 方案先行工作流（Solution-First）——**P0** [新增 v0.2]
+### P-10 方案先行工作流（Solution-First）——**P0** [新增 v0.2]（✅ 已实现：SolutionDoc 状态机 + draft 限流 + judge 一致性，冒烟 12 步绿）
 **动机**：任何任务直接一口气生成代码，准确性与可审核性都差。定版纪律：**任务决定之前，先出完整解决方案，经 2-3 轮人机讨论，冻结为静态文档；代码按文档生成，验收以文档为基准做一致性判断。**
 
 **契约草案**：
@@ -205,21 +205,21 @@
 | F-01 | 新建多智能体研究 | 现有 | ✅ |
 | F-02 | 执行记录视图 | 现有 | ✅ |
 | F-03 | HumanGate 写操作门禁 | 现有 | ✅（收窄适配待办） |
-| F-04 | Memory 与组织能力目录 | 现有 | ✅（升级=P-07） |
-| F-05 | 设置 / SSH 登录界面 | 现有 | 🔶（登录界面未建设） |
+| F-04 | Memory 与组织能力目录 | 现有 | ✅（能力目录+查询视图已落地；memory_search 后端通道挂账） |
+| F-05 | 设置 / SSH 登录界面 | 现有 | ✅（四态登录界面已建；SSH 完整认证面 G4-B1 延后） |
 | F-06 | 外部评估器注册与部署适配 | 现有 | ✅（登记=P-07/P-09） |
 | F-07 | 跨组协同（CI 基建） | 现有 | ✅（产品场景取消） |
 | F-08 | 三条 Compose 流 | 现有 | ✅（降级组内工具） |
-| F-09 | Monitor 与 Admin 中枢 | 现有 | ✅（升级=P-08） |
+| F-09 | Monitor 与 Admin 中枢 | 现有 | ✅（Admin UI 全套已落地；pop 自动推送 Q2） |
 | P-01 | 数据接入 | 已实现 | ✅ |
 | P-02 | 回测引擎 | 组内工具 | ✅ |
 | P-03 | 组合层 | 组内工具 | ✅ |
 | P-04 | 并行 subagent | 平台能力 | ✅ |
 | P-05 | 实验管理 | 已实现 | ✅ |
 | P-06 | evidence chain | 已实现（JSON） | ✅ |
-| P-07 | 组织资产蒸馏管线 | 计划 | **P0** |
-| P-08 | Admin 组与中枢管理面 | 计划 | **P0** |
-| P-09 | /deploy 黑盒部署适配 | 计划 | P1 |
-| P-10 | 方案先行工作流（Solution-First） | 计划 | **P0** |
+| P-07 | 组织资产蒸馏管线 | 已实现 | ✅（调研清单+六卡+Mask+常驻摘要） |
+| P-08 | Admin 组与中枢管理面 | 已实现 | ✅（后端六工具+GitGraph/双类pop/查询台 UI） |
+| P-09 | /deploy 黑盒部署适配 | 已实现(staging) | ✅（真适配器 blocked 待外部规格） |
+| P-10 | 方案先行工作流（Solution-First） | 已实现 | ✅（状态机+限流+judge，冒烟12步绿） |
 
 > 维护声明：本文件为功能唯一活文档；schemas/ 或 tools/ 每次改动必须同步更新状态列。历史快照不再修改。v0.2 定版依据 = 2026-09-01 功能定版会议（HumanGate 收窄 / PR 场景取消 / 引擎代码保留 / 平台红线 / 蒸馏与 Admin 双支柱）。

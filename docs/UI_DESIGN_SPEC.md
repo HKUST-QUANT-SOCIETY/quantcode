@@ -29,10 +29,10 @@
 | PIT 估值 | F-06（fundamental 组内工具） | ✅ |
 | 通知中心（铃铛） | F-03/F-09 | ✅ |
 | 设置（供应商只读 + SSH 登录） | F-05 | 🔶（登录界面待 AG-E） |
-| **能力目录** | F-04/P-07 | 🔲（待 AG-G） |
-| **Memory 查询** | F-04 | 🔲（待 AG-G） |
-| **Admin 中枢（含 GitGraph/pop）** | F-09/P-08（仅 admin 角色） | 🔲（待 AG-D+AG-G+AG-K） |
-| **方案面板**（会话内嵌） | P-10 | 🔲（待 AG-J+AG-G） |
+| **能力目录** | F-04/P-07 | ✅（trace 通道 + fetcher 占位） |
+| **Memory 查询** | F-04 | ✅（视图落地；memory_search 通道挂账 #8） |
+| **Admin 中枢（含 GitGraph/pop）** | F-09/P-08（仅 admin 角色） | ✅（AG-D 后端 + AG-K UI，21 条打磨） |
+| **方案面板**（会话内嵌） | P-10 | ✅（状态机+verdict 徽章，冒烟绿） |
 
 ---
 
@@ -134,13 +134,13 @@
 | 通知中心 | `notifications.tsx` | ✅ | — |
 | 供应商设置 | `settings-supplier.tsx` | ✅ | — |
 | 角色解析 | `roles.ts` | ✅（approver 权威源 Q2） | — |
-| SSH 登录 | `ssh-login.tsx` | 🔲 | AG-E(W1)→AG-G 接线 |
-| 能力目录 | `capability-catalog.tsx` | 🔲 | AG-G(W3) |
-| Memory 查询 | `memory-query.tsx` | 🔲 | AG-G(W3) |
-| Admin 中枢 | `admin-console.tsx` | 🔲 | AG-G(W3，数据源 AG-D) |
-| GitGraph 面板 | `gitgraph-panel.tsx` | 🔲 | AG-K(W4，数据源 AG-D) |
-| 方案面板 | `solution-panel.tsx` | 🔲 | AG-G(W3，状态机 AG-J) |
-| GatePanel kind 徽章 | `panels.tsx`（小改） | 🔲 | AG-G(W3) |
+| SSH 登录 | `ssh-login.tsx` | ✅ | AG-E→AG-G（stub 待查询 surface） |
+| 能力目录 | `capability-catalog.tsx` | ✅ | AG-G(W3) |
+| Memory 查询 | `memory-query.tsx` | ✅ | AG-G(W3) |
+| Admin 中枢 | `admin-console.tsx` | ✅ | AG-G/AG-K(W3-4，数据源 AG-D) |
+| GitGraph 面板 | `gitgraph-panel.tsx` | ✅ | AG-K(W4，数据源 AG-D) |
+| 方案面板 | `solution-panel.tsx` | ✅ | AG-G(W3，状态机 AG-J) |
+| GatePanel kind 徽章 | `panels.tsx`（小改） | ✅ | AG-G(W3) |
 
 ---
 
