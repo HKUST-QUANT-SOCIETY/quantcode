@@ -1,15 +1,17 @@
 # QuantCode Spec 体系 — 文档地图与规范流程
 
-> v1（2026-09-01）· Owner: Lead · 适用于 QuantCode 后端与 lens UI 全部域 SPEC。
+> v2（2026-09-01 功能定版）· Owner: Lead · 适用于 QuantCode 后端与 lens UI 全部域 SPEC。
 
 ## 1. 文档地图
 
 | 层 | 文件 | 状态 | 职责 |
 |---|---|---|---|
-| 功能总目录 | [specs/FUNCTIONAL_SPEC.md](FUNCTIONAL_SPEC.md) | 活文档 | 功能唯一事实源：F-XX / P-XX 编号、用户故事、验收口径 |
+| 功能总目录 | [specs/FUNCTIONAL_SPEC.md](FUNCTIONAL_SPEC.md) | 活文档（**v0.2.1 定版**） | 功能唯一事实源：F-XX / P-XX 编号、用户故事、验收口径、平台红线 |
+| UI 规格 | [docs/UI_DESIGN_SPEC.md](../docs/UI_DESIGN_SPEC.md) | 活文档 | 每功能 UI 设计：F/P 编号 ↔ 屏/组件/状态/角色/断言（UI↔功能一一对应） |
 | 域 SPEC | specs/data/SPEC.md · specs/governance/SPEC.md（扩展中） | draft | 契约先行 + 机器可验证断言（"how"层） |
-| 长期路线 | docs/audit/ROADMAP_LONGTERM.md | 活文档 | 四季度里程碑、跨域依赖、协作机制 |
-| 历史快照 | docs/PRD.md、docs/QuantCode_Design.md、docs/Architecture_Spec.md、docs/Day1~5_* | **只读冻结** | Day1-5 语境；冲突时以本体系为准 |
+| 长期路线 | docs/audit/ROADMAP_LONGTERM.md | 活文档（v2） | 四季度里程碑、跨域依赖、协作机制（v2 并入 P-07/P-08/P-09） |
+| 产品需求 | docs/PRD.md | **活文档（v2，2026-09-01 解冻）** | 产品方向/边界/用户画像/里程碑；功能状态以 FUNCTIONAL_SPEC 为准（此前 v1 曾冻结为历史快照，定版会议后恢复迭代） |
+| 历史快照 | docs/QuantCode_Design.md、docs/Architecture_Spec.md、docs/Day1~5_* | **只读冻结** | Day1-5 语境；冲突时以本体系为准 |
 | 质量台账 | docs/audit/DEVIATION_REGISTRY.md · ACCEPTANCE_REPORT.md | 活文档 | 偏差修复与验收记录 |
 
 ### 文档链路
@@ -35,7 +37,7 @@ FUNCTIONAL_SPEC (F-XX/P-XX, what & why)
 
 | SPEC | 覆盖功能 | status | target |
 |---|---|---|---|
-| specs/data/SPEC.md | P-01 数据接入（qs-cold → FactorPanel/ReturnsDataset） | draft | Q1 D1+D2-dev |
-| specs/governance/SPEC.md | F-03 HumanGate 现状锁定 + P-06 evidence chain | draft | Q1 G2-A1 / Q3 G2-B1 |
+| specs/data/SPEC.md | P-01 数据接入（qs-cold → FactorPanel/ReturnsDataset）+ §2.5 目标收益口径契约（D1-A11/A12） | draft | Q1 D1+D2-dev |
+| specs/governance/SPEC.md | F-03 HumanGate（v0.2 写操作收窄，§2.3 四类触发点 + G2-A8）+ P-06 evidence chain | draft | Q1 G2-A1/G2-A8 / Q3 G2-B1 |
 
-规划中的域名（随 ROADMAP 推进开新 SPEC）：`engine`（并行/沙箱/流式，P-04）、`portfolio`（P-03）、`research`（A2/A3 实验，P-05）、`product`（U1-U4）。
+规划中的域名（随 ROADMAP 推进开新 SPEC）：`engine`（并行/沙箱/流式，P-04）、`portfolio`（P-03 组内工具）、`research`（A2/A3 实验，P-05）、`product`（U1-U4）、**`distill`（P-07 组织资产蒸馏 + 复用纪律）、`admin`（P-08 中枢管理面）、`deploy`（P-09 /deploy 黑盒）**。

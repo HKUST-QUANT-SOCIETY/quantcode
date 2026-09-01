@@ -24,7 +24,9 @@ def test_risk_profile_from_breach_fixture():
     data = json.loads((FIXTURES / "risk_metrics_breach.json").read_text())
     profile = RiskProfile.model_validate(data)
     assert profile.max_drawdown == 0.22
-    assert profile.evaluate_verdict() == RiskGateVerdict.NEEDS_HUMAN
+    # v0.2 收窄（G2-A8）：越限 → verdict=fail（评估结论），不再 needs_human
+    assert profile.evaluate_verdict() == RiskGateVerdict.FAIL
+    assert profile.evaluate_verdict() == "fail"
     assert "max_drawdown" in profile.breached_thresholds()
     assert "tail_risk_var_99" in profile.breached_thresholds()
 

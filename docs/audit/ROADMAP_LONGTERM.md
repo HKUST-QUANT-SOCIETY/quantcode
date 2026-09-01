@@ -1,7 +1,7 @@
 # QuantCode 中长期总计划（对标 Z code，迈向工业级组合研究平台）
 
-> 版本：v1（2026-09-01）。方法：6 个域规划 subagent（R1 对标审计 / R2 引擎沙箱 / R3 数据回测 / R4 风控合规运维 / R5 产品协作 / R6 算法研究）各自只读调研 + 出规划，主 Agent 整合交叉依赖与协作机制。
-> 现状基线：后端 34 簇偏差修复收官（702 tests）、lens UI 品牌壳渲染成功（513 tests）、qs-cold 数据湖已勘察（247 因子池，PIT 字段内建）。
+> 版本：v2（2026-09-01 功能定版修订）。v1（2026-09-01）方法：6 个域规划 subagent（R1 对标审计 / R2 引擎沙箱 / R3 数据回测 / R4 风控合规运维 / R5 产品协作 / R6 算法研究）各自只读调研 + 出规划，主 Agent 整合交叉依赖与协作机制。v2：并入功能定版会议三项裁决（平台红线 / HumanGate 写操作收窄 / 蒸馏+Admin 双支柱），季度归属补 P-07/P-08/P-09（新增 R7 蒸馏 / R8 Admin / R9 部署域）。
+> 现状基线：后端 34 簇偏差修复收官（890 tests）、lens UI 品牌壳渲染成功（543 tests）、qs-cold 数据湖已勘察（247 因子池，PIT 字段内建）。
 
 ---
 
@@ -32,9 +32,12 @@
 |---|---|
 | 数据 R3 | D1 数据契约层（FactorPanel/ReturnsDataset/StrategyManifest 真实 schema 映射）+ D2 本地 staging dev 后端 |
 | 引擎 R2 | R0 三执行形态收敛（AgentRunner 唯一动态引擎 + compose_executor 声明态）+ R1 tiktoken 实测 + R2 token 预算硬约束 |
-| 风控 R4 | G1-L1 组合级事前约束内建 + G2-A1 全链路审计日志★ + G3-A1 metrics 分组 + G4-A1 permission_engine 三态 |
+| 风控 R4 | G1-L1 组合级事前约束内建 + G2-A1 全链路审计日志★ + G3-A1 metrics 分组 + G4-A1 permission_engine 三态 + **G2-A8 HumanGate 写操作收窄（v0.2 定版：产出/代码不 gate，RiskThresholds 越限 verdict 直接 fail）** |
 | 算法 R6 | A1 因子挖掘工具化（submit_candidate→真评估→入池治理），autoeval 去 mock |
-| 产品 R5 | U1 会话页三栏化 + 指标卡组件族（BigNumber/ProgressGauge/Checklist） |
+| 产品 R5 | U1 会话页三栏化 + 指标卡组件族（BigNumber/ProgressGauge/Checklist）+ **F-05 SSH 登录界面（用户点名，完整登录流程非只读卡片）** |
+| **蒸馏 R7（v0.2.2 修订）** | **P-07 调研先行 + 首批蒸馏**：Step 0 gh 只读资产盘点（org 69 repo→核心 14 活跃，产出 ASSET_INVENTORY.md，禁止凭记忆手写卡片）→ 六张能力卡片（目标收益口径契约 TargetReturnView/v1 + quant_evaluator 51 指标 + factor_engine 460+ 算子 + data_access + quant_platform DTO 契约层 + alpha_flow）→ 常驻组上下文 + 复用纪律（覆盖不全先问人，严格模式可配） |
+| **工作流 R10（v0.2.1 新增）** | **P-10 方案先行（Solution-First）**：SolutionDoc 状态机（draft→2-3 轮讨论→frozen）+ 冻结前写类工具阶段限流（复用组 allowlist，非 HumanGate）+ judge 方案↔代码一致性判定 + lens 方案面板；`docs/audit/PLAN_SPEC_V02_DISPATCH.md` AG-J |
+| **Admin R8（v0.2.2 提前）** | **P-08 本轮全量**：Admin 组建立（唯一跨组 scope）+ 跨组 list_runs 语义查询 + 错误记录汇总（非 Admin 被拒）+ **GitGraph 面板（repo 树/更新节点标红）+ 双类 pop（repo 提交 / package 版本更新，全组可见）——用户点名关键设计，自 Q2 提前** |
 | 修复债 | replay.py bootstrap 自愈、三组 allowlist 幽灵 tool 注释化清理、consistency 断言测试 |
 
 ### Q2（2027Q1）：服务化与并行
@@ -43,7 +46,11 @@
 | 引擎 | R3 spawn_subagent（签名+预算隔离+共享 Blackboard 写策略）+ R4 kill/task registry + R5 会话树 |
 | 数据 | D2a qs-data 只读服务（Server A，group 粒度 key）+ D2b COS 凭据服务化边界 + D3a 回测引擎选型 PoC |
 | 算法 | A2 组合因子模型（正交化+XGB/LGBM 对比，产出 composite_score） |
-| 风控 | G1-L2 模拟盘持续监控（cron 阈值扫描）+ G2-A2 产物不可变指纹★ + G3-B1 三机部署拓扑（A=dev/CI，B=主线+模拟盘 cron，C=对外+凭据宿主——首期文档落地：`deploy/README.md` + `deploy/quantcode.service.example`）+ G4-B1 SSH 全操作认证 |
+| 风控 | G1-L2 模拟盘持续监控（cron 阈值扫描）+ G2-A2 产物不可变指纹★ + G3-B1 三机部署拓扑（A=dev/CI，B=主线+模拟盘 cron，C=对外+凭据宿主——首期文档落地：`deploy/README.md` + `deploy/quantcode.service.example`）+ G4-B1 SSH 全操作认证 + **F-03 触发点②：SSH 写生产环境挂 HumanGate（kind=deploy）** |
+| **蒸馏 R7（v0.2）** | **P-07 扩面**：蒸馏粒度制度化（蒸 API 面不蒸实现细节）+ 能力卡片 CI 校验（接口面 vs 代码一致）+ 游客组 Mask 生效 |
+| **Admin R8（v0.2.2）** | **P-08 深化**：报告管理/任务管理日常工作台入口（GitGraph 与双类 pop 已提前至 Q1 交付） |
+| **部署 R9（v0.2）** | **P-09 /deploy 黑盒命令**：已调试代码 → AlphaFlow 部署库适配，全程不泄露底层（权限 Mask + 正常询问不透露）；依赖 F-05 登录界面 |
+| **工作流 R10（v0.2.1）** | **P-10 深化**：solution 模板 SKILL 化 + 与蒸馏闭环（A4）联动消费；一致性判定接 OOS 纪律 |
 | 产品 | U2 四屏逐屏落地（因子评估屏→审批屏），Linux 打包补齐 |
 
 ### Q3（2027Q2）：真实引擎与合规交付
@@ -73,6 +80,10 @@
 3. **配置不喂 LLM**：阈值/算法注册表（portfolio.yaml / algorithms.yaml / acceptance.{group}.yaml）给引擎与 acceptance 读，带 schema 校验；LLM 白名单由注册表**生成**，根治 allowlist 漂移。组合权重等数值必须确定性代码，LLM 只表达意图且经 gate 校验。
 4. **权限三态引擎**（ask/deny/allow）挂钩：render_report/deploy/publish/pit 链路 + 组合 gate；沙箱三级：L1 研究代码（容器/无网）→ L2 数据（只经 qs-data tool）→ L3 部署（仅 HumanGate approve 后专用 tool）。
 5. **合规脊柱**（学校/投资人 must，优先于一切实时化）：组身份 → permission_engine → 全链路审计日志 → 产物不可变指纹 → evidence chain 报告。
+6. **平台红线（v0.2 定版）**：QuantCode 不做业务层面的东西（策略/回测/组合/期权产品归组自研与报告平台）；回测/组合引擎代码保留为**组内工具适配层**（不做 UI、不进产品索引）。
+7. **HumanGate 写操作收窄（v0.2 定版）**：产出不 gate（报告平台承接）、代码不 gate（CI/PR 承接）；四类写操作触发点（merge/SSH 生产写/跨组访问/预算）。避免 Z code 式"每个动作都批准"把用户逼成完全访问的退化。
+8. **最大复用原则（v0.2 定版）**：能力卡片常驻组上下文（P-07）；Agent 方案首选已登记能力，覆盖不全**先向人征询，不许直接跳自造方案**。
+9. **蒸馏粒度（v0.2 定版）**：蒸 API 面，不蒸实现细节；权限权威源 = 用户组权限分配方案（Git 权限同源对齐），游客组 Mask。
 
 ## 3. 交叉依赖主线（跨域硬依赖）
 

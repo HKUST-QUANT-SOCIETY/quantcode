@@ -3,6 +3,8 @@
 > **项目定位 · 架构 · 功能清单**
 >
 > Owner: Agent Group · HKUST QUANT SOCIETY
+> **版本**：v2（2026-09-01 功能定版对齐，依据与各组长的定版讨论）
+> **修订说明**：产品口径唯一事实源 = `specs/FUNCTIONAL_SPEC.md` v0.2.1；本文 v1 章节保留作工程实现参考，与定版冲突处已就地标注。v2 四大变更：① **平台红线——QuantCode 不做业务层面的东西**（strategy/options/fundamental 业务流水线归组自研，引擎代码降级组内工具）；② **HumanGate 收窄为写操作门禁**（merge / SSH 生产写 / 跨组资源 / 预算四类触发点，产出与代码不 gate）；③ **"模型 PR"场景取消**（模型走 COS 传 PKL，代码 PR 由 GitHub Actions Multi-Agent Review 承接）；④ **新增四大平台支柱**：P-07 组织资产蒸馏（最大复用）、P-08 Admin 中枢、P-09 /deploy 黑盒部署、P-10 方案先行工作流（先方案后代码 + 一致性判定）。
 
 ---
 
@@ -10,7 +12,9 @@
 
 ### 1.1 一句话定位
 
-> **6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；流跑完自动接入生产主线。**
+> **v2 定版**：QuantCode 是研究面的 **Agent 平台与组织能力中枢**（不是业务系统）——6 个组登录同一个 agent，各走各的 Compose 流；平台负责能力蒸馏（最大复用，覆盖不全先问人）、写操作门禁、跨组语义查询与部署适配。**业务层面的策略/回测/组合/期权产品归各组自研与报告平台（可并入对外产品 2）。**
+
+> v1 表述（历史）：6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；流跑完自动接入生产主线。
 
 ### 1.2 核心叙事
 
@@ -207,6 +211,8 @@ QuantCode 采用业界 2026 年生产生存率最高的最小组合（Pattern 1 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> **v2 收窄（FUNCTIONAL_SPEC F-03）**：Pattern 5 的机械（interrupt/resume）保留，触发面收敛为**四类写操作**：① merge_to_main 主线入库；② SSH 写生产环境（普通 SSH 读/开发环境写不 gate，push 自动操作不 gate）；③ 跨组数据/资源访问；④ token/预算超限。研究面产出与代码变更**不再触发 Gate**（产出由报告平台承接、代码由 CI/PR 承接）；RiskThresholds 越限 → acceptance verdict 直接 fail。避免"每个动作都批准"把用户逼成完全访问的 Z code 式退化。
+
 #### 为什么不做另外三个模式
 
 业界另有三个模式（Supervisor/Verifier、Event-Driven Pub/Sub、Idempotent Retry Chains），我们选择不做：
@@ -278,7 +284,7 @@ quantcode/                       # 仓库根（Python 编排/执行 + 配置 + �
 ├── dream/                       # dream_prototype.py（Distill：Day5 新增 distill_prototype.py）
 ├── quantcode/                   # mcp_server.py（MCP stdio JSON-RPC server 入口）
 ├── tests/                       # 全量测试（~48 文件）
-├── vendor/mimo-code/            # MimoCode 上游只读副本（含 15 个 compose skill .bundle）
+├── vendor/                      # （v2：mimo-code 副本已移除；设计参考见 docs/mimocode-reference/）
 └── docs/                        # PRD / QuantCode_Design / Architecture_Spec / DayN_TaskList
 ```
 
@@ -338,7 +344,7 @@ def github_pr_comment(commit_sha: str, msg: str):
 | 功能 | 描述 |
 |---|---|
 | **SSH Key 登录** | 用户用 SSH key 登录，复用 Server A/B 现有的 key |
-| **组身份解析** | 从 Linux group / GitHub team 推断用户所属组 |
+| **组身份解析** | SSH 指纹 → 组映射（`quantcode/identity.py`，fail-closed；本地 dev 逃生门 `QUANTCODE_ALLOW_UNAUTH=1`） |
 | **Compose 流自动加载** | 进入对应组的 `.opencode/groups/<group>/` 配置 |
 | **Memory 隔离** | 每组有独立 MEMORY.md，跨组只看共享部分 |
 
@@ -386,6 +392,8 @@ Idea 文本的作用是**在既定流内分派执行模式**，而非选择进�
 
 每套流 = **一个 ReAct Agent 配置**（system prompt + tool 白名单 + permission 规则 + MEMORY.md）。Agent 自己推理执行顺序，不预定义流程图。
 
+> **v2 定位**：6 条流的产品口径以 FUNCTIONAL_SPEC v0.2.1 为准——risk/model（PR 链）降级 CI 基建维护模式；strategy/options/fundamental 业务归组自研、QuantCode 侧保留组内工具适配层；factor 为主战场（外部评估器注册 + 部署适配）。下文各节的 System Prompt / Permission 为 v1 参考。
+
 #### 4.3.1 基本面组（fundamental）
 
 **System Prompt 核心**：围绕公司/行业/宏观问题，检索语料（时点安全），提取财报，做估值，产出研报 PDF，走人工验收。
@@ -412,11 +420,11 @@ Idea 文本的作用是**在既定流内分派执行模式**，而非选择进�
 
 #### 4.3.4 风控组（risk）
 
-**System Prompt 核心**：读取 model 组提交的元数据（Blackboard），调用风控计算，生成 RiskProfile，VaR 超阈值触发人审，最终把分析结果写回 PR。
+**System Prompt 核心**：读取 model 组提交的元数据（Blackboard），调用风控计算，生成 RiskProfile，最终把分析结果写回 PR。**v2**：VaR 超阈值 → verdict 直接 fail 写入报告（产出门禁内化于评估流程，不触发 HumanGate，见 F-03）。
 
 **Available Tools**：`read_blackboard` `calc_risk` `generate_risk_profile` `check_gate` `write_pr_comment`
 
-**Permission 规则**：`check_gate` → ask（VaR 超阈值需人审）
+**Permission 规则**：`check_gate` 为纯判定（无 ask）；**v2** 起仅写操作类 tool（如 merge_to_main）挂 ask。
 
 #### 4.3.5 策略组（strategy）
 
@@ -579,6 +587,8 @@ memory.search(
 | 基本面组完成研报 | 自动通知策略组 + 风控组 review |
 | 基建组数据 schema 变更 | 自动通知因子组检查算子白名单 |
 
+> **v2 注**："模型 PR"场景已取消（模型走 COS 传 PKL；代码 PR 风控由既有 GitHub Actions Multi-Agent Review 承接，risk 链降级为 CI 基建维护模式）。跨组协同真痛点由口径统一（F-06 契约遵守检测 + P-07 蒸馏）与进展透明（P-08 Admin 中枢）承接。
+
 ---
 
 ## 5. 集成与依赖
@@ -635,7 +645,7 @@ memory.search(
 
 - 每个 Compose 流端到端可跑（一个真实 idea 进，一个 artifact 出）
 - 每个 skill 通过 `compose:verify` 自动验收
-- 跨组流程 PR 自动审批延迟 < 10 分钟
+- Admin 跨组语义查询 P95 < 15s（P-08）；方案先行首轮方案产出（不含代码）< 5min（P-10）
 - 长任务（10h+）context 不丢失，可断点续跑
 
 ### 6.2 业务验收
@@ -760,6 +770,9 @@ memory.search(
 | 2026-07-10 | trigger_risk_flow 定型为方式 2（Blackboard 队列标志） | 解耦 + 可观测 + 幂等；方式 1 同步 invoke 留作 Week 2 低延迟优化 |
 | 2026-07-10 | Day5 引擎合并采用 PR#25 确定性 HumanGate + 移植 main 的 truncate | run_agent/IDE 依赖确定性 gate；truncate 保长任务鲁棒性（甲方案） |
 | 2026-07-10 | demo 分组：factor/model/risk 走 AgentRunner(真ReAct)，options/strategy/fundamental 线性 flow 兜底 | 主菜展示自主推理，其余保可演，Week 2 迁 ReAct |
+| 2026-09-01 | 功能定版：平台红线"不做业务层面"；HumanGate 收窄写操作门禁；"模型 PR"场景取消；fundamental 降级组内工具 | 2026-09-01 与各组长定版讨论（详见 specs/FUNCTIONAL_SPEC.md v0.2.1 §0 与 docs/PRD.md v2） |
+| 2026-09-01 | 新增四大支柱：P-07 蒸馏（最大复用）/ P-08 Admin 中枢 / P-09 /deploy 黑盒 / P-10 方案先行（先方案后代码 + 一致性判定） | 痛点：库功能没进记忆导致重造、进展不透明、部署适配人工且需保密、一口气生成代码准确性与可审核性差 |
+| 2026-09-01 | Admin 实现为角色而非第七组；回测/组合/并行 subagent 引擎代码保留 | 组枚举两仓不动；Subagent 用户拍板保留（平台能力）；引擎代码"万一有用" |
 
 ---
 

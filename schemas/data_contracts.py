@@ -1,6 +1,7 @@
-"""P-01 数据接入契约（specs/data/SPEC.md §2.2 + §4 D1-A1..A3/A8）。
+"""P-01 数据接入契约（specs/data/SPEC.md §2.2/§2.5 + §4 D1-A1..A3/A8/A11/A12）。
 
-FactorPanel / ReturnsDataset：qs-cold staging 只读接入的 typed 契约对象。
+FactorPanel / ReturnsDataset / TargetReturnView：qs-cold staging 只读接入的
+typed 契约对象。
 - numpy 数组字段用 Any + validator 校验（不把 pandas/pyarrow 依赖带进 schemas；
   内部实现可用 numpy）。
 - ``_contract`` 版本戳随对象走：写 Blackboard 前后均可校验（D1-A8/A10）。
@@ -27,6 +28,7 @@ ASSET_PATTERN = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 
 CONTRACT_PANEL = "FactorPanel/v1"
 CONTRACT_RETURNS = "ReturnsDataset/v1"
+CONTRACT_TARGET_RETURN = "TargetReturnView/v1"
 
 # numpy 运行时才校验的字段统一用 Any（schemas 不引 pandas；numpy 为可选运行时依赖，
 # 缺失时构造方直接传 list 也能过校验）。
@@ -349,10 +351,36 @@ class ReturnsDataset(BaseModel):
         }
 
 
+class TargetReturnView(BaseModel):
+    """目标收益口径契约（SPEC §2.5，D1-A11/A12；FUNCTIONAL_SPEC F-06/P-07 定版）。
+
+    唯一取值源为数据仓目标收益表（后复权表内含 Horizon∈{1,5,10,20} 的
+    t+1→t+2 forward return），组员/Agent 禁止自算；本契约只登记口径。
+
+    ponytail: qs-cold 无该表，staging 数据源接线 blocked，契约先行——
+    取值字段（returns/values）待接线时再加，现在只登记 Horizon / 复权 / 对齐。
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    # SPEC 不变量⑤同款：_contract 版本戳随对象走。
+    contract: Literal["TargetReturnView/v1"] = Field(
+        default="TargetReturnView/v1", alias="_contract", serialization_alias="_contract"
+    )
+    # D1-A11：Horizon 枚举锁死 {1,5,10,20}，其他值（如 3）构造即抛 ValidationError。
+    horizon: Literal[1, 5, 10, 20]
+    # D1-A12：复权标记必填，且仅接受后复权（hfq）——禁止未复权口径。
+    adjusted: Literal["hfq"]  # hfq = 后复权
+    # 对齐口径字段：默认且仅接受 t+1→t+2（§2.5 实测案例的正确口径，防再算成 t→t+1）。
+    alignment: Literal["t+1->t+2"] = "t+1->t+2"
+
+
 __all__ = [
     "ASSET_PATTERN",
     "CONTRACT_PANEL",
     "CONTRACT_RETURNS",
+    "CONTRACT_TARGET_RETURN",
     "FactorPanel",
     "ReturnsDataset",
+    "TargetReturnView",
 ]

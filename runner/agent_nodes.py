@@ -30,6 +30,12 @@ from runner.human_gate import normalize_external_decision, parse_resume_decision
 from runner.routing.fingerprint import compute_state_fingerprint
 from runner.routing.router import RouteDecision, route_next_step
 from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
+from runner.solution_workflow import (
+    filter_tools_for_phase,
+    sync_phase_from_blackboard,
+    tool_allowed_in_phase,
+    tool_denied_message,
+)
 from tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
@@ -215,6 +221,13 @@ class AgentState(BaseFlowState, total=False):
     # P-01/F-06: Blackboard sqlite 路径透传（dataset 工具读同一 bb 文件；
     # None → backing 默认路径 .quantcode/blackboard.db）。
     _blackboard_db_path: str | None
+    # P-10 方案先行：当前方案阶段（None=未启动工作流 / "draft" / "frozen" /
+    # "superseded"）。draft 态由 make_tool_node/make_llm_node 做阶段限流
+    # （tool 过滤，非 interrupt——不新增 HumanGate 触发点）。
+    solution_phase: str | None
+    # P-10 方案先行：当前 run 激活的 SolutionDoc id（solution 工具输出经
+    # _extract_state_fields 注入；tool_node 据此从 Blackboard 回源 solution_phase）。
+    solution_id: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -264,8 +277,13 @@ def make_llm_node(
         if state.get("system_prompt"):
             history = [SystemMessage(content=state["system_prompt"])] + history
 
+        # P-10 方案先行（组 allowlist 过滤段）：draft 态只把「方案类工具 +
+        # 只读工具」白名单暴露给模型（可见性收窄）。phase 缺省/非 draft →
+        # 原样返回，行为与改动前一致。
+        visible_tools = filter_tools_for_phase(tools, state.get("solution_phase"))
+
         # 调 LLM（带 tool 列表）
-        response: AIMessage = model(history, tools=tools)
+        response: AIMessage = model(history, tools=visible_tools)
 
         updates = {
             "messages": [response],
@@ -339,9 +357,24 @@ def make_tool_node(
             ctx["blackboard_db_path"] = state["_blackboard_db_path"]
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 
+        # P-10 方案先行（组 allowlist 过滤段）：workflow 激活（state 已带
+        # solution_phase/solution_id）时从 Blackboard 回源当前 SolutionDoc 状态
+        # ——/solution 面板（AG-G）跨进程冻结后 run 侧同步解除限流。未激活 →
+        # phase=None，不读 db，既有 run 行为与开销不变。
+        solution_phase = sync_phase_from_blackboard(
+            state.get("solution_phase"),
+            state.get("solution_id"),
+            ctx.get("blackboard_db_path"),
+        )
+
         results: list[ToolMessage] = []
         # 收集需要注入 state 的字段
         state_updates: dict[str, Any] = {}
+
+        # P-10：把回源后的阶段写回 state，供 make_llm_node 的可见工具面过滤
+        # （draft 态只暴露方案类 + 只读工具；frozen 后解除）。
+        if solution_phase is not None:
+            state_updates["solution_phase"] = solution_phase
 
         executed_tools: list[str] = []
         executed_args: list[dict[str, Any]] = []
@@ -350,6 +383,18 @@ def make_tool_node(
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
+                # P-10 阶段限流（tool 过滤，非 interrupt——不新增 HumanGate 触发点）：
+                # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
+                # permission/enforce 链（避免无谓 interrupt 冒泡）。
+                # phase 非 draft（None/frozen/superseded）时恒放行，行为不变。
+                if not tool_allowed_in_phase(c["name"], solution_phase):
+                    content = tool_denied_message(c["name"])
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
                 # G4-A1 权限钩子：yaml 配 deny → PermissionError 转 tool_result
                 # error；ask 未批准 → LangGraph interrupt 冒泡（等 HumanGate
                 # resume）。未配置 permission 的 tool → allow，行为与改动前一致。
@@ -458,6 +503,14 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     # Day 4 控制平面状态回流：标准字段透传给 AgentState/MCP。
     if "output_data" in output and isinstance(output.get("output_data"), dict):
         updates["output_data"] = output["output_data"]
+
+    # P-10 方案先行：solution 工具输出携带 solution_id/solution_phase → 注入
+    # state（激活工作流）；后续每轮 tool_node 据此从 Blackboard 回源阶段，
+    # draft 态对写类工具做 deny（tool 过滤，非 interrupt）。
+    if output.get("solution_id"):
+        updates["solution_id"] = output["solution_id"]
+        if output.get("solution_phase"):
+            updates["solution_phase"] = output["solution_phase"]
 
     if "artifacts" in output:
         artifacts = output.get("artifacts") or []

@@ -130,13 +130,16 @@ def generate_risk_profile(
 
 
 def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
-    """检查是否需人工审批，返回 requires_human / reasons / risk_profile。
+    """检查 RiskProfile 阈值，返回 verdict / requires_human / reasons / risk_profile。
 
-    Day 4: route_gate_node 会直接消费这个结果构造 HumanGate interrupt payload，
-    所以这里把 risk_profile 一并带回，避免 gate node 再倒推上游状态。
+    v0.2 收窄（F-03 / G2-A8）：越限的**评估结论**是 ``verdict="fail"``
+    （单源 = RiskProfile.evaluate_verdict），随报告披露、不再触发产出门禁。
+    ``requires_human`` 仅保留给确定性 risk ReAct 路由（runner/routing/router.py
+    的 HUMAN_GATE 分支）消费，不等于"产出需要人审"。
     """
     reasons = profile.breached_thresholds(thresholds)
     return {
+        "verdict": str(profile.evaluate_verdict(thresholds)),
         "requires_human": bool(reasons),
         "reasons": reasons,
         "risk_profile": profile.model_dump(mode="json"),

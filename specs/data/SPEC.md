@@ -32,6 +32,18 @@ parquet 长表 `factors/{factor_id}/year={Y}/data.parquet`，实测列（勘察�
 - `load_returns(name: str, date_start: date, date_end: date) -> dict`
 - `pool_browse(factor_id: str|None, family: str|None) -> dict`（只读池元数据）
 
+### 2.5 目标收益口径契约（[新增 v0.2]，FUNCTIONAL_SPEC F-06/P-07 定版）
+
+**背景（实测案例）**：有组员把 t+1→t+2 的目标收益算成 t→t+1，回测收益虚高——口径不统一的真实代价。数据侧已建目标收益表：后复权表内同步存放 `Horizon∈{1,5,10,20}` 的 t+1→t+2 forward return（Target Return up to View up）。
+
+**契约规则**：
+1. **唯一取值源**：所有组员/Agent 需要"目标收益"时**直接取表值，禁止自算**；使用字段时用**后复权字段**，禁止未复权字段。
+2. **口径登记**：Horizon 枚举 `{1,5,10,20}`、对齐 `t+1→t+2`、复权=后复权——以 ReturnsDataset 补充字段（target_return 视图）登记进 `schemas/data_contracts.py` [新增待办]。
+3. **能力卡片**：该契约作为 P-07 首批蒸馏物，常驻因子/模型/策略组上下文（"目标收益怎么取"→指向契约表）。
+4. **违规检测**：Agent/Memory 发现组员自算目标收益或使用未复权字段时及时报告（F-06 契约遵守检测）。
+
+机器断言挂 D1-A11/A12（§4）。
+
 ## §3 数据流
 
 ```
@@ -57,6 +69,8 @@ qs-cold / staging-dev 后端（QS_DATA_BACKEND=staging 默认）
 - D1-A8: 返回值经 `FactorPanel.model_validate()` 通过且 `_contract=="FactorPanel/v1"`（[新增测试] tests/test_data_contracts.py::test_panel_output_matches_pydantic_contract）
 - D1-A9: 写 `shared.datasets.panel/demo` 后 get_entry 读回同一契约对象（[新增测试] tests/test_blackboard_datasets.py::test_dataset_roundtrip_project_scope）
 - D1-A10: 向 panel namespace 写入无 `_contract` 或版本不匹配的 dict，写入口抛 ValidationError（test_dataset_entry_version_stamp_enforced）
+- D1-A11 [新增 v0.2]: ReturnsDataset target_return 视图仅接受 `Horizon∈{1,5,10,20}`，其他值抛 ValidationError（[新增测试] tests/test_data_contracts.py::test_target_return_horizon_enum）
+- D1-A12 [新增 v0.2]: target_return 视图字段登记为后复权口径（t+1→t+2）；契约元数据缺失复权标记时构造抛 ValidationError（test_target_return_adjusted_marker_required）
 
 ## §5 开放问题
 
@@ -70,3 +84,4 @@ qs-cold / staging-dev 后端（QS_DATA_BACKEND=staging 默认）
 | D1-A1..A3, A8 | tests/test_data_contracts.py | blocked | — |
 | D1-A4..A7 | tests/test_market_tools.py | blocked | — |
 | D1-A9..A10 | tests/test_blackboard_datasets.py | blocked | — |
+| D1-A11..A12 [v0.2 新增] | tests/test_data_contracts.py | pass（test_target_return_horizon_enum / test_target_return_adjusted_marker_required） | 2026-09-01 |

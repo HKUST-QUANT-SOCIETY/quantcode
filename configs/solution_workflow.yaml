@@ -1,0 +1,14 @@
+# P-10 方案先行工作流（Solution-First）配置 — AG-J
+# 读取：runner/solution_workflow.load_workflow_config()（runner/config_loader.load_yaml，
+# lru_cache；测试改配置后需 load_yaml.cache_clear()）。
+# 缺文件/缺键时代码默认兜底：min_rounds=2 / max_rounds=3 / allow_trivial_exempt=false。
+
+# 冻结所需的最少人机讨论轮次（每轮记 feedback）；不足时 freeze_solution 被拒。
+min_rounds: 2
+
+# 讨论轮次上限；达到后仍处 draft → 置 needs_human 人裁标记（超轮数升级人裁）。
+max_rounds: 3
+
+# trivial 单点修复豁免开关：false（默认）= 一律走方案先行；
+# true = 允许显式声明 trivial 的任务跳过讨论直接落库（status=frozen 留痕）。
+allow_trivial_exempt: false

@@ -28,6 +28,8 @@ from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from schemas.solution_doc import SolutionDoc, SolutionStatus
+
 logger = logging.getLogger("runner.judge")
 
 __all__ = ["judge_run", "summarize_run", "VALID_VERDICTS"]
@@ -324,8 +326,149 @@ def judge_run(
     return {"verdict": verdict, "reasons": reasons}
 
 
+# ---------------------------------------------------------------------------
+# judge_solution_conformance — P-10 方案↔代码一致性判定
+# ---------------------------------------------------------------------------
+
+# P-10 一致性 verdict（与 judge_run 的 met/partial/missed 是两套口径，不混用）
+SOLUTION_VERDICTS = ("conformant", "deviation", "needs_human")
+
+
+def _coerce_solution_doc(doc: Any) -> SolutionDoc:
+    """接受 SolutionDoc 实例或其 model_dump dict，归一为 SolutionDoc。"""
+    if isinstance(doc, SolutionDoc):
+        return doc
+    return SolutionDoc.model_validate(doc)
+
+
+def _solution_semantic_pass(
+    doc: SolutionDoc,
+    changed_files: list[str],
+    deviations: list[str],
+    missing: list[str],
+    llm: Callable[..., Any],
+) -> dict[str, Any]:
+    """LLM 语义判定钩子（接口已接通，确定性结论优先）。
+
+    输入方案目标 + 验收标准 + 实际改动面，让 judge 模型评估语义层面一致性。
+    任何失败（异常 / 输出不合 JSON / verdict 不合法）诚实降级：返回
+    ``{"verdict": None, "degraded": True, "reasons": [...]}``，不影响确定性结论。
+    """
+    system_prompt = (
+        "你是方案↔代码一致性评审。根据方案目标与验收标准，评估实际改动是否在语义上符合方案。\n"
+        "只输出一个 JSON 对象，格式：\n"
+        '{"verdict": "conformant" | "deviation" | "needs_human", "reasons": ["..."]}\n'
+        "不要输出任何 JSON 以外的内容。"
+    )
+    user_prompt = (
+        f"# 方案目标\n{doc.goal}\n\n"
+        f"# 验收标准\n" + ("\n".join(f"- {c}" for c in doc.acceptance_criteria) or "(未填写)") + "\n\n"
+        f"# 方案预期改动文件\n" + ("\n".join(f"- {f}" for f in doc.file_impact) or "(未填写)") + "\n\n"
+        f"# 实际改动文件\n" + ("\n".join(f"- {f}" for f in changed_files) or "(无)") + "\n\n"
+        f"# 确定性偏离清单（file_impact 之外）\n" + ("\n".join(f"- {d}" for d in deviations) or "(无)") + "\n\n"
+        f"# 计划内未落地文件\n" + ("\n".join(f"- {m}" for m in missing) or "(无)") + "\n"
+    )
+    try:
+        response = llm([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
+        parsed = _extract_json_object(_content_to_text(getattr(response, "content", "")) or "")
+    except Exception as e:  # 诚实降级，不编造语义结论
+        return {"verdict": None, "degraded": True, "reasons": [f"semantic LLM call failed: {type(e).__name__}: {e}"]}
+    if parsed is None:
+        return {"verdict": None, "degraded": True, "reasons": ["semantic judge output is not valid JSON object"]}
+    verdict = str(parsed.get("verdict", "")).strip().lower()
+    if verdict not in SOLUTION_VERDICTS:
+        return {"verdict": None, "degraded": True, "reasons": [f"semantic judge returned invalid verdict {verdict!r}"]}
+    raw = parsed.get("reasons", [])
+    reasons = [str(r) for r in raw] if isinstance(raw, list) else [str(raw)]
+    return {"verdict": verdict, "degraded": False, "reasons": reasons}
+
+
+def judge_solution_conformance(
+    doc: SolutionDoc | dict[str, Any] | None,
+    changed_files: list[str] | None,
+    *,
+    llm: Callable[..., Any] | None = None,
+    semantic: bool = False,
+) -> dict[str, Any]:
+    """P-10 方案↔代码一致性判定（runner/judge.py 的方案先行入口）。
+
+    确定性部分先行：``file_impact ⊆ 实际改动`` 校验——
+    - 实际改动落在 file_impact 之外 → 必须列入偏离清单（deviations）；
+    - file_impact 内的文件实际未改动 → 列入 missing（计划内未落地）；
+    - 有 deviations 或 missing → verdict="deviation"，否则 "conformant"。
+
+    LLM 语义判定留接口：``semantic=True`` 且提供 ``llm`` 时追加语义评估；
+    结论只做升级（needs_human），不推翻确定性结论；任何失败诚实降级。
+
+    Returns:
+        ``{"verdict", "doc_id", "doc_hash", "doc_status", "deviations",
+        "missing", "reasons", "semantic"}``；
+        doc 缺失 / 未冻结 → verdict="needs_human"（方案不是可验收基准）。
+    """
+    deviations: list[str] = []
+    missing: list[str] = []
+    reasons: list[str] = []
+
+    if doc is None:
+        return {
+            "verdict": "needs_human", "doc_id": "", "doc_hash": "", "doc_status": "",
+            "deviations": [], "missing": [],
+            "reasons": ["SolutionDoc 缺失：无一致性判定基准"], "semantic": None,
+        }
+    try:
+        sdoc = _coerce_solution_doc(doc)
+    except Exception as e:
+        return {
+            "verdict": "needs_human", "doc_id": "", "doc_hash": "", "doc_status": "",
+            "deviations": [], "missing": [],
+            "reasons": [f"SolutionDoc 校验失败：{type(e).__name__}"], "semantic": None,
+        }
+
+    doc_status = str(sdoc.status.value)
+    base: dict[str, Any] = {
+        "doc_id": sdoc.id, "doc_hash": sdoc.doc_hash, "doc_status": doc_status,
+    }
+    if sdoc.status != SolutionStatus.FROZEN:
+        return {
+            **base, "verdict": "needs_human", "deviations": [], "missing": [],
+            "reasons": [f"方案状态为 {doc_status}（非 frozen），不构成一致性判定基准"],
+            "semantic": None,
+        }
+
+    actual = sorted({str(f).strip() for f in (changed_files or []) if str(f).strip()})
+    planned = sorted({str(f).strip() for f in sdoc.file_impact if str(f).strip()})
+    deviations = sorted(set(actual) - set(planned))
+    missing = sorted(set(planned) - set(actual))
+
+    if deviations:
+        reasons.append("file_impact 之外的改动（偏离清单）: " + ", ".join(deviations))
+    if missing:
+        reasons.append("file_impact 内未实际改动: " + ", ".join(missing))
+    verdict = "deviation" if (deviations or missing) else "conformant"
+    if not reasons:
+        reasons.append(f"实际改动 {len(actual)} 个文件全部落在 file_impact 内")
+
+    semantic_result: dict[str, Any] | None = None
+    if semantic:
+        if llm is None:
+            semantic_result = {"verdict": None, "degraded": True, "reasons": ["semantic requested but llm unavailable"]}
+        else:
+            semantic_result = _solution_semantic_pass(sdoc, actual, deviations, missing, llm)
+            # 语义结论只升级（needs_human），不推翻确定性结论
+            if semantic_result.get("verdict") == "needs_human":
+                verdict = "needs_human"
+                reasons.extend(semantic_result.get("reasons") or [])
+
+    return {
+        **base, "verdict": verdict, "deviations": deviations, "missing": missing,
+        "reasons": reasons, "semantic": semantic_result,
+    }
+
+
 __all__ = [
     "judge_run",
+    "judge_solution_conformance",
     "summarize_run",
     "VALID_VERDICTS",
+    "SOLUTION_VERDICTS",
 ]

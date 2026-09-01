@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/solution-doc.schema.json",
+  "title": "SolutionDoc",
+  "description": "方案文档（P-10 唯一契约，extra=\"forbid\"）。",
+  "$defs": {
+    "SolutionRound": {
+      "additionalProperties": false,
+      "description": "一轮人机讨论：人的反馈 + 该轮对方案的修订摘要。",
+      "properties": {
+        "round_no": {
+          "description": "轮次编号，从 1 起",
+          "minimum": 1,
+          "title": "Round No",
+          "type": "integer"
+        },
+        "feedback": {
+          "description": "本轮人的反馈（不可为空）",
+          "minLength": 1,
+          "title": "Feedback",
+          "type": "string"
+        },
+        "revision": {
+          "default": "",
+          "description": "本轮对方案的修订摘要（可空=未改动）",
+          "title": "Revision",
+          "type": "string"
+        },
+        "at": {
+          "default": "",
+          "description": "ISO8601 时间戳（写侧生成）",
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "round_no",
+        "feedback"
+      ],
+      "title": "SolutionRound",
+      "type": "object"
+    },
+    "SolutionStatus": {
+      "description": "方案文档状态机：draft → frozen → superseded（被新方案替代）。",
+      "enum": [
+        "draft",
+        "frozen",
+        "superseded"
+      ],
+      "title": "SolutionStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "方案 id（进入 artifacts 文件名与 blackboard key，限安全字符）",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9._-]+$",
+      "title": "Id",
+      "type": "string"
+    },
+    "goal": {
+      "description": "任务目标（自然语言）",
+      "minLength": 1,
+      "title": "Goal",
+      "type": "string"
+    },
+    "rounds": {
+      "description": "人机讨论轮次；freeze 要求 len(rounds) >= min_rounds",
+      "items": {
+        "$ref": "#/$defs/SolutionRound"
+      },
+      "title": "Rounds",
+      "type": "array"
+    },
+    "status": {
+      "$ref": "#/$defs/SolutionStatus",
+      "default": "draft"
+    },
+    "acceptance_criteria": {
+      "description": "验收标准（一致性判定的语义输入）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Acceptance Criteria",
+      "type": "array"
+    },
+    "file_impact": {
+      "description": "预期改动文件面（repo 相对路径）；之外的改动必须在偏离清单里报告",
+      "items": {
+        "type": "string"
+      },
+      "title": "File Impact",
+      "type": "array"
+    },
+    "doc_hash": {
+      "default": "",
+      "description": "方案内容摘要（sha256 前 16 位，由 runner/solution_workflow 计算）",
+      "title": "Doc Hash",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "description": "文档版本号（每次落盘递增，对应 <id>-v<n>.md）",
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "trivial_exempt": {
+      "default": false,
+      "description": "trivial 单点修复豁免标记（需 configs/solution_workflow.yaml 开关放行）；豁免文档直接以 frozen 状态落库留痕，代码工具不受限",
+      "title": "Trivial Exempt",
+      "type": "boolean"
+    },
+    "needs_human": {
+      "default": false,
+      "description": "超 max_rounds 仍处 draft 时的人裁标记",
+      "title": "Needs Human",
+      "type": "boolean"
+    },
+    "created_at": {
+      "default": "",
+      "description": "ISO8601 创建时间",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "default": "",
+      "description": "ISO8601 最后更新时间",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "goal"
+  ],
+  "type": "object"
+}

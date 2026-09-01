@@ -1,4 +1,4 @@
-"""D1-A1/A2/A3/A8 — FactorPanel Pydantic 契约断言（specs/data/SPEC.md §4）。"""
+"""D1-A1/A2/A3/A8/A11/A12 — FactorPanel/TargetReturnView 契约断言（specs/data/SPEC.md §4）。"""
 from __future__ import annotations
 
 from datetime import date
@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from schemas.data_contracts import CONTRACT_PANEL, FactorPanel, ReturnsDataset
+from schemas.data_contracts import (
+    CONTRACT_PANEL,
+    FactorPanel,
+    ReturnsDataset,
+    TargetReturnView,
+)
 
 
 def _panel_kwargs(**overrides):
@@ -83,3 +88,27 @@ def test_returns_dataset_nan_whitelist_and_inf_rejected():
             dates=[date(2024, 1, 2), date(2024, 1, 2)],  # duplicate dates
             returns={"600519.SH": [0.01, 0.02]},
         )
+
+
+# D1-A11: target_return 视图 Horizon 枚举——{1,5,10,20} 合法通过，3 抛 ValidationError
+def test_target_return_horizon_enum():
+    for h in (1, 5, 10, 20):
+        view = TargetReturnView(horizon=h, adjusted="hfq")
+        assert view.horizon == h
+        assert view.alignment == "t+1->t+2"
+        assert view.contract == "TargetReturnView/v1"
+
+    with pytest.raises(ValidationError):
+        TargetReturnView(horizon=3, adjusted="hfq")
+
+
+# D1-A12: 复权标记必填——缺 adjusted 抛 ValidationError，adjusted="hfq"（后复权）通过
+def test_target_return_adjusted_marker_required():
+    with pytest.raises(ValidationError):
+        TargetReturnView(horizon=5)
+
+    view = TargetReturnView(horizon=5, adjusted="hfq")
+    assert view.adjusted == "hfq"
+    # 非后复权标记同样拒绝（SPEC §2.5：禁止未复权字段）。
+    with pytest.raises(ValidationError):
+        TargetReturnView(horizon=5, adjusted="none")

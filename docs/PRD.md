@@ -1,24 +1,31 @@
 # QuantCode PRD — 产品需求文档
 
-> **版本**：v1（产品方向已落地到 OpenCode fork + 6 套 Compose 流）
+> **版本**：v2（功能定版修订）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
-> **最后更新**：2026-06-30
+> **最后更新**：2026-09-01
+> **修订记录**：v1（2026-06-30）产品方向落地到 OpenCode fork + 6 套 Compose 流。v2（2026-09-01 功能定版会议）——确立平台红线"QuantCode 不做业务层面的东西"；HumanGate 收窄为写操作门禁；"模型 PR"场景取消（PR 审核归 GitHub Actions）；新增四大支柱：P-07 组织资产蒸馏（最大复用）、P-08 Admin 中枢（管理面板的 AI 抽象化）、P-09 /deploy 黑盒部署适配、P-10 方案先行工作流（先方案后代码 + 一致性判定）；报告平台并入对外产品 2。功能状态唯一事实源 = `specs/FUNCTIONAL_SPEC.md`（v0.2）。
 
 ---
 
 ## 0. TL;DR
 
 **一句话定义产品**：
-> QuantCode 是 HKUST QUANT SOCIETY 内部使用的量化投研 Agent 平台，**6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；流跑完自动接入生产主线**。
+> QuantCode 是 HKUST QUANT SOCIETY 内部使用的量化投研 **Agent 平台**（不是业务系统）：6 个组登录同一个 agent，每个组进入自己工作流的 Compose 流；平台负责组织能力沉淀（最大复用）、写操作门禁、跨组语义查询与生产部署适配；**业务层的策略、回测产品、组合产品归各研究组自研与报告平台**。
 
 **一句话定义目标用户**：
-> HKUST QUANT SOCIETY 的 6 个研究/业务组（基本面、因子、模型、风控、策略、期权），以及内部 agent 组本身。
+> HKUST QUANT SOCIETY 的 6 个研究/业务组（基本面、因子、模型、风控、策略、期权）、Admin 管理组（跨组治理），以及内部 agent 组本身。
 
 **一句话定义核心价值**：
-> 把"人与人的协商"换成"机器与机器的 schema 校验"，把验收标准从"看一眼觉得行"换成"`assert` 通过/失败 + Goal/Judge"。
+> 把"人与人的协商"换成"机器与机器的 schema 校验"；把"每个库里有什么、每次怎么用"换成能力目录常驻 Agent 记忆——**能复用则复用，覆盖不全先问人，不许闷头自造**。
 
 **Agent 搭建边界**：
 > QuantCode 不是单纯写一组量化函数库。因子函数、评估配置、风控阈值是 Agent 调用的工具输入；真正的 Agent 工作是把研究员需求路由到 Compose 流的对应 skill，补齐上下文，按 Pattern 1/2/5 调度，执行 schema/assert 验收，并把结果写回 PR、报告或 artifact。
+
+**平台三条红线 + 一条工作流（2026-09-01 定版，详见 FUNCTIONAL_SPEC §0）**：
+1. **不做业务层面的东西**——策略/回测/组合/期权定价等产品功能归各组自研与报告平台（报告平台可并入对外产品 2，非核心竞争力）。
+2. **最大复用原则**——Agent 方案首选已登记能力；已有能力覆盖不全时先向人征询，不许直接跳自造方案。
+3. **HumanGate 只管写操作**——产出不 gate（报告平台承接）、代码不 gate（CI/PR 承接）；只有写操作进入生产面才 gate。
+4. **方案先行（P-10）**——任务先出完整解决方案，2-3 轮讨论冻结为静态文档，代码按文档生成并做一致性判定；冻结前代码工具不可用。
 
 ---
 
@@ -54,45 +61,49 @@
 | 组 | 人数 | 主要工作 | 对 QuantCode 的需求 |
 |---|---|---|---|
 | **基本面组** | 2-3 | 公司研究、行业研究、写研报 | 快速生成专业 PDF、point-in-time 检索研报 |
-| **因子组** | 3-4 | 因子开发、因子评估 | 标准化因子评估、接 AutoFactorEvaluation、横向比较 |
-| **模型组** | 3-4 | 策略建模、机器学习因子 | 提 PR 后自动风控反馈，无需反复同步风控组 |
-| **风控组** | 2-3 | 风险评估、PR 审批 | 程序化阈值，24h 自动执行风控规则，HumanGate 兜底人审 |
-| **策略组** | 2-3 | 组合构建、调仓决策 | 标的筛选、组合优化、回测 |
-| **期权组** | 1-2 | 期权定价、波动率研究、对冲策略 | 期权数据处理、波动率曲面、Greeks 和组合风险 |
+| **因子组** | 3-4 | 因子开发、因子评估 | 能力目录（评估器/引擎/数据可复用什么）、口径契约（目标收益唯一取值源）、/deploy 黑盒适配进 AlphaFlow |
+| **模型组** | 3-4 | 策略建模、机器学习因子 | 跨组进展透明（"因子组挖得怎么样"问 Agent 即得）、口径契约 |
+| **风控组** | 2-3 | 风险评估、工具开发 | 阈值程序化、越限 verdict 直接 fail（产出门禁已内化于评估流程） |
+| **策略组** | 2-3 | 组合构建、调仓决策 | 业务自研；QuantCode 提供组内工具适配层（回测/组合引擎代码保留）与数据契约 |
+| **期权组** | 1-2 | 期权定价、波动率研究、对冲 | 业务自研（期权回测引擎自研，不强推 options_v1） |
+| **Admin 组** | Lead+核心 | 跨组治理、报告管理、任务管理 | 中枢语义层：自然语言查询各组进展/模块运行/错误记录；Git graph 面板 + repo 更新 pop；唯一跨组 scope |
+| **游客组** | 访问受限 | — | 权限 Mask：数据字段清单等敏感蒸馏物不可见 |
 | **Agent 组**（我们） | 6 | 建设和维护 QuantCode | dogfood：每天用自己的工具 |
 
 ### 2.2 典型工作流变化（模型 → 风控）
 
-**模型组同学的"今天"**：
-1. 写完一个新的 ML 因子，提 PR
-2. 微信群里 @ 风控组，问"我这个 max_drawdown 算得对吗"
-3. 风控组同学有空了才看，可能 1-2 天
-4. 来回讨论 3-5 轮，统一口径
-5. 终于 merge
+**v2 口径**："模型 PR" 是伪场景——静态模型走 COS 上传 PKL，代码走正常 PR。PR 自动审核由既有 GitHub Actions Multi-Agent Review 承担（产出 issue 报告：建议/不建议合并、冗余设计指出），合并与否 owner 在 GitHub 操作。PR 风控链（read_pr → RiskProfile → PR comment）降级为 CI 基建继续运行，不再作为产品功能迭代。
 
-**模型组同学的"明天"**：
-1. 在 QuantCode 用 `model` Compose 流（`model:pr-submit` skill 自动填风控元数据）
-2. 自动触发风控组的 `risk` Compose 流（`risk:detect → analyze → schema-gen → ci-gate`）
-3. 10 分钟内 PR 评论里出现 `RiskProfile` JSON + 自动结论
-4. 越过阈值 → 走 `HumanGate`，等风控组同学人工审批；通过阈值 → 自动 approve 等人 review
-5. 风控组只需要 review JSON，不用从 0 开始算
+**跨组协同的真痛点与解法**：
+1. **口径统一**（实测有组员把 t+1→t+2 算成 t→t+1 致收益虚高）→ 目标收益契约表为唯一取值源（后复权、Horizon∈{1,5,10,20}），沉淀进能力目录与 Memory；Agent 发现未遵守契约的用法及时报告。
+2. **进展不透明**（模型组不知道因子组挖得怎么样）→ Admin 中枢语义查询（P-08）。
+3. **库功能没进记忆**（"我必须明确告诉它要用这个库，不说它就自己新造一个"）→ P-07 组织资产蒸馏 + 复用纪律（覆盖不全先问人）。
 
 ---
 
 ## 3. 产品范围
 
-### 3.1 必做（P0，MVP）
+### 3.1 必做（P0）
 
-**6 套 vertical Compose 流**（按组分发，详见 Design §4.3）：
+**四大平台支柱（v2 新增，优先级最高）**：
+
+| 支柱 | 编号 | 一句话 |
+|---|---|---|
+| 组织资产蒸馏管线 | P-07 | repo/数据 → 能力卡片 → 权限过滤 → Memory 常驻目录 + FTS 细节；复用纪律（覆盖不全先问人） |
+| Admin 组与中枢管理面 | P-08 | 唯一跨组 scope；语义查询（进展/运行/错误沉淀）+ **GitGraph 面板（更新节点标红）+ 双类 pop（repo 提交/package 版本更新，全组可见）**——用户点名关键设计，本轮交付 |
+| AlphaFlow 部署适配 | P-09 | /deploy 黑盒命令：已调试代码 → AlphaFlow 部署库，过程不暴露底层；部署挂写操作 gate |
+| 方案先行工作流 | P-10 | Goal/需求 → 完整解决方案 → 2-3 轮讨论 → 冻结静态文档 → 按文档生成代码 → 方案↔代码一致性判定 |
+
+**6 套 vertical Compose 流**（按组分发，详见 Design §4.3；v2 起 strategy/options 流的业务功能归组自研，QuantCode 侧降级为组内工具适配层）：
 
 | Compose 流 | 价值 | Owner |
 |---|---|---|
 | `fundamental` | 基本面研究 + 研报 PDF | 用户（Lead） |
-| `factor` | 因子开发 → AutoEval → 主线 | 肖骥超 |
-| `model` | 模型 PR 元数据 → 跨组发起 | 陈镇鸿 |
-| `risk` | PR 风控门禁 → HumanGate | 杨欣琳 |
-| `strategy` | 组合构建、回测、上线 | 待定 |
-| `options` | 波动率曲面、Greeks、对冲 | 刘炽 |
+| `factor` | 因子开发 → 外部评估器调用 → 主线入库 | 肖骥超 |
+| `model` | 模型元数据 → 跨组协同（CI 基建维护模式） | 陈镇鸿 |
+| `risk` | 风控指标计算 → verdict（CI 基建维护模式） | 杨欣琳 |
+| `strategy` | 组内工具适配层（业务功能归组自研） | 组内 |
+| `options` | 组内工具适配层（业务功能归组自研） | 组内 |
 
 **三大生产模式的契约**（所有 Compose 流的架构基石）：
 
@@ -116,6 +127,8 @@
 
 - **Compose 视图前端**（OpenCode desktop fork UI 改造：Compose 视图、任务树、Subagent 监控）
 - **跨组通知中心**（HumanGate 触发后的统一通知面板）
+- **SSH 登录界面**（F-05，用户点名：完整登录流程 host/user/key → 连接状态 → 组绑定，非只读卡片）
+- **报告平台整合**（策略/因子/模型/风控层汇报统一入海威报告平台，可并入对外产品 2——非核心竞争力，对外可见）
 
 ### 3.3 不做（明确边界）
 
@@ -124,6 +137,11 @@
 - ❌ **多租户 SaaS / 对外服务** —— 我们是内部工具
 - ❌ **自建 LLM 训练** —— 用 Claude / GPT
 - ❌ **造数据基建** —— 让基建组负责，agent 组消费
+- ❌ **业务层面的产品功能**（v2 平台红线）—— 策略回测产品、组合产品、期权定价产品归各组自研；策略层汇报归报告平台；回测/组合引擎代码保留为组内工具适配层
+- ❌ **产出/代码门禁（HumanGate 滥用）**（v2）—— 产出人本来要看（报告平台承接），代码有 CI/PR；Gate 只管写操作进生产面。避免 Z code 式"每个动作都批准"把用户逼成完全访问
+- ❌ **"模型 PR"场景**（v2）—— 模型走 COS 传 PKL，代码走正常 PR + GitHub Actions Multi-Agent Review
+- ❌ **论文复现功能**（v2）—— 研究层调优是研究员自己的工作，Agent 无增益；只做已调试代码的部署适配
+- ❌ **跳过方案直接生成代码**（v2，P-10）—— 非平凡任务冻结方案文档前，代码工具不可用；一口气生成的代码准确性与可审核性都不可接受（trivial 修复显式豁免）
 - ❌ **Supervisor/Verifier 独立 agent**（Pattern 3） —— 量化验收天然量化，`assert` + Goal/Judge 已够
 - ❌ **Event-Driven Pub/Sub**（Pattern 4） —— 6 人小团队 A→B 直接调用足够
 - ❌ **完整 Idempotent Retry Chain**（Pattern 6） —— 副作用 tool dedupe 兜底，不做完整哈希链
@@ -136,7 +154,11 @@
 
 每套流 = 一组 SKILL.md + 调度规则 + 默认 tool 集 + MEMORY.md。详细 skill 列表见 `docs/QuantCode_Design.md` §4.3。
 
-#### 4.1.1 risk Compose 流（PR 风控门禁）
+> **v2 定位修订**：risk/model 流（PR 链）降级为 CI 基建维护模式；strategy/options/fundamental 流业务功能归组自研，QuantCode 侧只留组内工具适配层（回测/组合引擎代码保留；PIT 检索与研报生成保留为基本面组工具）。以下各流详述保留 v1 内容作为工程实现参考（越限审批等旧语义已在各节标注），**产品口径以 FUNCTIONAL_SPEC v0.2.1 为准**。
+
+#### 4.1.1 risk Compose 流（CI 风控门禁——基建维护模式）
+
+**v2 场景说明**："模型 PR"是伪场景（模型走 COS 传 PKL）。本流实际服务**代码 PR** 的 CI 风控门禁（`.github/workflows/risk-gate.yml`），越限 verdict 直接 fail；HumanGate 不再挂产出门禁，只挂写操作（见 F-03）。
 
 **用户故事**：
 > 作为模型组研究员，我提交策略代码 PR 后，希望 10 分钟内自动得到风控分析 JSON，告诉我 max_drawdown / position_limit / 相关性 / 容量 / VaR 是否满足阈值，不用等风控组人工 review 就知道哪里要改。
@@ -153,7 +175,7 @@
 > 1. 读取 model 组提交的模型元数据（从 Blackboard）
 > 2. 调用风控计算工具获得各项指标
 > 3. 生成符合 RiskProfile schema 的结构化报告
-> 4. 如果 VaR/MaxDD 超阈值，触发人工审批
+> 4. VaR/MaxDD 超阈值 → verdict 直接 fail 写入报告（v2：越限不触发 HumanGate，产出门禁已内化于评估流程，见 F-03）
 > 5. 最终把分析结果写回 PR
 
 **输入**：任务描述（"分析 PR #123 的风控"）+ Blackboard key（`model.pr.123`）
@@ -166,7 +188,7 @@ assert risk_json["max_drawdown"] <= 0.20
 assert risk_json["position_limit"] <= 0.30
 assert abs(risk_json["correlation_with_existing"]) <= 0.60
 assert risk_json["tail_risk_var_99"] is not None
-# 越过阈值时自动触发 HumanGate
+# v2：越限 → verdict=fail 写入 PR 报告（不触发 HumanGate，见 F-03 收窄）
 ```
 
 #### 4.1.2 fundamental Compose 流（基本面 + PIT-RAG）
@@ -190,10 +212,12 @@ assert risk_json["tail_risk_var_99"] is not None
 ```python
 for doc in result["documents"]:
     assert doc["published_at"] <= query["as_of_date"]
-# 渲染 PDF 后人工验收：研究员愿意发出去 = 通过（走 HumanGate）
+# v2：渲染后人工验收为流程内审阅（人本来就要看产出），不走 HumanGate——研报发布渠道归报告平台
 ```
 
-#### 4.1.3 factor Compose 流（因子评估）
+#### 4.1.3 factor Compose 流（因子评估——外部评估器注册 + 部署适配）
+
+**v2 重定义**（详见 FUNCTIONAL_SPEC F-06）：Agent 不参与评估过程，但通过能力目录（P-07）知道组织有哪些现成评估能力（quant_evaluator 51 注册指标 / factor_engine DSL 460+ 算子 / data_access PIT 数据层，以 org 仓库实测为准）与调用时机；数据桥 = `tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。部署适配走 /deploy 黑盒命令（P-09，目标底层 = alpha_flow）。研究层调优不做（论文复现取消）。
 
 **Available Tools**（Agent 可调用）：
 - `match_main(idea)` - 匹配主线因子库，判断兼容性
@@ -241,7 +265,9 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 **System Prompt**（核心指令）：
 > 你是期权组 Agent。围绕用户的期权策略 idea，构建波动率曲面，计算风险敞口（Greeks），执行策略回测。
 
-#### 4.1.6 strategy Compose 流
+#### 4.1.6 strategy Compose 流（组内工具适配层）
+
+> **v2 降级**：策略业务功能归策略组自研（"策略内部的东西我们自己开"）；QuantCode 侧保留 `tools/strategy/backtest_engine.py`（internal_v1）与 `tools/portfolio/` 作为组内工具适配层，不做产品 UI。期权组同理自研（不强推 options_v1）。策略层表现汇报统一归报告平台（可并入对外产品 2）。
 
 **Available Tools**（Agent 可调用）：
 - `select_signals(candidates)` - 从候选信号中筛选
@@ -262,6 +288,8 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 | **2 Stateful Blackboard** | MEMORY.md / checkpoint.md / progress.md + SQLite FTS5 | Lead |
 | **5 Human-in-the-Loop Gate** | HumanGate schema + OpenCode permission 系统 | 杨欣琳 |
 
+> **v2 语义收窄**：Pattern 5 的机械（interrupt/resume）保留，触发面收敛为**四类写操作**（merge_to_main / SSH 生产写 / 跨组资源 / 预算）——见 FUNCTIONAL_SPEC F-03；产出与代码不再触发 Gate。
+
 **保险栓**：`@dedupe_within` 装饰器（陈镇鸿）覆盖 `github_pr_*` / `send_email` / `slack_notify` / `cross_team_notify`。
 
 ### 4.3 共用基础设施
@@ -273,6 +301,8 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 ### 4.4 核心引擎功能实现路线
 
 > **背景**：QuantCode 需要 Memory、Checkpoint、Workflow 等引擎能力支撑长任务执行。MimoCode (`vendor/mimo-code/`) 已实现类似功能，我们参考其设计并实现 Python 版本。
+
+> **v2 状态注**：本表为 v1 实施计划快照，状态以 FUNCTIONAL_SPEC 为准——Memory / Subagent（P-04）/ 自动 Checkpoint / 上下文重建 / Goal+Judge 均已实现（Goal+Judge 已被 P-10 方案先行工作流吸收扩展）；`vendor/mimo-code/` 已移除，仅保留设计参考价值。
 
 | 功能 | 用户价值 | 技术实现 | 参考资源（MimoCode 路径） | 优先级 | 状态 | 负责人 |
 |------|---------|---------|--------------------------|--------|------|--------|
@@ -312,7 +342,8 @@ assert report["ic_metrics"]["t_stat"] >= 2.0
 - 一次因子评估（CSI 1000，3 年回溯）< 30s
 - pit-rag 检索 P95 延迟 < 500ms
 - 研报 PDF 生成 < 5min（含 RAG + LLM + 渲染）
-- 模型组 PR → 风控反馈 < 10min
+- Admin 跨组语义查询 P95 < 15s（P-08）
+- 方案先行首轮方案产出（不含代码）< 5min（P-10）
 
 ### 5.2 可观测性
 
@@ -388,7 +419,7 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 
 ## 7. 里程碑（M1 / M2 / M3，具体日期由 Lead 编排）
 
-> **时间线由 Lead 编排**，不在 PRD 内固化。下表只描述里程碑达成标准。
+> **时间线由 Lead 编排**，不在 PRD 内固化。下表只描述里程碑达成标准。M1–M4 为 v1 历史口径（其中 PR 链语境已按 v2 降级为 CI 基建），M5 为 v2 新增。
 
 | 里程碑 | 达成标准 |
 |---|---|
@@ -396,6 +427,7 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 | **M2 端到端打通** | 一条 PR → model Compose → risk Compose → CI gate → 验收报告全链路跑通；至少 1 个非 agent 组同学用上 |
 | **M3 横向接入** | ≥3 套 Compose 流跑在同一调度 + 验收框架上（risk / fundamental / factor）；投资人 demo 物料齐全（研报 PDF + CI log + 因子迭代数据） |
 | **M4 闭环 + 自我进化** | Dream / Distill 上线；MEMORY/RAG 跨会话留存；前端 Compose 视图可用；6 个组全部接入 |
+| **M5 平台支柱（v2 新增）** | P-07 蒸馏管线跑通首批（目标收益口径契约 + Quant Evaluator + Factor Engine + Data Access 四张能力卡片，常驻组上下文）；P-08 Admin 组建立且跨组语义查询可用（非 Admin 被拒）+ **GitGraph 面板与双类 pop（repo/package）上线**；P-09 /deploy 黑盒命令端到端（已调试代码 → AlphaFlow 入库，全程不泄露底层，无审批被拦）；F-05 SSH 登录界面上线 |
 
 **节奏硬规则**：
 - M1 完成前不允许业务 schema 不通过 review 就动工
@@ -422,10 +454,16 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 | 学生时间不稳定 | 高 | 中 | 每个 track 配主副 owner，主病了副可顶 |
 | 数据基建依赖卡住 RAG | 中 | 高 | M1 就和基建组确认数据接入方式 |
 | dedupe 装饰器没及时上线导致 PR 评论刷屏 | 低 | 中 | 陈镇鸿 Day 1 必须先出装饰器，CI 上线前 mock 不写真实评论 |
+| **蒸馏物过期/口径漂移**（v2） | 中 | 高 | 能力卡片标注来源 commit + 日期；CI 定期校验卡片接口面与代码一致；漂移即告警 |
+| **权限 Mask 配置失误泄密**（v2） | 低 | 高 | 权限权威源 = 用户组权限分配方案（与 Git 权限同源对齐）；游客组默认全 Mask；fail-closed |
+| **/deploy 被滥用绕过审查**（v2） | 低 | 高 | 部署必经写操作 HumanGate；黑盒管线只接受 AlphaFlow 适配器认可的格式；全量 evidence chain 留痕 |
+| **组内工具层被误当产品**（v2） | 中 | 低 | 文档与 UI 均不宣传；代码注释标注"组内工具适配层"；产品功能索引以 FUNCTIONAL_SPEC 为准 |
 
 ---
 
 ## 10. 成功指标
+
+> M2/M3 为 v1 历史口径（PR 链语境已按 v2 降级为 CI 基建），保留作为达成记录；**v2 生效指标见 M5**。
 
 ### M2（端到端打通）
 
@@ -446,6 +484,14 @@ Schema 改动需要走 PR review（`opencode.jsonc` 中已配 `"schemas/**": "as
 - 平均每组提效 > 30%（按节省的人工小时数衡量）
 - Distill 自动生成的 skill 数量持续增长
 - 监控、降级、性能优化等生产化加固
+
+### M5 / 平台支柱（v2）
+
+- **最大复用成为默认行为**：组员不再需要"明确告诉 AI 要用哪个库"——能力卡片常驻后，Agent 方案首选已登记能力；自造行为出现前先向人征询（抽检 Agent 方案，自造率显著下降）
+- **口径违规可检测**：目标收益自算等违规用法被 Agent 及时发现并报告（对齐 t+1→t+2 实测案例）
+- **Admin 一问即得**："最近每组工作情况/各模块运行情况/错误记录"自然语言查询跨组汇总成功；非 Admin 跨组查询被拒（权限语义层成立）
+- **部署黑盒成立**：/deploy 全流程未向操作者泄露 AlphaFlow 底层（正常询问 AI 也不透露）；无审批时部署被拦
+- **报告平台承接产出**：各组从报告平台反推生产环境算法/模型问题 → 本地修改 → push（或 /deploy），形成日常研究闭环
 
 ---
 

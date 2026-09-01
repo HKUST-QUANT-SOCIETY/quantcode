@@ -1,4 +1,11 @@
-"""check_portfolio_gate — 组合阈值裁决 + HumanGate interrupt payload 构造（确定性）。"""
+"""check_portfolio_gate — 组合阈值裁决（确定性）。
+
+v0.2 收窄（F-03 / governance G2-A8）：组合越限 = gate 判定 **fail**——
+breached / reasons 随裁决返回，由报告平台承接，不再构造 HumanGate
+interrupt payload、不再暂停等审批（组合产出不 gate，只有写操作进
+生产面才 gate）。``runner.human_gate`` 的 interrupt 机制保留给写操作
+触发点（merge / permission / deploy / budget）复用。
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -24,22 +31,6 @@ def _yaml_defaults() -> dict[str, float]:
     }
 
 
-def maybe_interrupt(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """在 LangGraph 上下文内用 interrupt() 真暂停（与 request_human_review 同路）。
-
-    GraphInterrupt 是 BaseException 子类 → 向 tool_node 冒泡（tool_node 对
-    GraphBubbleUp re-raise），LangGraph 暂停等 Command(resume=...)。
-    resume 后 interrupt() 返回 resume payload（{"decision": ...}）。
-    不在 graph 内（MCP 直调/单测直调）→ RuntimeError，返回 None 不中断。
-    """
-    try:
-        from langgraph.types import interrupt
-
-        return interrupt(payload)
-    except RuntimeError:
-        return None
-
-
 def max_drawdown_proxy_impl(equity_curve: list[float]) -> float:
     """组合回撤代理：max(peak - equity) / peak。空/单点 → 0.0。"""
     if not equity_curve or len(equity_curve) < 2:
@@ -60,12 +51,15 @@ def check_portfolio_gate_impl(
     equity_curve: list[float] | None = None,
     thread_id: str = "",
 ) -> PortfolioGateVerdict:
-    """裁决 + requires_human 时经 runner.human_gate.build_interrupt_payload(kind 风格) 组 payload。
+    """裁决组合计划是否越过阈值；越限 → 裁决 fail（不再触发人审暂停）。
 
     thresholds 键（键名 LLM 可给摘要，缺省用默认）：
     - max_single_weight     单资产权重上限（目标权重里逐个查，含 plan.to_w）
     - max_turnover          换手上限
     - max_drawdown_proxy    回撤代理上限（仅当提供 equity_curve）
+
+    ponytail: ``thread_id`` 形参保留（registry 调用方传参、签名兼容），
+    收窄后裁决不再产生 gate payload，故当前未使用。
     """
     if isinstance(plan, dict):
         plan = RebalancePlan(**plan)
@@ -102,51 +96,15 @@ def check_portfolio_gate_impl(
             breached.append("drawdown_proxy")
             reasons.append(f"drawdown proxy {dd:.4f} > max_drawdown_proxy {max_dd}")
 
-    requires_human = bool(breached)
-    payload: dict[str, Any] | None = None
-    if requires_human:
-        from runner.human_gate import build_interrupt_payload, make_gate_id
-
-        payload = build_interrupt_payload(
-            gate_id=make_gate_id(thread_id or "portfolio"),
-            risk_profile={
-                "kind": "portfolio",
-                "breached": breached,
-                "turnover": plan.turnover,
-                "fee_total": plan.fee_total,
-                "max_single_weight_seen": round(worst_w, 6),
-                "thresholds": {
-                    "max_single_weight": max_single,
-                    "max_turnover": max_turnover,
-                    "max_drawdown_proxy": max_dd,
-                },
-            },
-            reasons=reasons,
-            message=f"⏸️ HumanGate: portfolio thresholds exceeded ({', '.join(breached)})",
-        )
-        # LangGraph 上下文内 → interrupt() 抛 GraphInterrupt 冒泡暂停；resume 后
-        # 本行返回 resume payload → 归一为 decision dict（供 _extract_state_fields
-        # 写 human_review_result，镜像 request_human_review 契约）。
-        # 进程外直调（测试/MCP 单步）→ interrupt 抛 RuntimeError → 返回带 payload
-        # 的 verdict（requires_human=True，由调用方决定下一步）。
-        resumed = maybe_interrupt(payload)
-        if resumed is not None:
-            from runner.human_gate import normalize_external_decision, parse_resume_decision
-
-            raw = parse_resume_decision(resumed)
-            external = normalize_external_decision(raw) if raw else "reject"
-            return {
-                "decision": "proceed" if external == "approve" else "abort",
-                "external_decision": external,
-                "gate_id": payload.get("gate_id", ""),
-                "breached": breached,
-                "reasons": reasons,
-                "reviewed_by": "human",
-            }
+    # v0.2 收窄：越限 → 裁决 fail（breached/reasons 承载失败语义），不再构造
+    # interrupt payload、不再经 maybe_interrupt() 暂停等 resume。
+    # schemas/portfolio.py 在本次文件集外，``requires_human`` / ``interrupt_payload``
+    # 字段保留但语义收窄：requires_human 恒 False（是否违规看 breached/reasons）。
+    # ponytail: 原 maybe_interrupt() 一并删除（仓库内无其他调用方）。
     return PortfolioGateVerdict(
         thresholds={"max_single_weight": max_single, "max_turnover": max_turnover, "max_drawdown_proxy": max_dd},
         breached=breached,
-        requires_human=requires_human,
+        requires_human=False,
         reasons=reasons,
-        interrupt_payload=payload,
+        interrupt_payload=None,
     )

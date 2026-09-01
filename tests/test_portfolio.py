@@ -6,7 +6,8 @@
 - 奇异协方差回退 equal_weight + 注记
 - 截断后 Σw = 1 守恒（max_single_weight 后处理）
 - 调仓 delta 阈值 + 成本（佣金/印花税）
-- 超阈值 → interrupt payload + AgentRunner 端到端 waiting_for_human（ScriptedLLM）
+- 超阈值 → 裁决 fail（requires_human=False、无 interrupt payload，G2-A8 收窄）
+  + AgentRunner 端到端零 interrupt 完成（ScriptedLLM）
 - configs/portfolio.yaml 单源（tmp 值生效）
 """
 from __future__ import annotations
@@ -208,7 +209,7 @@ def test_rebalance_plan_as_dict_via_tool():
 
 
 # ---------------------------------------------------------------------------
-# gate：阈值 / 回撤代理 / interrupt payload
+# gate：阈值 / 回撤代理 / 收窄语义（verdict fail，无 interrupt payload）
 # ---------------------------------------------------------------------------
 
 
@@ -224,7 +225,8 @@ def test_gate_passthrough_when_within_thresholds():
     assert v.interrupt_payload is None
 
 
-def test_gate_breach_builds_interrupt_payload():
+def test_gate_breach_verdict_fail_without_interrupt_payload():
+    """G2-A8 收窄：越限 = 裁决 fail（breached/reasons 承载），不再构造 HumanGate payload。"""
     from tools.portfolio.gate import check_portfolio_gate_impl
     from tools.portfolio.rebalance import rebalance_plan_impl
 
@@ -232,13 +234,11 @@ def test_gate_breach_builds_interrupt_payload():
     v = check_portfolio_gate_impl(
         plan, thresholds={"max_single_weight": 0.10, "max_turnover": 0.4}, thread_id="t-gate-1"
     )
-    assert v.requires_human is True
+    assert v.requires_human is False
+    assert v.interrupt_payload is None
     assert set(v.breached) == {"single_weight", "turnover"}
-    p = v.interrupt_payload
-    assert p is not None
-    assert p["gate_id"].startswith("hg_t_gate_1") or p["gate_id"].startswith("hg_")
-    assert p["risk_profile"]["kind"] == "portfolio"
-    assert p["reasons"] == v.reasons
+    assert len(v.reasons) == len(v.breached)
+    assert all("max_single_weight" in r or "max_turnover" in r for r in v.reasons)
 
 
 def test_gate_drawdown_proxy():
@@ -254,7 +254,7 @@ def test_gate_drawdown_proxy():
 
 
 # ---------------------------------------------------------------------------
-# 集成：ScriptedLLM Agent 跑 portfolio 工具，超阈 → HumanGate interrupt
+# 集成：ScriptedLLM Agent 跑 portfolio 工具，超阈 → 裁决 fail、零 interrupt 完成
 # ---------------------------------------------------------------------------
 
 
@@ -292,9 +292,9 @@ def tmp_db(tmp_path):
     clear_checkpointer_cache()
 
 
-def test_runagent_portfolio_gate_interrupts(tmp_db, clean_registry):
-    """端到端：LLM 调 construct_portfolio → rebalance_plan → check_portfolio_gate，
-    gate 超阈 → risk_metrics 注入 → human_gate interrupt → status=waiting_for_human。"""
+def test_runagent_portfolio_gate_breach_zero_interrupts(tmp_db, clean_registry):
+    """G2-A8 收窄 E2E：LLM 调 construct_portfolio → rebalance_plan → check_portfolio_gate，
+    gate 超阈 → 裁决 fail 随 tool_result 返回，全程零 __interrupt__，流程正常完成。"""
     pytest.importorskip("langgraph")
     register_tool(_gate_mark_done_tool())
     # clean_registry 清空了全局 registry；模块 import 已被缓存（副作用不再触发），
@@ -330,7 +330,7 @@ def test_runagent_portfolio_gate_interrupts(tmp_db, clean_registry):
                 })],
                 "s3",
             ),
-            # approve 恢复后收尾（状态变化避免 fingerprint 误判 loop）
+            # 无需任何 resume：裁决 fail 后直接收尾（状态变化避免 fingerprint 误判 loop）
             _ai_with_tools([("mark_task_done", {"ok": True})], "s4"),
         ]
     )
@@ -343,27 +343,18 @@ def test_runagent_portfolio_gate_interrupts(tmp_db, clean_registry):
         thread_id="portfolio-gate-e2e-1",
         flow_name="portfolio_e2e",
     )
-    assert final.get("status") == "waiting_for_human", (
-        f"expected gate interrupt, got {final.get('status')}; trace={final.get('execution_trace')}"
+    # 收窄语义：零 interrupt、不停在 waiting_for_human、流程完成
+    assert "__interrupt__" not in final, (
+        f"组合越限不应再触发 interrupt；got {final.get('__interrupt__')}"
     )
-    gate = final.get("gate") or {}
-    assert gate.get("decision_schema", {}).get("allowed") == ["approve", "reject"]
-    assert any("portfolio" in str(r) or "weight" in str(r) for r in gate.get("reasons", []))
-    # gate payload 带 HumanGateInterruptPayload 契约字段
-    assert "gate_id" in gate and "message" in gate
-
-    # approve 恢复 → gate tool 返回 decision dict → ScriptedLLM 继续调 mark_task_done
-    # → run 正常终态（无 pending interrupt）
-    resumed = runner.resume(
-        thread_id="portfolio-gate-e2e-1",
-        decision="approve",
-        flow_name="portfolio_e2e",
+    assert final.get("status") != "waiting_for_human"
+    assert final.get("task_status") == "done"
+    # 裁决 fail 随 tool_result 返回（breached / requires_human=False 可见）
+    tool_outputs = [str(getattr(m, "content", "")) for m in final["messages"]]
+    assert any("single_weight" in output for output in tool_outputs), (
+        f"expected breached verdict in tool outputs; trace={final.get('execution_trace')}"
     )
-    assert resumed.get("thread_id") == "portfolio-gate-e2e-1"
-    from runner.human_gate import extract_interrupt_payload
-
-    assert extract_interrupt_payload(resumed) is None
-    assert resumed.get("task_status") == "done"
+    assert any("requires_human" in output and "False" in output for output in tool_outputs)
 
 
 # ---------------------------------------------------------------------------
