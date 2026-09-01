@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hkust-quant-society.github.io/quantcode/schemas/capability-card.schema.json",
+  "title": "Capability Card",
+  "description": "P-07 组织资产蒸馏——能力卡片契约。两类蒸馏物：asset（资产卡，repo 蒸馏）/ contract（口径契约卡）。蒸馏粒度守则：蒸 API 面，不蒸实现细节；数据字段清单与部署底层结构不进卡片正文（细节走属组 scope Memory 检索，游客组仅 contract 卡可见，fail-closed）。落盘单源 configs/capabilities.yaml（顶层 cards 列表）。与 schemas/capability_card.py::CapabilityCard 保持一致。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "type",
+    "when_to_use",
+    "when_not_to_reinvent",
+    "owner_group",
+    "distilled_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "卡片 id（kebab-case；进入摘要行 / list_capabilities / Memory key）"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "能力显示名（如 'Quant Evaluator 批量因子评估器'）"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["asset", "contract"],
+      "description": "asset=资产卡（repo 蒸馏）；contract=口径契约卡（如 TargetReturnView/v1）"
+    },
+    "api_surface": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "关键入口列表（每条 = 模块路径/门面函数/契约类型名 + 一句话）；只蒸 API 面，不蒸实现细节；数据字段清单与部署底层结构不进本字段"
+    },
+    "when_to_use": {
+      "type": "string",
+      "minLength": 1,
+      "description": "何时用（进入常驻摘要行；写给 Agent 的复用触发条件）"
+    },
+    "when_not_to_reinvent": {
+      "type": "string",
+      "minLength": 1,
+      "description": "何时别自造（最大复用原则的反面清单：已有能力覆盖时禁止另造）"
+    },
+    "owner_group": {
+      "type": "string",
+      "enum": ["factor", "fundamental", "model", "options", "risk", "strategy", "all"],
+      "description": "属组（Git repo 权限 = Memory 权限同源）；contract 卡用 'all'；asset 卡为六组之一（Memory groups scope 落点）"
+    },
+    "source_commit": {
+      "type": "string",
+      "maxLength": 64,
+      "default": "",
+      "description": "蒸馏源 commit（org repo 的 HEAD sha 短码，Step 0 gh 实测）；in-repo 契约卡留空并标注分支"
+    },
+    "distilled_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "蒸馏日期（ISO 日期，Step 0 调研日）"
+    }
+  }
+}

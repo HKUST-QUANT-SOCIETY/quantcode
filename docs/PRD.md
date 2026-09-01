@@ -217,7 +217,7 @@ for doc in result["documents"]:
 
 #### 4.1.3 factor Compose 流（因子评估——外部评估器注册 + 部署适配）
 
-**v2 重定义**（详见 FUNCTIONAL_SPEC F-06）：Agent 不参与评估过程，但通过能力目录（P-07）知道组织有哪些现成评估能力（quant_evaluator 51 注册指标 / factor_engine DSL 460+ 算子 / data_access PIT 数据层，以 org 仓库实测为准）与调用时机；数据桥 = `tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。部署适配走 /deploy 黑盒命令（P-09，目标底层 = alpha_flow）。研究层调优不做（论文复现取消）。
+**v2 重定义**（详见 FUNCTIONAL_SPEC F-06）：Agent 不参与评估过程，但通过能力目录（P-07）知道组织有哪些现成评估能力（quant_evaluator 60 注册指标（权威源 METRIC_REGISTRY_COVERAGE.csv）/ factor_engine DSL 460+ 算子 / data_access PIT 数据层，以 org 仓库实测为准）与调用时机；数据桥 = `tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。部署适配走 /deploy 黑盒命令（P-09，目标底层 = alpha_flow）。研究层调优不做（论文复现取消）。
 
 **Available Tools**（Agent 可调用）：
 - `match_main(idea)` - 匹配主线因子库，判断兼容性

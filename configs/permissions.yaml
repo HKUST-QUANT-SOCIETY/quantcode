@@ -10,3 +10,8 @@
 #   strategy.deploy_strategy: ask
 permissions:
   fundamental.publish: deny
+  # F-03 触发点② SSH 分级（governance SPEC §2.3 ②；分级判定
+  # runner/server_ssh.classify_ssh_action，判定来源见其 _prod_targets 注释）：
+  ssh.read: allow        # SSH 读（列目录/读文件）不 gate
+  ssh.dev.write: allow   # 开发环境写不 gate（push 等自动操作亦不 gate）
+  ssh.prod.write: ask    # 生产环境写 → HumanGate(kind=deploy)（permission_engine.check_ssh/enforce_ssh）

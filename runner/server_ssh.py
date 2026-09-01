@@ -55,7 +55,8 @@ def _load_configs() -> list[dict[str, Any]]:
     """读取 ssh_mainline 配置：env ``QUANTCODE_SSH_MAINLINE`` 优先，其次 config.json。
 
     每项必需 name / host / user / key_path / mainline_dir，port 缺省 22，
-    host_key 可选（OpenSSH 公钥行，如 ``ssh-ed25519 AAAA...``）。
+    host_key 可选（OpenSSH 公钥行，如 ``ssh-ed25519 AAAA...``），
+    env 可选（环境角色标注，``"prod"`` → F-03 生产写闸，见 classify_ssh_action）。
     配置缺失返回空列表；结构非法抛 ValueError。
     """
     raw: Any = None
@@ -98,6 +99,7 @@ def _load_configs() -> list[dict[str, Any]]:
                 "key_path": str(item["key_path"]),
                 "mainline_dir": str(item["mainline_dir"]),
                 "host_key": str(host_key).strip() if host_key else None,
+                "env": str(item.get("env") or "").strip().lower() or None,
             }
         )
     return servers
@@ -106,6 +108,99 @@ def _load_configs() -> list[dict[str, Any]]:
 def list_servers() -> list[str]:
     """列出已配置的主线服务器名（不需要 paramiko / 不联网）。"""
     return [s["name"] for s in _load_configs()]
+
+
+# ---------------------------------------------------------------------------
+# F-03 触发点② 写操作分级（governance SPEC §2.3 ②，AG-F）
+# ---------------------------------------------------------------------------
+
+# 读操作封闭集合；未知名 action 一律按**写**处理（fail-closed：陌生写操作不会
+# 被误判为 read 绕过生产写闸）。
+_SSH_READ_ACTIONS = frozenset({
+    "read", "list", "ls", "listdir", "get", "status", "stat", "cat",
+    "read_file", "read_mainline_file", "read_mainline_listing",
+})
+
+# target_env 直接给环境名时可识别的生产标签。
+PROD_ENV_LABELS = frozenset({"prod", "production", "生产"})
+
+
+def _prod_targets() -> set[str]:
+    """收集 prod 判定标记（``classify_ssh_action`` 的 prod 来源，注释即规格）：
+
+    ① **服务器配置 env 角色标注**（最简可测方案）：``ssh_mainline`` 条目可选
+       ``"env": "prod"`` 字段标注 A/B 服务器的生产角色——命中后该条目的 name 与
+       host 都算生产目标。配置来源与 ``_load_configs`` 同源（env 变量
+       ``QUANTCODE_SSH_MAINLINE`` 优先，其次 config.json）。
+    ② **内建环境标签**：target_env 直接写 ``prod`` / ``production`` / ``生产``。
+    未命中任何来源 → 开发环境（按显式标注判定，不做猜测。升级路径：SSH 指纹
+    →组映射绑定 env 角色，见 F-05 登录界面）。
+    """
+    targets: set[str] = set(PROD_ENV_LABELS)
+    for s in _load_configs():
+        if str(s.get("env") or "").lower() in PROD_ENV_LABELS:
+            targets.update({s["name"].lower(), s["host"].lower()})
+    return targets
+
+
+def classify_ssh_action(action: str, target_env: str) -> str:
+    """F-03 触发点②分级纯函数：``"read" | "dev_write" | "prod_write"``。
+
+    - action ∈ ``_SSH_READ_ACTIONS`` → read（SSH 读永不 gate）；
+    - 其余 action（写/部署/删除等，含未知名，fail-closed）→ 按 target_env 分级：
+      命中 ``_prod_targets()``（配置 env=prod 标注或内建 prod 标签）→ prod_write，
+      否则 dev_write（开发环境写不 gate）。
+
+    纯判定：只读本地配置与入参，不联网、无副作用（prod 判定来源见
+    ``_prod_targets`` 注释）。
+    """
+    if str(action).strip().lower() in _SSH_READ_ACTIONS:
+        return "read"
+    env = str(target_env).strip().lower()
+    return "prod_write" if env in _prod_targets() else "dev_write"
+
+
+def ssh_status() -> dict[str, Any]:
+    """只读元工具后端：SSH 连接配置状态摘要（不联网、不连 SSH、零副作用）。
+
+    返回每个已配置服务器的连接要素（host/user/port）、host_key 摘要（sha256
+    前 12 位）、env 角色、私钥文件存在性，以及指纹→组映射
+    （``quantcode.identity``）是否就绪——供 F-05 登录界面 / Admin 面板展示。
+
+    **移交说明：注册到 mcp_server 的工作归 AG-D（W3 窗口）**——本函数只交付
+    可被调用的后端实现。
+
+    ponytail: 只读现有配置与绑定文件，不做连通性探测
+    （升级路径：可选 TCP probe / paramiko 指纹实算）。
+    """
+    from quantcode.identity import load_bindings
+
+    servers: list[dict[str, Any]] = []
+    for s in _load_configs():
+        host_key = s.get("host_key")
+        servers.append(
+            {
+                "name": s["name"],
+                "host": s["host"],
+                "port": s["port"],
+                "user": s["user"],
+                "env_role": s.get("env"),
+                "host_key_set": bool(host_key),
+                "host_key_digest": (
+                    hashlib.sha256(host_key.encode("utf-8")).hexdigest()[:12]
+                    if host_key
+                    else None
+                ),
+                "key_file_present": Path(os.path.expanduser(s["key_path"])).exists(),
+            }
+        )
+    bindings = load_bindings()
+    return {
+        "configured": bool(servers),
+        "servers": servers,
+        "group_bindings_ready": bool(bindings),
+        "group_bindings_count": len(bindings),
+    }
 
 
 def _get_server(name: str) -> dict[str, Any]:
@@ -295,4 +390,11 @@ def read_mainline_file(server: str, relpath: str) -> str:
     return text
 
 
-__all__ = ["list_servers", "read_mainline_listing", "read_mainline_file"]
+__all__ = [
+    "list_servers",
+    "read_mainline_listing",
+    "read_mainline_file",
+    "classify_ssh_action",
+    "ssh_status",
+    "PROD_ENV_LABELS",
+]

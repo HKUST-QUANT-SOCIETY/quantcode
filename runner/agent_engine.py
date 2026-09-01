@@ -48,6 +48,7 @@ from runner.agent_nodes import (
 )
 from runner.langgraph_base import CHECKPOINTS_DB, get_checkpointer, make_thread_id
 from runner.routing.guards import MAX_ITERATIONS
+from runner.distill.inject import append_capability_digest  # P-07: 常驻能力目录摘要（best-effort）
 from tools.loop_detector import LoopDetector
 from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
@@ -537,6 +538,9 @@ class AgentRunner:
         elif system_prompt is None:
             system_prompt = ""
 
+        # P-07：能力目录常驻摘要（configs/capabilities.yaml 单源；best-effort，缺席不砸 run）。
+        system_prompt = append_capability_digest(system_prompt, group=self.group)
+
         app = self.build(
             skill_name=skill_name,
             meta_skills=meta_skills,
@@ -611,6 +615,9 @@ class AgentRunner:
                 system_prompt = load_skill(skill_name, group=self.group, meta_skills=meta_skills)
         elif system_prompt is None:
             system_prompt = ""
+
+        # P-07：能力目录常驻摘要（与 run() 同款注入；stream 路径同样每次 run 可见）。
+        system_prompt = append_capability_digest(system_prompt, group=self.group)
 
         trace: list[dict] = []
         seq = 0

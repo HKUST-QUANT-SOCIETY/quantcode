@@ -85,7 +85,7 @@
 
 **三项能力**：
 
-1. **外部评估器注册**：Quant Evaluator（纯回测，**51 注册指标**——以 `HKUST-QUANT-SOCIETY/quant_evaluator` 仓库实测为准）、Factor Engine（DSL，460+ 算子）、Data Access（PIT 数据层）以 MCP 工具描述/蒸馏文档登记——Agent **不参与评估过程**，但知道存在/能力/调用时机（"评估流程要嵌在哪个环节时，自动识别应调用哪个 package"）。数据桥已有：`tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。
+1. **外部评估器注册**：Quant Evaluator（纯回测，**60 注册指标**——权威源 `METRIC_REGISTRY_COVERAGE.csv` 实测；README 口径一致）、Factor Engine（DSL，460+ 算子）、Data Access（PIT 数据层）以 MCP 工具描述/蒸馏文档登记——Agent **不参与评估过程**，但知道存在/能力/调用时机（"评估流程要嵌在哪个环节时，自动识别应调用哪个 package"）。数据桥已有：`tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。
 2. **契约遵守检测（口径统一）**：目标收益等口径以数据契约登记（见 [specs/data/SPEC.md](data/SPEC.md) §2.5：Horizon∈{1,5,10,20}、t+1→t+2、后复权表为唯一取值源，禁止自算）；Agent/Memory 能发现组员未遵守契约的用法并报告（背景：实测有组员把 t+1→t+2 算成 t→t+1 致收益虚高）。
 3. **部署适配**：已调试代码 → AlphaFlow 部署库自动适配（= P-09 `/deploy` 黑盒命令）；**不做论文复现**（研究层调优是研究员自己的工作，Agent 无增益）。
 
@@ -155,7 +155,7 @@
 
 **契约草案**：**Step 0 资产调研（先行，2026-09-01 补——禁止凭会议记忆手写卡片）**：gh 只读扫描 `HKUST-QUANT-SOCIETY` org（实测 69 repo，核心层 14 个活跃），产出 `docs/audit/ASSET_INVENTORY.md`（每个核心 repo 一行：定位/语言/接口入口/活跃度/属组归属；归档层如 infra-*/test* 标注不蒸馏）→ repo → 蒸馏为**能力卡片**（功能/接口面/何时用/何时别自造/权限属组；**type 字段区分 资产卡/口径契约卡 两类**）→ **权限过滤**（用户组权限分配方案为权威源；游客组 Mask 数据字段清单）→ Memory GROUP scope + **常驻目录摘要**。蒸馏粒度：蒸 API 面，不蒸实现细节。
 
-**首批蒸馏物（从调研清单出发，6 项）**：目标收益口径契约（Horizon 1/5/10/20、t+1→t+2、后复权，唯一取值源；已落 `TargetReturnView/v1`）、`quant_evaluator`（51 注册指标）、`factor_engine`（DSL 460+ 算子）、`data_access`（PIT 数据层）、`quant_platform`（纯 stdlib DTO 集成契约层——QuantCode 对接的正门）、`alpha_flow`（/deploy 部署目标底层）。
+**首批蒸馏物（从调研清单出发，6 项）**：目标收益口径契约（Horizon 1/5/10/20、t+1→t+2、后复权，唯一取值源；已落 `TargetReturnView/v1`）、`quant_evaluator`（60 注册指标，权威源 METRIC_REGISTRY_COVERAGE.csv）、`factor_engine`（DSL 460+ 算子）、`data_access`（PIT 数据层）、`quant_platform`（纯 stdlib DTO 集成契约层——QuantCode 对接的正门）、`alpha_flow`（/deploy 部署目标底层）。
 
 **第二类蒸馏物（工程约定，2026-09-01 补）**：项目工程决策沉淀——Python 版本、部署平台、架构约定、模块功能设计——进组 Memory，"搭架构时把细节沉淀进记忆，不需要二次对齐"；配套**开发 Best Practice**（架构先行→填细节）作为蒸馏类别（与 P-10 方案先行互为表里）。
 

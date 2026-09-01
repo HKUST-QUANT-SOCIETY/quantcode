@@ -452,7 +452,9 @@ def test_sync_phase_from_blackboard(sol_env, std_config):
 
 
 def test_solution_tools_registered():
-    import tools.solution._register  # noqa: F401  触发注册
+    from tools.solution._register import register_all
+
+    register_all()  # 幂等：registry 被先前测试清空后也能恢复
 
     from tools.registry import registry as global_registry
 
@@ -463,7 +465,9 @@ def test_solution_tools_registered():
 
 def test_solution_tool_roundtrip_via_registry(sol_env, std_config):
     """四工具经 registry.call 全流程走通（ctx.blackboard_db_path 注入同一 bb 文件）。"""
-    import tools.solution._register  # noqa: F401
+    from tools.solution._register import register_all
+
+    register_all()  # 幂等：registry 被先前测试清空后也能恢复
 
     from tools.registry import registry as global_registry
 
@@ -495,7 +499,9 @@ def test_solution_tool_roundtrip_via_registry(sol_env, std_config):
 
 def test_freeze_tool_refuses_below_min_rounds_via_registry(sol_env, std_config):
     """P-10 验收草案 #2（工具通道）：拒绝原因对 LLM 可见（返回值而非脱敏异常）。"""
-    import tools.solution._register  # noqa: F401
+    from tools.solution._register import register_all
+
+    register_all()  # 幂等：registry 被先前测试清空后也能恢复
 
     from tools.registry import registry as global_registry
 

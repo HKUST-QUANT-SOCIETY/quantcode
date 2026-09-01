@@ -1,0 +1,99 @@
+# configs/capabilities.yaml — P-07 组织资产蒸馏：能力卡片单源（不走 db）。
+#
+# 来源纪律：**禁止凭会议记忆手写卡片**——每张卡的内容以 docs/audit/ASSET_INVENTORY.md
+# 的 Step 0 实读（gh repo view + README，2026-09-01）为准；更新卡片须同步更新调研文档。
+# 蒸馏粒度守则：蒸 API 面（入口模块/门面/契约类型名），不蒸实现细节；
+# 数据字段清单（data_access semantic_fields 56 字段）与部署底层结构（alpha_flow 模块内部）
+# 不进卡片正文——细节走属组 scope Memory（弱保证），常驻摘要只有 id+name+when_to_use（强保证）。
+#
+# schema：schemas/capability_card.py::CapabilityCard（extra=forbid）+ schemas/capability-card.schema.json。
+# 加载：runner/distill/cards.py（经 runner/config_loader.load_yaml，QUANTCODE_CONFIG_DIR 可覆盖）。
+#
+# 复用纪律（运行时指令，runner/distill/inject.py 注入）：需求识别到已有能力覆盖不全
+# → 先向人征询，不许直接跳自造方案。strict_reuse=true 时进一步禁止引入外部自造实现
+# （仅允许已登记能力）——默认 false（P0 只注入纪律提示，不做硬拦截，收窄由主 Agent 裁决）。
+strict_reuse: false
+
+# 常驻摘要注入开关与限长（runner/distill/inject.py）。
+inject_enabled: true
+digest_max_chars: 2000
+
+cards:
+  # ── 契约卡（contract）：全组织可见（含游客组）──────────────────────────────
+  - id: target-return-view-v1
+    name: 目标收益口径契约（TargetReturnView/v1）
+    type: contract
+    api_surface:
+      - "schemas/data_contracts.py::TargetReturnView/v1 — horizon∈{1,5,10,20}、adjusted=hfq（后复权）、alignment=t+1→t+2"
+      - "唯一取值源 = 数据仓目标收益表（后复权表）；本契约只登记口径，不定义计算"
+    when_to_use: "任何涉及目标收益 / 前向标签的计算与评估前，先取本契约口径（Horizon/复权/对齐）"
+    when_not_to_reinvent: "禁止自算目标收益（实测有组员把 t+1→t+2 算成 t→t+1 致收益虚高）；禁止未复权口径；禁止 Horizon∈{1,5,10,20} 之外的窗口自造"
+    owner_group: all
+    # in-repo 契约（本仓 feat/p0-production-readiness 分支 schemas/data_contracts.py，AG-B 落地），
+    # 铁律禁 git 操作 → source_commit 留空，以分支标注。
+    source_commit: ""
+    distilled_at: "2026-09-01"
+
+  # ── 资产卡（asset）：org 真实仓库蒸馏；细节落属组 Memory groups scope ────────
+  - id: quant-evaluator
+    name: Quant Evaluator 批量因子评估器
+    type: asset
+    api_surface:
+      - "quant_evaluator.api：EvaluationRequest / EvaluationBundle / evaluate()（评估唯一入口）"
+      - "quant_evaluator.contracts.label_bundle.LabelBundle — 显式前向标签，硬口径 price_convention='vwap_to_vwap'"
+      - "指标注册表：docs/METRIC_REGISTRY_COVERAGE.csv 实测 60 个注册指标（spec v0.2 的 51 为旧口径）"
+    when_to_use: "因子批量评估需要 IC / 分位数 / 回撤 / 换手 / 置信区间等指标时（F-06 组织评估能力登记）"
+    when_not_to_reinvent: "别自写 rank_ic / quantile_spread / block_bootstrap_ci 等指标——注册表已覆盖；别自算 LabelBundle 的时序标签"
+    owner_group: factor
+    source_commit: "73223a4"
+    distilled_at: "2026-09-01"
+
+  - id: factor-engine
+    name: Factor Engine DSL 因子计算引擎
+    type: asset
+    api_surface:
+      - "factor_engine.api：col / rank / ts_mean / Factor / parse_expr（DSL，460+ 注册算子）"
+      - "factor_engine.runtime.engine.FactorEngine + backend.factory.build_backend('auto')（SQL 下推→Polars→Pandas）"
+      - "storage.factory.build_data_source(type='data_access') 直连数据层；FactorEngine.run_from_config(yaml)；service/ HTTP（factor-engine-serve）"
+    when_to_use: "把因子公式（DSL）算成 (日期×标的) 因子值并落因子湖；批量算子表达式计算"
+    when_not_to_reinvent: "别手写向量化因子计算管线、别再造算子库——DSL 已有 460+ 算子；它不做数据清洗/评估/回测（各归其库）"
+    owner_group: factor
+    source_commit: "c374cbd"
+    distilled_at: "2026-09-01"
+
+  - id: data-access
+    name: Data Access PIT 数据层
+    type: asset
+    api_surface:
+      - "data_access.get_store() → read / read_frame / read_uri / read_factors / read_joined / read_asof（读写唯一入口）"
+      - "写：write_arrow / upsert / publish_from_staging；HTTP：data-access-server + DataAccessClient"
+      - "注册表 73 数据集 + 56 语义字段（字段清单本体为 Mask 细节，不进卡片）"
+    when_to_use: "一切行情 / 因子值 / parquet 的读写——读数据的第一入口"
+    when_not_to_reinvent: "禁止直接 pd.read_parquet 裸读；禁止绕过 PIT 语义自取时点数据；禁止自建第二套数据集注册表"
+    owner_group: factor
+    source_commit: "b55656a"
+    distilled_at: "2026-09-01"
+
+  - id: quant-platform
+    name: Quant Platform DTO 集成契约层
+    type: asset
+    api_surface:
+      - "app/contracts/*：纯 stdlib frozen DTO（23 模块：artifact_ref/jobs/workflow/lifecycle/rbac/backtest/factor_library...）"
+      - "app/adapters/data_access_storage.py（DataAccessStorageAdapter）；app/worker + orchestrator（candidate→evaluation→admission 骨架）"
+    when_to_use: "平台服务间集成契约、跨包 DTO 翻译（Platform DTO ↔ Domain Native Contract）——QuantCode 对接平台服务的正门"
+    when_not_to_reinvent: "域包不得 import 平台层；平台不重算量化逻辑、不落第二套因子湖/元数据注册表；注意 DRAFT 态未 V1_FROZEN，契约以 reconcile 后版本为准"
+    owner_group: model
+    source_commit: "45a8cc7"
+    distilled_at: "2026-09-01"
+
+  - id: alpha-flow
+    name: AlphaFlow 部署底层
+    type: asset
+    api_surface:
+      - "模块边界：alpha_core / alpha_data / alpha_mining / alpha_bus / alpha_materializer / alpha_eval / alpha_sink / alpha_monitor（脚手架态）"
+      - "架构说明：docs/quant_architecture.html"
+    when_to_use: "/deploy（P-09）部署适配的目标底层；确认部署管线存在性与模块边界时"
+    when_not_to_reinvent: "部署转换只能经 /deploy 指令进行——底层结构对非授权用户 Mask（P-09 黑盒约束），不得询问 Agent 获取底层实现细节"
+    owner_group: strategy
+    source_commit: "5ea62c4"
+    distilled_at: "2026-09-01"

@@ -181,6 +181,8 @@ from tools.experiments._register import (  # noqa: F401
     run_ab_experiment_tool,
 )
 import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4 俞高磊）
+import tools.solution._register  # noqa: F401,E402  触发 solution 四工具注册（P-10，AG-J 移交项）
+import runner.distill.cards  # noqa: F401,E402  触发 list_capabilities 元工具注册（P-07，_meta 通道）
 
 
 # ---------------------------------------------------------------------------

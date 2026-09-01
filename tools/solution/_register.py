@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 import runner.solution_workflow as sw
 from schemas.solution_doc import SolutionDoc
-from tools.registry import ToolDef, register_tool
+from tools.registry import ToolDef, register_tool, registry
 
 
 def _store_from_ctx(ctx: dict | None) -> sw.SolutionStore:
@@ -194,10 +194,15 @@ solution_status_tool = ToolDef(
     execute=_status_execute,
 )
 
-register_tool(draft_solution_tool)
-register_tool(revise_solution_tool)
-register_tool(freeze_solution_tool)
-register_tool(solution_status_tool)
+def register_all() -> None:
+    """幂等注册四工具（重复 id 跳过）——mcp_server import 与测试显式调用共用。"""
+    known = set(registry.list_ids())
+    for t in (draft_solution_tool, revise_solution_tool, freeze_solution_tool, solution_status_tool):
+        if t.id not in known:
+            register_tool(t)
+
+
+register_all()
 
 __all__ = [
     "draft_solution_tool",
