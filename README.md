@@ -9,7 +9,7 @@
 [![Tests](https://img.shields.io/badge/tests-589%20passed-brightgreen.svg)](tests/)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
-[Quick Start](#quick-start) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
+[Quick Start](#quick-start) • [Screenshots](#screenshots) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
 
 </div>
 
@@ -22,6 +22,21 @@ QuantCode is an **agent orchestration platform** for quantitative investment res
 **Core thesis**: Replace "people negotiating over Slack" with "machines validating against schemas." Replace "does this look okay?" with "`assert` pass/fail + deterministic gates."
 
 Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-picking modules from MimoCode (Memory, Checkpoint, Subagent orchestration), and adding six vertical Compose flows for quant workflows.
+
+---
+
+## Screenshots
+
+<div align="center">
+<img src="docs/images/screenshots/home.png" width="900" alt="QuantCode desktop — research workspace home" /><br/>
+<sub>Research workspace — group selector, SSH connection status, research templates</sub>
+</div>
+
+<div align="center">
+<br/>
+<img src="docs/images/screenshots/memory-query.png" width="900" alt="QuantCode desktop — Memory query panel" /><br/>
+<sub>Memory panel — query in-group and shared research memory (read-only, fail-closed across groups)</sub>
+</div>
 
 ---
 
