@@ -1,4 +1,46 @@
-# ASSET_INVENTORY.md — P-07 Step 0 资产调研（AG-C，2026-09-01）
+# ASSET_INVENTORY.md — P-07 资产调研（v2，2026-09-01）
+
+> **v2 权威源变更**：AG-C Step 0 调研（gh 只读）为基础，叠加**组长《HKUST Quant Society 常用组件清单》**（12 节，含组件分层、状态标注、legacy 映射、速查表）为定版权威。
+> **v2 修正（对照组件清单）**：① barra_engine 由"归档"**更正为主链 S 级组件**（风险模型层，Riskfolio-QS 的上游）；② AlphaMining 家族、factor-research-db、sentinel、option-*、earnings-flash、quant-ops 等由"归档不蒸馏"**更正为专项/纪律层蒸馏**；③ lightgbm_qs 补 MISTAKES_AND_LEAKAGE_LESSONS.md 作工程约定蒸馏素材；④ alpha_flow 状态明确 SCAFFOLD。
+> 下方 Step 0 原文保留（历史记录），与 v2 冲突处以本节及 §v2 分档表为准。
+
+## v2 开放分档表（P-07 批次二权威，文档先行未实施）
+
+| 档 | 仓库 | 卡片状态标注 | 属组/可见性 |
+|---|---|---|---|
+| **一档·主链全员常驻（12）** | data_access | PRODUCTION | 全员；56 语义字段清单 Mask |
+| | factor_engine | PRODUCTION | 全员；写因子必走 DSL |
+| | quant_evaluator | PRODUCTION（评估唯一权威） | 全员；禁自算 IC/ICIR |
+| | factor_optimizer | STAGING | 全员一行 |
+| | factor_assets | STAGING | 全员一行 |
+| | factor_preprocess | STAGING | 全员一行 |
+| | modeling | PRODUCTION（泄漏防护权威） | 全员一行；模型组深卡 |
+| | barra_engine | PRODUCTION | 风控组深卡，他组一行 |
+| | riskfolio_qs | PRODUCTION | 策略/风控 |
+| | vectorbt_qs | PRODUCTION | 策略组深卡 |
+| | quant_platform | **DRAFT**（未 V1_FROZEN 警示） | 全员一行 |
+| | platform_web | PRODUCTION（前端镜像层） | 全员一行 |
+| **二档·专项按组** | alphaprobe | STAGING（未产线跑通） | 因子组 |
+| | AlphaMining-CogAlpha / factorminer / alphaschema / alphasage / AlphaBench | RESEARCH | 因子组 |
+| | factor-research-db | PRODUCTION（225 研报/788 因子） | 因子组 |
+| | lightgbm_qs | RESEARCH（脚本集非库） | 模型/因子 |
+| | barra_research / barra_factor_evaluate_engine / size-factor-risk-model | RESEARCH | 风控组 |
+| | option-backtestengine / option-pricing-line-code | RESEARCH | 期权组 |
+| | sentinel | PRODUCTION（年报→结构化财务事实） | 基本面组 |
+| | earnings-flash / quant-research-fundamentals | RESEARCH | 基本面组 |
+| | PaperRAG / quant-knowledge-graph | RESEARCH | Agent 组 |
+| **三档·纪律层（只蒸规则不蒸 API）** | quant-ops | — | 命名/权限/访问矩阵 → Agent 行为约束 |
+| | backtest_repo_example | — | 项目样板 |
+| **四档·负面清单（禁用+映射）** | quant-platform→quant_platform；quant-factor-engine→factor_engine；AutoFactorEvaluation / auto_factor_evaluation→quant_evaluator；旧 preprocess→factor_preprocess；旧 optimization→factor_optimizer；旧 registry→factor_assets | LEGACY | deprecated_aliases 写入卡片，防 AI 用错近名死仓 |
+| | infra-* / test* / demo-repository / management-documents / workspace-* 等 | PLACEHOLDER | "不要用+不存在" |
+
+**v2 硬纪律（进全部一档卡片 when_not_to_reinvent）**：① 读生产数据必经 data_access，禁止业务仓裸 `pd.read_parquet`/`pq.read_table`/`duckdb.sql` 直读；② 写因子必走 factor_engine DSL（挖矿算法产 DSL 不自造语法）；③ 评估一律调 quant_evaluator（NOT_COMPUTED≠0，禁自算）；④ 模型切分/泄漏防护必复用 modeling（walk-forward/purge/embargo）；⑤ 生产候选回测必过 vectorbt_qs accurate replay。
+
+---
+
+# 以下为 Step 0 原文（AG-C，2026-09-01，历史记录）
+
+
 
 **方法**：`gh` 只读（`gh repo view --json` + `gh api repos/<org>/<repo>/readme` + `gh api .../commits/HEAD`），
 逐 repo 实读 README 核实，不照抄初扫、不凭会议记忆手写。org `HKUST-QUANT-SOCIETY` 实测 **69 repo**（非 archived）。

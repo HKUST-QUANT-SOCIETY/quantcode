@@ -35,7 +35,7 @@
 | 风控 R4 | G1-L1 组合级事前约束内建 + G2-A1 全链路审计日志★ + G3-A1 metrics 分组 + G4-A1 permission_engine 三态 + **G2-A8 HumanGate 写操作收窄（v0.2 定版：产出/代码不 gate，RiskThresholds 越限 verdict 直接 fail）** |
 | 算法 R6 | A1 因子挖掘工具化（submit_candidate→真评估→入池治理），autoeval 去 mock |
 | 产品 R5 | U1 会话页三栏化 + 指标卡组件族（BigNumber/ProgressGauge/Checklist）+ **F-05 SSH 登录界面（用户点名，完整登录流程非只读卡片）** |
-| **蒸馏 R7（v0.2.2 修订）** | **P-07 调研先行 + 首批蒸馏**：Step 0 gh 只读资产盘点（org 69 repo→核心 14 活跃，产出 ASSET_INVENTORY.md，禁止凭记忆手写卡片）→ 六张能力卡片（目标收益口径契约 TargetReturnView/v1 + quant_evaluator 60 指标（METRIC_REGISTRY_COVERAGE.csv） + factor_engine 460+ 算子 + data_access + quant_platform DTO 契约层 + alpha_flow）→ 常驻组上下文 + 复用纪律（覆盖不全先问人，严格模式可配） |
+| **蒸馏 R7（v0.2.2 修订）** | **P-07 调研先行 + 首批蒸馏**：Step 0 gh 只读资产盘点（org 69 repo→核心 14 活跃，产出 ASSET_INVENTORY.md，禁止凭记忆手写卡片）→ 六张能力卡片（目标收益口径契约 TargetReturnView/v1 + quant_evaluator 60 指标（METRIC_REGISTRY_COVERAGE.csv） + factor_engine 460+ 算子 + data_access + quant_platform DTO 契约层 + alpha_flow）→ 常驻组上下文 + 复用纪律（覆盖不全先问人，严格模式可配）；**批次二（组长组件清单定版）：四档开放 + Card 契约补 status/domain_authority/depends_on/consumed_by/deprecated_aliases + 负面清单 legacy 映射** |
 | **工作流 R10（v0.2.1 新增）** | **P-10 方案先行（Solution-First）**：SolutionDoc 状态机（draft→2-3 轮讨论→frozen）+ 冻结前写类工具阶段限流（复用组 allowlist，非 HumanGate）+ judge 方案↔代码一致性判定 + lens 方案面板；`docs/audit/PLAN_SPEC_V02_DISPATCH.md` AG-J |
 | **Admin R8（v0.2.2 提前）** | **P-08 本轮全量**：Admin 组建立（唯一跨组 scope）+ 跨组 list_runs 语义查询 + 错误记录汇总（非 Admin 被拒）+ **GitGraph 面板（repo 树/更新节点标红）+ 双类 pop（repo 提交 / package 版本更新，全组可见）——用户点名关键设计，自 Q2 提前** |
 | 修复债 | replay.py bootstrap 自愈、三组 allowlist 幽灵 tool 注释化清理、consistency 断言测试 |

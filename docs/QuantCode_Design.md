@@ -615,6 +615,8 @@ memory.search(
 
 ### 5.4 外部仓库依赖
 
+> **v2.2 更新**：外部组件全量分层、状态标注与 legacy 映射以 `docs/audit/ASSET_INVENTORY.md` v2（组长组件清单为权威）为准；下表为 v1 历史记录。
+
 | 仓库 | 用途 |
 |---|---|
 | `HKUST-QUANT-SOCIETY/auto_factor_evaluation` | 因子自动评估，被 `factor:autoeval` skill 调用 |
@@ -773,6 +775,7 @@ memory.search(
 | 2026-09-01 | 功能定版：平台红线"不做业务层面"；HumanGate 收窄写操作门禁；"模型 PR"场景取消；fundamental 降级组内工具 | 2026-09-01 与各组长定版讨论（详见 specs/FUNCTIONAL_SPEC.md v0.2.1 §0 与 docs/PRD.md v2） |
 | 2026-09-01 | 新增四大支柱：P-07 蒸馏（最大复用）/ P-08 Admin 中枢 / P-09 /deploy 黑盒 / P-10 方案先行（先方案后代码 + 一致性判定） | 痛点：库功能没进记忆导致重造、进展不透明、部署适配人工且需保密、一口气生成代码准确性与可审核性差 |
 | 2026-09-01 | Admin 实现为角色而非第七组；回测/组合/并行 subagent 引擎代码保留 | 组枚举两仓不动；Subagent 用户拍板保留（平台能力）；引擎代码"万一有用" |
+| 2026-09-01 | 组件开放四档制（主链 12 全员常驻/专项按组/纪律层/负面清单 legacy 映射）+ CapabilityCard 契约补 status/domain_authority/depends_on/consumed_by/deprecated_aliases；alpha_flow 标 SCAFFOLD；acceptance.py 因子评估阈值挂账待退役（评估权威=quant_evaluator） | 组长《常用组件清单》为权威源；文档先行；防 AI 用错近名死仓 |
 
 ---
 

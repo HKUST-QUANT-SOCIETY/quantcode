@@ -36,6 +36,7 @@ F-XX 用户功能 / P-XX 平台功能  →  契约先行 + 机器可验证断言
 5. 每季度末独立红队核验：逐条抽检 §6 断言仍被测试真实覆盖（P1-6 断言—测试漂移教训的制度化），结论写入 docs/audit/。
 6. 契约废弃不改旧 SPEC：新开版本并在旧 SPEC §0 标 `superseded_by`。
 7. lens UI 同规则：断言用 playwright 表达，组件真源 = packages/app/src。
+8. **清单型活文档**（configs/capabilities.yaml、docs/audit/ASSET_INVENTORY.md）变更同样文档先行：先改 FUNCTIONAL_SPEC P-07 契约段，再改 yaml/数据——2026-09-01 教训制度化。
 
 ## 4. 断言与格式约定
 

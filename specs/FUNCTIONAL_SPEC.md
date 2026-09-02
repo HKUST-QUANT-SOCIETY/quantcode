@@ -161,6 +161,18 @@
 
 **复用纪律**（运行时指令）：需求识别到已有能力覆盖不全 → 先向人征询，不许直接跳自造方案；**严格模式可配置**（`configs/capabilities.yaml`：strict_reuse=true 时禁止引入外部自造实现，仅允许已登记能力）。
 
+**批次二（2026-09-01 组件清单定版，文档先行未实施）**：以组长《常用组件清单》为权威源，开放方案分**四档**——
+1. **主链 12 全员常驻**：data_access / factor_engine / quant_evaluator / factor_optimizer / factor_assets / factor_preprocess / modeling / barra_engine / riskfolio_qs / vectorbt_qs / quant_platform / platform_web；
+2. **专项按组**（非属组只见一行）：因子组=alphaprobe/CogAlpha/AlphaMining 家族/factor-research-db；模型组=modeling 深卡/lightgbm_qs；风控组=barra_research/barra_factor_evaluate_engine/size-factor-risk-model；期权组=option-backtestengine/option-pricing-line-code；基本面组=sentinel/earnings-flash/quant-research-fundamentals；Agent 组=PaperRAG/quant-knowledge-graph；
+3. **纪律层（只蒸规则不蒸 API）**：quant-ops（命名/权限/访问矩阵）、backtest_repo_example（样板）；
+4. **负面清单**：legacy 映射（quant-platform→quant_platform、quant-factor-engine→factor_engine、AutoFactorEvaluation/auto_factor_evaluation→quant_evaluator 等全盘采纳）+ test_*/infra-*/demo 标注"不要用"。
+
+**CapabilityCard 契约扩充（批次二实施时同步 schema）**：新增 `status∈{PRODUCTION,STAGING,SCAFFOLD,LEGACY}`、`domain_authority`、`depends_on[]`、`consumed_by[]`、`deprecated_aliases[]` 五字段；**蒸馏硬纪律三条**进卡片 when_not_to_reinvent：读生产数据必经 data_access（禁裸 read_parquet）、因子计算必走 factor_engine DSL、模型切分必复用 modeling（walk-forward/purge/embargo），评估一律调 quant_evaluator（禁自算 IC/ICIR）。
+
+**alpha_flow 状态降级**：SCAFFOLD（架构对齐脚手架，生产实现显式 NotImplementedError）——卡片只借架构不当生产引擎；P-09 /deploy 目标底层仍在建设中。
+
+**挂账（用户裁决"以后再改"）**：`runner/acceptance.py` 的因子评估阈值（IC/IR/换手）属**因子组自己的评估链**，与 Agent 组平台机制无关（v0.2 红线推论）；评估权威 = quant_evaluator。acceptance 因子阈值部分后续退役或移交，风控阈值部分随 G2-A8 已收窄为写操作语义。
+
 **依赖**：F-04 Memory 底座；Git 权限 ↔ 用户组权限对齐。**验收草案**：组员问"目标收益怎么取"Agent 指向契约表而非自算；游客组检索不到被 Mask 的数据字段卡片；能力卡片常驻摘要出现在每次 run 的组上下文。
 
 ### P-08 Admin 组与中枢管理面——**P0** [新增 v0.2]（✅ 已实现：admin_scope + 六工具 + lens 全套 UI，tests/test_admin_scope.py 35 用例）
