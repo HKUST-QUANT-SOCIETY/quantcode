@@ -1,22 +1,23 @@
 # QuantCode 用户手册
 
-> **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员  
-> **版本**：v1.1  
-> **最后更新**：2026-08-30
+> **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员
+> **版本**：v1.2
+> **最后更新**：2026-09-03
 
 ---
 
 ## 📚 目录
 
 1. [快速开始](#快速开始)
-2. [供应商绑定](#供应商绑定桌面端)
+2. [身份与供应商](#身份与供应商)
 3. [Factor组（因子开发）](#factor组因子开发)
 4. [Model组（模型建模）](#model组模型建模)
 5. [Risk组（风险评估）](#risk组风险评估)
 6. [Fundamental组（基本面研究）](#fundamental组基本面研究)
 7. [Strategy组（策略构建）](#strategy组策略构建)
 8. [Options组（期权定价）](#options组期权定价)
-9. [常见问题](#常见问题)
+9. [Admin、GitGraph 与 Pop](#admingitgraph-与-pop)
+10. [常见问题](#常见问题)
 
 ---
 
@@ -25,7 +26,8 @@
 ### 前置条件
 
 - QuantCode桌面端已安装并运行
-- 你的组账号已配置（联系Agent组获取）
+- 本机已有 SSH agent 或密钥链身份
+- 服务器 roster 已登记你的公钥指纹
 
 ### 启动QuantCode
 
@@ -40,8 +42,9 @@ cd /path/to/QUANTcode
 # 1. 启动桌面端
 cd opencode && bun run dev:desktop
 
-# 2. 在桌面端中选择你的组
-# 3. 开始对话
+# 2. 在桌面端选择本地 SSH 身份并完成公钥认证
+# 3. 服务端按 roster 返回 actor、业务组、角色和个人工作目录
+# 4. 开始对话
 ```
 
 ### 基本使用流程
@@ -50,11 +53,19 @@ cd opencode && bun run dev:desktop
 2. **描述你的任务** → 例如："我想开发一个动量因子"
 3. **Agent自动执行** → 调用工具、生成报告
 4. **审查结果** → 查看生成的artifact（JSON/PDF/图表）
-5. **人工审批**（如需要）→ 风险超阈值时gate面板出现 Approve/Reject 按钮
+5. **处理共享写入**（如需要）→ `merge` 或 `permission` 操作在 GatePanel 中等待授权；风险结果显示为报告或 CI 状态
 
 ---
 
-## 供应商绑定（桌面端）
+## 身份与供应商
+
+### SSH 身份登录
+
+桌面端只调用本机 SSH agent 或密钥链完成公钥证明。私钥不输入 QuantCode，不上传服务器，不写入 LLM、Memory、trace 或日志。认证成功后，服务端从公司 roster 绑定 actor、业务组、角色和个人工作目录；页面不提供自由切组。需要进入另一个业务组时，使用另一个有权限的身份重新登录。
+
+研究员通过 SSH 进入服务器上的个人工作目录，用于研究和开发。生产环境使用独立服务账号，研究员不进入生产 shell，也不直接控制生产进程。`/deploy` 只出现在 Admin 管理面。
+
+### 供应商绑定（桌面端）
 
 桌面端 **Settings → Providers** 只支持第三方供应商（DeepSeek / StepFun / Kimi / GLM / OpenRouter 等）。官方供应商直连与 OAuth 登录入口已移除。
 
@@ -85,7 +96,7 @@ cd opencode && bun run dev:desktop
 ```
 你: 我想开发一个基于营收增速的动量因子，看最近4个季度的营收同比增长率
 
-QuantCode: 
+QuantCode:
 ✓ 正在匹配主线因子库...
 ✓ 找到3个相似因子：revenue_growth_mom, fundamental_momentum, earnings_acceleration
 ✓ 生成FactorSpec...
@@ -117,13 +128,13 @@ QuantCode:
 
 ### 常见问题
 
-**Q: AutoEval评估需要多久？**  
+**Q: AutoEval评估需要多久？**
 A: 取决于因子复杂度与 API 状态。若 AutoEval 服务不可用，工具会降级返回 mock 数据并标注 `_is_mock`，请据此判断结果可信度。
 
-**Q: IC均值低于0.03还有价值吗？**  
-A: 验收判定（`runner/acceptance.py`）会返回 fail。可以综合 IR / t统计量人工判断是否继续优化，但当前不会进入合并流程（`merge_to_main` 尚未实现，合并/拒绝由人工决策）。
+**Q: IC均值低于0.03还有价值吗？**
+A: 验收判定（`runner/acceptance.py`）会返回 fail。你可以结合 IR / t统计量决定是否继续优化；通过验收的因子可提交 `merge_to_main`，由 `merge` HumanGate 等待授权的 approver 或 Admin 作最终决定。
 
-**Q: 如何修改因子定义？**  
+**Q: 如何修改因子定义？**
 A: 直接告诉Agent："修改因子公式，改用EPS增速替代营收增速"
 
 ---
@@ -134,9 +145,9 @@ A: 直接告诉Agent："修改因子公式，改用EPS增速替代营收增速"
 
 你需要：
 1. 提交PR到模型仓库
-2. 自动触发风控评估
-3. 等待风控组审批（如超阈值）
-4. 合并PR
+2. 触发 Risk CI/report 链
+3. 查看结构化 RiskProfile 和 CI 状态
+4. 由仓库 owner 按正常 GitHub PR 流程处理合并
 
 ### 典型对话示例
 
@@ -149,12 +160,12 @@ QuantCode:
 ✓ 生成ModelSpec并写入Blackboard...
 ✓ 触发risk组flow...
 
-[自动切换到risk组Agent]
+Risk flow 读取授权的 ModelSpec 字段
 ✓ 计算风险指标...
 ✓ 生成RiskProfile...
-⚠️ HumanGate触发：max_drawdown (0.22) 超过阈值 (0.15)
+⚠️ 风险结果：max_drawdown (0.22) 超过阈值 (0.15)，RiskProfile 返回 fail
 
-等待风控组审批...
+报告已写入 CI artifact 或 PR comment
 ```
 
 ### 关键工具
@@ -168,19 +179,19 @@ QuantCode:
 
 ### 跨组协作
 
-Model → Risk 自动handoff：
+Model → Risk handoff：
 1. 你提交PR
 2. Model Agent生成ModelSpec
 3. 写入Blackboard（PROJECT scope）
-4. Risk Agent自动读取并评估
-5. 风控报告自动写回PR评论
+4. Risk flow 读取授权字段并评估
+5. 风控报告写回 PR comment 或 CI artifact
 
 ### 常见问题
 
-**Q: PR评论多久出现？**  
+**Q: PR评论多久出现？**
 A: 通常5分钟内。检查GitHub Actions状态。
 
-**Q: 风控拒绝了我的PR怎么办？**  
+**Q: 风控拒绝了我的PR怎么办？**
 A: 查看RiskProfile中的`breached_limits`，调整模型参数后重新提交。
 
 ---
@@ -192,28 +203,24 @@ A: 查看RiskProfile中的`breached_limits`，调整模型参数后重新提交�
 你需要：
 1. 审查模型组提交的PR
 2. 查看自动生成的RiskProfile
-3. 人工审批超阈值的模型
+3. 查看风险结果和 CI 状态；QuantCode 不因风险越限创建产出审批卡
 
 ### 典型对话示例
 
 ```
-你: 查看待审批的风控gate
+你: 查看最近的风控结果
 
 QuantCode:
-找到1个待审批项目：
+找到1个风险结果：
 
 PR#42 - ML因子优化 (model组提交)
 - max_drawdown: 0.22 (阈值: 0.15) ❌
 - tail_risk_var_99: 0.085 (阈值: 0.05) ❌
 - position_limit: 0.92 (阈值: 0.8) ❌
 
-你的决定？[approve/reject]
-
-你: approve, 但要求降低position_limit到0.85
-
 QuantCode:
-✓ 审批通过
-✓ 已在PR#42添加评论：风控批准，需调整position_limit≤0.85
+✓ 已返回 RiskProfile fail
+✓ 已在 PR#42 写入风险报告，建议降低 position_limit 至 0.85
 ```
 
 ### 关键工具
@@ -228,13 +235,11 @@ QuantCode:
 
 ### HumanGate机制
 
-**何时触发**：任一风险指标超过阈值  
-**如何审批（桌面gate面板）**：
-1. Agent暂停，gate面板显示RiskProfile（含 risk_metrics、reasons、thread_id）
-2. 点击面板上的 **Approve** 或 **Reject** 按钮 → 自动以 resume 方式恢复该会话
-3. Agent继续执行或终止
+**风险结果**：任一指标超过阈值时，RiskProfile 返回 `fail` 或 `warning`，并进入报告或 CI 状态。风险结果不触发 QuantCode HumanGate。
 
-（命令行等价操作：`python scripts/replay.py resume --decision approve`）
+**HumanGate**：普通 Agent 只有共享写入和跨组资源授权会进入 GatePanel。`merge` 或 `permission` 卡片显示资源、actor、理由和 evidence；有权限的 approver 或 Admin 可以批准或拒绝。生产部署由 Admin 管理面独立发起。
+
+共享写入或跨组授权暂停时，可使用 `python scripts/replay.py resume --decision approve|reject` 恢复对应会话。
 
 **阈值配置**：默认阈值内置于 `schemas/risk_profile.py` 的 `RiskThresholds`（max_drawdown/VaR/position_limit 等，如 max_drawdown 0.15）；factor/risk 验收阈值与默认值统一见 `runner/acceptance.py`。
 
@@ -281,8 +286,8 @@ QuantCode:
 
 ### Point-in-Time安全
 
-**什么是PIT**：确保回测时不使用"未来信息"  
-**如何实现**：Chroma向量库+时间戳过滤  
+**什么是PIT**：确保回测时不使用"未来信息"
+**如何实现**：Chroma向量库+时间戳过滤
 **示例**：2023-01-01回测时，只检索2022-12-31前的研报
 
 ---
@@ -295,7 +300,7 @@ QuantCode:
 1. 选择信号（因子/模型）
 2. 组合优化（权重分配）
 3. 回测验证
-4. 上线部署
+4. 将部署请求交给 Admin 管理面
 
 ### 典型对话示例
 
@@ -313,7 +318,7 @@ QuantCode:
   - 最大回撤: 12.3%
 ✓ 生成StrategyReport...
 
-是否部署到生产环境？[yes/no]
+已生成待部署 artifact。需要上线时，将请求交给 Admin 管理面处理。
 ```
 
 ### 关键工具
@@ -323,7 +328,7 @@ QuantCode:
 | `select_signals` | 筛选因子/模型 |
 | `combine_signals` | 组合优化 |
 | `run_strategy_backtest` | 回测 |
-| `deploy_strategy` | 部署（需HumanGate） |
+| `deploy_strategy` | 产出待部署 artifact；不能直接部署生产 |
 
 ### 风险控制
 
@@ -332,7 +337,7 @@ QuantCode:
 - 最大回撤 < 20%
 - IC稳定性（无显著衰减）
 
-**HumanGate**：`deploy_strategy`总是需要人工批准
+**部署**：Admin 在管理面提交已调试 artifact，由生产服务账号通过受控接口执行。研究员不进入生产 shell。
 
 ---
 
@@ -373,38 +378,48 @@ QuantCode:
 
 ---
 
+## Admin、GitGraph 与 Pop
+
+Admin 是组织级角色，在 QuantCode 平台拥有全部可见性、管理、审批和部署发起权。Admin 可以查询所有组的运行、错误、Memory、Blackboard、能力卡和仓库状态；访问和写操作保留审计记录。
+
+GitGraph 按 GitHub 权限显示仓库、分支、提交树和依赖变化。普通用户只看到当前身份可见的 repo；Admin 查看组织范围的 repo。Pop 提醒 repo 提交和 package 版本更新，消息带来源、时间、变化摘要、去重键和跳转入口。
+
+Admin 管理面提供 `/deploy` 入口。研究员把个人工作目录中的已调试 artifact 交给 Admin；生产服务账号通过受控接口执行部署。研究员和普通 Agent 不获得生产服务账号，也不进入生产 shell。
+
+---
+
 ## 常见问题
 
 ### 通用问题
 
-**Q: 如何查看历史对话？**  
+**Q: 如何查看历史对话？**
 A: QuantCode自动保存所有对话，在侧边栏选择"历史会话"
 
-**Q: Agent卡住不动了怎么办？**  
+**Q: Agent卡住不动了怎么办？**
 A: 1) 等待30秒；2) 如仍卡住，点击"停止"按钮；3) 联系Agent组
 
-**Q: 如何修改工具配置？**  
-A: 只有Agent组可以修改。如有需求，提Issue到GitHub仓库。
+**Q: 如何修改工具配置？**
+A: Tool/Flow 由维护员后端注册、审核和发布。用户和 Agent 只能使用已发布能力；如需变更，提交 GitHub Issue 或由 Admin/维护员处理。
 
-**Q: 生成的artifact在哪里？**  
+**Q: 生成的artifact在哪里？**
 A: `artifacts/{你的组}/` 目录下（如 factor 报告在 `artifacts/factor/{name}-report.json`、fundamental 研报在 `artifacts/research/`）
 
-**Q: 如何查看最近运行情况？**  
+**Q: 如何查看最近运行情况？**
 A: 会话内打开桌面端 Monitor 面板，或让 Agent 调用只读 `list_runs` 工具（数据源 `.quantcode/metrics.jsonl`）。
 
 ### 错误排查
 
-**错误：Tool 'xxx' not found**  
-原因：你的组没有权限使用该工具  
-解决：检查你是否登录到正确的组账号
+**错误：Tool 'xxx' not found**
+原因：当前 session 的 effective tool set 未包含该工具
+解决：确认 SSH 身份、roster 绑定和工具发布状态；不要用任务参数切换组
 
-**错误：API key未配置**  
-原因：`QUANTCODE_API_KEY` 环境变量未设置，或桌面供应商绑定未填 API Key  
+**错误：API key未配置**
+原因：`QUANTCODE_API_KEY` 环境变量未设置，或桌面供应商绑定未填 API Key
 解决：设置环境变量（见 README Quick Start）或重新完成供应商绑定
 
-**错误：卡在等待人工审批**  
-原因：风控gate触发 waiting for human  
-解决：在桌面gate面板点击 Approve/Reject，或用 `python scripts/replay.py resume --decision approve|reject` 恢复
+**错误：卡在等待人工审批**
+原因：共享写入或跨组资源授权进入 HumanGate
+解决：在 GatePanel 点击 Approve/Reject，或用 `python scripts/replay.py resume --decision approve|reject` 恢复。风险结果本身不会创建 Gate 卡片。
 
 ---
 

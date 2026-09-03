@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-702%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-1021%20passed-brightgreen.svg)](tests/)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
 [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
@@ -17,7 +17,7 @@
 
 ## What is QuantCode?
 
-QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) each work through their own ReAct-style agent — no manual handoffs, no Slack threads asking "did you finish the backtest?" The platform enforces **schema contracts** at every boundary: your factor submission must validate against `FactorSpec`, your model PR triggers automatic `RiskProfile` generation, and cross-group state flows through a type-safe Blackboard.
+QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) use the same ReAct runtime with group-scoped skills, tools, and memory. Structured handoffs replace ad-hoc coordination. The platform enforces **schema contracts** at every boundary: factor submissions validate against `FactorSpec`, model metadata can feed the Risk CI chain, and cross-group state flows through a type-safe Blackboard.
 
 **Core thesis**: Replace "people negotiating over Slack" with "machines validating against schemas." Replace "does this look okay?" with "`assert` pass/fail + deterministic gates."
 
@@ -29,7 +29,7 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 
 <div align="center">
 <img src="docs/images/screenshots/home.png" width="900" alt="QuantCode desktop — research workspace home" /><br/>
-<sub>Research workspace — group selector, SSH connection status, research templates</sub>
+<sub>Research workspace — roster-bound group context, SSH connection status, research templates</sub>
 </div>
 
 <div align="center">
@@ -45,7 +45,7 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 | Date | Event |
 |------|-------|
 | 2026-08-30 | 📊 **Monitoring + Self-evolution closed loop** — `list_runs` MCP tool + desktop Monitor panel (`metrics.jsonl`), `/goal` → judge verdict (met/partial/missed) → RLHF回填 |
-| 2026-08-29 | 🧭 Group identity via SSH key fingerprint (`.opencode/authorized_groups.yaml` mapping, fail-closed with `QUANTCODE_ALLOW_UNAUTH=1` escape hatch); desktop provider binding unified to third-party form with live `/models` fetching |
+| 2026-08-29 | 🧭 Group identity via SSH key fingerprint and roster binding; local development may use an explicit fallback, while production requires roster authentication |
 | 2026-08-28 | 🔁 Minimal replay CLI (list/show/resume), auto checkpoint (>70% snapshot / >90% rebuild), unified single checkpoint DB |
 | 2026-07-16 | 🎯 **Beta Release** — 6-group E2E demos functional |
 | 2026-07-15 | 🔐 Risk Gate E2E: GitHub PR comments with auto-generated `RiskProfile` |
@@ -66,27 +66,26 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 ```
 User intent → Group-specific AgentRunner → Tool chain → Schema validation → Output artifact
      ↓
-  Factor: match_main → gen_schema → autoeval → RiskProfile
+  Factor: match_main → gen_schema → autoeval → FactorReport
   Model: read_pr → extract_metadata → generate_model_spec → (triggers Risk flow)
-  Risk: read_blackboard → calc_risk → generate_risk_profile → check_gate → HumanGate
+  Risk: read_blackboard → calc_risk → generate_risk_profile → CI/report result
      ↓
   All outputs: JSON artifacts under artifacts/{group}/ + optional PR comments
 ```
 
 **Three production patterns:**
 
-1. **Pattern 1 (Push)** — Factor group submits FactorSpec → AutoEval returns IC/IR → acceptance runner in `runner/acceptance.py` produces pass/fail verdict (merge decision is human-owned today)
-2. **Pattern 2 (Pull + Human Gate)** — Model group opens PR → Risk agent auto-generates RiskProfile → human approves if max_drawdown > 15%
-3. **Pattern 5 (Interrupt-Resume)** — Any tool can `interrupt()` mid-flow for human decision, then `resume(decision=...)` to continue
+1. **Pattern 1 (Push)** — Factor group submits FactorSpec → evaluator returns evidence → acceptance produces a pass/fail result; shared-asset merge remains an explicit write operation
+2. **Pattern 2 (Pull + Handoff)** — Model group publishes ModelSpec → Risk flow consumes the authorized Blackboard entry → CI/report output returns to the originating workflow
+3. **Pattern 5 (Interrupt-Resume)** — ordinary Agent runs pause only for `merge` or `permission` decisions; Admin deployment uses a separate management surface
 
-> **Don't pre-define DAGs. Let agents route.**  
-> The platform provides deterministic routing (`route_next_step`) based on state fingerprints, loop detection, and risk thresholds — but the **sequence** of tool calls emerges from LLM reasoning, not hardcoded graphs.
+> Compose uses a shared ReAct runtime. The Agent chooses the next tool from the current state, while deterministic guards enforce iteration, loop, budget, and permission limits.
 
 **Key primitives:**
 
 - **AgentRunner** — Self-built StateGraph ReAct engine (not `create_react_agent`). Loads group-specific tools, injects skill markdown as system prompt, routes via `tool_routing_edge` → `route_next_step`.
 - **ToolRegistry** — Global singleton. Each group's `_register.py` declares tools at import time. Tests use `importlib.reload()` to re-register after other tests clear the registry.
-- **Blackboard** — SQLite-backed shared state with 5-scope isolation (SESSION/THREAD/GROUP/PROJECT/GLOBAL). Model group writes `ModelSpec` to PROJECT scope → Risk group reads it.
+- **Blackboard** — SQLite-backed shared state with GLOBAL/PROJECT/GROUP/SESSION/TASK scopes. Model group writes an authorized `ModelSpec` entry → Risk flow reads the permitted fields.
 - **Memory** — FTS5 full-text search + 5-scope ACL. Factor agent can't read Model group's memory.
 - **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskProfile`, `StrategyReport`, etc.
 
@@ -94,7 +93,7 @@ User intent → Group-specific AgentRunner → Tool chain → Schema validation 
 
 ## Six Workflows
 
-Each group has a vertical Compose flow — from raw idea to production-ready artifact.
+Each group has a vertical Compose flow that produces a typed research or engineering artifact. Production deployment stays in the Admin management surface.
 
 ### 1. Factor (Owner: 肖骥超)
 
@@ -116,7 +115,7 @@ idea = "高ROE低PB价值因子"
     (thresholds: runner/acceptance.py, defaults)
 ```
 
-> Auto-merge to main is **not** implemented: `merge_to_main` / `check_factor_gate` tools do not exist yet. The gate currently produces a pass/fail verdict, a human takes the merge/reject decision.
+> `check_factor_gate` validates the evidence. `merge_to_main` creates a shared-asset merge request and pauses on the `merge` HumanGate; an authorized approver or Admin makes the final decision.
 
 **Demo**: `python scripts/demo_jerry_tracks.py --track factor` (factor track entry shared with the other 3 tracks; `runner/jerry_demos.py` remains the underlying module)
 
@@ -138,7 +137,7 @@ Entry: `runner/server_ssh.py` — directory listing / file contents are cached u
 
 ### 2. Model (Owner: 陈镇鸿)
 
-**Goal**: PR metadata extraction → cross-group handoff to Risk for gate check.
+**Goal**: PR metadata extraction → structured handoff to the Risk CI/report chain.
 
 **Tools**: `read_pr`, `extract_metadata`, `generate_model_spec`, `write_blackboard`
 
@@ -147,8 +146,8 @@ Entry: `runner/server_ssh.py` — directory listing / file contents are cached u
 PR #42 opened → read_pr → extract model type/params from diff
   ↓ generate_model_spec → {"model_name": "pb_roe_ranker", "model_type": "ml", ...}
   ↓ write_blackboard(scope=PROJECT) → triggers Risk flow
-  ↓ Risk agent reads ModelSpec → calculates risk_metrics → generates RiskProfile
-  ↓ check_gate → HumanGate if max_drawdown > 15%
+  ↓ Risk flow reads ModelSpec → calculates risk_metrics → generates RiskProfile
+  ↓ CI/report result returns to the workflow; no QuantCode output Gate
   ↓ write_pr_comment → posts RiskProfile JSON to PR
 ```
 
@@ -158,7 +157,7 @@ PR #42 opened → read_pr → extract model type/params from diff
 
 ### 3. Risk (Owner: 杨欣琳)
 
-**Goal**: Automated risk gate for model PRs — generate `RiskProfile`, check thresholds, trigger HumanGate if needed.
+**Goal**: Generate a structured `RiskProfile` for the CI/report chain and return threshold results.
 
 **Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `check_gate`, `write_pr_comment`, `request_human_review`
 
@@ -166,17 +165,15 @@ PR #42 opened → read_pr → extract model type/params from diff
 ```python
 ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, position_limit}
   ↓ generate_risk_profile → enriched RiskProfile with thresholds
-  ↓ check_gate → {requires_human: true, reasons: ["max_drawdown", "tail_risk_var_99"]}
-  ↓ route_next_step detects risk_profile + threshold breach → HUMAN_GATE
-  ↓ _human_gate_node → interrupt() → waits for Command(resume={"decision": "approve"})
-  ↓ write_pr_comment → GitHub PR comment with full RiskProfile JSON
+  ↓ check_gate → {verdict: "pass|fail", reasons: [...]}
+  ↓ write_pr_comment → GitHub PR comment or CI artifact with full RiskProfile JSON
 ```
 
-**HumanGate**: Deterministic routing — if `risk_metrics` exceed thresholds AND `risk_profile` exists, route to `human_gate` node. Agent pauses until user resumes with `approve` or `reject`.
+**Gate boundary**: Risk threshold results remain reports or CI statuses. QuantCode HumanGate handles shared writes and cross-group permissions; Admin handles production deployment separately.
 
 **Demo**: `pytest tests/test_risk_react_ready.py -v`
 
-**Production**: GitHub Actions workflow calls `run_agent(group="risk", task="Run risk gate for PR #{pr_number}")`
+**Production**: GitHub Actions may call the Risk flow for a PR and publish its report or status.
 
 ---
 
@@ -192,11 +189,11 @@ ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, posit
 
 ### 5. Strategy (Owner: TBD)
 
-**Goal**: Signal combination → backtest → deploy gate.
+**Goal**: Signal combination → group-owned backtest adapter → deployment request for Admin.
 
-**Tools**: `select_signals`, `combine_signals`, `run_strategy_backtest`, `deploy_strategy`
+**Tools**: `select_signals`, `combine_signals`, `run_strategy_backtest`; deployment requests leave the ordinary Agent tool set.
 
-**Gate**: `deploy_strategy` always requires HumanGate approval.
+**Deployment**: Admin submits the approved artifact through the Admin management surface and the production service account executes the controlled request.
 
 ---
 
@@ -242,9 +239,9 @@ export QUANTCODE_API_KEY="sk-your-deepseek-api-key"     # the only API key entry
 export QUANTCODE_MODEL_PROVIDER="deepseek"              # deepseek | anthropic | stepfun (default deepseek)
 export QUANTCODE_MODEL_NAME="deepseek-chat"             # optional, provider defaults apply
 export QUANTCODE_MODEL_BASE_URL="https://api.deepseek.com/v1"  # optional, provider defaults apply
-# Group identity (pick one):
-#   a) SSH key binding: python -m quantcode.identity add  (writes .opencode/authorized_groups.yaml)
-#   b) local single-user fallback: export QUANTCODE_GROUP="factor"
+# Group identity:
+#   Production: SSH public-key proof → server roster → actor/group/role/workspace
+#   Local development only: export QUANTCODE_GROUP="factor"
 # Optional: SSH mainline reading — copy config.example.json's ssh_mainline section
 # into your own config.json (gitignored), or set QUANTCODE_SSH_MAINLINE env (JSON string)
 
@@ -261,7 +258,7 @@ cd ../quantcode
 
 ### Conversational path
 
-Open QuantCode desktop → select your group (or use the group segmented control) → type:
+Open QuantCode desktop → authenticate with a local SSH identity → let the server roster bind your group → type:
 
 ```
 我想开发一个基于ROE和PB的价值因子
@@ -313,7 +310,7 @@ python scripts/demo_jerry_tracks.py --track factor  # factor track entry
 ## Testing
 
 ```bash
-# Full suite (702 tests)
+# Full suite (1021 tests)
 pytest
 
 # Specific group
@@ -329,18 +326,18 @@ pytest tests/test_model_risk_handoff_e2e.py -v
 QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ```
 
-**Test status**: 702 passed, 5 skipped (as of 2026-08-30). The 5 skipped tests require real LLM API access.
+**Test status**: 1021 passed, 5 skipped (as of 2026-09-03). The 5 skipped tests require real LLM API access.
 
-**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (5-scope isolation), Memory (FTS5), routing logic (loop detection + risk gates), HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM + mock fallback), risk metrics (real returns + stub marking), metrics/monitor read path.
+**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM + mock fallback), risk metrics (real returns + stub marking), metrics/monitor read path.
 
 ## Sessions & Monitoring
 
-- **Replay**: `python scripts/replay.py list|show|resume` — list threads, inspect a checkpoint, resume a paused `risk:gate` with `--decision approve|reject`.
+- **Replay**: `python scripts/replay.py list|show|resume` — list threads, inspect a checkpoint, and resume a paused shared-write or permission Gate with `--decision approve|reject`.
 - **Run metrics**: `.quantcode/metrics.jsonl` written by agent engine completion hooks; query via the read-only `list_runs` MCP tool or the desktop Monitor panel.
-- **Goal judging**: `/goal <objective>` in desktop before running → after `run_agent` finishes, a judge verdict (`met` / `partial` / `missed` / `unevaluated`) is produced and fed back into RLHF (`apply_judged_session`).
+- **Goal judging**: `/goal <objective>` in desktop before running → after `run_agent` finishes, a judge verdict (`met` / `partial` / `missed` / `unevaluated`) is produced and fed back into RLHF (`apply_judged_session`). Goal/Judge supplies evidence; it does not make a domain or deployment decision.
 - **Auto checkpoint**: context >70% snapshots → >90% rebuilds (`runner/agent_nodes.py`, ~4 chars/token approximation, tunable via `QUANTCODE_CONTEXT_TOKENS`). Single checkpoint DB: `.quantcode/checkpoints.db`.
 
-**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (5-scope isolation), Memory (FTS5), routing logic (loop detection + risk gates), HumanGate (interrupt-resume), cross-group handoff (Model→Risk).
+**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk).
 
 ---
 
@@ -358,10 +355,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 **Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
 
-**Current stage**: Beta — 702/707 core tests passing, all six Compose flows registered, missing pieces:
-- Real AutoEval service endpoint (factor autoeval degrades to mock with `_is_mock` marking until the real API is wired)
-- `merge_to_main` / `check_factor_gate` tools (factor acceptance ends at verdict; merge is manual)
-- Packaging/distribution of the desktop app (dev-mode only today)
+**Current stage**: Beta — 1021 tests pass and five are skipped for real LLM access. The main production gaps are the real SSH/roster surface, dynamic catalog enforcement, Admin-only deployment authorization, the production AlphaFlow adapter, and desktop packaging. Staging, mock, proxy, and external-service gaps remain labeled in the artifacts and audit ledger.
 
 **Production readiness estimate**: 4-6 weeks to GA per [product evaluation](https://github.com/HKUST-QUANT-SOCIETY/quantcode/issues/X).
 
@@ -370,12 +364,13 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ## Roadmap
 
 - [x] **AutoEval integration** — factor `autoeval` tool now calls the real API; unconfigured/failing calls degrade to an `_is_mock`-marked payload (real service URL hardening ongoing). *(done 2026-08)*
-- [x] **Replay / auto checkpoint** — `scripts/replay.py` (list/show/resume risk:gate) + context >70% snapshot / >90% rebuild. *(done 2026-08)*
+- [x] **Replay / auto checkpoint** — `scripts/replay.py` (list/show/resume shared-write or permission runs) + context >70% snapshot / >90% rebuild. *(done 2026-08)*
 - [x] **Monitoring dashboard v0** — `list_runs` read-only MCP tool + desktop Monitor panel aggregating `.quantcode/metrics.jsonl`. *(done 2026-08)*
-- [ ] **merge_to_main / check_factor_gate** — close the factor accept→merge loop (verdict exists, merge execution does not)
-- [ ] **Multi-agent workflows** — Parallel agent orchestration for large-scale tasks
-- [ ] **Token budget management** — User-controlled token limits ("+500k" directive)
-- [ ] **Distill/Dream consumption** — turn RLHF traces + distill drafts into registered tools (judge/review consumers exist; dream_events not yet wired)
+- [x] **Shared-write merge path** — factor asset merge requests use the `merge` HumanGate contract; domain owners retain the final decision
+- [x] **Parallel agent workflows** — bounded Subagent registry with inherited group permissions and budgets
+- [x] **Token budget management** — runtime budget limits, explicit exhaustion state, and checkpoint support
+- [ ] **Dynamic Tool Catalog enforcement** — replace compatibility allowlists with roster-derived effective tool sets on every production call
+- [ ] **Production deployment adapter** — connect the Admin management surface to the real production service account and adapter
 - [ ] **Desktop app packaging** — bundled Python sidecar / installable build
 
 ---
@@ -384,7 +379,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 **Agent-first workflow** (recommended):
 
-Open the QuantCode desktop → type:
+Open the QuantCode desktop → authenticate with your local SSH identity → type:
 
 ```
 /implement add a new tool for calculating Fama-French 3-factor exposures
@@ -415,7 +410,7 @@ git push origin feat/your-feature
 gh pr create
 ```
 
-> **IMPORTANT**: All PRs trigger the Risk gate automatically. If your changes affect risk calculations or thresholds, expect HumanGate to pause the merge until a risk reviewer approves.
+> **IMPORTANT**: GitHub Actions may run the Risk CI chain on PRs. QuantCode HumanGate applies to shared writes and cross-group permissions; production deployment remains an Admin-only management action.
 
 **Code style**: Black (line length 100), Ruff (target py312), type hints required.
 
