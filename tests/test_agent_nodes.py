@@ -249,6 +249,23 @@ def test_tool_node_handles_unknown_tool_with_friendly_error(registry_with_echo):
     assert "failed" in out["messages"][0].content
 
 
+def test_tool_node_rejects_tool_outside_authenticated_allowlist(registry_with_echo):
+    """LLM 伪造 tool call 不能绕过 AgentRunner 的组工具面。"""
+    node = make_tool_node(registry_with_echo, allowed_tool_ids={"other_tool"})
+    state: AgentState = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "echo", "args": {"msg": "secret"}, "id": "c1"}],
+            )
+        ],
+        "group": "model",
+        "thread_id": "t-1",
+    }
+    out = node(state)
+    assert "not available" in out["messages"][0].content
+
+
 # ---------------------------------------------------------------------------
 # Day 3 评审修复（🟢#7）：tool_node 异常脱敏测试
 # ---------------------------------------------------------------------------

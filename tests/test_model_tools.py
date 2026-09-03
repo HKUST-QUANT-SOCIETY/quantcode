@@ -167,6 +167,13 @@ def test_read_pr_requires_source():
         registry.call("read_pr", {})
 
 
+def test_read_pr_rejects_paths_outside_checkout(tmp_path):
+    outside = tmp_path / "private.txt"
+    outside.write_text("PRIVATE-PROBE", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the approved"):
+        registry.call("read_pr", {"pr_path": str(outside)})
+
+
 # ---------------------------------------------------------------------------
 # extract_metadata
 # ---------------------------------------------------------------------------

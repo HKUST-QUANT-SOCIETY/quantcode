@@ -82,6 +82,7 @@ class RunAgentArgs(BaseModel):
     # ── Day 7: resume 协议字段 ──
     thread_id: str | None = Field(
         default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
         description="resume 模式时必传：要恢复的已暂停 thread_id。"
         "start 模式可选：指定则用该值作为 thread_id。",
     )

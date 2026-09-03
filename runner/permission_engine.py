@@ -28,22 +28,23 @@ DEFAULT_PERMISSIONS_FILE = PROJECT_ROOT / "configs" / "permissions.yaml"
 
 @functools.lru_cache(maxsize=1)
 def _load_cached(path: str) -> dict[str, str]:
-    """读取 path 的 permissions 映射；文件缺失/解析失败 → {}（整体 allow）。"""
+    """读取 path 的 permissions 映射；文件缺失允许本地默认策略，配置损坏则拒绝启动该读取。"""
     p = Path(path)
     if not p.exists():
         return {}
     try:
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"permissions config is unreadable or invalid: {p}") from exc
     permissions = data.get("permissions") if isinstance(data, dict) else None
-    if not isinstance(permissions, dict):
+    if permissions is None and isinstance(data, dict):
         return {}
-    return {
-        str(k): str(v).strip().lower()
-        for k, v in permissions.items()
-        if str(v).strip().lower() in VALID_PERMISSIONS
-    }
+    if not isinstance(permissions, dict):
+        raise ValueError(f"permissions config must contain a mapping: {p}")
+    invalid = [str(k) for k, v in permissions.items() if str(v).strip().lower() not in VALID_PERMISSIONS]
+    if invalid:
+        raise ValueError(f"permissions config has invalid values for: {', '.join(invalid)}")
+    return {str(k): str(v).strip().lower() for k, v in permissions.items()}
 
 
 def load_permissions() -> dict[str, str]:

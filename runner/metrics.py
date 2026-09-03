@@ -110,7 +110,12 @@ def aggregate(window: int = 20) -> dict[str, Any]:
     返回 ``{runs, success_rate, avg_duration_s, error_rate, by_group}``；
     ``by_group[g] = {runs, success, errors, avg_duration_s}``。空窗口全零。
     """
-    runs = read_recent(window)
+    return aggregate_records(read_recent(window))
+
+
+def aggregate_records(runs: list[dict]) -> dict[str, Any]:
+    """对已提供的 run 记录做汇总，不重新读取全局文件。"""
+    runs = [run for run in runs if isinstance(run, dict)]
     total = len(runs)
     if total == 0:
         return {

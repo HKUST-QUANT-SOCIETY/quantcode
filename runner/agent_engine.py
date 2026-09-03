@@ -231,7 +231,10 @@ class AgentRunner:
                 "AgentRunner.build(): 必须提供 model（生产用 LLM，测试用 MockLLM）"
             )
         llm_node = make_llm_node(self.model, tools=tools)  # tools 通过闭包注入
-        tool_node = make_tool_node(self.registry)
+        tool_node = make_tool_node(
+            self.registry,
+            allowed_tool_ids={tool.id for tool in tools},
+        )
         # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
         # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
         fingerprint_history: list[str] = []

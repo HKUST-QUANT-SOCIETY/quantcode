@@ -143,6 +143,15 @@ def test_read_missing_file_returns_exists_false(streams_dir):
     assert r == {"events": [], "next_cursor": 0, "exists": False}
 
 
+@pytest.mark.parametrize("run_id", ["../secret", "/tmp/secret", "nested/path", ""])
+def test_run_id_cannot_escape_stream_directory(streams_dir, run_id):
+    """stream ids are opaque filenames and cannot read or write outside STREAMS_DIR."""
+    with pytest.raises(ValueError):
+        sc.open_stream(run_id)
+    with pytest.raises(ValueError):
+        sc.read_from(run_id, 0)
+
+
 def test_emit_lines_are_jsonl(streams_dir):
     """文件形态：每行一条合法 JSON（JSONL）。"""
     ch = sc.open_stream("jsonl-form")

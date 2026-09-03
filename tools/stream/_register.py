@@ -17,7 +17,11 @@ from tools.registry import ToolDef, registry
 class CheckToolStreamArgs(BaseModel):
     """check_tool_stream 入参。"""
 
-    run_id: str = Field(min_length=1, description="run_agent start 返回的 thread_id（= run_id）。")
+    run_id: str = Field(
+        min_length=1,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+        description="run_agent start 返回的 opaque thread_id（= run_id）。",
+    )
     cursor: int = Field(default=0, ge=0, description="行偏移游标（上次 read_from 返回的 next_cursor，首读传 0）。")
     wait_s: int = Field(default=0, ge=0, le=120, description=">0 时轮询阻塞至有新事件或超时（秒）。")
 

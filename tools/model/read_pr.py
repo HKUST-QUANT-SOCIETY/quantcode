@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, model_validator
 from tools.github_comments import github_request
 from tools.registry import ToolDef
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class ReadPRArgs(BaseModel):
     pr_path: str | None = None
@@ -49,7 +51,15 @@ def _resolve_token(ctx: dict) -> str:
 
 
 def _read_local_pr(path_str: str) -> dict:
-    path = Path(path_str)
+    """Read a local fixture only from the approved QuantCode checkout."""
+    candidate = Path(path_str).expanduser()
+    path = (PROJECT_ROOT / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    try:
+        path.relative_to(PROJECT_ROOT)
+    except ValueError as exc:
+        raise ValueError("pr_path must remain inside the approved QuantCode checkout") from exc
+    if not path.is_file():
+        raise ValueError("pr_path must reference a regular file inside the approved checkout")
     body = path.read_text(encoding="utf-8")
     return {
         "source": str(path),

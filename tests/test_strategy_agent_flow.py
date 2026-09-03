@@ -111,5 +111,4 @@ def test_strategy_agent_multi_step(tmp_db):
         "select_signals",
         "combine_signals",
         "run_strategy_backtest",
-        "deploy_strategy",
     }

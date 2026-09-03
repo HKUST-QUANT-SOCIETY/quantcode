@@ -125,6 +125,16 @@ def test_missing_yaml_allows(monkeypatch, tmp_path):
     assert enforce("anything", "any_group", {})["decision"] == "allow"
 
 
+def test_malformed_yaml_fails_closed(monkeypatch, tmp_path):
+    """损坏的权限配置不能退化为全量 allow。"""
+    path = tmp_path / "broken-permissions.yaml"
+    path.write_text("permissions: [broken", encoding="utf-8")
+    monkeypatch.setenv("QUANTCODE_PERMISSIONS_FILE", str(path))
+    reset_cache()
+    with pytest.raises(ValueError, match="invalid"):
+        check("publish", "fundamental", {})
+
+
 # ---------------------------------------------------------------------------
 # ToolDef.permission 元数据：registry 注册校验合法值
 # ---------------------------------------------------------------------------

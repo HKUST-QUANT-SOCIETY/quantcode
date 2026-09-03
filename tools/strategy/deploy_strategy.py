@@ -1,4 +1,4 @@
-"""deploy_strategy tool — 部署占位；超阈值或显式 require_human 时返回 needs_human。"""
+"""deploy_strategy tool — 生成交给 Admin 的待部署状态，不执行生产部署。"""
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ class DeployStrategyArgs(BaseModel):
     verdict: str = Field(default="pass", description="StrategyReport.verdict")
     require_human: bool = Field(
         default=False,
-        description="强制走 HumanGate（Permission ask）",
+        description="兼容旧调用方的字段；生产部署统一由 Admin 管理面处理",
     )
     artifact_path: str | None = Field(
         default=None,
@@ -32,10 +32,10 @@ def deploy_strategy_execute(args: DeployStrategyArgs, ctx: dict) -> dict:
             "artifact_path": args.artifact_path,
         }
     return {
-        "status": "deployed_stub",
+        "status": "pending_admin",
         "strategy_name": args.strategy_name,
-        "deployed": True,
-        "message": f"[stub] {args.strategy_name} marked ready for production",
+        "deployed": False,
+        "message": f"{args.strategy_name} is ready for Admin deployment review",
         "artifact_path": args.artifact_path,
     }
 
@@ -43,13 +43,14 @@ def deploy_strategy_execute(args: DeployStrategyArgs, ctx: dict) -> dict:
 deploy_strategy_tool = ToolDef(
     id="deploy_strategy",
     description=(
-        "Deploy a strategy to production (stub). "
+        "Prepare a strategy deployment request for the Admin management surface. "
+        "This tool never deploys to production and returns deployed=false. "
         "Blocks with needs_human when verdict!=pass or require_human=true. "
         "Input: strategy_name, verdict, optional require_human / artifact_path."
     ),
     schema=DeployStrategyArgs,
     execute=deploy_strategy_execute,
-    permission="ask",  # G4-A1：部署需人审；执行策略由 configs/permissions.yaml 决定
+    permission=None,
 )
 
 __all__ = ["deploy_strategy_tool", "DeployStrategyArgs", "deploy_strategy_execute"]

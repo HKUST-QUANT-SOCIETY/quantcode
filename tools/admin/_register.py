@@ -73,9 +73,23 @@ def _org_metadata_gate(ctx: dict) -> dict[str, Any] | None:
 
 def _resolve_github_token(ctx: dict) -> str | None:
     """复用 read_pr 的 token 解析语义（tools/model/read_pr._resolve_token）：
-    ctx["github_token"] 优先，退化 ``GITHUB_TOKEN`` env。缺失 → None（调用方
-    返回诚实空态，绝不伪造数据）。"""
-    token = ctx.get("github_token") or os.environ.get("GITHUB_TOKEN")
+    普通用户必须通过 ``ctx["github_token"]`` 提供用户范围 token；中心
+    ``GITHUB_TOKEN`` 只允许 Admin 管理进程使用。缺失 → None（调用方返回诚实
+    空态，绝不使用中心 token 放大普通用户的 GitHub 可见性）。"""
+    token = ctx.get("github_token")
+    if not token:
+        from runner.admin_scope import is_admin
+
+        ident = ctx.get("identity") or ctx.get("ssh_fingerprint")
+        if not ident:
+            try:
+                from quantcode.mcp_server import _get_ssh_fingerprint
+
+                ident = _get_ssh_fingerprint()
+            except Exception:
+                ident = None
+        if is_admin(ident if isinstance(ident, str) else None, ctx.get("group")):
+            token = os.environ.get("GITHUB_TOKEN")
     return str(token) if token else None
 
 

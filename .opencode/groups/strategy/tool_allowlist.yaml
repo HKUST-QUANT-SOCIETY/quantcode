@@ -4,4 +4,3 @@ allowlist:
   - select_signals
   - combine_signals
   - run_strategy_backtest
-  - deploy_strategy

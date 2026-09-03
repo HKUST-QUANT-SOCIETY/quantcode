@@ -225,6 +225,22 @@ def test_mcp_list_runs_registered_and_callable(tmp_path, monkeypatch):
     assert bad["isError"] is True
 
 
+def test_mcp_list_runs_scopes_to_session_group(tmp_path, monkeypatch):
+    """普通 session 的 list_runs 只返回当前业务组记录。"""
+    import importlib
+    import quantcode.mcp_server as mcp_server
+
+    monkeypatch.setenv("QUANTCODE_GROUP", "model")
+    monkeypatch.setenv("QUANTCODE_ALLOW_UNAUTH", "1")
+    importlib.reload(mcp_server)
+    monkeypatch.setattr(metrics, "METRICS_PATH", tmp_path / "metrics.jsonl")
+    metrics.record_run("model", "f", "model-1", 0.0, 1.0, "completed")
+    metrics.record_run("risk", "f", "risk-1", 0.0, 1.0, "completed")
+    result = mcp_server.call_tool("list_runs", {"limit": 10})
+    payload = json.loads(result["content"][0]["text"])
+    assert {row["group"] for row in payload["recent_runs"]} == {"model"}
+
+
 def test_agent_engine_record_run_safe_never_raises():
     """_record_run_safe 在 record_run 抛错时静默（不影响主流程）。"""
     from runner import agent_engine

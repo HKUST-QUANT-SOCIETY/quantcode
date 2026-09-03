@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from schemas.evidence_chain import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE_DIR = PROJECT_ROOT / ".quantcode" / "evidence"
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class EvidenceChainError(Exception):
@@ -42,7 +44,10 @@ class EvidenceChainError(Exception):
 
 
 def evidence_path(run_id: str, artifacts_dir: str | Path = EVIDENCE_DIR) -> Path:
-    return Path(artifacts_dir) / f"{run_id}.jsonl"
+    value = str(run_id or "")
+    if not RUN_ID_PATTERN.fullmatch(value):
+        raise ValueError("run_id must be an opaque identifier using letters, digits, '.', '_' or '-'")
+    return Path(artifacts_dir) / f"{value}.jsonl"
 
 
 def _load_events(

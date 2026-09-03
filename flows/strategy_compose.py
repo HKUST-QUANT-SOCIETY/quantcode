@@ -8,7 +8,7 @@
                          与 run_strategy_backtest 工具自身 verdict 规则对齐
                          （sharpe < 0.5 → fail；max_dd > 0.25 → needs_human）。
 
-deploy_strategy 不放进流：needs_human 语义保留在工具层（人审由 HumanGate 处理）。
+生产部署不放进流：策略流只产出待部署 artifact，部署请求交给 Admin 管理面。
 
 input_data 约定（对齐 schemas.strategy.StrategySpec 字段）：
     - strategy_name / as_of_date / candidates[{signal_id, source_group, weight_hint}]
@@ -126,8 +126,8 @@ def strategy_verdict_node(state: StrategyComposeFlowState) -> dict[str, Any]:
         "verdict": verdict,
         "fail_reasons": fail_reasons,
         "note": (
-            "deploy_strategy not part of this flow; "
-            "needs_human semantics stay in the tool layer (HumanGate)"
+            "production deployment is not part of this flow; "
+            "submit the resulting artifact to the Admin management surface"
         ),
     }
 

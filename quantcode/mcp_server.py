@@ -65,6 +65,13 @@ from quantcode import identity  # P0-7: SSH key → group 绑定解析
 # 之后即使 env 指纹消失或绑定文件被改，会话组身份也不变（防会话中途降权/换组）。
 _SESSION_GROUP: str | None = None
 
+# 管理查询面分为两类：GitGraph/package 元数据按 GitHub 可见范围提供给
+# 普通用户；跨组运行、错误和 Blackboard 查询只给 Admin。该集合同时用于
+# tools/list 和 tools/call，避免出现“列表看不到但仍可直接调用”的旁路。
+_ADMIN_ONLY_META_TOOLS = frozenset(
+    {"admin_list_runs", "admin_errors", "admin_blackboard_read"}
+)
+
 
 def _get_ssh_fingerprint() -> str | None:
     """读取宿主注入的 SSH 公钥指纹 env（主名 + 兼容别名）。"""
@@ -235,9 +242,13 @@ def _list_runs_execute(args: ListRunsArgs, ctx: dict) -> dict:
     """执行 list_runs：read_recent + aggregate 汇总。只读，best-effort。"""
     from runner import metrics
 
+    runs = metrics.read_recent(args.limit)
+    group = str((ctx or {}).get("group") or "").strip()
+    if group and not _is_admin_session(group):
+        runs = [run for run in runs if run.get("group") == group]
     return {
-        "recent_runs": metrics.read_recent(args.limit),
-        "aggregate": metrics.aggregate(window=max(args.limit, 20)),
+        "recent_runs": runs,
+        "aggregate": metrics.aggregate_records(runs),
     }
 
 
@@ -298,6 +309,14 @@ def _parse_skill_frontmatter(md_text: str) -> dict:
 def _list_skills_execute(args: ListSkillsArgs, ctx: dict) -> dict:
     """扫描 .opencode/groups/<group>/skills/*/SKILL.md，返回目录（只读）。"""
     group = args.group.strip()
+    session_group = str((ctx or {}).get("group") or "").strip()
+    if session_group and group != session_group and not _is_admin_session(session_group):
+        return {
+            "error": (
+                f"group mismatch: authenticated session is '{session_group}', "
+                f"requested skills for '{group}'"
+            )
+        }
     groups_root = PROJECT_ROOT / ".opencode" / "groups"
     group_dir = groups_root / group
     skills_dir = group_dir / "skills"
@@ -512,6 +531,30 @@ def tool_def_to_mcp(tool: ToolDef) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _is_admin_session(group: str | None = None) -> bool:
+    """按当前 MCP session 判断 Admin；身份来自 SSH 指纹或显式 Admin 进程。"""
+    from runner.admin_scope import is_admin
+
+    fingerprint = _get_ssh_fingerprint()
+    return is_admin(fingerprint, group)
+
+
+def _tools_for_session(group: str | None) -> list[ToolDef]:
+    """返回当前 MCP session 的 effective tool set。"""
+    if group:
+        visible = registry.get_tools_for_group(group)
+    else:
+        visible = registry.list_all()
+
+    for tool in registry.list_all():
+        if not getattr(tool, "_meta", False) or tool in visible:
+            continue
+        if tool.id in _ADMIN_ONLY_META_TOOLS and not _is_admin_session(group):
+            continue
+        visible.append(tool)
+    return sorted(visible, key=lambda tool: tool.id)
+
+
 def list_tools() -> dict:
     """实现 MCP 的 ``tools/list``：返回 QUANTCODE_GROUP 过滤后的 tool。
 
@@ -522,21 +565,13 @@ def list_tools() -> dict:
     让 OpenCode compose agent 能发现并调用它。
     """
     _mcp_group = _get_mcp_group()
-    if _mcp_group:
-        tools = registry.get_tools_for_group(_mcp_group)
-        logger.info("list_tools: group=%s → %d tools", _mcp_group, len(tools))
-    else:
-        tools = registry.list_all()
-        logger.info("list_tools: no group → %d tools (all)", len(tools))
-
-    # 附加 meta tool（run_agent / list_runs 等，_meta=True 不进 allowlist，
-    # 但所有组的 MCP server 都应能列出）。原 run_agent 硬编码推广为遍历 _meta。
-    meta_tools = [
-        t for t in registry.list_all()
-        if getattr(t, '_meta', False) and t not in tools
-    ]
-    if meta_tools:
-        tools = tools + meta_tools
+    tools = _tools_for_session(_mcp_group)
+    logger.info(
+        "list_tools: group=%s admin=%s → %d tools",
+        _mcp_group or "(unset)",
+        _is_admin_session(_mcp_group),
+        len(tools),
+    )
 
     tool_ids = [t.id for t in tools]
     logger.debug("list_tools: returning %s", tool_ids)
@@ -560,6 +595,11 @@ def call_tool(name: str, arguments: dict) -> dict:
     """
     try:
         mcp_group = _get_mcp_group()
+        allowed_tools = {tool.id for tool in _tools_for_session(mcp_group)}
+        if name not in allowed_tools:
+            raise PermissionError(
+                f"tool '{name}' is not available for the authenticated session"
+            )
         ctx: dict[str, Any] = {
             "source": "mcp",
             "_model": _get_model(),
@@ -568,6 +608,10 @@ def call_tool(name: str, arguments: dict) -> dict:
         # dict.get("group", "") 返回 None 而非默认值 ""
         if mcp_group:
             ctx["group"] = mcp_group
+        fingerprint = _get_ssh_fingerprint()
+        if fingerprint:
+            ctx["identity"] = fingerprint
+            ctx["ssh_fingerprint"] = fingerprint
         logger.info("call_tool: %s(%s) group=%s model=%s",
                      name, json.dumps(arguments, default=str)[:200],
                      mcp_group or "(unset)",

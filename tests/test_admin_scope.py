@@ -313,6 +313,14 @@ def test_admin_package_updates_no_token_honest_empty(monkeypatch):
     assert result["updates"] == []
 
 
+def test_org_metadata_does_not_use_central_token_for_plain_user(monkeypatch):
+    """普通用户不能借用进程级 GITHUB_TOKEN 扩大 GitHub repo 可见性。"""
+    monkeypatch.setenv("GITHUB_TOKEN", "central-token")
+    result = global_registry.call("admin_repo_status", {}, ctx={})
+    assert result["ok"] is False
+    assert "GITHUB_TOKEN" in result["error"]
+
+
 def _fake_gh_get_repo_status(path: str, token: str):
     if path.startswith("/orgs/"):
         return [

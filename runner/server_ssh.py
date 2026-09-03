@@ -17,8 +17,8 @@
   * 路径穿越守卫 — relpath 必须相对、不含 ``..``、resolve 后仍在 mainline_dir 内；
   * host/user/key_path 只来自本地配置文件（非用户会话输入）；
   * connect 设 timeout=15 / banner_timeout=15，仅用显式 key（禁 agent/交互式探测）；
-  * known_hosts：配置了 ``host_key`` 时用 RejectPolicy 严格校验；缺省 AutoAdd +
-    UserWarning（升级路径：支持 known_hosts 文件 / TOFU 持久化）。
+  * known_hosts：生产环境必须配置 ``host_key`` 并用 RejectPolicy 严格校验；开发环境
+    可省略，届时降级到 AutoAdd 并发出 UserWarning。
 - 依赖：paramiko 为可选依赖（pyproject ``[project.optional-dependencies].ssh``），
   懒加载；未安装时首次真实连接抛 RuntimeError 并提示
   ``pip install 'quantcode[ssh]'``。``list_servers`` 不需要 paramiko。
@@ -295,8 +295,12 @@ def _connect(server_cfg: dict[str, Any]):
         client.get_host_keys().add(server_cfg["host"], entry.key.get_name(), entry.key)
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
-        # PonyTail 升级路径：支持 known_hosts 文件 / TOFU 持久化；
-        # 当前缺省 AutoAdd 信任首次指纹，并显式警告。
+        if str(server_cfg.get("env") or "").strip().lower() in {"prod", "production", "生产"}:
+            raise ValueError(
+                f"SSH 生产服务器 {server_cfg['name']} 必须配置 pinned host_key；"
+                "拒绝使用 TOFU 主机信任"
+            )
+        # 开发环境允许显式降级到 TOFU，并记录 warning。
         warnings.warn(
             f"SSH 服务器 {server_cfg['name']}({server_cfg['host']}) 未配置 host_key，"
             "使用 AutoAddPolicy 信任首次连接的主机指纹"

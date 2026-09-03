@@ -322,6 +322,7 @@ def make_llm_node(
 
 def make_tool_node(
     registry: ToolRegistry,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
 
@@ -383,6 +384,17 @@ def make_tool_node(
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
+                if allowed_tool_ids is not None and c["name"] not in allowed_tool_ids:
+                    content = (
+                        f"Tool '{c['name']}' is not available for the authenticated "
+                        "session."
+                    )
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
                 # P-10 阶段限流（tool 过滤，非 interrupt——不新增 HumanGate 触发点）：
                 # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
                 # permission/enforce 链（避免无谓 interrupt 冒泡）。

@@ -31,7 +31,11 @@ def test_strategy_tools_registered():
 
 
 def test_strategy_allowlist():
-    assert {t.id for t in registry.get_tools_for_group("strategy")} == EXPECTED
+    assert {t.id for t in registry.get_tools_for_group("strategy")} == {
+        "select_signals",
+        "combine_signals",
+        "run_strategy_backtest",
+    }
 
 
 def test_select_combine_backtest_pipeline():
@@ -77,6 +81,17 @@ def test_deploy_strategy_needs_human():
     )
     assert result["deployed"] is False
     assert result["status"] == "needs_human"
+
+
+def test_deploy_strategy_only_creates_admin_request():
+    """策略 Agent 只能生成待部署状态，不能宣称已部署。"""
+    result = registry.call(
+        "deploy_strategy",
+        {"strategy_name": "x", "verdict": "pass"},
+    )
+    assert result["deployed"] is False
+    assert result["status"] == "pending_admin"
+    assert "Admin" in result["message"]
 
 
 def test_load_strategy_compose_skill():

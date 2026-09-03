@@ -13,12 +13,22 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 
 from runner.langgraph_base import PROJECT_ROOT  # 复用同一仓库根判定（.quantcode 的锚点）
 
 STREAMS_DIR = PROJECT_ROOT / ".quantcode" / "streams"
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _validate_run_id(run_id: str) -> str:
+    """Validate the opaque run id before using it as a filename component."""
+    value = str(run_id or "")
+    if not RUN_ID_PATTERN.fullmatch(value):
+        raise ValueError("run_id must be an opaque identifier using letters, digits, '.', '_' or '-'")
+    return value
 
 
 class StreamChannel:
@@ -41,6 +51,7 @@ class StreamChannel:
 
 def open_stream(run_id: str) -> StreamChannel:
     """创建/清空 ``.quantcode/streams/<run_id>.jsonl``，返回通道（幂等）。"""
+    run_id = _validate_run_id(run_id)
     STREAMS_DIR.mkdir(parents=True, exist_ok=True)
     path = STREAMS_DIR / f"{run_id}.jsonl"
     path.write_text("", encoding="utf-8")
@@ -55,6 +66,7 @@ def read_from(run_id: str, cursor: int = 0) -> dict:
         next_cursor = 新的行偏移；events 里每条带隐式序号 =
         cursor + 索引（通道契约按行对齐，事件本身不注入字段）。
     """
+    run_id = _validate_run_id(run_id)
     path = STREAMS_DIR / f"{run_id}.jsonl"
     if not path.is_file():
         return {"events": [], "next_cursor": int(cursor), "exists": False}
@@ -81,6 +93,7 @@ _registry: dict[str, StreamChannel] = {}
 
 def get_or_open(run_id: str) -> StreamChannel:
     """registry 命中复用，未命中走 open_stream（清空首次创建的文件）。"""
+    run_id = _validate_run_id(run_id)
     with _registry_lock:
         ch = _registry.get(run_id)
         if ch is None:
@@ -91,6 +104,7 @@ def get_or_open(run_id: str) -> StreamChannel:
 
 def stream_exists(run_id: str) -> bool:
     """该 run_id 是否已有通道文件（控制器决定 attach 与否的快速检查）。"""
+    run_id = _validate_run_id(run_id)
     return (STREAMS_DIR / f"{run_id}.jsonl").is_file()
 
 

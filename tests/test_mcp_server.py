@@ -423,6 +423,25 @@ def test_list_tools_factor_group_excludes_risk_tools(monkeypatch):
     leaked = tool_names & risk_ids
     assert not leaked, f"risk tools 泄漏到 factor group:{leaked}"
 
+
+def test_call_tool_enforces_same_group_allowlist(monkeypatch):
+    """tools/call 不能绕过 tools/list 的组白名单直接调用另一组工具。"""
+    import tools.factor._register  # noqa: F401
+    import tools.risk._register  # noqa: F401
+
+    monkeypatch.setenv("QUANTCODE_GROUP", "factor")
+    monkeypatch.setenv("QUANTCODE_ALLOW_UNAUTH", "1")
+    importlib.reload(mcp_server)
+    importlib.reload(tools.factor._register)
+    importlib.reload(tools.risk._register)
+
+    result = mcp_server.call_tool(
+        "calc_risk",
+        {"model_spec": {"model_name": "x"}, "scenario": "normal"},
+    )
+    assert result["isError"] is True
+    assert "not available" in result["content"][0]["text"]
+
 # ---------------------------------------------------------------------------
 # Day 4 严格验收:subprocess stdio 真跑 QUANTCODE_GROUP=factor
 # ---------------------------------------------------------------------------
