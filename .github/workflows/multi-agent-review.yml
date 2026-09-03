@@ -1,0 +1,831 @@
+name: QuantCode Multi-Agent Review
+
+on:
+  # This workflow must come from the base branch. PR source is data,
+  # never workflow authority, because the agent stage receives an environment secret.
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
+
+concurrency:
+  group: quantcode-multi-agent-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  GIT_CONFIG_GLOBAL: /dev/null
+  GIT_CONFIG_NOSYSTEM: "1"
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_CACHE_DIR: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONNOUSERSITE: "1"
+  PYTHONSAFEPATH: "1"
+  REVIEW_CI_RUNTIME: /srv/quant/envs/quant-review-374e0176-a3cd117-v2
+  REVIEW_CI_MANIFEST_SHA256: 43e2e59a9d88b3813d31d307746463f2d8c270719318d1002eaa039dad982d9c
+  REVIEW_CI_REQUIREMENTS_SHA256: 3b64c225ea6e20ed5be9ff966d4026c9dd85eea8fff54da1a9b3b5cb08a585a1
+  REVIEW_CI_PIP_INSPECT_SHA256: ae198ba40f2773a40d80540a7281d77b887273c2a517b7c05e76648bfc9a19b9
+  REVIEW_CI_TEST_DEPS: /srv/quant/envs/quantcode-testdeps-a3cd117-v1
+  REVIEW_CI_TEST_DEPS_REQUIREMENTS_SHA256: 1b0af5452aee67e9348a96501ef2f58c57831b7a13ea3948eb7998593a0930ee
+  REVIEW_CI_TEST_DEPS_PIP_INSPECT_SHA256: 859ec35d259b59643acb5bb87e3f99edee50db7496ff477a741d5439358072ef
+  REVIEW_CI_TEST_DEPS_FREEZE_SHA256: 4d5630312f58bdbce388d12e9da0484d373dafca2389f302f596d6d8bdd4bb7c
+  REVIEW_CI_SANDBOX_TEMP: /srv/quant/runner-sandboxes
+  REVIEW_CI_SANDBOX_SIZE_BYTES: "6442450944"
+  REVIEW_CI_SANDBOX_MOUNT_UNIT: '/etc/systemd/system/srv-quant-runner\x2dsandboxes.mount'
+  REVIEW_CI_SANDBOX_MOUNT_UNIT_SHA256: bb0ad66f253889ad2058989732e6bbeeb1d9aed97a1b9fd3cd13345828c97e01
+  REVIEW_CI_RUNNER_UNIT: actions.runner.HKUST-QUANT-SOCIETY.server-b-multiagent-review-01.service
+  REVIEW_CI_RUNNER_DROPIN: /etc/systemd/system/actions.runner.HKUST-QUANT-SOCIETY.server-b-multiagent-review-01.service.d/20-review-resource-limits.conf
+  REVIEW_CI_RUNNER_DROPIN_SHA256: eecce6317e973bdfde602a57aaf7586f139d6fc083aaf3423234e054d969c300
+  REVIEW_CI_CGROUP_MEMORY_HIGH: "8589934592"
+  REVIEW_CI_CGROUP_MEMORY_MAX: "10737418240"
+  REVIEW_CI_CGROUP_MEMORY_SWAP_MAX: "0"
+  REVIEW_CI_CGROUP_PIDS_MAX: "768"
+  REVIEW_CI_CGROUP_CPU_MAX: "400000 100000"
+  REVIEW_CI_MAX_BLOB_BYTES: "20971520"
+  REVIEW_CI_MAX_CHANGED_FILES: "500"
+  REVIEW_CI_MAX_DIFF_BYTES: "120000"
+  REVIEW_CI_MAX_TREE_BYTES: "536870912"
+  REVIEW_CI_PYTHON_BASE: /srv/quant/envs/python-3.12.13-review-stable
+  REVIEW_CI_PYTHON_SHA256: 547a8cb634bc4d7a58248b35c373612f5dd87cca3efcf7f80a8c338256c703cc
+  REVIEW_CI_LIBPYTHON_SHA256: 407fd314d57b58aae561c7184ead0ad68d7a2c0621792a1d0480f89f5d4da114
+  REVIEW_CI_TEST_WRAPPER: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh
+  REVIEW_CI_TEST_WRAPPER_SHA256: 9ce070f1a3e871d071007c22ba74b731efd228399b99da8c9591de13b4eb5fe3
+  REVIEW_CI_TEST_SANDBOX_MANIFEST: /srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/test-sandbox-manifest-v8.json
+  REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256: c65a521fde6a4ad4512634cf1a8da965f70615f5ce7ef75b05ae674a00276449
+  LD_LIBRARY_PATH: /srv/quant/envs/python-3.12.13-review-stable/lib
+
+jobs:
+  initialize-review-gate:
+    name: Initialize Quant Review Gate
+    if: >-
+      ${{ (github.event.action != 'edited' || github.event.changes.base.ref.from != null) &&
+          (github.event.action != 'closed' || github.event.pull_request.merged == false) }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Invalidate any prior status for this head
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+        with:
+          script: |
+            const sameRepository = process.env.HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            const isReady = process.env.IS_DRAFT === "false";
+            const isOpen = process.env.PR_STATE === "open";
+            const allowed = sameRepository && isReady && isOpen;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.HEAD_SHA,
+              state: allowed ? "pending" : "failure",
+              context: "Quant Review Gate",
+              description: allowed ? "Advisory trusted review is running" : "Only open, ready, same-repository PRs are reviewed",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            core.warning("Quant Review Gate is advisory until private-repository branch protection and a dedicated attestor are enabled.");
+            if (!allowed) {
+              core.setFailed("Review is disabled for closed, draft, or cross-repository PRs.");
+            }
+
+  physical-gates:
+    name: Quant Physical Gates
+    needs: initialize-review-gate
+    if: >-
+      ${{ needs.initialize-review-gate.result == 'success' &&
+          github.event.pull_request.draft == false &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Verify pinned prebuilt review runtime
+        id: runtime
+        shell: bash
+        env:
+          REVIEW_CI_REF: ${{ vars.REVIEW_CI_REF }}
+        run: |
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1
+          if [[ ! "$REVIEW_CI_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "REVIEW_CI_REF must be a full 40-character commit SHA." >&2
+            exit 1
+          fi
+
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
+          pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
+          python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"
+          python_library="$REVIEW_CI_PYTHON_BASE/lib/libpython3.12.so.1.0"
+          test_deps_python="$REVIEW_CI_TEST_DEPS/bin/python"
+          test_deps_requirements="$REVIEW_CI_TEST_DEPS/test-requirements.txt"
+          test_deps_pip_inspect="$REVIEW_CI_TEST_DEPS/test-pip-inspect.json"
+          test_deps_freeze="$REVIEW_CI_TEST_DEPS/test-freeze.txt"
+          test_wrapper="$REVIEW_CI_TEST_WRAPPER"
+          test_sandbox_manifest="$REVIEW_CI_TEST_SANDBOX_MANIFEST"
+          cli="$REVIEW_CI_RUNTIME/bin/quant-review-ci"
+          if [[ ! -r "$manifest" || ! -r "$requirements" || ! -r "$pip_inspect" || ! -x "$python_binary" || ! -r "$python_library" || ! -x "$test_deps_python" || ! -r "$test_deps_requirements" || ! -r "$test_deps_pip_inspect" || ! -r "$test_deps_freeze" || ! -x "$test_wrapper" || ! -r "$test_sandbox_manifest" || ! -x "$cli" ]]; then
+            echo "Pinned review runtime is missing or unreadable: $REVIEW_CI_RUNTIME" >&2
+            exit 1
+          fi
+
+          manifest_sha="$(sha256sum "$manifest" | cut -d ' ' -f 1)"
+          requirements_sha="$(sha256sum "$requirements" | cut -d ' ' -f 1)"
+          pip_inspect_sha="$(sha256sum "$pip_inspect" | cut -d ' ' -f 1)"
+          python_sha="$(sha256sum "$python_binary" | cut -d ' ' -f 1)"
+          python_library_sha="$(sha256sum "$python_library" | cut -d ' ' -f 1)"
+          test_deps_requirements_sha="$(sha256sum "$test_deps_requirements" | cut -d ' ' -f 1)"
+          test_deps_pip_inspect_sha="$(sha256sum "$test_deps_pip_inspect" | cut -d ' ' -f 1)"
+          test_deps_freeze_sha="$(sha256sum "$test_deps_freeze" | cut -d ' ' -f 1)"
+          test_wrapper_sha="$(sha256sum "$test_wrapper" | cut -d ' ' -f 1)"
+          test_sandbox_manifest_sha="$(sha256sum "$test_sandbox_manifest" | cut -d ' ' -f 1)"
+          if [[ "$manifest_sha" != "$REVIEW_CI_MANIFEST_SHA256" || "$requirements_sha" != "$REVIEW_CI_REQUIREMENTS_SHA256" || "$pip_inspect_sha" != "$REVIEW_CI_PIP_INSPECT_SHA256" || "$python_sha" != "$REVIEW_CI_PYTHON_SHA256" || "$python_library_sha" != "$REVIEW_CI_LIBPYTHON_SHA256" || "$test_deps_requirements_sha" != "$REVIEW_CI_TEST_DEPS_REQUIREMENTS_SHA256" || "$test_deps_pip_inspect_sha" != "$REVIEW_CI_TEST_DEPS_PIP_INSPECT_SHA256" || "$test_deps_freeze_sha" != "$REVIEW_CI_TEST_DEPS_FREEZE_SHA256" || "$test_wrapper_sha" != "$REVIEW_CI_TEST_WRAPPER_SHA256" || "$test_sandbox_manifest_sha" != "$REVIEW_CI_TEST_SANDBOX_MANIFEST_SHA256" ]]; then
+            echo "Pinned review runtime hash verification failed." >&2
+            exit 1
+          fi
+          if [[ "$(readlink -f "$test_deps_python")" != "$(readlink -f "$python_binary")" ]]; then
+            echo "Test dependency environment does not use the pinned Python base." >&2
+            exit 1
+          fi
+          cgroup_path="$(cut -d: -f3 /proc/self/cgroup)"
+          cgroup_root="/sys/fs/cgroup$cgroup_path"
+          if [[ ! -r "$cgroup_root/memory.max" ||
+                "$(<"$cgroup_root/memory.high")" != "$REVIEW_CI_CGROUP_MEMORY_HIGH" ||
+                "$(<"$cgroup_root/memory.max")" != "$REVIEW_CI_CGROUP_MEMORY_MAX" ||
+                "$(<"$cgroup_root/memory.swap.max")" != "$REVIEW_CI_CGROUP_MEMORY_SWAP_MAX" ||
+                "$(<"$cgroup_root/pids.max")" != "$REVIEW_CI_CGROUP_PIDS_MAX" ||
+                "$(<"$cgroup_root/cpu.max")" != "$REVIEW_CI_CGROUP_CPU_MAX" ]]; then
+            echo "Runner cgroup limits are missing or do not match policy." >&2
+            exit 1
+          fi
+          if [[ "$(findmnt -n -T "$REVIEW_CI_SANDBOX_TEMP" -o TARGET)" != "$REVIEW_CI_SANDBOX_TEMP" ||
+                "$(findmnt -n -T "$REVIEW_CI_SANDBOX_TEMP" -o FSTYPE)" != "tmpfs" ||
+                "$(findmnt -b -n -T "$REVIEW_CI_SANDBOX_TEMP" -o SIZE)" != "$REVIEW_CI_SANDBOX_SIZE_BYTES" ]]; then
+            echo "Bounded sandbox tmpfs is missing or has the wrong capacity." >&2
+            exit 1
+          fi
+          file_sha() {
+            "$python_binary" -I -S -c 'import hashlib, sys; print(hashlib.file_digest(open(sys.argv[1], "rb"), "sha256").hexdigest())' "$1"
+          }
+          if [[ "$(file_sha "$REVIEW_CI_SANDBOX_MOUNT_UNIT")" != "$REVIEW_CI_SANDBOX_MOUNT_UNIT_SHA256" ||
+                "$(file_sha "$REVIEW_CI_RUNNER_DROPIN")" != "$REVIEW_CI_RUNNER_DROPIN_SHA256" ||
+                "$(systemctl show "$REVIEW_CI_RUNNER_UNIT" -p KillMode --value)" != "control-group" ||
+                "$(systemctl show "$REVIEW_CI_RUNNER_UNIT" -p OOMPolicy --value)" != "kill" ||
+                "$(systemctl show "$REVIEW_CI_RUNNER_UNIT" -p Restart --value)" != "always" ||
+                "$(systemctl show "$REVIEW_CI_RUNNER_UNIT" -p RestartUSec --value)" != "10s" ]]; then
+            echo "Runner systemd unit or recovery policy does not match the tracked configuration." >&2
+            exit 1
+          fi
+          "$test_deps_python" -m pip check >/dev/null
+          "$test_deps_python" - <<'PY'
+          from importlib.metadata import PackageNotFoundError, distribution
+
+          for package in ("quant-multiagent-review-ci", "quantcode"):
+              try:
+                  distribution(package)
+              except PackageNotFoundError:
+                  continue
+              raise SystemExit(f"{package} must not be installed in the PR test environment")
+          PY
+
+          installed_ref="$(jq -er '.engine.ref' "$manifest")"
+          if [[ "$installed_ref" != "$REVIEW_CI_REF" ]]; then
+            echo "Prebuilt runtime ref $installed_ref does not match REVIEW_CI_REF $REVIEW_CI_REF." >&2
+            exit 1
+          fi
+
+          "$cli" --help >/dev/null
+          echo "$REVIEW_CI_RUNTIME/bin" >> "$GITHUB_PATH"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+          path: quantcode
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Checkout trusted target configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Verify exact checkouts and reject symlinks
+        shell: bash
+        env:
+          BASE_REPO: ${{ github.workspace }}/trusted-target
+          PR_REPO: ${{ github.workspace }}/quantcode
+        run: |
+          set -euo pipefail
+          if [[ "$(git -C "$PR_REPO" rev-parse HEAD)" != "$HEAD_SHA" ]]; then
+            echo "PR checkout does not match the event head SHA." >&2
+            exit 1
+          fi
+          if [[ "$(git -C "$BASE_REPO" rev-parse HEAD)" != "$BASE_SHA" ]]; then
+            echo "Trusted checkout does not match the event base SHA." >&2
+            exit 1
+          fi
+          git -C "$PR_REPO" config --local core.quotePath false
+          export LC_ALL=C
+          for revision in "$BASE_SHA" "$HEAD_SHA"; do
+            git -C "$PR_REPO" ls-tree -r -z --name-only "$revision" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import re
+          import sys
+
+          credential_patterns = (
+              re.compile(r"(?i)(secret[_-]?key|access[_-]?key|api[_-]?key|token)\s*[:=]\s*[\x27\x22]?[A-Za-z0-9_\-./+=]{16,}"),
+              re.compile(r"AKID[A-Za-z0-9]{16,}"),
+              re.compile(r"sk-[A-Za-z0-9]{20,}"),
+          )
+
+          for raw_path in sys.stdin.buffer.read().split(b"\0"):
+              if not raw_path:
+                  continue
+              try:
+                  path = raw_path.decode("utf-8")
+              except UnicodeDecodeError as exc:
+                  raise SystemExit(f"Git path is not valid UTF-8: {exc}")
+              if any(pattern.search(path) for pattern in credential_patterns):
+                  raise SystemExit("Credential-like value found in a Git path")
+              if (
+                  path.splitlines() != [path]
+                  or not path.isprintable()
+                  or path != path.strip()
+                  or "\t" in path
+                  or "\\" in path
+                  or "\"" in path
+              ):
+                  raise SystemExit(f"Unsupported Git path for pinned review engine: {path!r}")
+          '
+            git -C "$PR_REPO" ls-tree -r -l -z "$revision" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import os
+          import sys
+
+          max_blob = int(os.environ["REVIEW_CI_MAX_BLOB_BYTES"])
+          max_tree = int(os.environ["REVIEW_CI_MAX_TREE_BYTES"])
+          total = 0
+          for record in sys.stdin.buffer.read().split(b"\0"):
+              if not record:
+                  continue
+              metadata, _path = record.split(b"\t", 1)
+              fields = metadata.split()
+              if len(fields) != 4 or fields[1] != b"blob":
+                  continue
+              size = int(fields[3])
+              if size > max_blob:
+                  raise SystemExit(f"Tracked blob exceeds review limit: {size} > {max_blob}")
+              total += size
+          if total > max_tree:
+              raise SystemExit(f"Tracked tree exceeds review limit: {total} > {max_tree}")
+          '
+          done
+          changed_file_count="$(git -C "$PR_REPO" diff --name-only -z "$BASE_SHA...$HEAD_SHA" | "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c 'import sys; print(sum(bool(item) for item in sys.stdin.buffer.read().split(b"\0")))')"
+          if (( changed_file_count > REVIEW_CI_MAX_CHANGED_FILES )); then
+            echo "PR changes $changed_file_count files; review limit is $REVIEW_CI_MAX_CHANGED_FILES." >&2
+            exit 1
+          fi
+          patch_bytes="$(git -C "$PR_REPO" diff --no-ext-diff --unified=20 "$BASE_SHA...$HEAD_SHA" | wc -c)"
+          if (( patch_bytes > REVIEW_CI_MAX_DIFF_BYTES )); then
+            echo "PR patch is $patch_bytes bytes; review limit is $REVIEW_CI_MAX_DIFF_BYTES." >&2
+            exit 1
+          fi
+          while IFS= read -r -d '' changed_path; do
+            object="$HEAD_SHA:$changed_path"
+            if [[ "$(git -C "$PR_REPO" cat-file -t "$object" 2>/dev/null || true)" != "blob" ]]; then
+              continue
+            fi
+            if ! git -C "$PR_REPO" cat-file blob "$object" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import re
+          import sys
+
+          payload = sys.stdin.buffer.read()
+          patterns = (
+              re.compile(rb"(?i)(secret[_-]?key|access[_-]?key|api[_-]?key|token)\s*[:=]\s*[\x27\x22][A-Za-z0-9_\-./+=]{16,}"),
+              re.compile(rb"AKID[A-Za-z0-9]{16,}"),
+              re.compile(rb"sk-[A-Za-z0-9]{20,}"),
+          )
+          if any(pattern.search(payload) for pattern in patterns):
+              raise SystemExit("credential-like value found")
+          '
+            then
+              printf 'Possible secret in changed file: %s\n' "$changed_path" >&2
+              exit 1
+            fi
+          done < <(git -C "$PR_REPO" diff --diff-filter=ACMRT --name-only -z "$BASE_SHA...$HEAD_SHA")
+          if find "$PR_REPO" -path "$PR_REPO/.git" -prune -o -type l -print -quit | grep -q .; then
+            echo "PR checkout contains a symlink; host-side gates refuse it." >&2
+            exit 1
+          fi
+
+      - name: Run physical gates
+        id: physical
+        shell: bash
+        env:
+          CONFIG_DIR: ${{ github.workspace }}/trusted-target/.review-ci
+          OUTPUT_DIR: ${{ runner.temp }}/physical-review
+          PR_REPO: ${{ github.workspace }}/quantcode
+          REVIEW_CI_BIN: ${{ steps.runtime.outputs.cli }}
+          REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
+          RUNNER_TEMP: ${{ env.REVIEW_CI_SANDBOX_TEMP }}
+          PYTHONSAFEPATH: "1"
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          export PYTHONNOUSERSITE=1
+          config_dir="$CONFIG_DIR"
+          config_args=()
+          profile_args=()
+          if [[ ! -d "$config_dir" ]]; then
+            echo "Trusted target review configuration is missing." >&2
+            exit 1
+          fi
+          for config_file in reviewer_matrix.yaml gate_policy.yaml repo_profiles.yaml; do
+            if [[ ! -f "$config_dir/$config_file" ]]; then
+              echo "Trusted review config is incomplete: $config_file is missing." >&2
+              exit 1
+            fi
+          done
+          echo "Trusted review config: using target-branch $BASE_SHA/.review-ci."
+          config_args=(--config-dir "$config_dir")
+          if [[ -n "$REVIEW_CI_PROFILE" ]]; then
+            profile_args=(--profile "$REVIEW_CI_PROFILE")
+          fi
+
+          set +e
+          "$REVIEW_CI_BIN" \
+            --repo "$PR_REPO" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --physical-only \
+            --out-dir "$OUTPUT_DIR" \
+            "${config_args[@]}" \
+            "${profile_args[@]}"
+          exit_code=$?
+          set -e
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload physical review result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: physical-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/physical-review/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce physical gate status
+        if: always()
+        shell: bash
+        env:
+          RESULT_FILE: ${{ runner.temp }}/physical-review/review-result.json
+          CLI_EXIT_CODE: ${{ steps.physical.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RESULT_FILE" ]]; then
+            echo "Physical review produced no result (CLI exit: $CLI_EXIT_CODE)." >&2
+            exit 1
+          fi
+          case "$CLI_EXIT_CODE" in
+            0|2) ;;
+            *) echo "Physical review failed unexpectedly: $CLI_EXIT_CODE" >&2; exit 1 ;;
+          esac
+
+          status="$(jq -r '.arbiter.status' "$RESULT_FILE")"
+          case "$status" in
+            pass|warn) ;;
+            block) exit 1 ;;
+            *) echo "Unexpected physical review status: $status" >&2; exit 1 ;;
+          esac
+
+  agent-review:
+    name: Quant Multi-Agent Review
+    needs: physical-gates
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    environment: deepseek-review
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read
+
+    steps:
+      - name: Verify pinned prebuilt review runtime
+        id: runtime
+        shell: bash
+        env:
+          REVIEW_CI_REF: ${{ vars.REVIEW_CI_REF }}
+        run: |
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1
+          if [[ ! "$REVIEW_CI_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "REVIEW_CI_REF must be a full 40-character commit SHA." >&2
+            exit 1
+          fi
+          manifest="$REVIEW_CI_RUNTIME/runtime-manifest-v7.json"
+          requirements="$REVIEW_CI_RUNTIME/runtime-requirements.txt"
+          pip_inspect="$REVIEW_CI_RUNTIME/runtime-pip-inspect.json"
+          python_binary="$REVIEW_CI_PYTHON_BASE/bin/python"
+          python_library="$REVIEW_CI_PYTHON_BASE/lib/libpython3.12.so.1.0"
+          cli="$REVIEW_CI_RUNTIME/bin/quant-review-ci"
+          manifest_sha="$(sha256sum "$manifest" | cut -d ' ' -f 1)"
+          requirements_sha="$(sha256sum "$requirements" | cut -d ' ' -f 1)"
+          pip_inspect_sha="$(sha256sum "$pip_inspect" | cut -d ' ' -f 1)"
+          python_sha="$(sha256sum "$python_binary" | cut -d ' ' -f 1)"
+          python_library_sha="$(sha256sum "$python_library" | cut -d ' ' -f 1)"
+          installed_ref="$(jq -er '.engine.ref' "$manifest")"
+          if [[ "$manifest_sha" != "$REVIEW_CI_MANIFEST_SHA256" || "$requirements_sha" != "$REVIEW_CI_REQUIREMENTS_SHA256" || "$pip_inspect_sha" != "$REVIEW_CI_PIP_INSPECT_SHA256" || "$python_sha" != "$REVIEW_CI_PYTHON_SHA256" || "$python_library_sha" != "$REVIEW_CI_LIBPYTHON_SHA256" || "$installed_ref" != "$REVIEW_CI_REF" || ! -x "$cli" ]]; then
+            echo "Pinned review runtime verification failed." >&2
+            exit 1
+          fi
+          "$cli" --help >/dev/null
+          echo "$REVIEW_CI_RUNTIME/bin" >> "$GITHUB_PATH"
+          echo "cli=$cli" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_SHA }}
+          path: quantcode
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Checkout trusted target configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: trusted-target
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Verify exact checkouts and reject symlinks
+        shell: bash
+        env:
+          BASE_REPO: ${{ github.workspace }}/trusted-target
+          PR_REPO: ${{ github.workspace }}/quantcode
+        run: |
+          set -euo pipefail
+          if [[ "$(git -C "$PR_REPO" rev-parse HEAD)" != "$HEAD_SHA" ]]; then
+            echo "PR checkout does not match the event head SHA." >&2
+            exit 1
+          fi
+          if [[ "$(git -C "$BASE_REPO" rev-parse HEAD)" != "$BASE_SHA" ]]; then
+            echo "Trusted checkout does not match the event base SHA." >&2
+            exit 1
+          fi
+          git -C "$PR_REPO" config --local core.quotePath false
+          export LC_ALL=C
+          for revision in "$BASE_SHA" "$HEAD_SHA"; do
+            git -C "$PR_REPO" ls-tree -r -z --name-only "$revision" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import re
+          import sys
+
+          credential_patterns = (
+              re.compile(r"(?i)(secret[_-]?key|access[_-]?key|api[_-]?key|token)\s*[:=]\s*[\x27\x22]?[A-Za-z0-9_\-./+=]{16,}"),
+              re.compile(r"AKID[A-Za-z0-9]{16,}"),
+              re.compile(r"sk-[A-Za-z0-9]{20,}"),
+          )
+
+          for raw_path in sys.stdin.buffer.read().split(b"\0"):
+              if not raw_path:
+                  continue
+              try:
+                  path = raw_path.decode("utf-8")
+              except UnicodeDecodeError as exc:
+                  raise SystemExit(f"Git path is not valid UTF-8: {exc}")
+              if any(pattern.search(path) for pattern in credential_patterns):
+                  raise SystemExit("Credential-like value found in a Git path")
+              if (
+                  path.splitlines() != [path]
+                  or not path.isprintable()
+                  or path != path.strip()
+                  or "\t" in path
+                  or "\\" in path
+                  or "\"" in path
+              ):
+                  raise SystemExit(f"Unsupported Git path for pinned review engine: {path!r}")
+          '
+            git -C "$PR_REPO" ls-tree -r -l -z "$revision" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import os
+          import sys
+
+          max_blob = int(os.environ["REVIEW_CI_MAX_BLOB_BYTES"])
+          max_tree = int(os.environ["REVIEW_CI_MAX_TREE_BYTES"])
+          total = 0
+          for record in sys.stdin.buffer.read().split(b"\0"):
+              if not record:
+                  continue
+              metadata, _path = record.split(b"\t", 1)
+              fields = metadata.split()
+              if len(fields) != 4 or fields[1] != b"blob":
+                  continue
+              size = int(fields[3])
+              if size > max_blob:
+                  raise SystemExit(f"Tracked blob exceeds review limit: {size} > {max_blob}")
+              total += size
+          if total > max_tree:
+              raise SystemExit(f"Tracked tree exceeds review limit: {total} > {max_tree}")
+          '
+          done
+          changed_file_count="$(git -C "$PR_REPO" diff --name-only -z "$BASE_SHA...$HEAD_SHA" | "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c 'import sys; print(sum(bool(item) for item in sys.stdin.buffer.read().split(b"\0")))')"
+          if (( changed_file_count > REVIEW_CI_MAX_CHANGED_FILES )); then
+            echo "PR changes $changed_file_count files; review limit is $REVIEW_CI_MAX_CHANGED_FILES." >&2
+            exit 1
+          fi
+          patch_bytes="$(git -C "$PR_REPO" diff --no-ext-diff --unified=20 "$BASE_SHA...$HEAD_SHA" | wc -c)"
+          if (( patch_bytes > REVIEW_CI_MAX_DIFF_BYTES )); then
+            echo "PR patch is $patch_bytes bytes; review limit is $REVIEW_CI_MAX_DIFF_BYTES." >&2
+            exit 1
+          fi
+          while IFS= read -r -d '' changed_path; do
+            object="$HEAD_SHA:$changed_path"
+            if [[ "$(git -C "$PR_REPO" cat-file -t "$object" 2>/dev/null || true)" != "blob" ]]; then
+              continue
+            fi
+            if ! git -C "$PR_REPO" cat-file blob "$object" |
+              "$REVIEW_CI_PYTHON_BASE/bin/python" -I -S -c '
+          import re
+          import sys
+
+          payload = sys.stdin.buffer.read()
+          patterns = (
+              re.compile(rb"(?i)(secret[_-]?key|access[_-]?key|api[_-]?key|token)\s*[:=]\s*[\x27\x22][A-Za-z0-9_\-./+=]{16,}"),
+              re.compile(rb"AKID[A-Za-z0-9]{16,}"),
+              re.compile(rb"sk-[A-Za-z0-9]{20,}"),
+          )
+          if any(pattern.search(payload) for pattern in patterns):
+              raise SystemExit("credential-like value found")
+          '
+            then
+              printf 'Possible secret in changed file: %s\n' "$changed_path" >&2
+              exit 1
+            fi
+          done < <(git -C "$PR_REPO" diff --diff-filter=ACMRT --name-only -z "$BASE_SHA...$HEAD_SHA")
+          if find "$PR_REPO" -path "$PR_REPO/.git" -prune -o -type l -print -quit | grep -q .; then
+            echo "PR checkout contains a symlink; host-side review refuses it." >&2
+            exit 1
+          fi
+
+      - name: Download physical review result
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: physical-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/physical-review
+
+      - name: Verify PR is still current before provider access
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const {data: currentPull} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const valid =
+              currentPull.state === "open" &&
+              currentPull.draft === false &&
+              currentPull.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}` &&
+              currentPull.head.sha === process.env.HEAD_SHA &&
+              currentPull.base.sha === process.env.BASE_SHA &&
+              process.env.HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            if (!valid) {
+              core.setFailed("PR state or base/head changed before DeepSeek access; review is stale.");
+            }
+
+      - name: Run reviewer matrix
+        id: agents
+        continue-on-error: true
+        shell: bash
+        env:
+          CONFIG_DIR: ${{ github.workspace }}/trusted-target/.review-ci
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-v4-flash' }}
+          OUTPUT_DIR: ${{ runner.temp }}/agent-review
+          PHYSICAL_RESULT: ${{ runner.temp }}/physical-review/review-result.json
+          PR_REPO: ${{ github.workspace }}/quantcode
+          REVIEW_CI_BIN: ${{ steps.runtime.outputs.cli }}
+          REVIEW_CI_PROFILE: ${{ vars.REVIEW_CI_PROFILE }}
+          PYTHONSAFEPATH: "1"
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          if [[ "$DEEPSEEK_BASE_URL" != "https://api.deepseek.com" ]]; then
+            echo "DEEPSEEK_BASE_URL is not an approved review endpoint." >&2
+            exit 1
+          fi
+          unset PYTHONPATH PYTHONHOME PYTHONUSERBASE
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+          unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE SSL_CERT_FILE
+          export PYTHONNOUSERSITE=1
+          config_dir="$CONFIG_DIR"
+          config_args=()
+          profile_args=()
+          if [[ ! -d "$config_dir" ]]; then
+            echo "Trusted target review configuration is missing." >&2
+            exit 1
+          fi
+          for config_file in reviewer_matrix.yaml gate_policy.yaml repo_profiles.yaml; do
+            if [[ ! -f "$config_dir/$config_file" ]]; then
+              echo "Trusted review config is incomplete: $config_file is missing." >&2
+              exit 1
+            fi
+          done
+          echo "Trusted review config: using target-branch $BASE_SHA/.review-ci."
+          config_args=(--config-dir "$config_dir")
+          if [[ -n "$REVIEW_CI_PROFILE" ]]; then
+            profile_args=(--profile "$REVIEW_CI_PROFILE")
+          fi
+
+          set +e
+          "$REVIEW_CI_BIN" \
+            --repo "$PR_REPO" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --agent-only \
+            --gate-attestation-file "$PHYSICAL_RESULT" \
+            --require-llm \
+            --out-dir "$OUTPUT_DIR" \
+            "${config_args[@]}" \
+            "${profile_args[@]}"
+          exit_code=$?
+          set -e
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload combined review result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: combined-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/agent-review/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create or update PR summary
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SUMMARY_PATH: ${{ runner.temp }}/agent-review/review-summary.md
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- quant-multiagent-review -->";
+            if (!fs.existsSync(process.env.SUMMARY_PATH)) {
+              core.warning("No agent review summary was produced.");
+              return;
+            }
+
+            const summary = fs.readFileSync(process.env.SUMMARY_PATH, "utf8");
+            const advisory = "> [!WARNING]\n> Advisory review only: the current GitHub plan does not enforce this as a merge gate.";
+            const body = `${marker}\n${advisory}\n\n${summary}`.slice(0, 65000);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const previous = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Enforce combined review status
+        if: always()
+        shell: bash
+        env:
+          RESULT_FILE: ${{ runner.temp }}/agent-review/review-result.json
+          CLI_EXIT_CODE: ${{ steps.agents.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RESULT_FILE" ]]; then
+            echo "Agent review produced no result (CLI exit: $CLI_EXIT_CODE)." >&2
+            exit 1
+          fi
+          case "$CLI_EXIT_CODE" in
+            0|2) ;;
+            *) echo "Agent review failed unexpectedly: $CLI_EXIT_CODE" >&2; exit 1 ;;
+          esac
+
+          status="$(jq -r '.arbiter.status' "$RESULT_FILE")"
+          case "$status" in
+            pass|warn) ;;
+            block) exit 1 ;;
+            *) echo "Unexpected combined review status: $status" >&2; exit 1 ;;
+          esac
+
+  publish-review-gate:
+    name: Publish Quant Review Gate
+    needs: [initialize-review-gate, physical-gates, agent-review]
+    if: >-
+      ${{ always() &&
+          (github.event.action != 'edited' || github.event.changes.base.ref.from != null) &&
+          (github.event.action != 'closed' || github.event.pull_request.merged == false) }}
+    runs-on:
+      group: quant-review-runners
+      labels: server-b-multiagent-review
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Publish head-bound advisory status
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          AGENT_RESULT: ${{ needs.agent-review.result }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          INIT_RESULT: ${{ needs.initialize-review-gate.result }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PHYSICAL_RESULT: ${{ needs.physical-gates.result }}
+        with:
+          script: |
+            const {data: currentPull} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const sameRepository = process.env.HEAD_REPOSITORY === `${context.repo.owner}/${context.repo.repo}`;
+            const isCurrent = currentPull.head.sha === process.env.HEAD_SHA && currentPull.base.sha === process.env.BASE_SHA;
+            const isOpen = currentPull.state === "open";
+            const isReady = process.env.IS_DRAFT === "false" && currentPull.draft === false;
+            const initialized = process.env.INIT_RESULT === "success";
+            const physicalPassed = process.env.PHYSICAL_RESULT === "success";
+            const agentsPassed = process.env.AGENT_RESULT === "success";
+            const passed = sameRepository && isCurrent && isOpen && isReady && initialized && physicalPassed && agentsPassed;
+            const detail = [
+              `same-repository=${sameRepository}`,
+              `current=${isCurrent}`,
+              `open=${isOpen}`,
+              `ready=${isReady}`,
+              `initialized=${process.env.INIT_RESULT}`,
+              `physical=${process.env.PHYSICAL_RESULT}`,
+              `agents=${process.env.AGENT_RESULT}`,
+            ].join(" ");
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.HEAD_SHA,
+              state: passed ? "success" : "failure",
+              context: "Quant Review Gate",
+              description: passed ? "Advisory physical and multi-agent review passed" : "Advisory review failed; inspect the workflow run",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+            core.info(`Published Quant Review Gate for ${process.env.HEAD_SHA}: ${detail}`);
+            if (!passed) {
+              core.setFailed(`Quant Review Gate failed: ${detail}`);
+            }

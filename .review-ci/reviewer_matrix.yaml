@@ -1,0 +1,205 @@
+orchestration:
+  max_workers: 6
+  timeout_seconds: 300
+  retries: 2
+  retry_backoff_seconds: 0.5
+  max_patch_chars: 120000
+  max_prompt_chars: 160000
+
+reviewers:
+  schema_contract_reviewer:
+    name: Schema Contract Reviewer
+    context:
+      mission: Protect typed handoffs between QuantCode groups and reject incompatible contract drift.
+      categories: [contracts, integration]
+      instructions:
+        - Treat FactorSpec, ModelSpec, RiskProfile, Blackboard state, and tool schemas as versioned interfaces.
+        - Check required fields, enum semantics, scope isolation, serialization, and backward compatibility.
+        - Require tests whenever a producer or consumer contract changes.
+    rules:
+      blocker:
+        - A producer and consumer disagree on a required field, type, enum, or scope.
+        - Validation can be bypassed before a cross-group artifact is persisted or routed.
+        - A breaking schema change has no migration or coordinated consumer update.
+      important:
+        - A contract change lacks a round-trip or compatibility fixture.
+      ignore:
+        - Pure wording or formatting changes with no schema effect.
+    tools:
+      - {name: git_diff, kind: local, description: Read-only changed-file evidence}
+    skills:
+      - {name: code-review, required: true}
+      - {name: lqtp_schema_review, required: true}
+    programmatic_gate_bindings:
+      - {name: schema_gate, required: true}
+      - {name: secret_gate, required: true}
+      - {name: pytest_gate, required: false, on_status: [block, error]}
+    subagents:
+      - {name: producer_consumer_checker, mission: "Compare changed schema producers with every changed consumer"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_contract_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+  orchestration_reviewer:
+    name: Agent Orchestration Reviewer
+    context:
+      mission: Review AgentRunner routing, tool registration, checkpoints, memory isolation, retries, and interrupt-resume behavior.
+      categories: [orchestration, memory, integration]
+      instructions:
+        - Preserve deterministic routing boundaries around LLM decisions.
+        - Check loop detection, retry limits, state fingerprints, checkpoint recovery, and HumanGate resume semantics.
+        - Ensure group-scoped memory and Blackboard access cannot cross authorization boundaries.
+    rules:
+      blocker:
+        - An agent can bypass HumanGate or deterministic risk routing.
+        - A retry, resume, or checkpoint path duplicates a non-idempotent side effect.
+        - Memory or Blackboard scope isolation is weakened.
+      important:
+        - A new routing branch lacks a deterministic test fixture.
+        - Tool registration becomes import-order dependent without recovery coverage.
+    tools:
+      - {name: git_diff, kind: local}
+    skills:
+      - {name: code-review, required: true}
+      - {name: deployment_safety_review, required: true}
+    programmatic_gate_bindings:
+      - {name: secret_gate, required: true}
+      - {name: pytest_gate, required: false, on_status: [block, error]}
+    subagents:
+      - {name: state_machine_checker, mission: "Trace changed states, transitions, retries, and interrupt boundaries"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_routing_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+  research_integrity_reviewer:
+    name: Quant Research Integrity Reviewer
+    context:
+      mission: Review factor, model, fundamental, strategy, and options research for PIT safety and reproducibility.
+      categories: [factor, model, fundamental, strategy, options]
+      instructions:
+        - Separate observation, signal, decision, execution, and evaluation timestamps.
+        - Reject future leakage, same-bar execution without policy, unseeded stochastic work, and undocumented cost assumptions.
+        - Require reproducible inputs and explicit as-of semantics for research artifacts.
+    rules:
+      blocker:
+        - Future information can enter a feature, factor, signal, valuation, or backtest.
+        - Train and validation periods overlap or preprocessing leaks across the split.
+        - A production-facing strategy omits costs, constraints, or executable-price policy.
+      important:
+        - Randomness, data snapshot, or as-of time is not recorded.
+        - A numerical or portfolio assumption changes without regression evidence.
+    tools:
+      - {name: git_diff, kind: local}
+    skills:
+      - {name: point_in_time_data_review, required: true}
+      - {name: temporal_validation_review, required: true}
+      - {name: factor_statistics_review, required: true}
+    programmatic_gate_bindings:
+      - {name: secret_gate, required: true}
+      - {name: pytest_gate, required: false, on_status: [block, error]}
+      - {name: reproducibility_gate, required: false, on_status: [block, error]}
+    subagents:
+      - {name: temporal_leakage_checker, mission: "Trace data availability through research and evaluation timestamps"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_research_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+  risk_gate_reviewer:
+    name: Risk and HumanGate Reviewer
+    context:
+      mission: Protect risk thresholds, deterministic admission, PR risk comments, and human approval boundaries.
+      categories: [risk, orchestration, contracts]
+      instructions:
+        - Treat max drawdown, VaR, position limits, capacity, and approval routing as governed policy.
+        - Require fail-closed behavior when risk data or approval state is missing.
+        - Verify dedupe keys bind comments and decisions to the PR head SHA.
+    rules:
+      blocker:
+        - A threshold is relaxed or bypassed without explicit policy evidence.
+        - Missing or invalid risk data falls through to approval.
+        - A stale PR comment, risk profile, or human decision can be reused for a new head SHA.
+      important:
+        - Risk units, horizon, confidence level, or aggregation semantics are ambiguous.
+    tools:
+      - {name: git_diff, kind: local}
+    skills:
+      - {name: admission_policy_review, required: true}
+      - {name: portfolio_accounting_review, required: true}
+      - {name: code-review, required: true}
+    programmatic_gate_bindings:
+      - {name: schema_gate, required: true}
+      - {name: secret_gate, required: true}
+      - {name: pytest_gate, required: false, on_status: [block, error]}
+    subagents:
+      - {name: threshold_and_dedupe_checker, mission: "Compare thresholds, head-SHA binding, and HumanGate transitions"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_risk_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+  ci_security_reviewer:
+    name: CI and Supply-Chain Reviewer
+    context:
+      mission: Review GitHub Actions, scripts, dependencies, secrets, Server B boundaries, and fail-closed gates.
+      categories: [ci, integration]
+      instructions:
+        - Keep untrusted PR content separate from provider secrets and privileged runner state.
+        - Require pinned Actions and a pinned, manifest-verified prebuilt review runtime.
+        - Do not add per-PR dependency installation when the fixed runtime can provide it.
+    rules:
+      blocker:
+        - A fork or untrusted PR can execute on the persistent Server B runner.
+        - A workflow exposes a token, provider key, production path, or write credential.
+        - Review or release can pass when a required stage is skipped, cancelled, stale, or malformed.
+        - A workflow uses an unpinned central engine or silently installs a new runtime per PR.
+      important:
+        - Concurrency, timeout, cleanup, rollback, or head-SHA binding is missing.
+    tools:
+      - {name: git_diff, kind: local}
+    skills:
+      - {name: deployment_safety_review, required: true}
+      - {name: server_ab_boundary_review, required: true}
+      - {name: code-review, required: true}
+    programmatic_gate_bindings:
+      - {name: secret_gate, required: true}
+      - {name: prod_path_gate, required: true}
+      - {name: shell_syntax_gate, required: true}
+    subagents:
+      - {name: trust_boundary_checker, mission: "Trace event trust, runner scope, secrets, permissions, and final gate results"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_ci_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+  docs_operations_reviewer:
+    name: Documentation and Operations Reviewer
+    context:
+      mission: Keep feature docs, runbooks, ownership, commands, and actual workflow behavior consistent.
+      categories: [docs, ci, unknown]
+      instructions:
+        - Verify every command states where it runs and what permission it needs.
+        - Distinguish configured, locally verified, CI verified, and production-enabled states.
+        - Require validation and rollback for operational changes.
+    rules:
+      blocker:
+        - Documentation instructs an unsafe command or credential practice.
+        - Documentation claims a gate, runner, signature, or deployment is active when configuration contradicts it.
+      important:
+        - Ownership, expected output, failure mode, or rollback is missing.
+    tools:
+      - {name: git_diff, kind: local}
+    skills:
+      - {name: operational_runbook_review, required: true}
+      - {name: code-review, required: true}
+    programmatic_gate_bindings:
+      - {name: schema_gate, required: true}
+      - {name: shell_syntax_gate, required: true}
+    subagents:
+      - {name: docs_config_checker, mission: "Compare changed documentation with workflow, variables, paths, and check names"}
+    verifiers:
+      - {name: finding_schema, kind: schema, required: true}
+      - {name: changed_docs_evidence, kind: rule, required: true, requires_changed_file_evidence: true}
+
+arbiter:
+  fail_on_agent_blocker: true
+  fail_on_physical_gate_block: true
+  fail_on_agent_error: true
+  fail_on_agent_skip: true

@@ -1,0 +1,86 @@
+{
+  "schema_version": 3,
+  "runtime_id": "quant-review-374e0176-a3cd117-v2",
+  "attestation_id": "quant-review-374e0176-a3cd117-attestation-v7",
+  "built_on": "2026-08-24",
+  "platform": {
+    "os": "ubuntu",
+    "os_version": "22.04",
+    "architecture": "x86_64",
+    "glibc": "2.35",
+    "python": "3.12.13",
+    "python_implementation": "CPython",
+    "python_soabi": "cpython-312-x86_64-linux-gnu",
+    "openssl": "OpenSSL 3.0.2 15 Mar 2022",
+    "pip": "25.0.1"
+  },
+  "python_base": {
+    "path": "/srv/quant/envs/python-3.12.13-review-stable",
+    "executable_sha256": "547a8cb634bc4d7a58248b35c373612f5dd87cca3efcf7f80a8c338256c703cc",
+    "libpython_sha256": "407fd314d57b58aae561c7184ead0ad68d7a2c0621792a1d0480f89f5d4da114",
+    "required_library_path": "/srv/quant/envs/python-3.12.13-review-stable/lib"
+  },
+  "engine": {
+    "repository": "HKUST-QUANT-SOCIETY/multiagent_review_ci_standalone",
+    "ref": "374e0176fecb21b1729bf38fcaf205580793afc6",
+    "tree": "44cad5f1d0885985e21456acd9a1a1f16ffebbf0",
+    "wheel": "quant_multiagent_review_ci-0.1.0-py3-none-any.whl",
+    "wheel_sha256": "49f81dcc8ed340f17e0dfd2833e559615d6ac07ea2f0828fd3a0afde2876c2ab"
+  },
+  "quantcode_dependency_baseline": {
+    "repository": "HKUST-QUANT-SOCIETY/quantcode",
+    "commit": "a3cd11799bd99736c2c2f120745bab5184428a19",
+    "tree": "3ec70391be576f2f45c9122e548088ca45b0372c",
+    "source_wheel": "quantcode-0.0.1-py3-none-any.whl",
+    "source_wheel_sha256": "c00f7bdee04895ca0d184a9d7701c14ccdb9e23673fa209ba0d28dcbd224d1f5",
+    "distribution_installed": false,
+    "pyproject_sha256": "263a0f94ca5af2122f98b3339023b3b76ab684979c6408cdd8f02c1557a205e9",
+    "uv_lock_sha256_provenance_only": "8b0929786be5eb35b8f2af504e3c905a329089fe568bcef1d619b94c9e8346af"
+  },
+  "resolved_environment": {
+    "install_mode": "offline wheelhouse",
+    "runtime_requirements_sha256": "3b64c225ea6e20ed5be9ff966d4026c9dd85eea8fff54da1a9b3b5cb08a585a1",
+    "pip_inspect_sha256": "ae198ba40f2773a40d80540a7281d77b887273c2a517b7c05e76648bfc9a19b9",
+    "wheelhouse_path": "/srv/quant/envs/quant-review-wheelhouse-374e0176-a3cd117",
+    "wheelhouse_wheel_count": 115,
+    "wheelhouse_sha256_list_sha256": "73e2a4e7eb25d0fba57f30a26b13a2d471982e2bc8b542d84caa89a93ddad2f3",
+    "third_party_requirements_sha256": "1b0af5452aee67e9348a96501ef2f58c57831b7a13ea3948eb7998593a0930ee"
+  },
+  "mimocode_skills": {
+    "repository_commit": "0abfd8a226c83f4a9088c09b5341a8f2c1aa9787",
+    "repository_tree": "5b54a1e6f9e670a400588991bdca6003bde73389",
+    "bundle_path": "/srv/quant/envs/mimocode-compose-0abfd8a",
+    "bundle_file_count": 38,
+    "skill_md_count": 15,
+    "bundle_sha256": "d67ee430a68fe32822d74c726f980cf3cf7150d11b8cd9554804cc5a1acaa928"
+  },
+  "offline_model_cache": {
+    "path": "/srv/quant/envs/quant-review-model-cache-a3cd117",
+    "tiktoken_cl100k_base_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+    "chroma_onnx_archive_sha256": "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3",
+    "chroma_extracted_tree_sha256": "21dd9e6ccaf517de6f60d3cb52e144a4f8703eec76da27d7fef5dcf665389004"
+  },
+  "test_sandbox": {
+    "manifest_path": "/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/test-sandbox-manifest-v8.json",
+    "manifest_sha256": "c65a521fde6a4ad4512634cf1a8da965f70615f5ce7ef75b05ae674a00276449",
+    "test_dependencies_path": "/srv/quant/envs/quantcode-testdeps-a3cd117-v1",
+    "review_engine_exposed_to_pr_tests": false,
+    "network": "disabled"
+  },
+  "filesystem_policy": {
+    "owner": "quantadmin for review runtime; root for test sandbox assets",
+    "administrative_group": "quant-dev",
+    "runner_acl": "gha-multiagent-review:rX",
+    "other_acl": "none",
+    "runner_can_write_runtime": false
+  },
+  "verification": {
+    "pip_check": "passed",
+    "central_config_load": "passed",
+    "elf_dependencies": "passed",
+    "quantcode_tests_passed": 589,
+    "quantcode_tests_skipped": 8,
+    "quantcode_test_mode": "offline isolated chroot",
+    "quantcode_project_import_source": "PR checkout only"
+  }
+}

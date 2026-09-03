@@ -1,0 +1,40 @@
+gates:
+  secret_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  prod_path_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  schema_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  shell_syntax_gate:
+    enabled: true
+    required: true
+    block_on: blocker
+  pytest_gate:
+    enabled: true
+    required: false
+    block_on: blocker
+  artifact_contract_gate:
+    enabled: false
+    required: false
+    block_on: important
+  reproducibility_gate:
+    enabled: true
+    required: false
+    block_on: blocker
+
+pytest_timeout_seconds: 600
+max_command_output_chars: 20000
+
+pytest_commands:
+  - categories: [contracts, orchestration, memory, factor, model, risk, fundamental, strategy, options, integration, ci, unknown]
+    command: [/srv/quant/envs/quant-review-test-wrapper-a3cd117-v6/run_quantcode_review_tests.sh]
+
+artifact_contract:
+  required_files: []
+  manifest_required_fields: []
