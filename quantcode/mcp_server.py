@@ -603,6 +603,7 @@ def call_tool(name: str, arguments: dict) -> dict:
         ctx: dict[str, Any] = {
             "source": "mcp",
             "_model": _get_model(),
+            "_allowed_tool_ids": allowed_tools,
         }
         # ★ 只有 group 非空时才注入，避免 ctx["group"]=None 导致
         # dict.get("group", "") 返回 None 而非默认值 ""

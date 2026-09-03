@@ -233,7 +233,7 @@ def test_strategy_compose_langgraph_invoke(tmp_path, monkeypatch):
 
     assert result["errors"] == []
     assert result["state"]["verdict"]["verdict"] == "pass"
-    assert "deploy_strategy" in result["output_data"]["note"]
+    assert "Admin" in result["output_data"]["note"]
 
 
 # ---------------------------------------------------------------------------

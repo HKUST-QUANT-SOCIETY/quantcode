@@ -386,8 +386,8 @@ def make_tool_node(
             try:
                 if allowed_tool_ids is not None and c["name"] not in allowed_tool_ids:
                     content = (
-                        f"Tool '{c['name']}' is not available for the authenticated "
-                        "session."
+                        f"Tool '{c['name']}' failed: it is not available for the "
+                        "authenticated session."
                     )
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])

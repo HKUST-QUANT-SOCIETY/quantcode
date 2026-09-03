@@ -413,10 +413,11 @@ def test_ssh_status_registered_and_callable(monkeypatch):
 
 
 def test_admin_tools_meta_visible_via_mcp_tools_list(monkeypatch):
-    """_meta 通道：设置组过滤后六工具仍出现在 MCP tools/list（发现面全员一致）。"""
+    """_meta 通道：普通组员只发现公开元工具，Admin 查询面不泄漏。"""
     monkeypatch.setenv("QUANTCODE_GROUP", "model")
     names = {t["name"] for t in mcp_server.list_tools()["tools"]}
-    assert set(ALL_ADMIN_TOOL_IDS) <= names
+    assert {"ssh_status", "admin_repo_status", "admin_package_updates"} <= names
+    assert not ({"admin_list_runs", "admin_errors", "admin_blackboard_read"} & names)
 
 
 def test_admin_tools_not_in_group_allowlist():

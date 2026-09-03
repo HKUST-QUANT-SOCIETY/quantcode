@@ -40,7 +40,9 @@ DEFAULT_TOKEN_BUDGET = 200_000
 def _resolve_budget(max_total_tokens: int | None) -> int | None:
     """args 显式值 > env QUANTCODE_TOKEN_BUDGET > DEFAULT_TOKEN_BUDGET。"""
     if max_total_tokens is not None:
-        return max_total_tokens
+        # 0 is the established test/CLI sentinel for disabling the optional
+        # budget gate; positive values remain hard limits.
+        return max_total_tokens if max_total_tokens > 0 else None
     try:
         return int(os.environ.get("QUANTCODE_TOKEN_BUDGET", DEFAULT_TOKEN_BUDGET))
     except ValueError:
@@ -231,10 +233,16 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
 
     # ── resume mode ──
     if args.decision is not None:
-        return _resume_mode(args, group, model, checkpoint_db, resolved_skill)
+        return _resume_mode(
+            args, group, model, checkpoint_db, resolved_skill,
+            allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+        )
 
     # ── start mode ──
-    return _start_mode(args, group, model, checkpoint_db, resolved_skill)
+    return _start_mode(
+        args, group, model, checkpoint_db, resolved_skill,
+        allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+    )
 
 def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
     """risk 组启动时读取 PROJECT scope 的 ``shared.pending_risk_reviews`` 队列条数。
@@ -278,6 +286,8 @@ def _start_mode(
     model: Any,
     checkpoint_db: Path,
     resolved_skill: str | None,
+    *,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """start 模式：启动 AgentRunner，捕获 interrupt → waiting_for_human。"""
     from runner.agent_engine import AgentRunner
@@ -309,6 +319,7 @@ def _start_mode(
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
+        allowed_tool_ids=allowed_tool_ids,
     )
 
     # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
@@ -409,6 +420,8 @@ def _resume_mode(
     model: Any,
     checkpoint_db: Path,
     resolved_skill: str | None,
+    *,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """resume 模式：用 Command(resume=...) 恢复已暂停的 gate。"""
     from runner.agent_engine import AgentRunner
@@ -429,6 +442,7 @@ def _resume_mode(
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
+        allowed_tool_ids=allowed_tool_ids,
     )
 
     try:

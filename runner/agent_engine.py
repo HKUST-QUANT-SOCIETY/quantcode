@@ -142,6 +142,7 @@ class AgentRunner:
         retry_base_delay: float = 0.5,
         budget_tokens: int | None = None,  # R2 token budget；None=不启用
         blackboard_db_path: str | Path | None = None,  # P-01/F-06: dataset 工具同源 bb
+        allowed_tool_ids: set[str] | frozenset[str] | None = None,
     ) -> None:
         self.group = group
         # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
@@ -173,6 +174,12 @@ class AgentRunner:
         # merge_to_main 读同一 bb 文件；None → backing 默认 .quantcode/blackboard.db）。
         self.blackboard_db_path = (
             str(blackboard_db_path) if blackboard_db_path else None
+        )
+        # 受信任的嵌入式调用方可显式提供 effective tool set（例如隔离测试或
+        # 已由上层 roster 解析的服务）。普通生产调用不传，继续从本组
+        # tool_allowlist.yaml 解析，避免请求参数成为越权旁路。
+        self.allowed_tool_ids = (
+            frozenset(allowed_tool_ids) if allowed_tool_ids is not None else None
         )
 
     # ----- 构造 StateGraph -----
@@ -222,8 +229,14 @@ class AgentRunner:
         # ★ 追加 tool-call 指令（解决 StepFun 只输出文字不调 tool 的问题）
         system_prompt = system_prompt + _tc_instruction
 
-        # 2. 按组过滤 tool
-        tools = self.registry.get_tools_for_group(self.group)
+        # 2. 计算当前可见工具。MCP 入口会传入已经由认证 session 计算好的
+        # effective set；未传时使用仓库内本组 allowlist。后者是受信任的
+        # 库调用/测试入口，保留其对注入 registry 的兼容执行语义。
+        tools = (
+            [tool for tool in self.registry.list_all() if tool.id in self.allowed_tool_ids]
+            if self.allowed_tool_ids is not None
+            else self.registry.get_tools_for_group(self.group)
+        )
 
         # 3. 构造节点工厂
         if self.model is None:
@@ -233,7 +246,9 @@ class AgentRunner:
         llm_node = make_llm_node(self.model, tools=tools)  # tools 通过闭包注入
         tool_node = make_tool_node(
             self.registry,
-            allowed_tool_ids={tool.id for tool in tools},
+            # 只有 MCP 认证边界传入的 effective set 才需要在执行时再次
+            # 校验。直接库调用维持历史的自定义 registry 行为。
+            allowed_tool_ids=self.allowed_tool_ids,
         )
         # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
         # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
