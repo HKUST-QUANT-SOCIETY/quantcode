@@ -1,6 +1,5 @@
 # risk 组 tool 白名单 — Day 4 + Day 7 HumanGate
 allowlist:
-  - run_agent
   - read_blackboard
   - calc_risk
   - generate_risk_profile

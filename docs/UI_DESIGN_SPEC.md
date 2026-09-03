@@ -1,174 +1,294 @@
-# QuantCode UI 设计规格（UI_DESIGN_SPEC）
+# QuantCode 桌面端设计规格（UI_DESIGN_SPEC）
 
-> **版本**：v1（2026-09-01）｜**Owner**：Agent Group
-> **依据**：`specs/FUNCTIONAL_SPEC.md` v0.2.1 · `docs/PRD.md` v2 · 定版讨论纪要
-> **UI 仓库**：`opencode-lens`（组件真源 = `packages/app/src/components/quantcode/`，断言用 playwright 表达）
-> **定位**：本文是 UI 层唯一活文档——每个 F/P 编号对应什么屏、什么组件、什么状态。UI↔功能一一对应是验收目标。
+> **版本**：v3（2026-09-03，OpenCode/MimoCode 基线与运营模型重定版）
+> **Owner**：Agent Group · HKUST QUANT SOCIETY
+> **UI 仓库**：`opencode-lens`，组件根目录为 `packages/app/src/components/quantcode/`。
+> **上位规范**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)；本文件只定义桌面端接入、展示和操作，不复制领域业务平台。
 
----
+## 1. 设计目标
 
-## 1. 设计原则
+QuantCode 桌面端运行在 OpenCode 的 Desktop/TUI、session、Prompt/Context、MCP、Provider 和 Workspace 底座上。它提供按身份和权限运行的研究工作台：
 
-1. **品牌壳统一**：`OPENCODE_CHANNEL=quantcode` → qc-shell 设计 token（QUANTCODE 点阵光场 lens-field 背景）；dev 渠道保持 OpenCode 上游壳（开发逃生门）。
-2. **千组千流，不是千人千面**：统一 UI，组身份只切换 skill / tool 白名单 / Memory scope，不切换前端。
-3. **角色三态**：`analyst`（审批只读）/ `approver`（可批准拒绝）/ `admin`（跨组可见）——`roles.ts::resolveRole(readIdentity())`，单一来源。
-4. **一屏一事**：每个视图锚定一个 F/P 编号；trace 事件是数据源的主干（屏跟着 run 走，不另造数据面）。
-5. **不做的 UI**（平台红线 1）：无策略回测产品界面、无组合产品界面、无报告平台复刻（归报告平台/产品 2）、不展示 AlphaFlow 内部结构（P-09 黑盒约束）。
+```text
+本地 SSH 身份
+→ 业务组/角色绑定
+→ 组内 Memory 与可见能力
+→ 任务/方案/Agent trace
+→ 结果、错误、组件状态
+→ （共享写入）Gate；（生产部署）Admin 管理面与审计
+```
 
----
+界面统一，数据和操作随服务端 session 权限变化。普通用户使用自己的 GitHub/服务端可见范围；Admin 作为组织级角色查看和管理全组织内容。
 
-## 2. 信息架构（左侧导航轨视图清单）
+### 1.1 UI 边界
 
-| 视图 | 锚定编号 | 状态 |
+- 策略、组合、回测、期权定价和基本面报告页面由对应业务平台提供；
+- IC、风险、Greeks、组合和回测结果由权威组件计算，前端只展示 artifact 和来源；
+- AlphaFlow 和其他生产系统的内部结构不出现在研究员界面；
+- 研究结果、风险阈值失败和 CI 结果显示为结果或状态，不生成审批卡；
+- 前端隐藏只负责体验，后端权限决定可见性和可操作性。
+
+### 1.2 底座与新增界面
+
+OpenCode 提供 Desktop/TUI、session、Prompt/Context、MCP、Provider、Workspace、文件/Shell 工具和原生状态流。MimoCode 提供通用 Compose Skill、Memory、Task、Checkpoint 和 Subagent 的工作流设计。QuantCode 在这些界面之上增加组身份、组内 Memory、能力目录、量化 artifact、方案面板、GitGraph、Pop 和 Admin 中枢。
+
+UI 只消费服务端 session、工具目录、结构化 artifact 和外部平台链接。QuantCode 面板不复制 OpenCode 的会话逻辑，也不重算业务指标。
+
+### 1.3 交互原则
+
+- OpenCode 的会话、消息、工具状态、文件和终端仍是主工作区；QuantCode 面板提供身份、组织知识、量化 artifact 和治理入口。
+- 组上下文由认证 session 提供。页面展示当前组，不提供任意切组控件；重新登录才会建立另一组 session。
+- 结果页面优先展示来源、版本、时间、状态和下一步入口。`mock`、`proxy`、`staging`、权限拒绝和服务不可用都使用独立状态样式。
+- 需要输入的动作使用文本区、文件选择、日期选择和结构化表单；审批、确认、停止和跳转动作必须有明确的操作结果。
+- 生产服务账号、生产 shell 和 AlphaFlow 内部结构不出现在研究员 UI。Admin 的部署面只显示受控接口返回的最小结果。
+
+## 2. 身份、组与角色
+
+### 2.1 SSH 登录界面
+
+登录界面只调用本地 SSH agent 或密钥链，不接收私钥文本。流程如下：
+
+1. 选择本机 SSH agent/密钥链中的身份；
+2. 发起公钥认证连接；
+3. 服务端验证指纹，从公司 roster 匹配 actor、业务组、角色和个人工作目录；
+4. 显示 fingerprint 摘要、连接状态、绑定组、角色和工作目录；
+5. 服务端返回组页面上下文，页面不提供自由切组；需要另一个组时重新使用有权限的身份登录。
+
+私钥不上传、不回显、不写入 localStorage、不发送给 LLM，也不进入 trace。研究员进入的是服务器上的个人工作目录；生产服务账号和生产 shell 不属于该登录会话。若平台暂时不能调用本地 SSH agent，UI 显示“身份接线未完成”，不显示假连接状态。
+
+### 2.2 角色
+
+| 角色 | 可见性 | 操作 |
 |---|---|---|
-| 首页（研究提交） | F-01 | ✅ |
-| 会话（对话 + trace） | F-01/F-02 | ✅ |
-| Activity（执行时间线） | F-02 | ✅ |
-| Gate（审批） | F-03 | ✅ |
-| 因子评估 | F-06 | ✅ |
-| PIT 估值 | F-06（fundamental 组内工具） | ✅ |
-| 通知中心（铃铛） | F-03/F-09 | ✅ |
-| 设置（供应商只读 + SSH 登录） | F-05 | 🔶（登录界面待 AG-E） |
-| **能力目录** | F-04/P-07 | ✅（trace 通道 + fetcher 占位） |
-| **Memory 查询** | F-04 | ✅（视图落地；memory_search 通道挂账 #8） |
-| **Admin 中枢（含 GitGraph/pop）** | F-09/P-08（仅 admin 角色） | ✅（AG-D 后端 + AG-K UI，21 条打磨） |
-| **方案面板**（会话内嵌） | P-10 | ✅（状态机+verdict 徽章，冒烟绿） |
+| `analyst` | 本组和授权公共内容 | 研究、开发、查询；Gate 只读 |
+| `approver` | 本组和授权公共内容 | 可批准被分配的写操作 Gate |
+| `admin` | 全部组、全部 Memory/Blackboard、全部 repo 和运行 | 全部查询、管理和审批；仍保留 Gate/evidence 记录 |
 
----
+角色必须来自服务端权威身份/权限数据。前端身份名启发式只能用于开发占位，不能决定 Admin 或审批权限。
 
-## 3. 已实现 UI 盘点（对应 v5 PPT slide20 四屏）
+## 3. 信息架构
 
-| 屏 | 设计稿内容 | 组件 | 数据源 | 状态 |
-|---|---|---|---|---|
-| 屏1 因子评估 | 研究流程节点 + 评估指标大数字/阈值条 | `factor-screen.tsx`（match_main→gen_schema→autoeval→HumanGate 四节点）+ `metric-cards.tsx`（QcBigNumber/QcProgress/QcChecklistItem） | `RunAgentResult.execution_trace` + `output_data` | ✅ |
-| 屏2 审批/Gate | 风险越阈值专用面板、批准/拒绝 | `panels.tsx::GatePanel`（approver 按钮 / analyst 只读）+ `notifications.tsx` | `run.gate`（breached_thresholds 权威） | ✅（v2 收窄后仅四类写操作进此屏） |
-| 屏3 PIT 估值 | 证据时间线 + DCF 估值卡 | `pit-screen.tsx`（published_at≤as_of 红色告警 + 滑条实时重算） | `output_data`（documents/fair_value/…） | ✅ |
-| 屏4 通知中心 | 待审批提醒汇总 | `notifications.tsx`（铃铛 + badge + 跳转审批） | waiting_for_human 运行历史 | ✅ |
-
----
-
-## 4. 每功能 UI 规格
-
-### F-01 新建多智能体研究 ✅（一处待补）
-- **屏**：首页 RunAgentPanel——任务描述输入 + 组选择器 + skill 下拉 + ⌘⏎ 提交。
-- **待补（AG-G）**：skill 下拉接 `list_skills` 真目录（现为硬编码 4 条）。
-- **状态**：提交中（禁用按钮）/ 已提交（跳转会话视图）。
-- **数据**：提交 → `buildResearchInstruction`（强制 run_agent）→ trace 经 `result-contract.ts` 回流。
-
-### F-02 执行记录视图 ✅（可选增强）
-- **屏**：ActivityPanel——timeline（12 类事件）+ artifacts 区。
-- **交互**：`mergeTraceEvents` 按 iteration:seq 去重；"再次运行"按钮。
-- **可选增强（AG-G stretch）**：接 `list_runs` 服务端历史（跨设备恢复）。
-
-### F-03 HumanGate 写操作门禁 ✅
-- **屏**：GatePanel——gate 卡片 + 批准/拒绝按钮。
-- **v2 变化**：只有**四类写操作**进此屏，卡片加 kind 徽章：`merge`（主线入库）/ `deploy`（SSH 生产写）/ `permission`（跨组资源）/ `budget`（预算超限）。研究流不再出现 gate 卡片。
-- **角色**：approver 见按钮；analyst 只读提示"由负责人审批"。
-- **拒绝语义**：fail-closed——显示"拒绝即终止该写操作"提示。
-
-### F-04 Memory 与组织能力目录 🔲（AG-G）
-- **能力目录视图（新组件 `capability-catalog.tsx`）**：
-  - 卡片列表：名称 / 接口面摘要 / **何时用** / **何时别自造**（高亮）/ 权限属组徽章 / source_commit；
-  - 顶部搜索（走 FTS）；游客组被 Mask 的卡片不出现（后端过滤，UI 无感知）。
-- **Memory 查询（新组件 `memory-query.tsx`）**：
-  - 搜索框 + scope 过滤（组内/共享）+ 结果 snippet 高亮 + BM25 分数条；
-  - 跨组读取被拒时显示"无权限"空态（对应 `MemoryPermissionError` fail-closed）。
-- **常驻摘要**：由后端注入 run 指令（强保证），UI 不重复渲染全量目录。
-
-### F-05 设置 / SSH 登录界面 🔶（AG-E 交付）
-- **屏**：设置页 SSH 分区——**完整登录流，不是只读卡片**：
-  1. **表单态**：host / user / 私钥（密码框，不回显不落盘，交后端 identity）；
-  2. **连接态**：spinner + 逐行连接日志；
-  3. **已连接态**：指纹摘要 + **组绑定徽章**（如"factor 组"）+ 断开按钮；
-  4. **失败态**：具体原因（密钥被拒/host 不可达）+ 重试。
-- **供应商分区**：Provider/Model/BaseURL 只读 readout（已实现 `settings-supplier.tsx`）。
-- **约束**：登录前首页提交按钮置灰提示"请先完成身份认证"（fail-closed 的 UI 面）。
-
-### F-06 外部评估器注册与部署适配 ✅（两处待补）
-- **因子评估屏**：已实现；评估走外部 Quant Evaluator（经 eval_from_panel 桥），UI 不感知评估内部。
-- **待补 1（AG-G）**：能力目录中出现 Quant Evaluator / Factor Engine / Data Access 卡片（即 F-04 数据）。
-- **待补 2（AG-G）**：**契约违规提示卡**——Agent 检测到口径违规（如自算目标收益）时，会话内以 warning 卡片呈现（复用 risk_metrics 卡样式）："检测到自算目标收益，契约要求取 Horizon 表（后复权 t+1→t+2）"。
-
-### F-07 跨组协同（CI 基建）
-- **无新 UI**：PR 风控结论由 GitHub PR comment 承载（Multi-Agent Review issue 报告）；lens 不做 PR 视图。
-
-### F-08 三条 Compose 流（组内工具）
-- **无产品 UI**：引擎降级组内工具；PIT 屏保留（基本面组工具入口）。
-
-### F-09 / P-08 Admin 中枢 🔲（AG-D 后端 + AG-G UI + AG-K 面板，仅 admin 角色可见导航项）
-- **语义查询入口（新组件 `admin-console.tsx`）**：
-  - 顶部自然语言输入："最近每组工作情况 / 某模块运行情况 / 各组错误记录"；
-  - 结果卡片按 **组 → 人 → 状态** 分组聚合（数据：admin_list_runs）；每组一行摘要 + 展开明细。
-- **错误沉淀视图**：时间线 + 按组过滤 + 错误类型标签（数据：admin_errors）。
-- **GitGraph 面板（新组件 `gitgraph-panel.tsx`，AG-K，本轮交付——用户点名关键设计）**：
-  - 一键查看组织**全部 repo 最新树状态**，有更新的节点**标红高亮**；
-  - 数据：`admin_repo_status`（GitHub API 只读）；Admin 中枢页挂 GitGraph 入口按钮。
-- **双类 Pop 提醒（AG-K，接入通知中心）**：
-  - ① repo 有新提交 → pop；② 依赖库 **package 版本更新** → pop；全组可见，"不可能一直盯着 repo，pop 起提醒作用"；
-  - 复用 `notifications.tsx` 铃铛 + badge 通道，pop 卡片带来源 repo/库名 + 跳转。
-- **日常工作台定位**：Admin 把中枢页当日常任务管理界面打开（报告管理/任务管理入口 Q2 深化）。
-
-### P-09 /deploy 黑盒部署（命令 + 审批，AG-H 后端 + AG-G 注册）
-- **入口**：会话命令 `/deploy <代码路径或描述>`。
-- **流程 UI**：提交 → GatePanel 出现 `kind=deploy` 审批卡 → 批准后执行 → 结果卡。
-- **黑盒约束的 UI 面**：结果卡只显示"适配成功/失败 + artifact 路径 + 部署记录哈希"——**任何环节不出现 AlphaFlow 内部结构信息**；对 /deploy 之外的自然语言询问，Agent 侧拒绝透露（prompt 层约束）。
-
-### P-10 方案面板（P0，AG-J 后端 + AG-G UI）
-- **新组件 `solution-panel.tsx`（会话内嵌，/solution 命令唤起）**：
-  - **状态机可视化**：`draft`（可讨论，黄点）→ 第 N 轮讨论（轮次计数 + 反馈输入框 + 历史版本链接）→ `frozen`（锁定徽章 + doc_hash 尾号）→ 一致性 verdict 徽章；
-  - **verdict 徽章**：conformant（绿"实现符合方案"）/ deviation（黄，点击展开**偏离文件清单**）/ needs_human（红，需人裁）；
-  - **draft 态输入区提示**："方案未冻结——代码生成工具不可用，请先讨论并冻结方案"（对应后端阶段限流）；
-  - **方案文档**：可展开查看 `artifacts/solutions/<id>-v<n>.md`（只读渲染）。
-- **命令**：`/solution <goal>` 创建；`/solution status` 查看当前状态。
-
----
-
-## 5. 组件清单与落位
-
-| 组件 | 文件（opencode-lens/packages/app/src/components/quantcode/） | 状态 | 交付方 |
+| 视图 | 主要用户 | 数据源 | 状态 |
 |---|---|---|---|
-| 品牌壳 + 五视图路由 | `panels.tsx` | ✅ | — |
-| 指标卡族 | `metric-cards.tsx` | ✅ | — |
-| 因子评估屏 | `factor-screen.tsx` | ✅ | — |
-| PIT 屏 | `pit-screen.tsx` | ✅ | — |
-| 通知中心 | `notifications.tsx` | ✅ | — |
-| 供应商设置 | `settings-supplier.tsx` | ✅ | — |
-| 角色解析 | `roles.ts` | ✅（approver 权威源 Q2） | — |
-| SSH 登录 | `ssh-login.tsx` | ✅ | AG-E→AG-G（stub 待查询 surface） |
-| 能力目录 | `capability-catalog.tsx` | ✅ | AG-G(W3) |
-| Memory 查询 | `memory-query.tsx` | ✅ | AG-G(W3) |
-| Admin 中枢 | `admin-console.tsx` | ✅ | AG-G/AG-K(W3-4，数据源 AG-D) |
-| GitGraph 面板 | `gitgraph-panel.tsx` | ✅ | AG-K(W4，数据源 AG-D) |
-| 方案面板 | `solution-panel.tsx` | ✅ | AG-G(W3，状态机 AG-J) |
-| GatePanel kind 徽章 | `panels.tsx`（小改） | ✅ | AG-G(W3) |
+| 首页/任务提交 | 全部登录用户 | session + 组/Skill/能力目录 | 必须接真实组身份 |
+| 会话/Activity | 全部登录用户 | `execution_trace`、artifact、错误 | 保留 |
+| 方案面板 | L2/L3 任务 | `SolutionDoc`、方案事件 | 按复杂度出现 |
+| Memory/能力目录 | 全部登录用户 | Memory、`list_capabilities` | 按 ACL Mask |
+| 组件/评估结果入口 | 相关研究组 | 外部组件 artifact/链接 | 只展示，不重算 |
+| Gate/审批 | approver/Admin | Gate payload、evidence | 只显示 merge/permission Gate |
+| Admin 中枢 | Admin | 运行、错误、Memory、Blackboard、组件状态 | Admin 专属 |
+| GitGraph | 普通组员/Admin | GitHub API/组织 Git 服务 | 权限范围不同 |
+| 通知中心/Pop | 全部登录用户 | Gate、repo/package 变更 | 遵守同一 ACL |
+| 设置/连接 | 全部登录用户 | 本地 SSH/provider 状态 | 私钥不出本机；组由 roster 返回 |
 
----
+### 3.1 面板与数据契约
 
-## 6. i18n
+| 面板 | 组件文件 | 主要契约 | 关键状态 |
+|---|---|---|---|
+| 首页/任务提交 | `panels.tsx` | `RunAgentArgs` / session | 未认证、提交中、已提交、拒绝 |
+| 会话/Activity | `panels.tsx`、`result-contract.ts` | `RunAgentResult` / `TraceEvent` | 运行中、checkpoint、降级、失败、完成 |
+| 方案 | `solution-panel.tsx` | `SolutionDoc` | draft、discussion、frozen、verdict |
+| Memory/能力目录 | `memory-query.tsx`、`capability-catalog.tsx` | Memory query / CapabilityCard | 空态、无权限、未连接、结果 |
+| HumanGate | `panels.tsx`、`notifications.tsx` | `HumanGate` | 待处理、批准、拒绝、过期 |
+| Admin | `admin-console.tsx` | admin query/run/error contracts | 全组织结果、部分失败、无权限 |
+| GitGraph/Pop | `gitgraph-panel.tsx`、`notifications.tsx` | repo/package update contracts | 已观察、已更新、已读、确认、错误 |
+| SSH/设置 | `ssh-login.tsx`、`settings-supplier.tsx` | identity/roster status | 未连接、连接中、已连接、失败 |
 
-- 新组件所有文案走 i18n key，**18 locale 全补齐**；中文文案以定版讨论用语为准（如"何时别自造""方案未冻结"）。
-- `parity.test.ts` 断言 en 全 key 遍历，防漂移。
+所有面板只渲染服务端返回的授权结果。前端状态不能推断或扩大 `group`、`role`、repo、Memory 和生产权限。
 
----
+### 3.2 功能到界面映射
 
-## 7. UI 验收断言（playwright，U 域编号）
+| 编号 | 界面承载 | 界面边界 |
+|---|---|---|
+| F-01/F-02 | 首页、会话和 Activity | 提交、状态流、trace、artifact 和回放 |
+| F-03 | GatePanel、通知中心 | 仅 `merge`/`permission`；部署另走 Admin 面 |
+| F-04/P-07 | Memory、能力目录 | 组内共享、公共契约、卡片状态和 ACL |
+| F-05 | SSH/设置 | 本地公钥证明、roster 结果和个人工作目录 |
+| F-06 | 因子评估、PIT、外部结果入口 | 只展示 QuantEvaluator、DataAccess 和报告 artifact |
+| F-07/F-08 | 会话结果和外部链接 | CI/handoff 与组内工具，不新增业务产品页 |
+| F-09/P-08 | Admin、GitGraph、Pop | Admin 全组织可见；普通用户遵守 GitHub 权限 |
+| P-09 | Admin 部署入口 | 生产服务账号受控执行，普通 Agent 不可见 |
+| P-10 | 方案面板 | L2/L3 方案冻结和一致性 verdict |
 
-- U1-A1: quantcode 渠道启动 → qc-shell 渲染且导航轨含上表视图（已有像素验证）。
-- U1-A2 [新增]: SSH 登录四态流转：表单→连接中→已连接（组徽章）→失败（原因可见）。
-- U1-A3 [新增]: P-10 draft 态下提交代码生成请求 → 输入区显示"方案未冻结"提示且不产生代码产物。
-- U1-A4 [新增]: 方案面板 frozen 后出现 doc_hash 徽章；judge 返回 deviation 时徽章黄色且展开偏离文件清单。
-- U1-A5 [新增]: admin 角色导航轨出现"Admin 中枢"，analyst/approver 不出现；admin 查询返回跨组分组卡片。
-- U1-A9 [新增]: GitGraph 面板渲染全部 repo 树且更新节点标红高亮；repo 新提交与 package 版本更新两类 pop 均在通知中心可见且可跳转。
-- U1-A6 [新增]: GatePanel 卡片按 kind 显示四类徽章；研究流 run 全程不出现 gate 卡片（对应 G2-A8(a) 的 UI 面）。
-- U1-A7 [新增]: 能力目录卡片含"何时别自造"字段且游客组不见被 Mask 卡片；Memory 跨组查询显示"无权限"空态。
-- U1-A8 [新增]: /deploy 结果卡不包含 AlphaFlow 内部结构关键词（黑盒断言的 UI 面）。
+## 4. 首页与任务提交
 
-> 测试文件 [新增测试] `packages/app/.../quantcode/ui-spec.test.ts`（或分组件），随对应 agent 交付落盘。
+首页提供自然语言任务、已绑定的组/角色、可用 Skill 和最近任务。组由认证会话提供，页面不提供组选择器。Skill 列表从维护员发布的 `list_skills` 目录获取，加载失败显示明确错误。
 
----
+提交前显示当前可用能力的摘要：组件名、用途、状态和“何时别自造”。首页提供提示和复用入口，详细 API 仍在能力目录中查看。
 
-## 8. 维护声明
+任务按复杂度处理：
 
-- 本文随 FUNCTIONAL_SPEC 编号变更同步；新增 F/P 必须在 §2/§4 补 UI 规格，否则 spec 评审打回。
-- 已实现组件改动须同步 §3/§5 状态列。
-- Q2 归属项（OS 级通知、approver 权威源、报告/任务管理工作台深化）不在本轮 UI 验收范围。
+- L0 查询/只读：直接提交；
+- L1 有界研究/小修改：可生成轻量计划；
+- L2 架构/多模块：展示方案面板，冻结后才进入代码阶段；
+- L3 生产变更：方案、部署信息、Admin 管理面和审计均可见；普通研究 Agent 不出现部署入口。
+
+## 5. 会话与执行记录
+
+Activity 按顺序展示：
+
+```text
+用户输入 → Agent 思考 → 工具调用 → 工具结果 → artifact/错误
+→ 方案状态 → Gate（若为写操作）→ 结束状态
+```
+
+要求：
+
+- 事件按 `thread_id + iteration + seq` 去重；
+- 失败、降级、mock、proxy return 等必须显式标注；
+- artifact 显示来源、版本、哈希和打开入口；
+- 不在 UI 中从多个不一致数据源自行推断“成功”；
+- 只允许用户访问自己有权限的会话和 artifact，Admin 可查看全部并保留访问记录；
+- 支持 checkpoint/replay，但恢复操作仍按当前权限和 Gate 规则执行。
+
+## 6. 方案面板
+
+方案面板只服务 L2/L3 任务，不强制所有查询和小修改都出现。状态：
+
+```text
+draft → discussion/revision → frozen → implementation → conformance verdict
+```
+
+显示 goal、验收标准、预期文件面、讨论记录、版本和 `doc_hash`。draft 阶段提示代码工具不可用，但允许查能力、读资料和验证；该状态属于流程控制。`conformant`、`deviation`、`needs_human` 是一致性结果，不等同于生产审批。
+
+## 7. Memory 与能力目录
+
+### 7.1 组内 Memory
+
+Memory 页面默认展示当前组共享知识：研究结论、失败记录、组件用法、数据口径、工程决策和 Best Practice。公共契约单独标识。普通组员不能搜索其他组的详细 Memory；Admin 可以查看全部内容。
+
+每条结果显示 scope、来源、更新时间、验证状态和 superseded 关系。未接通真实后端时显示空态/未连接，不展示假数据。
+
+### 7.2 能力目录
+
+能力卡至少展示：
+
+- canonical repo 和状态：PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY；
+- 公开用途、输入/输出摘要、领域权威、依赖和消费者；
+- “何时用”和“何时别自造”；
+- 属组、可见性和来源 commit/观察时间；
+- 旧名称到 canonical repo 的映射。
+
+详细 API、敏感字段和部署底层按 ACL 过滤。普通用户看到 GitHub/组权限允许的内容；Admin 看到完整目录；游客只看到公开契约。
+
+## 8. HumanGate 页面
+
+GatePanel 只显示普通 Agent 可以触发的共享写入和跨组授权：
+
+| kind | 示例 | UI 行为 |
+|---|---|---|
+| `merge` | 主线/共享生产资产入库 | 显示变更、来源、风险和批准/拒绝 |
+| `permission` | 受限跨组资源访问 | 显示资源范围和一次性授权 |
+
+生产部署由 Admin 管理面单独展示和执行，不在普通研究员的 GatePanel 中出现。研究报告、风险指标越限、评估失败、普通代码修改和 CI 结果不显示 Gate 卡。预算耗尽显示预算告警或停止状态。
+
+Admin 可以处理全部 Gate，并在管理面发起部署；approver 只处理授权 Gate；analyst 只读。界面显示 actor、时间、理由、资源和 evidence 状态；拒绝终止对应写操作。
+
+## 9. Admin 中枢
+
+Admin 中枢提供组织管理工作台：
+
+- 自然语言查询各组、成员、任务、运行、错误和模块状态；
+- 全部组 Memory/Blackboard 的只读或管理视图；
+- 组件目录、版本、状态和失败依赖；
+- 报告管理、任务管理入口（逐步接入外部报告平台/QuantPlatform）；
+- GitGraph 和通知中心入口；
+- 所有查询、修改和审批的审计记录。
+
+Admin 的“全部可见性”覆盖普通组的 Memory Mask 和 repo 过滤。生产部署仍由服务端的 Admin 权限和生产服务账号控制，前端不能绕过。
+
+## 10. GitGraph 完整目标
+
+GitGraph 不按“属组仓库”静态写死，而按当前 GitHub 权限查询：
+
+- 普通用户：显示其 GitHub 身份可见的全部组织 repo；
+- Admin：显示组织全部 repo；
+- 每个 repo 显示分支、HEAD、最新提交、提交树/时间线、活跃度、归档状态和依赖文件变化；
+- 更新节点标红/高亮，可跳回 GitHub；
+- API 错误、权限不足和仓库缺失要分别显示，不能伪装成“没有更新”；
+- 后端返回权限上下文和 `observed_at`，前端只渲染授权结果。
+
+## 11. Pop 与通知
+
+### 11.1 两类更新 Pop
+
+1. repo 新提交、分支或仓库状态变化；
+2. 依赖库/package 版本变化。
+
+Pop 与 GitGraph 使用相同可见性边界：普通用户只收到自己可见 repo 的消息，Admin 收到组织范围消息。每条 Pop 应有来源、时间、变化摘要、跳转、去重键、已读/确认状态。
+
+### 11.2 完整增强目标
+
+目标运营模式包含服务端定期检查、基线保存、变更检测、重复抑制、应用内通知和系统级通知。手动“检查更新”作为没有后台服务或调试时的降级路径。没有真实数据时显示未连接，禁止生成示例更新。
+
+## 12. 外部业务平台入口
+
+因子评估、PIT 研究、策略结果、组合和期权结果在 QuantCode 中只显示结构化 artifact、来源和跳转：
+
+```text
+FactorEngine / DataAccess → QuantEvaluator → Report Platform
+Modeling / Barra / Riskfolio / VectorBT → Report Platform
+```
+
+QuantCode 不在 UI 重复实现这些平台的业务页面。`/deploy` 只在 Admin 管理面显示，结果包含成功/失败、artifact 路径、部署记录哈希和可操作错误，不暴露生产底层结构。
+
+## 13. UI 验收重点
+
+1. 本地 SSH 身份不上传私钥；服务端返回的 actor/组/角色/工作目录与 UI 一致；未认证不能提交任务；页面不提供自由切组；
+2. 普通组员与 Admin 的 Memory、能力卡和 GitGraph 可见性符合 GitHub/roster 权限；
+3. 复杂任务才出现方案面板，L0/L1 不被固定讨论轮次阻塞；
+4. 研究输出、风险失败和 CI 结果不出现 Gate 卡；merge/permission 写操作能审批并回放；Admin 可从管理面提交 `/deploy` 并查看审计；
+5. GitGraph 显示权限范围内完整 repo/分支/提交状态；repo/package 两类 Pop 可去重、确认和跳转；
+6. 外部组件未接通、权限不足、mock 或 staging 必须在 UI 明示；
+7. Admin 查询能覆盖所有组，并保留访问/审批审计；
+8. UI 组件测试不再把旧版“风险越限必人审”“模型 PR 是产品主链”“六条业务流由 QuantCode 承担”作为验收前提。
+
+## 14. 维护规则
+
+- 本文与 `FUNCTIONAL_SPEC` 的编号和状态同步；
+- UI 只消费后端契约和外部 artifact，不复制领域计算；
+- 角色、组和 repo 可见性必须由权威服务/会话提供，不能长期依赖前端字符串启发式；
+- 新增视图必须说明其业务归属、权限边界、数据源和失败空态；
+- GitGraph/Pop 的自动刷新、系统通知、报告/任务工作台和真实 SSH surface 是增强项，未接通时必须标为未完成。
+
+## 15. 组件清单与落位
+
+| 组件 | 文件 | 责任 |
+|---|---|---|
+| 品牌壳、导航和任务入口 | `panels.tsx` | OpenCode session 接入、当前组/角色/连接状态和任务提交 |
+| Activity、指标和 artifact | `panels.tsx`、`metric-cards.tsx`、`factor-screen.tsx` | trace 时间线、评估结果、来源和错误 |
+| PIT 与外部平台入口 | `pit-screen.tsx` | 时点约束、artifact 和报告平台跳转 |
+| SSH 登录和供应商 | `ssh-login.tsx`、`settings-supplier.tsx` | 本地公钥证明、roster 结果和 Provider 状态 |
+| Memory 与能力目录 | `memory-query.tsx`、`capability-catalog.tsx` | 组内搜索、能力卡、ACL 空态和版本来源 |
+| 方案与 Gate | `solution-panel.tsx`、`panels.tsx` | P-10 阶段、conformance verdict、`merge`/`permission` 审批 |
+| Admin、GitGraph 与 Pop | `admin-console.tsx`、`gitgraph-panel.tsx`、`notifications.tsx` | 组织查询、GitHub 可见仓库、更新通知和审计入口 |
+
+`/deploy` 仅在 Admin 管理面挂载独立组件或管理入口。普通研究员导航、任务输入和 GatePanel 不出现部署控件。
+
+## 16. 文案与本地化
+
+新增组件的文案使用 i18n key。中文和英文至少覆盖登录状态、权限拒绝、未连接、mock/proxy/staging、方案阶段、Gate kind、GitGraph 更新和部署结果；缺少翻译时显示稳定的 fallback key，不拼接敏感错误细节。`parity.test.ts` 检查各 locale 的 key 集合，领域组件返回的原始错误由后端做脱敏后再展示。
+
+## 17. UI 验收断言
+
+| 编号 | 场景 | 断言 |
+|---|---|---|
+| U1 | SSH 登录 | 只选择本地身份；连接成功显示 actor、组、角色、工作目录；失败原因可区分；私钥不出请求和页面 |
+| U2 | 组路由 | 登录后显示服务端绑定组；页面没有自由切组；不同 `group` 请求被拒绝 |
+| U3 | 任务与方案 | L0/L1 可直接执行；L2/L3 展示方案阶段；draft 阶段不生成代码；frozen 后显示 hash 和 verdict |
+| U4 | 执行记录 | trace 去重；checkpoint 可回放；artifact 带来源、版本、哈希和状态 |
+| U5 | Memory/能力目录 | 普通用户只见授权内容；Admin 全可见；未连接和无权限不展示假结果 |
+| U6 | HumanGate | 仅 `merge`/`permission` 卡片进入普通 GatePanel；风险、评估、预算和 CI 不生成 Gate 卡；Admin 可处理全部 Gate |
+| U7 | Admin/GitGraph/Pop | Admin 可查全组织；普通用户遵守 GitHub 可见范围；repo/package 更新可去重、确认和跳转 |
+| U8 | 部署边界 | `/deploy` 只在 Admin 管理面可见；普通 Agent 调用被拒；结果不暴露生产拓扑、服务账号或 AlphaFlow 内部结构 |
+| U9 | 外部结果 | mock、proxy、staging、权限失败和 API 错误有明确状态，不伪装为成功或空结果 |
+
+UI 测试必须覆盖 analyst、approver 和 admin 三类 session，并用服务端授权结果作为 fixture。旧版“风险越限必人审”“自由切组”“普通 Agent 部署”和“六条业务流都是产品页”的断言应删除或改成边界回归。
+
+## 18. 修订记录
+
+| 日期 | 变更 |
+|---|---|
+| 2026-09-01 | v1：F/P UI 清单、方案面板、Admin/GitGraph/Pop 初版 |
+| 2026-09-03 | v2：按业务组登录、组内 Memory、Admin 全权限、GitHub 权限边界、本地 SSH 身份、生产隔离、完整 GitGraph/Pop 和按复杂度方案先行 |
+| 2026-09-03 | v3：补齐 OpenCode/MimoCode 底座映射、面板契约、组件落位、本地化和 U1~U9 验收；Admin 部署与普通 Agent Gate 分离 |

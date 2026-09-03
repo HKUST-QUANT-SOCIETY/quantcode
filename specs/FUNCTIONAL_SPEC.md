@@ -1,237 +1,293 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
-> **版本**：v0.2（2026-09-01，功能定版会议）｜**Owner**：Agent Group
-> **声明**：本文件是 QuantCode 功能规格的**唯一活文档**。`docs/PRD.md`（v2）描述产品方向与边界；`docs/Day1~5_*`、`docs/Day5_Feature_Checklist.md` 一律为**历史快照**，不再更新，状态以本文件为准。长期路线见 `docs/audit/ROADMAP_LONGTERM.md`，域级设计见 `specs/<域>/SPEC.md`（规范见 `specs/SPEC_GUIDE.md`）。
-> **编号**：现有功能 F-01…F-09，计划功能 P-01…P-10。跨文档引用一律用编号。后端 = 本仓库根；UI 仓库 = `opencode-lens`（前端路径 `packages/app/src/components/quantcode/` 相对 UI 仓库根）。
-> **修订记录**：v0.1 初始（F-01..F-09 / P-01..P-06）。v0.2 功能定版——F-03 HumanGate 收窄为写操作门禁；F-04 升级为组织能力目录；F-05 改为完整 SSH 登录界面；F-06 重定义（外部评估器注册 + 契约遵守检测 + 部署适配）；F-07 "模型 PR"场景取消（降为 CI 基建）；F-08 降级组内工具（引擎代码保留）；F-09 升级 Admin 中枢语义层；P-07/P-08/P-09 新增；P-02/P-03 降级组内工具。v0.2.1 补录 **P-10 方案先行工作流**（任务先出方案、2-3 轮讨论、冻结静态文档、代码按文档生成并做一致性判定——流程阶段约束，非权限门禁）。
+> **版本**：v0.4（2026-09-03，OpenCode/MimoCode 基线与运营模型重定版）
+> **Owner**：Agent Group · HKUST QUANT SOCIETY
+> **文档性质**：QuantCode 的活功能规格。`docs/PRD.md` 说明产品目标，`docs/QuantCode_Design.md` 说明技术设计，`docs/UI_DESIGN_SPEC.md` 说明桌面端体验；三者服从本文的运营边界。`docs/Day1~5_*` 与旧版 PRD/Design 是历史材料。
+> **实现状态说明**：本文的状态只表示当前实现证据，不代表设计已经完成。后续功能审查应以本文的“规范要求”逐项核对代码、UI 和测试。
 
 ---
 
-## 0. 平台红线（2026-09-01 定版）
+## 0. 平台红线
 
-1. **QuantCode 不做业务层面的东西**：策略、回测、组合、期权定价等产品功能归各研究组自研与报告平台（报告平台可并入对外产品 2，非核心竞争力）。QuantCode 定位为研究面的 Agent 平台与组织能力中枢。
-2. **最大复用原则**：能复用则复用。Agent 制定方案时首选已登记能力（P-07 能力目录）；已有能力覆盖不全时**先向人征询，不许直接跳自造方案**（"可能是表述不清，改完 Factor Engine 就能完整满足需求"）。
-3. **HumanGate 只管写操作**：研究面产出不 gate（人本来就要看，报告平台承接）、代码不 gate（CI/PR 流程承接）；只有写操作进入生产面才 gate（见 F-03）。
-4. **方案先行（P-10）**：任何非平凡任务先出完整解决方案，经 2-3 轮讨论冻结为静态文档，代码按文档生成并做一致性判定；冻结前代码工具不可用。流程阶段约束，不是权限门禁。
+1. **QuantCode 是研究 Agent 平台与组织能力中枢。** 策略、组合、回测、期权定价和基本面报告由各研究组及报告平台维护；QuantCode 负责让 Agent 认识、复用、编排、验证和记录这些能力。
+2. **登录决定业务组。** 用户通过本地 SSH 身份登录，服务端按公钥指纹匹配公司 roster，绑定 actor、业务组、角色和个人工作目录。会话内组身份不能由任务文本或普通参数改写。每个组共享本组 Memory，跨组只通过公共契约、脱敏摘要和授权 Blackboard 条目协作。
+3. **先复用组织能力。** Agent 制定方案前检索能力目录、组级 Memory 和数据/工程契约。已有能力覆盖不足时先说明缺口并询问用户。
+4. **HumanGate 处理共享写入和跨组授权。** 研究结果、风险指标、评估失败、研报、普通代码修改和 CI 审查由各组或外部平台处理。主线资产入库和受限跨组资源访问需要明确确认并留痕；Admin 管理面使用独立服务账号执行生产部署，普通 Agent 不参与。
+5. **方案先行按复杂度启用。** 架构性、多模块和跨系统任务先形成方案；查询、只读分析、小修改和实验直接执行。方案阶段不等同于审批流程。
+6. **权限跟随权威身份。** 普通用户只能看到其 GitHub 身份和组权限允许的 repo、Memory、组件详情和任务；Admin 跨组查看组织内容。前端隐藏不构成安全边界，后端和外部服务必须再次校验。
+7. **研究员使用个人工作环境。** 研究员可以 SSH 进入被授权服务器上的个人目录并写代码。生产环境使用独立服务账号，研究员不取得该账号、不进入生产 shell；Admin 管理面负责发起 `/deploy`。
 
----
+### 0.1 底座能力与 QuantCode 增量
 
-## 第一部分：现有功能（F-XX）
+| 来源 | 功能边界 |
+|---|---|
+| OpenCode | Desktop/TUI、session、Prompt/Context、原生文件与 Shell 工具、MCP、Provider、Workspace、Permission、消息和状态流 |
+| MimoCode | Compose ReAct、通用 Compose Skill、Memory/FTS5、Task、Checkpoint/Replay、Subagent、Goal/Judge、Dream/Distill 的可移植设计 |
+| QuantCode | roster 组绑定、组内 Memory、动态 Tool Catalog、能力卡、Blackboard handoff、量化组件契约、Admin、GitGraph/Pop 和 P-10 |
 
-### F-01 新建多智能体研究（lens 首页 → run_agent）✅
-**用户故事**：作为任一组研究员，我想在品牌壳首页输入研究任务、选组与 Skill 并一键提交，以启动本组 Multi-Agent 研究流，不必记忆 MCP 命令。
+功能规格只锁定 QuantCode 的行为和边界。OpenCode/MimoCode 的底座行为由各自实现和版本维护，QuantCode 不复制一套同名基础设施。
 
-**契约**：UI `RunAgentResult`（`result-contract.ts`：status/thread_id/gate/execution_trace/output_data/artifacts）↔ 后端 `RunAgentArgs`（`runner/agent_mcp_tool.py`：task/group/skill_name/max_iterations/thread_id/decision，start/resume 两阶段）。组枚举 `GroupName`（`schemas/compose_task.py`）。
+## 1. 当前运营模型
 
-**数据流**：`panels.tsx::QuantCodePanel`（⌘⏎ 提交）→ `instructions.ts::buildResearchInstruction`（强制调 run_agent）→ `quantcode/mcp_server.py`（QUANTCODE_GROUP 过滤）→ `runner/agent_engine.py` ReAct 循环 → 组 allowlist 过滤 tool → trace 经 `result-contract.ts` 回流 `updateQuantCodeTrace`。
+### 1.1 五种运行模式
 
-**验收**：
-- Given 已选组=factor，When 点击"开始研究"，Then 提交指令含 `group="factor"` 且强制 run_agent 调用語句。
-- Given 任务含关键词（如 "PR"），When `agent_mcp_tool._resolve_skill_name` 路由，Then 分派到执行器子 skill（`ORCHESTRATOR_DISPATCH`）。
-
-**状态**：✅。缺口：Skill 下拉为硬编码 4 条常量，未读 `.opencode/groups/*/skills/` 真实目录。
-
-### F-02 执行记录视图（Activity）✅
-**用户故事**：作为研究员，我想按时间线查看 run 的推理/工具调用/产物/异常，并一键"再次运行"。
-
-**契约**：`RunAgentResult.execution_trace: TraceEvent[]`（事件枚举 12 类：agent_start/skill_loaded/node_update/llm_thought/tool_call/tool_result/risk_metrics/human_gate/output_data/artifact/agent_end/error，另有 `checkpoint_snapshot` 扩展类型）。
-
-**数据流**：agent_engine 产 trace → trace 桥（跨会话重置）→ `ActivityPanel`（timeline+artifacts）。`mergeTraceEvents` 按 `iteration:seq` 去重；缓存 localStorage `quantcode:thread_cache`（≤50）。
-
-**验收**：同 `iteration:seq` 事件不重复；同 thread_id 结果合并 upsert。
-
-**状态**：✅。缺口：无服务端 run 历史读取（未接 F-09 的 list_runs）。
-
-### F-03 HumanGate 写操作门禁 ✅（收窄适配待办）
-**用户故事（v0.2 重写）**：作为管理员，我想让 QuantCode 只在**写操作进入生产面**时强制人审，而研究面产出与代码审查不设 Gate——避免 Z code 式"每个动作都要批准"导致用户只能开完全访问、自动模式不可用的退化。
-
-**触发点收敛为四类**（v0.2 收窄）：
-
-| 触发点 | kind | 状态 |
-|---|---|---|
-| merge_to_main 主线因子入库 | merge | ✅ 已实现（`tools/factor/merge_to_main.py`，E2E `tests/test_factor_merge.py`） |
-| SSH **写生产环境**（普通 SSH 读/开发环境写不 gate） | deploy | 计划（随 F-05 登录界面 + permission hook） |
-| 跨组数据/资源访问 | permission | ✅ `runner/permission_engine.py` ask 态 → interrupt |
-| token/预算超限 | budget | ✅ `QUANTCODE_TOKEN_BUDGET` 硬约束 |
-
-**收窄语义**：`RiskThresholds` 越限 → acceptance verdict 直接 **fail**（gate 内化于评估流程，产出由报告平台承接，不设产出门禁）。现有代码 `RiskProfile.evaluate_verdict()` 仍返回 needs_human 触发 interrupt，**收窄适配为下轮代码待办**（governance SPEC G2-A8）。push 为自动操作不 gate；PR 合并与否由 GitHub owner 操作，PR 自动审核（Multi-Agent Review issue 报告：建议/不建议合并、冗余设计）由既有 GitHub Actions 承担，不进 QuantCode HumanGate；GitHub 侧未来出现需人审的场景可登记为新触发点。
-
-**契约**：`HumanGate/HumanGateDecision/HumanGateInterruptPayload`（`schemas/human_gate.py` + `schemas/human-gate.schema.json`）；阈值 `RiskThresholds`（`schemas/risk_profile.py`）；契约锁定详见 [specs/governance/SPEC.md](governance/SPEC.md)。
-
-**验收**：四类写操作触发 interrupt 且 `normalize_external_decision` fail-closed；merge 审批 E2E 通过；（收窄后）纯研究流零 interrupt。
-
-### F-04 Memory 与组织能力目录 ✅（升级方向定版）
-**用户故事（v0.2 升级）**：作为任一组研究员，我想让 Agent 知道组织已有哪些可复用的数据与代码（能力卡片），写代码时首选复用而不是另造一套；同时我不该看到的能力按我的组权限被 Mask。
-
-**契约**：`MemoryService.search/write/get`（`runner/memory/service.py`，FTS5+BM25+CJK）+ 5-scope GROUP 隔离 [既有]；能力卡片 [新增，落地=P-07]——每 repo 一张（功能/接口面/何时用/**何时别自造**/权限属组），两层投放：**目录摘要常驻组上下文**（每次 run 可见，强保证）+ **细节走 FTS 检索**（弱保证）。蒸馏粒度：蒸 API 面，不蒸实现细节。
-
-**权限 Mask**：按用户组 Mask Memory 内容（游客组不可见数据字段清单）；QuantCode 权限与用户组权限分配方案对齐（Git repo 权限 = QuantCode Memory 权限同源）。
-
-**验收**：跨组读抛 `MemoryPermissionError`（fail-closed）；能力卡片常驻摘要进入组上下文；无权限组检索不到被 Mask 条目。
-
-**状态**：✅ 后端完整 + 能力目录/查询视图已落地（memory-query fetcher 占位待 memory_search 后端通道，挂账 ACCEPTANCE #8）。
-
-### F-05 设置（组/身份/供应商/SSH 登录）🔶
-**用户故事**：作为研究员，我想通过完整的 SSH **登录界面**完成身份认证与组绑定，配置供应商与默认 Skill，使每次提交无需重复配置。
-
-**契约**：组枚举 `QUANTCODE_GROUPS`（UI `instructions.ts`）↔ `GroupName`；身份 `quantcode/identity.py`（SSH 指纹→组映射，fail-closed）；tool 可见性 `registry.get_tools_for_group`。
-
-**验收**：切组=options 后 tools/list 只返回 options allowlist 内 tool；断连时提交被阻断；登录界面完成 host/user/key → 连接状态 → 组绑定显示的完整流程。
-
-**状态**：✅ 登录界面已建设（`ssh-login.tsx` 四态，数据层 stub 待 ssh_status 可查询 surface）；供应商 readout 已落地；SSH 完整认证面 = G4-B1（Q2）。
-
-### F-06 外部评估器注册与部署适配（原 Factor AutoEval 流）✅（重定义）
-**用户故事（v0.2 重定义）**：作为因子组研究员，我已用 Codex 把论文算法落成可运行代码并完成本地调优；QuantCode 要做的是——(a) 让我和 Agent 都知道组织有哪些现成评估能力并正确调用，(b) 把我调好的代码适配进 AlphaFlow 部署库，(c) 在我违反数据口径契约时及时发现。
-
-**三项能力**：
-
-1. **外部评估器注册**：Quant Evaluator（纯回测，**60 注册指标**——权威源 `METRIC_REGISTRY_COVERAGE.csv` 实测；README 口径一致）、Factor Engine（DSL，460+ 算子）、Data Access（PIT 数据层）以 MCP 工具描述/蒸馏文档登记——Agent **不参与评估过程**，但知道存在/能力/调用时机（"评估流程要嵌在哪个环节时，自动识别应调用哪个 package"）。数据桥已有：`tools/factor/eval_from_panel.py`（FactorPanel → 外部评估器）。
-2. **契约遵守检测（口径统一）**：目标收益等口径以数据契约登记（见 [specs/data/SPEC.md](data/SPEC.md) §2.5：Horizon∈{1,5,10,20}、t+1→t+2、后复权表为唯一取值源，禁止自算）；Agent/Memory 能发现组员未遵守契约的用法并报告（背景：实测有组员把 t+1→t+2 算成 t→t+1 致收益虚高）。
-3. **部署适配**：已调试代码 → AlphaFlow 部署库自动适配（= P-09 `/deploy` 黑盒命令）；**不做论文复现**（研究层调优是研究员自己的工作，Agent 无增益）。
-
-**保留件**：merge_to_main / check_factor_gate（写操作 gate，F-03）；`FactorSpec`/`FactorReport` 契约（`schemas/factor.py`、`schemas/factor-report.schema.json`）与 acceptance verdict（`runner/acceptance.py`，阈值 `configs/acceptance.factor.yaml` 单源）。
-
-**验收**：eval_from_panel 对真实 FactorPanel 出 FactorReport；merge 审批 E2E 通过；组员问"目标收益怎么取"时 Agent 指向契约表而非自算。
-
-**状态**：✅ 管线已落地；评估器登记与口径契约落地 = P-07/P-09。
-
-### F-07 跨组协同（PR 风控链降级为 CI 基建）✅（产品场景取消）
-**v0.2 裁决**："模型 PR" 是伪场景——静态模型走 COS 上传 PKL，代码走正常 PR；PR 自动审核由既有 GitHub Actions Multi-Agent Review 承担（产出 issue 报告：建议/不建议合并、冗余设计），合并与否 owner 在 GitHub 操作。**PR 流不再作为 QuantCode 产品功能迭代。**
-
-**保留为基建**：read_pr → extract_metadata → generate_model_spec → trigger_risk_flow → calc_risk → write_pr_comment（dedupe）链路与 `.github/workflows/risk-gate.yml` 继续运行（服务代码 PR 风控门禁），维护模式。
-
-**跨组协同的真痛点转由**：口径统一（F-06 契约遵守检测 + P-07 蒸馏）与进展透明承接（P-08 Admin 中枢："模型组不知道因子组挖得怎么样" → 跨组语义查询）。
-
-**状态**：✅ 代码与 E2E 存在（`tests/test_model_risk_handoff_e2e.py`、dedupe 防刷）；产品场景取消，基建维护。
-
-### F-08 三条 Compose 流（降级为组内工具）✅（产品功能清单移除）
-**v0.2 裁决**：策略/期权/基本面的业务流水线归各研究组自研（"策略内部的东西我们自己开"），QuantCode 不做业务层（平台红线 1）；策略层汇报归报告平台（可并入对外产品 2）。
-
-**引擎代码保留**（用户裁决："万一有用呢"）：`tools/strategy/backtest_engine.py`（internal_v1）、`tools/options/backtest_engine.py`（options_v1）、`tools/portfolio/`、`flows/` 全部保留，降级为**组内工具适配层**——喂因子评估（eval_from_panel）与组内自用；不做 UI、不进产品功能索引。期权组自研引擎，不强推 options_v1。
-
-**验收**：pytest 全量绿（引擎回归保护）；产品文档不再将其列为产品功能。
-
-**状态**：✅ 代码+测试全绿（pytest 890）；定位降级为组内工具。
-
-### F-09 Monitor 与 Admin 中枢语义层 ✅（升级方向定版）
-**用户故事（v0.2 升级）**：作为 Admin 组成员，我直接问 QuantCode"最近每个人工作情况怎么样、每个模块运行情况怎么样、各组错误记录有哪些"，得到比固定面板更灵活的信息；同时保留 Git graph 面板与错误沉淀视图。
-
-**Admin 组**：唯一跨组 scope（各组只见本组；blackboard/Memory 权限天然支持组隔离）。
-
-**三层能力**：
-
-1. **语义查询（管理面板的 AI 抽象化）**：跨组 list_runs（人/组/状态/错误聚合）+ blackboard 跨组只读 + 错误记录汇总——"问 AI 得到想要的，比看面板更灵活"（落地 = P-08）。
-2. **Git graph 面板**：各 repo 最新树状态、更新节点标红高亮 + pop 提醒（GitHub API；落地 = P-08）。
-3. **既有可观测**：`runner/metrics.py`（.quantcode/metrics.jsonl）、`list_runs`、`scripts/replay.py`、token 预算（已实现）。
-
-**验收**：Admin 问"最近各组 run 状态"能跨组汇总；非 Admin 跨组查询被拒；repo 有更新时 pop 通知可见。
-
-**状态**：✅ Admin 中枢全套已落地（admin-console/gitgraph-panel/双类 pop，AG-K+W4 打磨）；pop 自动推送 = Q2。
-
----
-
-## 第二部分：计划功能（P-XX）
-
-### P-01 数据接入（qsdata 组 + FactorPanel 契约）——P0，Q1（✅ 已实现：`schemas/data_contracts.py` + `tools/market/` 四工具，见 `specs/data/SPEC.md`）
-**动机**：ROADMAP"最高优先级单点"。**契约**：`FactorPanel`（PIT calc_time<=as_of + `_contract:"FactorPanel/v1"`）、`ReturnsDataset`、工具 `list_factors/load_factor_panel/load_returns/pool_browse`；数据走 Blackboard `shared.datasets.*`。**验收**：GTJA191_M019 真实 IC 报告替换 mock；无权限组 fail-closed。
-
-### P-02 回测引擎 ✅（已实现，降级组内工具）
-`tools/strategy/backtest_engine.py` internal_v1（A 股 T+1/涨跌停/费用；vectorbt 升级路径见代码注释）；阈值 `configs/backtest.yaml` 单源。**v0.2**：产品功能清单移除，代码保留喂因子评估与组内自用（F-08）。
-
-### P-03 组合层 ✅（已实现，降级组内工具）
-`tools/portfolio/` construct/rebalance/gate（确定性数值，阈值 `configs/portfolio.yaml` 单源；复用 HumanGate interrupt）。**v0.2**：同 P-02 降级组内工具。
-
-### P-04 并行 subagent ✅（已实现，平台能力）
-`tools/subagent/` spawn/check/kill/list（任务树 MAX_TREE_DEPTH=4、预算隔离、组 allowlist）。**v0.2**：属 Agent 平台基础设施（非业务层），保留。
-
-### P-05 实验管理 ✅（已实现）
-`tools/experiments/ab.py`（A/B + OOS 纪律 + 排行榜）；`configs/experiments.yaml`。
-
-### P-06 evidence chain 报告 ✅（已实现 JSON 契约）
-`schemas/evidence_chain.py`（哈希指纹链，篡改可检）+ `runner/evidence.py::generate_evidence_report`；详见 [specs/governance/SPEC.md](governance/SPEC.md)。
-
-### P-07 组织资产蒸馏管线——**P0** [新增 v0.2]（✅ 已实现：ASSET_INVENTORY 14 核心repo + 六卡 + Mask + 常驻摘要，tests/test_capability_cards.py 31 用例）
-**动机**：最大复用原则的落地件。现状痛点：目标收益表已在数据仓却各自重算；库的功能没进 Agent 记忆（"我必须明确告诉它要用这个库，不说它就自己新造一个"）。
-
-**契约草案**：**Step 0 资产调研（先行，2026-09-01 补——禁止凭会议记忆手写卡片）**：gh 只读扫描 `HKUST-QUANT-SOCIETY` org（实测 69 repo，核心层 14 个活跃），产出 `docs/audit/ASSET_INVENTORY.md`（每个核心 repo 一行：定位/语言/接口入口/活跃度/属组归属；归档层如 infra-*/test* 标注不蒸馏）→ repo → 蒸馏为**能力卡片**（功能/接口面/何时用/何时别自造/权限属组；**type 字段区分 资产卡/口径契约卡 两类**）→ **权限过滤**（用户组权限分配方案为权威源；游客组 Mask 数据字段清单）→ Memory GROUP scope + **常驻目录摘要**。蒸馏粒度：蒸 API 面，不蒸实现细节。
-
-**首批蒸馏物（从调研清单出发，6 项）**：目标收益口径契约（Horizon 1/5/10/20、t+1→t+2、后复权，唯一取值源；已落 `TargetReturnView/v1`）、`quant_evaluator`（60 注册指标，权威源 METRIC_REGISTRY_COVERAGE.csv）、`factor_engine`（DSL 460+ 算子）、`data_access`（PIT 数据层）、`quant_platform`（纯 stdlib DTO 集成契约层——QuantCode 对接的正门）、`alpha_flow`（/deploy 部署目标底层）。
-
-**第二类蒸馏物（工程约定，2026-09-01 补）**：项目工程决策沉淀——Python 版本、部署平台、架构约定、模块功能设计——进组 Memory，"搭架构时把细节沉淀进记忆，不需要二次对齐"；配套**开发 Best Practice**（架构先行→填细节）作为蒸馏类别（与 P-10 方案先行互为表里）。
-
-**复用纪律**（运行时指令）：需求识别到已有能力覆盖不全 → 先向人征询，不许直接跳自造方案；**严格模式可配置**（`configs/capabilities.yaml`：strict_reuse=true 时禁止引入外部自造实现，仅允许已登记能力）。
-
-**批次二（2026-09-01 组件清单定版，文档先行未实施）**：以组长《常用组件清单》为权威源，开放方案分**四档**——
-1. **主链 12 全员常驻**：data_access / factor_engine / quant_evaluator / factor_optimizer / factor_assets / factor_preprocess / modeling / barra_engine / riskfolio_qs / vectorbt_qs / quant_platform / platform_web；
-2. **专项按组**（非属组只见一行）：因子组=alphaprobe/CogAlpha/AlphaMining 家族/factor-research-db；模型组=modeling 深卡/lightgbm_qs；风控组=barra_research/barra_factor_evaluate_engine/size-factor-risk-model；期权组=option-backtestengine/option-pricing-line-code；基本面组=sentinel/earnings-flash/quant-research-fundamentals；Agent 组=PaperRAG/quant-knowledge-graph；
-3. **纪律层（只蒸规则不蒸 API）**：quant-ops（命名/权限/访问矩阵）、backtest_repo_example（样板）；
-4. **负面清单**：legacy 映射（quant-platform→quant_platform、quant-factor-engine→factor_engine、AutoFactorEvaluation/auto_factor_evaluation→quant_evaluator 等全盘采纳）+ test_*/infra-*/demo 标注"不要用"。
-
-**CapabilityCard 契约扩充（批次二实施时同步 schema）**：新增 `status∈{PRODUCTION,STAGING,SCAFFOLD,LEGACY}`、`domain_authority`、`depends_on[]`、`consumed_by[]`、`deprecated_aliases[]` 五字段；**蒸馏硬纪律三条**进卡片 when_not_to_reinvent：读生产数据必经 data_access（禁裸 read_parquet）、因子计算必走 factor_engine DSL、模型切分必复用 modeling（walk-forward/purge/embargo），评估一律调 quant_evaluator（禁自算 IC/ICIR）。
-
-**alpha_flow 状态降级**：SCAFFOLD（架构对齐脚手架，生产实现显式 NotImplementedError）——卡片只借架构不当生产引擎；P-09 /deploy 目标底层仍在建设中。
-
-**挂账（用户裁决"以后再改"）**：`runner/acceptance.py` 的因子评估阈值（IC/IR/换手）属**因子组自己的评估链**，与 Agent 组平台机制无关（v0.2 红线推论）；评估权威 = quant_evaluator。acceptance 因子阈值部分后续退役或移交，风控阈值部分随 G2-A8 已收窄为写操作语义。
-
-**依赖**：F-04 Memory 底座；Git 权限 ↔ 用户组权限对齐。**验收草案**：组员问"目标收益怎么取"Agent 指向契约表而非自算；游客组检索不到被 Mask 的数据字段卡片；能力卡片常驻摘要出现在每次 run 的组上下文。
-
-### P-08 Admin 组与中枢管理面——**P0** [新增 v0.2]（✅ 已实现：admin_scope + 六工具 + lens 全套 UI，tests/test_admin_scope.py 35 用例）
-**动机**："中枢管理平台，不只是信息平台"——以前是直连后台数据的面板，现在把整个平台囊括进 AI：问 Agent 得到比面板固有信息更灵活的答案（各组进展、模块运行、错误沉淀）。
-
-**契约草案**：Admin 组 = 唯一跨组 scope（**实现为角色而非第七研究组**——不进 `GroupName` 枚举，走 identity/permission role 判定，避免两仓组枚举联动）；跨组 list_runs（按人/组/状态/错误聚合）+ blackboard 跨组只读 + 错误记录查询（各组错误 Admin 可见）。
-
-**GitGraph 与双类 Pop（2026-09-01 定版：用户点名关键设计，P0 本轮交付，自 Q2 提前）**：
-1. **GitGraph 面板**：一键查看组织全部 repo 最新树状态，有更新的节点**标红高亮**（GitHub API：`admin_repo_status`）；
-2. **Pop 提醒（两类）**：① repo 有新提交 → pop；② 各库（海威/浩海的库、各组开发环境）**package 版本更新** → pop，全组可见（数据：`admin_package_updates`）。"我们不可能一直盯着 repo，pop 起提醒作用。"
-3. **日常工作台定位**：Admin 把它当日常任务管理界面打开（报告管理 + 任务管理入口）。
-
-**依赖**：F-09 metrics、permission_engine（Admin 角色权威源）、GitHub API 只读客户端（复用 read_pr 通道）。**验收草案**：Admin 自然语言查询跨组汇总成功；非 Admin 查询他组被拒；GitGraph 更新节点标红；两类 pop 均可触达全组。
-
-### P-09 AlphaFlow 部署适配命令（/deploy 黑盒）——**P1** [新增 v0.2]（✅ staging 已实现：黑盒字段面锁死 + kind=deploy gate + evidence 留痕；真适配器 blocked 待外部规格）
-**动机**：研究员已调试代码与 AlphaFlow 部署库之间的适配是当前人工环节；同时 AlphaFlow 底层对普通研究员保密（"我能让他们部署，但不希望他们了解底层"）。
-
-**契约草案**：`/deploy` 命令（lens 会话命令）→ 黑盒适配管线（已调试代码 → AlphaFlow 部署库格式适配 → 部署入库）；**黑盒约束**：过程中不向非授权用户暴露 AlphaFlow 底层结构（权限 Mask；正常询问 AI 时不得透露），部署转换只能经此指令进行；部署动作 = 写生产环境 → 挂 HumanGate（F-03 触发点 ②）。
-
-**不做**：论文复现（研究层调优 Agent 无增益，用户裁决）。
-
-**依赖**：F-05 SSH 登录界面、P-07 能力目录、permission_engine。**验收草案**：一份已调试因子代码经 /deploy 适配入库，全流程未向操作者泄露底层实现细节；无审批时部署被拦。
-
----
-
-### P-10 方案先行工作流（Solution-First）——**P0** [新增 v0.2]（✅ 已实现：SolutionDoc 状态机 + draft 限流 + judge 一致性，冒烟 12 步绿）
-**动机**：任何任务直接一口气生成代码，准确性与可审核性都差。定版纪律：**任务决定之前，先出完整解决方案，经 2-3 轮人机讨论，冻结为静态文档；代码按文档生成，验收以文档为基准做一致性判断。**
-
-**契约草案**：
-- `SolutionDoc`（`schemas/solution_doc.py` [新增]）：id / goal / rounds[]（每轮人反馈+方案修订）/ status∈{draft, frozen, superseded} / acceptance_criteria[] / file_impact[]（预期改动文件面）/ doc_hash；存 `artifacts/solutions/<id>-v<n>.md` + Blackboard `shared.solutions.*`。
-- 状态机：draft →（≥min_rounds 轮讨论）→ frozen（**用户显式确认才冻结**）→ 按方案实现。冻结前**代码生成工具不可用**（复用组 allowlist 机制做阶段性工具限流，draft 态 deny 写类工具）。
-- 一致性判定：实现完成后复用 `runner/judge.py` 做方案↔代码比对，verdict ∈ {conformant, deviation, needs_human}；偏离 file_impact 的改动必须列出。
-- 默认开启（`configs/solution_workflow.yaml`：min_rounds=2、max_rounds=3，超轮数升级人裁；trivial 单点修复可显式豁免）。
-- **语义边界**：本工作流是**流程阶段约束，不是权限门禁**——不新增 HumanGate 触发点（与 F-03 收窄一致，避免"每步都批"退化）。
-
-**依赖**：F-01 run_agent（两阶段已有）、`runner/judge.py`、Blackboard、组 allowlist。**验收草案**：下达功能目标后 Agent 首轮只产方案不产代码；min_rounds 未满足时冻结被拒；frozen 后代码产出经一致性 verdict 可复核；偏离方案的文件改动被报告。
-
-## 附：编号索引
-
-| 编号 | 名称 | 类型 | 状态 |
+| 模式 | 典型用户 | Agent/系统行为 | 治理方式 |
 |---|---|---|---|
-| F-01 | 新建多智能体研究 | 现有 | ✅ |
-| F-02 | 执行记录视图 | 现有 | ✅ |
-| F-03 | HumanGate 写操作门禁 | 现有 | ✅（收窄适配待办） |
-| F-04 | Memory 与组织能力目录 | 现有 | ✅（能力目录+查询视图已落地；memory_search 后端通道挂账） |
-| F-05 | 设置 / SSH 登录界面 | 现有 | ✅（四态登录界面已建；SSH 完整认证面 G4-B1 延后） |
-| F-06 | 外部评估器注册与部署适配 | 现有 | ✅（登记=P-07/P-09） |
-| F-07 | 跨组协同（CI 基建） | 现有 | ✅（产品场景取消） |
-| F-08 | 三条 Compose 流 | 现有 | ✅（降级组内工具） |
-| F-09 | Monitor 与 Admin 中枢 | 现有 | ✅（Admin UI 全套已落地；pop 自动推送 Q2） |
-| P-01 | 数据接入 | 已实现 | ✅ |
-| P-02 | 回测引擎 | 组内工具 | ✅ |
-| P-03 | 组合层 | 组内工具 | ✅ |
-| P-04 | 并行 subagent | 平台能力 | ✅ |
-| P-05 | 实验管理 | 已实现 | ✅ |
-| P-06 | evidence chain | 已实现（JSON） | ✅ |
-| P-07 | 组织资产蒸馏管线 | 已实现 | ✅（调研清单+六卡+Mask+常驻摘要） |
-| P-08 | Admin 组与中枢管理面 | 已实现 | ✅（后端六工具+GitGraph/双类pop/查询台 UI） |
-| P-09 | /deploy 黑盒部署适配 | 已实现(staging) | ✅（真适配器 blocked 待外部规格） |
-| P-10 | 方案先行工作流（Solution-First） | 已实现 | ✅（状态机+限流+judge，冒烟12步绿） |
+| 研究/分析 | 六组研究员 | 查资料、查能力、调用评估器、生成分析和报告引用 | 否 |
+| 工程开发 | 六组研究员 | 按任务复杂度形成方案，复用已有组件，生成或修改个人工作环境代码 | 否 |
+| 组件适配 | 因子/模型/策略相关成员 | 把已调试代码接到组织标准接口，报告契约违规 | 否；结果交给 Admin 管理面 |
+| 生产变更 | Admin | 通过 Admin 管理面和生产服务账号执行受控部署 | Admin 操作审计，不进入普通 Agent Gate |
+| 运营管理 | Admin | 查看所有组的任务、错误、组件、Memory、Blackboard、GitGraph 和通知 | 查询不需要；审批动作仍留 Gate 记录 |
 
-> 维护声明：本文件为功能唯一活文档；schemas/ 或 tools/ 每次改动必须同步更新状态列。历史快照不再修改。v0.2 定版依据 = 2026-09-01 功能定版会议（HumanGate 收窄 / PR 场景取消 / 引擎代码保留 / 平台红线 / 蒸馏与 Admin 双支柱）。
+### 1.2 Agent 参与边界
+
+**Agent 应做**：识别任务类型；检索能力目录和组级 Memory；优先选择标准组件；在需要时询问人；组合只读工具和适配器；执行数据、PIT、版本和工程契约检查；把运行状态、错误、产物和决策写入可追踪记录；把需要生产处理的 artifact 交给 Admin 管理面。
+
+**Agent 不做**：替研究员决定研究问题或投资结论；替研究员完成算法调优和科学判断；重写已有 `DataAccess`、`FactorEngine`、`QuantEvaluator`、`Modeling`、组合/回测组件；把内部评估器当作自己的实现；绕过权限或把生产 SSH 凭据交给模型；把一次性聊天内容自动当成长期事实。
+
+**人和领域组件负责**：研究员负责问题、假设和结果解释；各组负责人负责本域算法、指标口径和业务验收；标准组件负责数据、计算、评估、优化、资产治理、模型、风险、组合和回测；报告平台负责面向研究员或外部产品的汇报；Admin 负责组织级可见性、权限、审批和运行治理。
+
+### 1.3 领域职责边界
+
+| 领域 | 权威职责 | QuantCode 的职责 | 不应越权承担 |
+|---|---|---|---|
+| DataAccess | 数据读写、PIT、快照、字段和权限 | 登记、选择、契约检查、调用 | 业务仓裸读生产数据或造第二套数据目录 |
+| FactorEngine | 因子 DSL、算子和因子值计算 | 发现、调用、适配和记录 | 重造因子语法/算子库 |
+| QuantEvaluator | IC、ICIR、换手、稳定性、置信区间等证据 | 发起评估、消费报告、展示来源 | 自算第二套指标 |
+| FactorOptimizer | 因子结构和处理方案搜索 | 发现、编排、记录试验 | 把搜索结果伪装成最终因子结论 |
+| FactorAssets | 因子身份、去重、聚类、生命周期和资产库 | 适配入库入口、查询 | 维护第二套因子事实源 |
+| FactorPreprocess | winsor、rank、zscore、中性化和 FeatureBundle | 选择处理方案 | 各模型重复实现处理逻辑 |
+| Modeling | walk-forward、purge/embargo、训练和 OOS | 发现和调用 | 自行决定时序切分口径 |
+| Barra/Riskfolio/VectorBT | 风险模型、组合优化、准确回测 | 登记和适配 | 在平台层重新计算业务结果 |
+| Report Platform | 汇总、展示、发布研究报告和策略表现 | 提供结构化产物、链接和状态 | 复制报告产品 |
+| Admin | 全组织运行治理、权限和审批 | 提供中枢查询和管理视图 | 代替各组做领域研究判断 |
+
+## 2. 共享契约与信息层
+
+### 2.1 组内 Memory
+
+- 同一组成员共享该组 Memory；它应沉淀已验证的研究结论、失败和错误、工程决策、组件用法、数据口径和 Best Practice。
+- 全组织契约（例如目标收益 `TargetReturnView/v1`）进入 global/shared 层；不应把组内敏感实现写进公共层。
+- 会话/任务记录与长期知识分开。原始 trace 只能作为候选来源；经过确定性检查、领域负责人确认或明确标注后，内容才能晋升为长期 Memory。
+- 每条可复用知识都应保留来源、时间、适用条件、验证状态和被推翻/替代关系。过期内容标记 superseded，不静默覆盖。
+- Admin 拥有全部可见性，可读取和管理所有组 Memory；这类访问应有审计记录。普通组员只能读取本组详情和被授权的共享摘要。
+
+### 2.2 能力目录与组件注册
+
+组件清单以组织仓库实读和 `gh` 可验证信息为准，不能凭会议记忆手写数量。能力卡至少包含：`canonical_repo`、状态（PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY）、领域权威、输入/输出、公开 API、依赖、消费者、属组和废弃映射。
+
+当前标准主链：
+
+```text
+DataAccess
+  → FactorEngine
+  → QuantEvaluator
+  → FactorOptimizer / FactorAssets
+  → FactorPreprocess
+  → Modeling
+  → Barra Engine / Riskfolio-QS
+  → VectorBT-QS
+  → QuantPlatform / Platform Web
+```
+
+挖因子和研究智能组件（AlphaProbe、CogAlpha、FactorMiner、Factor Research DB、Sentinel、PaperRAG、Quant Knowledge Graph 等）是上游或专项能力，不自动成为主链权威。`alpha_flow` 当前只能作为部署目标的接口/脚手架登记，不能当作成熟生产引擎宣传。
+
+能力目录采用两层投放：
+
+1. **摘要层**：每次 Agent run 注入可见能力的 id、名称、用途和“何时别自造”。
+2. **详情层**：通过受 ACL 保护的 Memory/目录查询取得 API、字段和实现约束。
+
+游客或未认证用户只看公开契约；普通组员按 GitHub/组权限看到摘要和被授权详情；Admin 看到完整目录。目录发现不代表运行时已经接入，卡片必须明确 `status`。
+
+工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。第一阶段六组共用研究/开发工具集合；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
+
+### 2.3 数据口径契约
+
+目标收益、前向标签和复权字段以数据仓现有表为唯一取值源。当前定版口径为：`Horizon ∈ {1, 5, 10, 20}`、后复权字段、`t+1 → t+2` 对齐；不得在业务仓自行重算。Agent 只做契约识别和违规提示，不替数据层生成第二套标签。`DataAccess`、`QuantEvaluator` 的实际标签约定必须在能力卡和领域 SPEC 中分别标明，名称相近但语义不同的接口不得混用。
+
+### 2.4 Blackboard、Artifact、Trace
+
+- **Blackboard**：传递结构化跨组状态和脱敏结果；项目共享条目使用 `shared.*` 命名；组私有条目不能因普通查询泄露。
+- **Artifact**：保存报告、评估、方案、部署记录和其他二进制/大对象；Blackboard 只保存引用和必要摘要。
+- **Trace/metrics**：记录 run、工具、错误、耗时、版本和状态，供 Activity、Admin 和回放使用。运行指标带脱敏的 `actor_id`/组信息，支持按人查看；`thread_id` 只标识会话。
+
+## 3. 现有功能（F-XX）
+
+### 3.0 功能状态和共用契约
+
+`F-XX` 描述用户可见或运行时必须保留的能力，`P-XX` 描述扩展、增强或待接入能力。状态分为 `IMPLEMENTED`、`STAGING`、`PARTIAL` 和 `BLOCKED`。`IMPLEMENTED` 只表示代码和测试已有证据，不能替代身份、权限、外部服务和生产环境验收。
+
+所有组流共用以下接口：
+
+| 契约 | 最小字段 | 用途 |
+|---|---|---|
+| `ComposeTask` | `task_id`、`root_task_id`、`parent`、`owner_group`、`goal`、`status`、`artifacts` | 任务树、预算和回放归属 |
+| `BlackboardState` | `scope`、`namespace`、`producer`、`consumer`、`schema_version`、`payload_ref`、`updated_at` | 组内状态和跨组 handoff |
+| `RunAgentResult` | `status`、`thread_id`、`execution_trace`、`output_data`、`artifacts`、`errors`、`gate` | 控制平面与 AgentRunner 的结果回流 |
+| `HumanGate` | `gate_id`、`kind`、`resource`、`actor`、`decision`、`evidence`、`expires_at` | `merge`/`permission` 写操作的 interrupt/resume |
+
+契约由 Pydantic v2 维护，并导出 JSON Schema。子任务、artifact、metrics 和 Blackboard 条目必须携带任务归属；恢复 checkpoint 时重新校验当前 session 权限。
+
+### F-01 新建研究与组路由
+
+首页提交任务，服务端从已认证会话得到组身份，加载该组 Skill、能力摘要和可用工具。允许显式选择 Skill，但不能用 `group` 参数越权切换组；多组授权必须来自服务端 roster。`list_skills` 应来自真实目录。
+
+**当前实现**：桌面首页、MCP `run_agent` 和基础工具过滤已存在；SSH 真实认证、roster 自动组绑定、动态 Skill/Tool Catalog 和组覆盖防护仍需接通。
+
+**验收补充**：提交请求只能使用认证 session 的 `group`；请求中出现不同组时拒绝；`tools/list` 与 `tools/call` 必须使用同一份 effective tool set；无 roster 的生产请求 fail-closed。Skill 列表来自维护员发布目录，不能由用户输入或 Agent 运行时注册。
+
+### F-02 执行记录与回放
+
+Activity 显示思考、工具调用/结果、产物、错误、方案状态、Gate 和 checkpoint；同一 `thread_id` 的事件可去重合并，支持从 checkpoint 回放。服务端历史应与本地缓存区分，避免跨用户泄露。
+
+**当前实现**：trace、metrics、checkpoint 和 replay 基础已存在；服务端历史、按人维度和 UI 全量验收待审查。
+
+**事件要求**：至少支持 `agent_start`、`skill_loaded`、`node_update`、`llm_thought`、`tool_call`、`tool_result`、`artifact`、`error`、`checkpoint_snapshot`、`human_gate` 和 `agent_end`。事件使用 `thread_id + iteration + seq` 去重，mock、proxy、staging、降级和权限拒绝必须保留原状态。
+
+### F-03 HumanGate 写操作门禁
+
+| 触发点 | kind | 规范 |
+|---|---|---|
+| 因子资产/主线登记等共享生产写 | `merge` | 评估结果只提供依据；实际写入需显式批准 |
+| 跨组受限数据/资源访问 | `permission` | 只有权限策略允许的跨组请求可申请批准 |
+
+生产部署由 Admin 管理面发起，生产服务账号通过受控接口执行。部署记录必须保留 actor、目标、artifact、版本和结果，但普通研究 Agent 不调用 `/deploy`。
+
+预算是运行时资源限制：达到上限时告警、停止或进入预算耗尽状态。研究输出、RiskProfile 越限、组合评估失败和 CI 结果通过 `pass/fail`、报告或错误记录表达，不触发产出 Gate。
+
+**当前实现**：Gate 载体、permission 和 merge 入口已有；风险越限、预算和旧部署路径仍有旧语义，需按本规格迁移。Admin 专属部署和生产服务账号边界尚未在服务端完全接通。
+
+**严格边界**：普通 Agent 的 Gate kind 白名单只有 `merge` 和 `permission`。风险、评估、报告、普通开发、CI、预算和循环检测分别返回领域结果、报告、错误或停止状态。Admin `/deploy` 使用独立管理接口和部署审计，不注册为普通 Agent 工具，也不在普通 Agent GatePanel 中生成卡片。
+
+### F-04 组内 Memory 与组织能力目录
+
+提供组级共享 Memory、公共契约、能力卡片、详情查询、来源和版本信息。Mask 按用户组/GitHub 权限执行，Admin 全可见。`memory_search` 必须有真实后端通道；UI 空态不得伪造结果。
+
+**当前实现**：FTS5、Group 隔离、六张首批卡和常驻摘要已有；详情分级、真实 Memory MCP 查询和 Admin 审计待审查。
+
+**能力卡字段**：`canonical_repo`、`status`、`type`、`domain_authority`、`inputs`、`outputs`、`public_api`、`depends_on`、`consumed_by`、`owner_group`、`visibility`、`deprecated_aliases`、`source_commit`、`observed_at`、`when_to_use` 和 `when_not_to_reinvent`。卡片状态不能用目录存在代替运行时接通。
+
+### F-05 SSH 身份登录
+
+流程为“本地 SSH 身份 → 服务端验证公钥指纹 → roster 匹配 actor/组/角色/个人工作目录 → 建立不可变会话”。私钥只留在本机密钥链或 SSH agent，不进入 LLM、Memory、日志或普通 UI 请求。登录后可读取授权主线、写入个人开发环境；生产环境由独立服务账号运行，不提供研究员直接登录。
+
+**当前实现**：指纹映射和只读状态查询有基础，桌面登录界面仍需接真实认证/连接 surface；当前 UI stub 不能视为完整登录。
+
+**失败状态**至少区分密钥拒绝、主机不可达、roster 未命中、资源权限不足和身份接线未完成。研究员登录后拥有被授权服务器上的个人工作目录；该目录属于研究/开发环境。生产 shell、生产服务账号和生产进程控制不属于此功能。
+
+### F-06 外部组件登记、评估调用、契约检测与部署适配
+
+因子路径必须区分：
+
+```text
+已有因子值 / FactorPanel → QuantEvaluator
+没有因子值 → DataAccess → FactorEngine → QuantEvaluator
+需要寻优 → FactorOptimizer
+需要资产治理 → FactorAssets
+需要模型输入处理 → FactorPreprocess
+需要训练/OOS → Modeling
+```
+
+QuantCode 负责发现、选择、调用、适配和记录；评估器负责计算证据；研究员负责算法调优；Admin 管理面负责把已调试代码交给 `/deploy` 黑盒适配器。论文复现和研究方向调优不属于 QuantCode 功能。
+
+**当前实现**：`eval_from_panel`、真实数据契约、能力卡和 staging adapter 已有；组织组件逐一接入、真实 AlphaFlow adapter、Admin 部署权限和口径违规 warning 仍需审查。
+
+**状态要求**：评估结果必须带 `source`、`environment` 和 `result_status`。`mock`、`proxy`、`staging` 结果不能冒充生产证据。QuantCode 负责选择和记录；QuantEvaluator 负责指标计算；研究员负责算法调优和科学结论；Admin 管理面负责把已调试 artifact 交给部署适配器。
+
+### F-07 跨组协同
+
+“模型 PR 自动风控”不再是 QuantCode 产品场景。模型静态产物走 COS/模型平台，代码走正常 PR 和 GitHub Actions review；保留的 Model→Risk 链是 CI 基建维护，不新增产品 UI。跨组协同由共享契约、能力目录、Blackboard 摘要、Admin 查询和报告平台承接。
+
+**保留的 CI 链**：`read_pr → extract_metadata → generate_model_spec → write_blackboard → trigger_risk_flow → calc_risk → write_pr_comment`。该链在 GitHub Actions 中输出 CI 报告，不能把报告结果转换为 QuantCode HumanGate。
+
+### F-08 组内业务工具适配层
+
+策略、期权、基本面等领域的业务流水线由各组自研。QuantCode 可以保留工具适配、PIT 检索、组件调用和回归测试，但不把这些工具包装成统一业务产品，也不复制报告平台。相关实现状态以各域 SPEC 和组件权威仓为准。
+
+策略、期权和基本面工具可以继续通过 Agent 调用、回归测试和 artifact 记录接入。QuantCode 不在这些工具之上新增统一业务页面、统一指标计算或统一发布流程。
+
+### F-09 Admin、Monitor、GitGraph 与 Pop
+
+Admin 是组织级角色，在 QuantCode 平台拥有无限权限，包括全组织可见性、管理、审批和部署发起权。Admin 可查询所有组的运行、错误、Memory、Blackboard、任务和组件状态；敏感访问、管理、审批和部署动作都要审计。普通组员只能看到其 GitHub/组权限范围内的信息。
+
+GitGraph 的完整目标是：按当前用户权限列出全部可见 repo、分支、HEAD、最近提交和变更节点；Admin 按组织权限查看全部 repo。更新节点高亮，package/依赖版本更新单独显示。Pop 使用同一权限边界，全组可见不等于跨权限可见。
+
+**当前实现**：Admin 元工具、基础查询和应用内 GitGraph/Pop 已有；按人运行记录、完整分支树、后台自动刷新、基线/去重/确认、系统级通知和报告/任务工作台仍需审查或后续实现。
+
+**权限要求**：普通用户的 GitGraph 和 Pop 查询使用当前 GitHub subject/token scope；Admin 使用组织授权范围。业务组归属只影响能力卡和上下文，不能代替 GitHub repo 权限。错误、权限不足、仓库缺失和服务不可用必须分别返回。
+
+## 4. 计划与扩展功能（P-XX）
+
+计划功能沿用 OpenCode/MimoCode 的 Agent 基础设施，不因产品边界收窄而删除。每项扩展都必须说明所属层、权威组件、输入输出契约、权限边界、失败状态和验收证据。
+
+| 编号 | 设计定位 | 当前口径 |
+|---|---|---|
+| P-01 | DataAccess/FactorPanel/ReturnsDataset 数据契约与 staging 接入 | 平台消费；真实数据接入仍依赖外部服务 |
+| P-02 | 回测引擎 | 组内工具，不做 QuantCode 产品 UI |
+| P-03 | 组合层 | 组内工具，不做 QuantCode 产品 UI |
+| P-04 | 并行 subagent | 平台基础设施，必须继承组权限和预算 |
+| P-05 | 实验管理 | 记录 A/B、OOS、证据和复现关系 |
+| P-06 | evidence chain | 运行、产物、Gate 和决策的可验证留痕 |
+| P-07 | 组织资产蒸馏 | 组件调研 → 能力卡 → ACL/Mask → 常驻摘要 + 详情 Memory；组件状态以实物为准 |
+| P-08 | Admin 中枢 | 全权限角色的语义查询、错误沉淀、GitGraph、Pop 和运行治理 |
+| P-09 | `/deploy` 黑盒适配 | Admin 管理面提交已调试代码，生产服务账号经受控接口执行并留存部署记录 |
+| P-10 | 方案先行 | 按任务复杂度分级；架构性任务先出方案，流程控制不改变 HumanGate 范围 |
+
+### P-10 复杂度分级
+
+| 任务级别 | 例子 | 规范 |
+|---|---|---|
+| L0 只读/查询 | 查组件、看状态、读报告 | 直接执行，记录 trace |
+| L1 有界研究/小修改 | 单文件修复、一次评估、参数实验 | 可生成轻量计划，不强制冻结 |
+| L2 架构/多模块 | 新模块、跨仓接入、较大功能 | 先产方案，讨论后冻结，再生成代码 |
+| L3 生产变更 | 部署、主线入库、不可逆写 | L2 方案 + evidence；merge/permission 进入 HumanGate，部署由 Admin 管理面发起 |
+
+### 4.1 计划功能验收要点
+
+| 编号 | 输入/输出契约 | 验收要点 |
+|---|---|---|
+| P-01 | `FactorPanel`、`ReturnsDataset`、`PITQuery` | 数据必须带 contract version、`as_of` 和来源；无权限请求 fail-closed |
+| P-02 | 组内回测适配器 → 回测 artifact | 保留 A 股交易约束和准确回放；QuantCode 不提供统一回测产品页 |
+| P-03 | alpha、risk、benchmark、previous positions → target positions/trades | 组合约束和结果由组内组件计算，平台只记录引用 |
+| P-04 | `ComposeTask` parent/children → 子任务状态 | 子任务继承 actor、group、workspace、allowlist 和预算，并支持独立终止 |
+| P-05 | A/B、OOS、trial ledger → 实验 artifact | 记录数据版本、切分、参数和复现关系，禁止把训练内结果当 OOS |
+| P-06 | run、artifact、Gate、决策 → evidence chain | 哈希链可验证；关键写操作证据失败时阻止成功状态 |
+| P-07 | 组织仓库实读 → 能力卡、ACL/Mask、组内摘要 | 卡片含 canonical、状态、依赖、消费者、别名和复用纪律；目录存在不代表已接通 |
+| P-08 | Admin session → 跨组查询、错误聚合、GitGraph、Pop | 非 Admin 拒绝跨组查询；普通用户遵守 GitHub 可见范围；错误不伪装成空结果 |
+| P-09 | Admin artifact + manifest → 受控部署请求/结果 | 生产服务账号执行；普通 Agent 不可见、不可调用；结果只返回状态、artifact、记录哈希和错误 |
+| P-10 | `SolutionDoc` → frozen 实现 → conformance verdict | L2/L3 先冻结方案；L0/L1 不被固定轮次阻塞；偏离文件面必须报告 |
+
+P-04、P-05、P-06 和 P-10 属于平台基础能力。P-02、P-03 继续保留为组内工具适配。P-09 依赖外部生产接口规格，staging 通过不代表生产完成。
+
+## 5. 可见性与权限矩阵
+
+| 资源 | 普通组员 | Admin | 游客/未认证 |
+|---|---|---|---|
+| 本组 Memory 详情 | 读写按组策略 | 全部可见/可管理 | 不可见 |
+| 其他组 Memory 详情 | 不可见，除非明确授权 | 全部可见，访问留痕 | 不可见 |
+| 公共契约/脱敏摘要 | 可读 | 可读写/管理 | 公开部分可读 |
+| Blackboard PROJECT 摘要 | 读授权条目 | 全部可读/管理 | 不可见 |
+| GitGraph repo | GitHub 身份可见范围 | 组织全部可见 | 不可见 |
+| repo/package Pop | 同一可见范围 | 组织全部 | 不可见 |
+| 生产写操作 | 无直接权限 | Admin 管理面提交，生产服务执行 | 拒绝 |
+
+## 6. 后续功能审查顺序
+
+先审身份与权限，再审信息沉淀，再审 Agent 运行边界，最后审业务适配：
+
+1. SSH 本地公钥登录、服务端 roster、组锁定、Admin 权威源和 GitHub 权限映射；
+2. 组内 Memory 写入/晋升/Mask、能力卡状态和 `memory_search` 通道；
+3. HumanGate 收窄、预算语义、P-10 复杂度分级和 `run_agent` 组越权；
+4. 组件注册与标准链调用，尤其是 DataAccess、FactorEngine、QuantEvaluator 和 TargetReturnView；
+5. GitGraph 全量视图、Pop 基线/去重/自动刷新和 Admin 运行/错误聚合；
+6. 最后清理旧 Skill、旧业务流、旧测试断言和文档示例。
+
+PyTest 全绿只说明测试与当前代码一致。凡是断言风险越限 HumanGate、预算审批、研究产出 Gate、模型 PR 产品流、普通 Agent 调用 `/deploy` 或六条业务流属于 QuantCode 主产品的测试，都要重新分类：保留为底座回归、改写为新语义，或删除。
+
+## 7. 设计变更记录
+
+| 日期 | 变更 |
+|---|---|
+| 2026-09-01 | HumanGate 收窄为写操作；模型 PR 降级为 CI；业务流水线归组内；新增 P-07/P-08/P-09/P-10 |
+| 2026-09-03 | 根据组长会议与组件指南重建运营基线：组内 Memory、组件权威与复用纪律、Admin 全权限、GitHub 权限一致、SSH 不进生产、GitGraph 全增强、方案按复杂度分级 |
+| 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、六组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
