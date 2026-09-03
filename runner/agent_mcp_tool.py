@@ -174,8 +174,20 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     - 调用 ``AgentRunner.resume(thread_id=..., decision=...)``。
     - 返回 completed/rejected 结果。
     """
-    # 优先级：args.group > ctx["group"]（环境变量）> 报错
-    group = args.group or ctx.get("group") or ""
+    # 认证 session 决定 group。请求参数只能重复声明同一组，不能覆盖
+    # roster 返回的 session group。没有认证 group 时，显式 group 只作为
+    # 本地开发降级路径，正式 MCP 会话由 mcp_server 在调用前 fail-closed。
+    session_group = str((ctx or {}).get("group") or "").strip()
+    requested_group = str(args.group or "").strip()
+    if session_group and requested_group and requested_group != session_group:
+        return {
+            "status": "error",
+            "error": (
+                f"group mismatch: authenticated session is '{session_group}', "
+                f"request asked for '{requested_group}'"
+            ),
+        }
+    group = session_group or requested_group
     if not group:
         return {
             "status": "error",

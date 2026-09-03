@@ -62,6 +62,15 @@ class TestRunAgentExecuteErrors:
         )
         assert result["status"] == "error"
 
+    def test_request_group_cannot_override_authenticated_session(self):
+        """请求参数不能把已认证 session 改成另一个业务组。"""
+        result = _run_agent_execute(
+            RunAgentArgs(task="test", group="risk"),
+            ctx={"group": "model", "_model": object()},
+        )
+        assert result["status"] == "error"
+        assert "group mismatch" in result["error"]
+
     def test_no_model_returns_error(self, monkeypatch):
         """ctx 中有 group 但没有 _model，且 fallback _get_model 也返回 None → 返回 error。"""
         import quantcode.mcp_server as _mcp
