@@ -81,17 +81,21 @@ def _is_guest(requester_group: str | None) -> bool:
 def visible_cards(
     cards: list[CapabilityCard],
     requester_group: str | None,
+    requester_role: str | None = None,
 ) -> list[CapabilityCard]:
     """按请求组过滤卡片（Mask 决策唯一入口）。
 
     规则：
     - 游客组（未认证 / guest / 未知组）→ 仅 ``type == "contract"``；
-    - 已认证研究组 → contract + 全部 asset（数据字段清单细节的 Mask 在 Memory
-      scope 层实现，见 :func:`card_memory_location`）。
+    - 已认证研究组 → contract + non-admin asset（数据字段清单细节的 Mask 在
+      Memory scope 层实现，见 :func:`card_memory_location`）；
+    - Admin role → 全部卡片。
     """
     if _is_guest(requester_group):
         return [c for c in cards if c.type == "contract"]
-    return list(cards)
+    if requester_role == "admin":
+        return list(cards)
+    return [c for c in cards if c.visibility != "admin"]
 
 
 def card_memory_location(card: CapabilityCard) -> tuple[str, str | None]:
@@ -179,7 +183,7 @@ def _list_capabilities_execute(args: Any, ctx: dict) -> dict:
     except ValueError as e:
         return {"error": f"capabilities.yaml 校验失败: {e}"}
     group = (ctx or {}).get("group")
-    visible = visible_cards(cards, group)
+    visible = visible_cards(cards, group, (ctx or {}).get("role"))
     return {
         "group": group or GUEST_GROUP,
         "strict_reuse": strict_reuse_enabled(),

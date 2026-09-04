@@ -73,7 +73,7 @@ def test_factor_tools_registered():
 
 
 def test_match_main_fallback_without_llm(monkeypatch):
-    """无 LLM 时 match_main 降级：返回 compatible + suggested_fields + notes 三键。"""
+    """无 LLM 时 match_main 必须拒绝生成乐观兼容结论。"""
     import runner.llm_provider
 
     def _no_llm():
@@ -85,9 +85,31 @@ def test_match_main_fallback_without_llm(monkeypatch):
     validated = t.schema(idea="PB-ROE 季度再平衡")
     out = t.execute(validated, ctx={})
     assert isinstance(out, dict)
-    assert out["compatible"] is True
+    assert out["compatible"] is False
     assert isinstance(out["suggested_fields"], list)
+    assert out["result_status"] == "UNAVAILABLE"
     assert "notes" in out
+
+
+def test_match_main_accepts_callable_llm_adapter(monkeypatch):
+    """DeepSeekAdapter 的 callable 协议应返回并校验真实 JSON 结果。"""
+    import runner.llm_provider
+
+    class _CallableAdapter:
+        def __call__(self, messages):
+            assert messages
+            return AIMessage(
+                content='{"compatible": true, "suggested_fields": ["pb", "roe"], "notes": "主线字段可用"}'
+            )
+
+    monkeypatch.setattr(runner.llm_provider, "create_deepseek_llm", lambda: _CallableAdapter())
+    t = global_registry.get("match_main")
+    out = t.execute(t.schema(idea="PB-ROE 因子"), ctx={})
+    assert out == {
+        "compatible": True,
+        "suggested_fields": ["pb", "roe"],
+        "notes": "主线字段可用",
+    }
 
 
 def test_gen_schema_fallback_marks_fallback():

@@ -111,11 +111,19 @@ def is_readonly_tool(tool_id: str) -> bool:
     return tool_id in READONLY_TOOL_IDS or str(tool_id).startswith(READONLY_TOOL_PREFIXES)
 
 
-def tool_allowed_in_phase(tool_id: str, phase: str | None) -> bool:
+def tool_allowed_in_phase(
+    tool_id: str,
+    phase: str | None,
+    *,
+    solution_required: bool = False,
+) -> bool:
     """阶段限流判定：仅 draft 态收窄为「方案类工具 + 只读工具」白名单。
 
-    phase 为 None（未启动工作流）或 "frozen"/"superseded" → 全放行。
+    phase 为 None（未启动工作流）或 "frozen"/"superseded" → 默认全放行；
+    但服务端已判定 ``solution_required`` 的 L2/L3 任务在方案冻结前仍收窄。
     """
+    if phase is None and solution_required:
+        return tool_id in SOLUTION_TOOLS or is_readonly_tool(tool_id)
     if phase != "draft":
         return True
     return tool_id in SOLUTION_TOOLS or is_readonly_tool(tool_id)
@@ -130,17 +138,24 @@ def tool_denied_message(tool_id: str) -> str:
     )
 
 
-def filter_tools_for_phase(tools: Iterable[Any], phase: str | None) -> list[Any]:
+def filter_tools_for_phase(
+    tools: Iterable[Any],
+    phase: str | None,
+    *,
+    solution_required: bool = False,
+) -> list[Any]:
     """按阶段过滤 tool 列表（llm_node 提供给模型的可见工具面）。
 
-    元素为 ToolDef（取 .id）或裸 str 均可。phase != "draft" 时原样返回
-    （不复制，零开销路径）。
+    元素为 ToolDef（取 .id）或裸 str 均可。未要求方案且 phase != "draft" 时
+    原样返回；L2/L3 的 phase=None 按 draft 白名单处理。
     """
-    if phase != "draft":
+    if phase != "draft" and not (phase is None and solution_required):
         return list(tools)
     return [
         t for t in tools
-        if tool_allowed_in_phase(getattr(t, "id", t), phase)
+        if tool_allowed_in_phase(
+            getattr(t, "id", t), phase, solution_required=solution_required
+        )
     ]
 
 

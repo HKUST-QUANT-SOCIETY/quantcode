@@ -48,6 +48,24 @@ def test_estimate_tokens_no_tiktoken_falls_back_to_len_div_2(monkeypatch):
     assert n == 100, f"无 tiktoken 时 200 chars → 100 tokens (//2),实际 {n}"
 
 
+def test_estimate_tokens_tiktoken_cache_permission_falls_back(monkeypatch):
+    """缓存文件被并发锁定时仍可执行 truncate 保护。"""
+    import runner.agent_nodes as an
+
+    class _LockedTiktoken:
+        @staticmethod
+        def encoding_for_model(model):
+            raise PermissionError("locked cache")
+
+        @staticmethod
+        def get_encoding(name):
+            raise PermissionError("locked cache")
+
+    monkeypatch.setattr(an, "tiktoken", _LockedTiktoken)
+    monkeypatch.setattr(an, "_TIKTOKEN_AVAILABLE", True)
+    assert _estimate_tokens("a" * 200) == 100
+
+
 # ---------------------------------------------------------------------------
 # make_truncate_node 单测
 # ---------------------------------------------------------------------------

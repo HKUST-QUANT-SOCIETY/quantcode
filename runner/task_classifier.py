@@ -48,6 +48,16 @@ class TaskClassification(BaseModel):
 _QUERY_WORDS = ("查询", "查看", "读取", "状态", "search", "inspect", "list", "explain")
 _ADAPTER_WORDS = ("adapter", "适配", "接入组件", "contract")
 _ENGINEERING_WORDS = ("实现", "修改", "重构", "build", "fix", "code")
+_COMPLEXITY_WORDS = (
+    "跨文件",
+    "多文件",
+    "跨仓",
+    "架构",
+    "方案",
+    "/solution",
+    "增加模块",
+    "接入",
+)
 
 
 def classify_task(
@@ -87,7 +97,7 @@ def classify_task(
 
     if shared_write:
         complexity = Complexity.L3
-    elif cross_repo or file_count > 1:
+    elif cross_repo or file_count > 1 or any(word in text for word in _COMPLEXITY_WORDS):
         complexity = Complexity.L2
     elif governance == Governance.READ_ONLY and any(word in text for word in _QUERY_WORDS):
         complexity = Complexity.L0

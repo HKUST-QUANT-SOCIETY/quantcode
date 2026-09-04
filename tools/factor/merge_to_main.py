@@ -39,7 +39,7 @@ def _main_config() -> dict[str, Any]:
     """主线登记配置：mainline_index 路径 + require_human 开关。"""
     from runner.config_loader import load_yaml
 
-    cfg = load_yaml("factor_main")
+    cfg = load_yaml("factor_main", strict=True)
     return {
         "mainline_index": cfg.get("mainline_index", _DEFAULT_MAINLINE_INDEX),
         "require_human": bool(cfg.get("require_human", True)),

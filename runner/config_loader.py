@@ -6,7 +6,8 @@
 「启动即定型」保证，不提供文件级热加载）。
 
 配置目录解析：``QUANTCODE_CONFIG_DIR`` 覆盖，默认 <repo>/configs/。
-缺文件 / 坏 YAML / 顶层非 dict → 返回 ``{}``（调用方用代码默认兜底）。
+缺文件 → 返回 ``{}``（调用方用代码默认兜底）；坏 YAML 或顶层非 dict 默认
+保持兼容返回 ``{}``，需要安全写入的调用方可传 ``strict=True`` 直接阻断。
 """
 from __future__ import annotations
 
@@ -30,13 +31,19 @@ def config_dir() -> Path:
 
 
 @functools.lru_cache(maxsize=32)
-def load_yaml(name: str, _required: tuple[str, ...] = ()) -> dict[str, Any]:
+def load_yaml(
+    name: str,
+    _required: tuple[str, ...] = (),
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """读 ``<config_dir>/<name>.yaml``，返回顶层 dict（缺失/非法 → 空 dict）。
 
     Args:
         name: 配置名，如 ``"acceptance.factor"``（自动补 .yaml）。
         _required: 要求存在的顶层键；缺失时警告一次并按缺键处理。
             定位为内部参数——调用方用模块级常量传固定键元组，绕过 cache 无碍。
+        strict: 对坏 YAML 或顶层非 dict 抛 ``ValueError``；文件缺失仍返回空字典。
 
     Returns:
         顶层 dict；文件缺失 / YAMLError / 非 dict → ``{}``。
@@ -49,6 +56,8 @@ def load_yaml(name: str, _required: tuple[str, ...] = ()) -> dict[str, Any]:
         return {}
     except yaml.YAMLError as e:
         logger.warning("config_loader: %s 解析失败（%s），调用方使用代码默认", path, e)
+        if strict:
+            raise ValueError(f"config_loader: {path} 解析失败") from e
         return {}
     if data is None:
         return {}
@@ -57,6 +66,8 @@ def load_yaml(name: str, _required: tuple[str, ...] = ()) -> dict[str, Any]:
             "config_loader: %s 顶层不是映射（%s），调用方使用代码默认",
             path, type(data).__name__,
         )
+        if strict:
+            raise ValueError(f"config_loader: {path} 顶层不是映射")
         return {}
     if _required:
         missing = [k for k in _required if k not in data]

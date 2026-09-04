@@ -349,6 +349,7 @@ def _start_mode(
             skill_name=resolved_skill,
             flow_name="mcp_compose",
             thread_id=thread_id,
+            solution_required=bool(classification.get("solution_required")),
         )
         for ev in (final_state.get("execution_trace") or []):
             if isinstance(ev, dict):
@@ -367,6 +368,7 @@ def _start_mode(
                     skill_name=resolved_skill,
                     flow_name="mcp_compose",
                     thread_id=thread_id,
+                    solution_required=bool(classification.get("solution_required")),
                 )
         else:
             final_state = runner.run(
@@ -374,6 +376,7 @@ def _start_mode(
                 skill_name=resolved_skill,
                 flow_name="mcp_compose",
                 thread_id=thread_id,
+                solution_required=bool(classification.get("solution_required")),
             )
 
         # ── 检查是否有 pending HumanGate interrupt ──

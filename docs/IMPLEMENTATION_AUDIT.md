@@ -1,6 +1,6 @@
 # QuantCode v5 实现审计
 
-> 日期：2026-09-04
+> 日期：2026-09-05
 > 规范：FUNCTIONAL_SPEC v0.5 / PRD v5 / Design v5 / UI Spec v4
 > 测试环境：macOS、Python 3.12、本地 Mock/fixture；外部生产服务未连接
 
@@ -9,13 +9,13 @@
 | 模块 | 功能性 | 完整性 | 可维护性 | 结论 |
 |---|---|---|---|---|
 | Session Group / MCP Tool Catalog | 通过 | 生产 fail-closed；开发降级需显式 `QUANTCODE_ENV` | list/call 共用 effective set | 继续使用 |
-| SSH Identity / Roster | 后端挑战签名、指纹和 SessionContext 已实现 | 桌面 Identity Picker 属外部 `opencode-lens`，本仓无法验收 | 私钥不进服务端；roster 字段版本化 | 外部 UI 待接 |
+| SSH Identity / Roster | 后端挑战签名、指纹和 SessionContext 已实现；Lens 已接入只读 `ssh_status` | 真正 SSH 私钥认证/网络探测仍需独立 gateway，Desktop E2E 待验 | 私钥不进只读 API；roster 字段版本化 | 外部 gateway 待接 |
 | AgentRunner / ReAct | 通过 | Run、Trace、Checkpoint、Resume、Context rebuild 可用 | 删除 risk/budget/loop Gate 分支；状态单一 | 继续使用 |
 | Budget / Loop | 通过 | `stopped_budget` / `stopped_loop` | 不再混入 HumanGate | 继续使用 |
 | HumanGate | 通过 | Schema 仅允许 `merge` / `permission` | 通用 Envelope；风险字段已移除 | 继续使用 |
 | Admin Deploy | 管理面 API 与黑盒 staging Adapter 可用 | 真实生产队列/服务账号是外部依赖 | 普通 Catalog 不注册 Deploy；Evidence 必写 | 外部生产 Adapter 待接 |
 | Group Memory | 通过 | FTS5、Group ACL、显式 reconcile 可用 | Runtime task 嵌套 session，不是顶层 Memory；查询不再默认全盘扫描 | 继续使用 |
-| Capability Catalog | 通过 | 14 张卡（12 个 canonical 主链卡 + 契约/部署卡）；摘要/详情分层 | Pydantic/JSON Schema v2；成熟度和接入状态分离 | 继续使用 |
+| Capability Catalog | 通过 | 14 张卡（12 个 canonical 主链卡 + 契约/部署卡）；普通组过滤 admin-only，摘要/详情分层 | Pydantic/JSON Schema v2；成熟度和接入状态分离 | 继续使用 |
 | Blackboard / Handoff | 通过 | Scope ACL、Artifact 引用和事务写入 | `BEGIN IMMEDIATE` 消除读改写竞争 | 继续使用 |
 | QuantEvaluator Adapter | 通过 | canonical API Adapter 可用；断连返回 `UNAVAILABLE` | 删除 mock 指标 fallback；proxy evaluator 不进生产 allowlist | 继续使用 |
 | Risk CI | 通过 | `risk_verdict` + CI 报告；高风险不阻断 | 旧 risk-gate/Resume 流删除并改名 `risk_ci` | 继续使用（CI 基建） |
@@ -51,7 +51,7 @@
 
 ## 4. 外部依赖与不能伪装完成的项
 
-1. `opencode-lens` 的 SSH Identity Picker、自由切组删除、Admin Console 和真实 Memory/GitGraph UI；
+1. `opencode-lens` 的真实 SSH gateway、自由切组删除和 Desktop E2E；Admin Console、Memory/GitGraph UI 已接入本地 trace/受限查询面；
 2. SSH gateway 的生产 roster、证书轮换与 Session 签发部署；
 3. QuantEvaluator、DataAccess、Modeling、Barra、Riskfolio-QS、VectorBT-QS 的真实服务连接；
 4. Admin Deploy 生产队列、服务账号和回滚协议；
@@ -59,11 +59,19 @@
 
 这些模块当前必须返回 `UNAVAILABLE`、`STAGING`、`PARTIAL` 或明确错误，不能显示生产成功。
 
-## 5. 测试报告
+## 5. 2026-09-05 Bug 修复同步
+
+- Agent 入口按任务分类强制 L2/L3 方案阶段；`match_main` 统一 callable/invoke 并在 LLM 异常时 fail-closed。
+- Capability visibility、strict YAML 写配置、`pyarrow` 依赖、MCP UTF-8 stdio 和 tiktoken 缓存异常已补齐。
+- Lens QuantCode UI 已通过 OpenCode `/experimental/quantcode/tool` 受限 API 读取 `list_skills`、`list_algorithms`、`ssh_status`；任意 MCP tool 名和参数不会被公开。
+- UI 指标精度、共享标签、算法列表渲染和 `lens-field` 动态导入错误态已修复。
+- P-07 仍未完成自动能力卡蒸馏/晋升与服务端 strict reuse；ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
+
+## 6. 测试报告
 
 ```yaml
 spec_version: v0.5
-date: 2026-09-04
+date: 2026-09-05
 environment: macOS / Python 3.12
 external_services: not connected
 real_or_mock: local deterministic tests; external adapters mocked or unavailable
@@ -71,4 +79,4 @@ test_scope: full pytest + v5 contract suite
 known_legacy_tests: migrated or deleted
 ```
 
-本轮结果：`987 passed, 4 skipped, 1 warning`。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。
+此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `992 passed, 4 skipped, 1 warning`，定向后端回归 `114 passed, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `107 passed`，TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。

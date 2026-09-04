@@ -117,6 +117,10 @@ def test_task_classification_keeps_complexity_and_governance_separate() -> None:
     assert shared.governance == "shared_write"
     assert shared.solution_required is True
 
+    solution = classify_task("/solution 为 factor 组增加 export 脚本")
+    assert solution.complexity == "L2"
+    assert solution.solution_required is True
+
     with pytest.raises(PermissionError):
         classify_task("deploy artifact", deploy=True, admin=False)
 

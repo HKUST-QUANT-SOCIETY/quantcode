@@ -200,6 +200,9 @@ def register_all() -> None:
     for t in (draft_solution_tool, revise_solution_tool, freeze_solution_tool, solution_status_tool):
         if t.id not in known:
             register_tool(t)
+        # Platform workflow tools are exposed through the authenticated MCP
+        # meta channel, then narrowed again by the P-10 phase guard.
+        t._meta = True  # type: ignore[attr-defined]
 
 
 register_all()

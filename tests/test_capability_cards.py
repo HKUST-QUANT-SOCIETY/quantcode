@@ -176,7 +176,8 @@ def test_guest_group_sees_only_contract_cards(six_cards):
 
 def test_authenticated_group_sees_all_cards(six_cards):
     for group in ("factor", "model", "strategy", "risk", "options", "fundamental"):
-        assert {c.id for c in visible_cards(six_cards, group)} == EXPECTED_IDS
+        assert {c.id for c in visible_cards(six_cards, group)} == EXPECTED_IDS - {"alpha-flow"}
+    assert {c.id for c in visible_cards(six_cards, "strategy", "admin")} == EXPECTED_IDS
 
 
 def test_asset_card_memory_location_is_groups_scope(six_cards):
@@ -199,8 +200,9 @@ def test_asset_card_with_non_group_owner_rejected():
 
 def test_digest_contains_one_line_per_card(six_cards):
     digest = capability_digest("factor", max_chars=10000)
-    for card in six_cards:
+    for card in visible_cards(six_cards, "factor"):
         assert f"- {card.id} | {card.name} | " in digest, f"缺 {card.id} 摘要行"
+    assert "- alpha-flow | " not in digest
     # api_surface 细节不进常驻摘要（数据字段清单类细节 Mask 的实现之一）。
     assert "EvaluationRequest" not in digest
     assert "get_store" not in digest

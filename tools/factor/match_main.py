@@ -145,7 +145,12 @@ def _match_main_execute(args: MatchMainArgs, ctx: dict) -> dict[str, Any]:
         # 调用LLM
         from langchain_core.messages import HumanMessage
         messages = [HumanMessage(content=prompt)]
-        response = llm.invoke(messages)
+        if callable(llm):
+            response = llm(messages)
+        elif hasattr(llm, "invoke"):
+            response = llm.invoke(messages)
+        else:
+            raise TypeError("configured LLM does not implement the supported call protocol")
 
         # 解析LLM响应
         import json
@@ -162,21 +167,27 @@ def _match_main_execute(args: MatchMainArgs, ctx: dict) -> dict[str, Any]:
         result = json.loads(json_str)
 
         # 验证必需字段
-        if "compatible" not in result:
-            result["compatible"] = True
+        if not isinstance(result, dict):
+            raise ValueError("LLM response must be a JSON object")
+        if "compatible" not in result or not isinstance(result["compatible"], bool):
+            raise ValueError("LLM response must contain boolean compatible")
         if "suggested_fields" not in result:
             result["suggested_fields"] = []
+        if not isinstance(result["suggested_fields"], list):
+            raise ValueError("LLM response suggested_fields must be a list")
         if "notes" not in result:
             result["notes"] = "LLM分析完成"
 
         return result
 
     except Exception as e:
-        # 降级：返回兼容但空字段列表
+        # Failed matching is not evidence of compatibility.
         return {
-            "compatible": True,
+            "compatible": False,
             "suggested_fields": [],
-            "notes": f"LLM分析失败，降级返回: {str(e)}",
+            "result_status": "UNAVAILABLE",
+            "error": f"LLM分析失败: {type(e).__name__}",
+            "notes": "LLM分析不可用，未生成主线兼容结论",
         }
 
 

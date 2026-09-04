@@ -504,6 +504,38 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
     assert "quant_evaluator" in tool_names, f"factor group 应有 quant_evaluator,got {tool_names}"
 
 
+def test_mcp_subprocess_stdio_forces_utf8_on_gbk_locale(tmp_path):
+    """MCP JSON-RPC remains valid when the parent process advertises GBK."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.update({
+        "QUANTCODE_ENV": "test",
+        "QUANTCODE_GROUP": "factor",
+        "QUANTCODE_ALLOW_UNAUTH": "1",
+        "PYTHONIOENCODING": "gbk",
+    })
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
+    request = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'
+    proc = subprocess.run(
+        [sys.executable, "-m", "quantcode.mcp_server"],
+        input=request,
+        env=env,
+        cwd=project_root,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    response = json.loads(proc.stdout.splitlines()[-1].decode("utf-8"))
+    assert response["id"] == 1
+    assert "match_main" in {tool["name"] for tool in response["result"]["tools"]}
+
+
 def test_mcp_subprocess_stdio_risk_group_call_risk_verdict(tmp_path):
     """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call risk_verdict。
 

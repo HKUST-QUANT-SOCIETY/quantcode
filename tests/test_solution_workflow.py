@@ -248,6 +248,15 @@ def test_filter_tools_for_phase():
     assert len(filter_tools_for_phase(tools, None)) == 3
 
 
+def test_solution_required_phase_none_is_still_locked():
+    """L2/L3 classification must not bypass P-10 before a SolutionDoc exists."""
+    assert not tool_allowed_in_phase("write_blackboard", None, solution_required=True)
+    assert tool_allowed_in_phase("read_pr", None, solution_required=True)
+    tools = [_tool("write_blackboard"), _tool("read_pr"), _tool("draft_solution")]
+    visible = filter_tools_for_phase(tools, None, solution_required=True)
+    assert [tool.id for tool in visible] == ["read_pr", "draft_solution"]
+
+
 # ----- tool_node / llm_node 接线 -----
 
 

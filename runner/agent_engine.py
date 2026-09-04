@@ -415,6 +415,7 @@ class AgentRunner:
         thread_id: str | None = None,
         flow_name: str = "agent",
         resume: bool = False,
+        solution_required: bool = False,
     ) -> dict:
         """跑一个任务，返回最终 state。
 
@@ -473,6 +474,7 @@ class AgentRunner:
                     input_data={"task": task},
                     budget_tokens=self.budget_tokens,
                     blackboard_db_path=self.blackboard_db_path,
+                    solution_required=solution_required,
                 )
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
@@ -507,6 +509,7 @@ class AgentRunner:
         thread_id: str | None = None,
         flow_name: str = "agent",
         resume: bool = False,
+        solution_required: bool = False,
     ) -> dict:
         """Run agent via LangGraph app.stream() and return node-level execution_trace.
 
@@ -573,6 +576,7 @@ class AgentRunner:
                 input_data={"task": task},
                 budget_tokens=self.budget_tokens,
                 blackboard_db_path=self.blackboard_db_path,
+                solution_required=solution_required,
             )
 
         final_state: dict[str, Any] = {}

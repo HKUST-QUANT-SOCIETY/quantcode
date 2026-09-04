@@ -49,6 +49,12 @@ def test_load_yaml_bad_yaml_returns_empty(config_dir_env):
     assert load_yaml("broken") == {}
 
 
+def test_load_yaml_strict_rejects_bad_yaml(config_dir_env):
+    (config_dir_env / "broken.yaml").write_text("a: [1, 2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="解析失败"):
+        load_yaml("broken", strict=True)
+
+
 def test_load_yaml_non_dict_returns_empty(config_dir_env):
     (config_dir_env / "scalar.yaml").write_text("just a string\n", encoding="utf-8")
     assert load_yaml("scalar") == {}

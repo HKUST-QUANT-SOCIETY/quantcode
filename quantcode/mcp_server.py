@@ -698,11 +698,24 @@ def handle_request(req: dict) -> dict:
         }
 
 
+def _configure_stdio_encoding() -> None:
+    """Make JSON-RPC output deterministic on Windows locales such as GBK."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            continue
+
+
 def serve_stdio() -> None:
     """从 stdin 读 JSON-RPC 请求，往 stdout 写响应。
 
     协议：每行一条 JSON。响应可选（notifications 无 id 时不写）。
     """
+    _configure_stdio_encoding()
     logger.info("MCP server starting: cwd=%s python=%s group=%s "
                 "QUANTCODE_API_KEY=%s",
                 os.getcwd(), sys.executable,

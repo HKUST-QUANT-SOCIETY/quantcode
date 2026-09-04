@@ -20,30 +20,32 @@
 
 | 类别 | 数量 | 说明 |
 |---|---:|---|
-| 当前确认的真实缺陷/缺口 | 15 | 9 个后端/契约/外部服务接入问题，6 个 UI/集成问题 |
+| 当前确认的真实缺陷/缺口 | 3 | P-07 自动晋升、SSH 实际连通性探测、ReturnsDataset 外部数据源 |
 | 当前确认的工程维护债 | 1 | UI 根节点全量重建，主要是性能/焦点风险 |
-| 已由 v5 修复或已改为新语义 | 8 | 旧 Risk Gate、Admin fingerprint、factor mock evaluator 等 |
+| 本轮已修复 | 12 | 服务端方案门禁、LLM adapter/权限/配置/跨平台，以及 UI 目录、指标、算法和加载错误态 |
 | 外部环境或旧附件无法确认 | 6 | Windows 锁、Desktop resume、外部 fixture、真实服务等 |
 | 不是缺陷或不符合当前 v5 契约 | 7 | 闭包、局部状态、显式 token 错误、旧名称等 |
+
+本轮已经落地的修复包括：L2/L3 任务服务端强制方案阶段；`match_main` 统一 callable/invoke 协议并在失败时返回 `UNAVAILABLE`；能力卡 visibility 服务端过滤；声明 `pyarrow` 并严格阻断坏 YAML 写路径；MCP stdio UTF-8 与 tiktoken 缓存异常降级；QuantCode UI 接入受限的 OpenCode 只读 API（仅 `list_skills`、`ssh_status`、`list_capabilities`、`list_algorithms`），修复指标精度、共享指标标签、算法列表、动态模块错误反馈，并补充对应回归测试。
 
 ## 2. 当前确认的真实缺陷
 
 | ID | 原报告 | 判定 | 证据与影响 | 建议 |
 |---|---|---|---|---|
-| B-01 | P-10 方案先行可绕过 | **确认，P0/P1** | `tool_allowed_in_phase("write_blackboard", None)` 返回 `True`（`runner/solution_workflow.py:114-121`）。`classify_task()` 能把多文件任务判为 L2/`solution_required=True`，但 `run_agent` 只记录分类，不自动创建 draft；因此 L2/L3 仍可能在 `phase=None` 直接进入写工具。 | 在服务端入口按 classification 强制创建/绑定 `SolutionDoc`；保留 L0/L1 直接执行。 |
-| B-02 | `match_main` adapter `.invoke` 异常并乐观降级 | **确认，P1** | `DeepSeekAdapter` 实现的是 `__call__`（`runner/llm_provider.py:96-116`），而 `tools/factor/match_main.py:143-148` 调用 `llm.invoke(messages)`。当前可稳定复现 `AttributeError`，随后 `match_main.py:174-180` 返回 `compatible=True`、空字段。 | 统一 adapter 调用协议；异常时返回明确失败/不可用状态，禁止 `compatible=True`。 |
-| B-03 | P-07 自动蒸馏和 strict reuse 不完整 | **确认，P1/产品缺口** | `distill_cards_to_memory()` 存在，但当前代码搜索不到生产启动/调研管线调用；`strict_reuse` 默认为 `false`，`runner/distill/inject.py:82-85` 只注入提示词。能力目录仍由 `configs/capabilities.yaml` 静态加载。 | 明确 P-07 当前为静态目录 + 显式蒸馏 API；若要求自动管线，增加受控 job 和晋升审计，不要只靠 prompt。 |
-| B-04 | AlphaFlow 卡的可见性与黑盒约束冲突 | **确认，P1** | `configs/capabilities.yaml` 将 `alpha-flow` 标为 `visibility: admin`，但 `visible_cards()` 对任意已认证研究组直接返回全部卡；实测 factor 组仍能看到 admin-only 卡及 `/deploy` 摘要。当前 `list_capabilities` 不返回完整 `api_surface`，因此“完整内部 API 已向所有组泄漏”尚未成立，但 `visibility` 字段确实没有被执行。 | 对 `visibility` 做服务端过滤；普通组最多看到脱敏的部署候选能力，不返回 AlphaFlow 内部模块。 |
-| B-05 | `pyarrow` 未声明 | **确认，P1** | `tools/market/backing.py:63-73` 运行时导入 `pyarrow.parquet`，但 `pyproject.toml:15-23` 没有核心或 dev 依赖声明。当前环境因已安装依赖而通过，干净安装不能保证。 | 将 `pyarrow` 放入对应 extras，或把 parquet backend 单独拆成明确可选 extra，并在安装/启动检查中给出状态。 |
-| B-06 | 坏 YAML 可能回退到默认生产写路径 | **确认，P1** | `runner/config_loader.py:32-65` 对坏 YAML 返回 `{}`；`tools/factor/merge_to_main.py:38-52` 随后使用 `.quantcode/mainline/factors.json` 默认路径。实测坏 `factor_main.yaml` 后仍解析到默认相对路径。 | 对生产写配置区分“缺失可默认”和“解析失败必须阻断”；至少 `factor_main` 解析失败应 fail-closed。 |
-| B-07 | Windows GBK 下 MCP stdout 编码崩溃 | **确认，P1，跨平台** | 强制 `PYTHONIOENCODING=gbk` 运行 `quantcode.mcp_server`，返回含 Unicode 文案时在 `quantcode/mcp_server.py:701-730` 复现 `UnicodeEncodeError`。 | MCP stdio 进程统一使用 UTF-8 binary/text wrapper，或启动时显式重配置 stdout 编码；增加 Windows 子进程测试。 |
-| B-08 | tiktoken BPE 缓存 PermissionError 未兜底 | **确认，P1，跨平台** | `runner/agent_nodes.py:965-986` 只捕获 `KeyError/ValueError`；注入 `PermissionError('locked cache')` 可直接向上抛出。Windows 并发锁定缓存时，truncate/checkpoint 相关路径会失败。 | 捕获缓存读取的 `OSError/PermissionError` 后退回近似计数；同时允许设置独立 `TIKTOKEN_CACHE_DIR`。 |
-| B-09 | factor UI 指标精度丢失 | **确认，P2，UI** | `opencode-lens/.../metric-cards.tsx:9-12` 对非 IC/IR/Sharpe 指标只保留三位小数，`0.000123` 显示为 `0`。 | 使用有效数字/科学计数法下限；补充小数极小值测试。 |
-| B-10 | factor-screen 与 panels 指标标签不一致 | **确认，P2，UI** | `factor-screen.tsx:56-65` 与 `panels.tsx:264-272` 各自维护 `METRIC_LABELS`，字段集合不一致（`ic_std/t_stat` 与 `ic/annualized_return` 分歧）。 | 提取共享指标字段/标签模块，两个视图只消费同一映射。 |
-| B-11 | Skill 选择仍硬编码 | **确认，P1，UI/集成** | `opencode-lens/.../panels.tsx:161-166` 固定 4 个 Skill；没有从后端 `list_skills` 获取并按会话组刷新。当前 v5 规格要求 Skill 来自维护员发布目录。 | 接入真实 `list_skills` 通道；加载失败显示未连接，不静默使用过期列表。 |
-| B-12 | lens-field 动态导入无错误反馈 | **确认，P2，UI** | `panels.tsx:733-755` 只有 `import(...).then(...)`，没有 `.catch()`；模块加载失败时粒子场静默消失。 | 添加可见的非阻断降级状态和日志，避免把加载失败伪装成正常空白。 |
-| B-13 | SSH UI 未接真实 connect | **确认，P1，外部集成** | `ssh-login.tsx:31-34` 的默认 `stubSshConnect` 永远返回 `unavailable`；`panels.tsx:532-537` 没有注入后端连接实现。后端 `ssh_status` 已存在，但当前 SDK 面没有直接 tool invoke。 | 为 lens 提供只读身份/连接状态 API 或受控 fetcher；在接线前明确显示“身份接线未完成”，并联动禁用未认证任务提交。 |
-| B-14 | settings 中 algorithms 有数据时不渲染 | **确认，P2，UI** | `settings-supplier.tsx:40-53` 只处理空数组；`algorithms.length > 0` 时没有生成列表。现有测试只覆盖空态。 | 增加有数据分支和对应测试，显示 id、描述、来源/状态。 |
+| B-01 | P-10 方案先行可绕过 | **已修复** | 分类结果现在写入 Agent state；L2/L3 在无 phase 时仍按 draft 白名单过滤，入口统一传递 `solution_required`。 | 继续用现有方案状态机；补真实 Desktop resume 回归。 |
+| B-02 | `match_main` adapter `.invoke` 异常并乐观降级 | **已修复** | 同时兼容 callable/invoke，结构校验失败或 LLM 异常统一返回 `compatible=false`、`result_status=UNAVAILABLE`；新增 callable 回归。 | 保持不可用时 fail-closed。 |
+| B-03 | P-07 自动蒸馏和 strict reuse 不完整 | **仍是产品缺口** | Dream consumer 已能从 evidence 增量生成候选，但能力卡到 Memory 仍需显式 `distill_cards_to_memory()`，`strict_reuse` 仍主要是 prompt 纪律。 | 增加受控 job、晋升审计和服务端复用约束。 |
+| B-04 | AlphaFlow 卡的可见性与黑盒约束冲突 | **已修复** | `visible_cards()` 现在对普通研究组过滤 `visibility=admin`，Admin 保留全量目录；新增 ACL 测试。 | 继续检查 Memory 详情 API 的角色语义。 |
+| B-05 | `pyarrow` 未声明 | **已修复** | 已加入项目依赖并同步 lock；parquet backend 可在干净安装中解析。 | CI 保持最小安装验证。 |
+| B-06 | 坏 YAML 可能回退到默认生产写路径 | **已修复** | strict 配置读取区分缺失与解析失败，`factor_main` 损坏时 fail-closed。 | 继续将 strict 模式扩展到其他生产写配置。 |
+| B-07 | Windows GBK 下 MCP stdout 编码崩溃 | **已修复，Windows 实机待验** | stdio 启动时显式重配置 UTF-8，并增加 GBK subprocess 回归测试。 | 在 Windows 矩阵确认真实 locale 行为。 |
+| B-08 | tiktoken BPE 缓存 PermissionError 未兜底 | **已修复，Windows 实机待验** | 捕获 BPE cache `OSError` 并降级近似 token 计数；新增锁异常测试。 | Windows 并发锁定场景实测。 |
+| B-09 | factor UI 指标精度丢失 | **已修复** | 极小非零值使用科学计数法；新增 `0.000123` 回归。 | 继续按指标类型优化展示口径。 |
+| B-10 | factor-screen 与 panels 指标标签不一致 | **已修复** | 提取共享 `metrics.ts`，两个视图消费同一映射。 | 新指标先更新共享映射。 |
+| B-11 | Skill 选择仍硬编码 | **已修复，外部 MCP 连接待验** | UI 通过 OpenCode `/experimental/quantcode/tool` 受限 surface 查询 `list_skills`，按组刷新；失败显示未连接并禁用提交。 | Desktop 启用 QuantCode MCP 后做 E2E。 |
+| B-12 | lens-field 动态导入无错误反馈 | **已修复** | 动态导入增加 catch、控制台日志和非阻断可见降级提示。 | 保持降级提示不阻断研究流程。 |
+| B-13 | SSH UI 未接真实 connect | **部分修复，仍有外部缺口** | UI 已注入后端 `ssh_status` 查询并显示明确的“仅状态、无连通性探测”日志；真正 SSH 私钥认证/网络探测仍未实现。 | 需要独立安全设计和 SSH gateway，不把只读状态冒充连接成功。 |
+| B-14 | settings 中 algorithms 有数据时不渲染 | **已修复** | 有数据时渲染算法 id 与描述，并接入 `list_algorithms` 查询；新增数据分支测试。 | 继续补充来源/版本字段时沿用同一列表。 |
 | B-15 | ReturnsDataset 当前无收益源 | **确认，外部依赖缺口** | `tools/market/backing.py:430-457` 明确返回 `error: no_source`，当前 staging 没有 A 股收益表。因此真实 panel 评估不能在本地完整闭环。 | 接入 canonical StockDailyBar/ReturnsDataset 前保持 `no_source`，不要用代理收益冒充生产评估。 |
 
 ## 3. 已由 v5 修复或语义已改变
@@ -101,7 +103,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 98 passed, 1 warning
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`992 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
 
 当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
 
@@ -120,10 +122,9 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 
 ## 7. 建议处理顺序
 
-1. 先修 B-01/B-02/B-04/B-06：它们会造成权限绕过、错误结论或错误生产写路径。
-2. 接着修 B-05/B-07/B-08：保证干净安装和 Windows/并发环境的基础可靠性。
-3. 在 `opencode-lens` 修 B-09~B-14，并补真实 `list_skills`、SSH 状态和任务提交联动。
-4. 接入 ReturnsDataset/QuantEvaluator/DataAccess 前，继续保留 `no_source`/`UNAVAILABLE`，不要用 fixture 通过替代生产验收。
-5. 最后用真实 Desktop + Windows 矩阵复测附件中的 resume、Activity、空数据场景和路径/时钟问题。
+1. 完成 B-03：把能力卡蒸馏、候选晋升和 strict reuse 从显式 API/prompt 纪律升级为受控服务端流程。
+2. 为 B-13 设计独立 SSH gateway：私钥不经普通 UI 查询 API，认证、连通性探测和证书轮换均需审计。
+3. 接入 ReturnsDataset/QuantEvaluator/DataAccess 前，继续保留 `no_source`/`UNAVAILABLE`，不要用 fixture 通过替代生产验收。
+4. 最后用真实 Desktop + Windows 矩阵复测附件中的 resume、Activity、空数据场景和路径/时钟问题。
 
-本记录没有修改外部 `opencode-lens` 仓库，也没有把上述缺陷自动修复；本次请求只完成整理和真实性核验。
+本轮已修改后端与外部 `opencode-lens` UI，并为已修复项补充回归测试；未把外部服务依赖（SSH gateway、ReturnsDataset、生产队列）伪装成完成。

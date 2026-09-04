@@ -224,6 +224,8 @@ class AgentState(BaseFlowState, total=False):
     # P-10 方案先行：当前 run 激活的 SolutionDoc id（solution 工具输出经
     # _extract_state_fields 注入；tool_node 据此从 Blackboard 回源 solution_phase）。
     solution_id: str | None
+    # P-10 服务端任务分类：L2/L3 在 phase=None 时也必须维持方案限流。
+    solution_required: bool
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +278,11 @@ def make_llm_node(
         # P-10 方案先行（组 allowlist 过滤段）：draft 态只把「方案类工具 +
         # 只读工具」白名单暴露给模型（可见性收窄）。phase 缺省/非 draft →
         # 原样返回，行为与改动前一致。
-        visible_tools = filter_tools_for_phase(tools, state.get("solution_phase"))
+        visible_tools = filter_tools_for_phase(
+            tools,
+            state.get("solution_phase"),
+            solution_required=bool(state.get("solution_required")),
+        )
 
         # 调 LLM（带 tool 列表）
         response: AIMessage = model(history, tools=visible_tools)
@@ -389,7 +395,11 @@ def make_tool_node(
                 # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
                 # permission/enforce 链（避免无谓 interrupt 冒泡）。
                 # phase 非 draft（None/frozen/superseded）时恒放行，行为不变。
-                if not tool_allowed_in_phase(c["name"], solution_phase):
+                if not tool_allowed_in_phase(
+                    c["name"],
+                    solution_phase,
+                    solution_required=bool(state.get("solution_required")),
+                ):
                     content = tool_denied_message(c["name"])
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
@@ -920,6 +930,7 @@ def init_agent_state(
     input_data: dict | None = None,
     budget_tokens: int | None = None,
     blackboard_db_path: str | None = None,
+    solution_required: bool = False,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -943,6 +954,7 @@ def init_agent_state(
         budget_tokens=budget_tokens,
         budget_used=0,
         _blackboard_db_path=str(blackboard_db_path) if blackboard_db_path else None,
+        solution_required=solution_required,
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
@@ -976,12 +988,12 @@ def _estimate_tokens(text: str, *, model: str = "gpt-4") -> int:
         try:
             enc = tiktoken.encoding_for_model(model)
             return len(enc.encode(text))
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, OSError):
             # 未知 model 名 → 退化为 cl100k_base
             try:
                 enc = tiktoken.get_encoding("cl100k_base")
                 return len(enc.encode(text))
-            except Exception:
+            except (KeyError, ValueError, OSError):
                 pass  # 退化到 len // 2
     return len(text) // 2
 
