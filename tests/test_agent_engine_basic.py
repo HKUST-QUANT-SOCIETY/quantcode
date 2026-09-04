@@ -760,6 +760,34 @@ def test_agent_runner_separates_seen_states_across_builds(tmp_db, clean_registry
     )
 
 
+def test_agent_runner_hides_management_candidate_review_from_inner_agent(tmp_db, clean_registry):
+    """Approver review stays on the outer management plane, never inner LLM tools."""
+    from tools.registry import ToolDef
+
+    class _Args(BaseModel):
+        pass
+
+    clean_registry.register(ToolDef(
+        id="review_distill_candidate", description="management", schema=_Args,
+        execute=lambda args, ctx: {"ok": True},
+    ))
+    class _CaptureLLM:
+        def __init__(self):
+            self.tools = []
+
+        def __call__(self, messages, tools=None):
+            self.tools = list(tools or [])
+            return AIMessage(content="done")
+
+    llm = _CaptureLLM()
+    runner = AgentRunner(
+        group="factor", model=llm, registry=clean_registry,
+        allowed_tool_ids={"review_distill_candidate"}, checkpoint_db=tmp_db,
+    )
+    runner.run(task="review candidate", system_prompt="x", thread_id="candidate-review-guard")
+    assert all(tool.id != "review_distill_candidate" for tool in llm.tools)
+
+
 def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, tmp_path):
     """Approvers resume another actor's run while creator context stays auditable."""
 

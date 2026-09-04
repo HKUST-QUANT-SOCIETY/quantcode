@@ -41,7 +41,15 @@ DEFAULT_TOKEN_BUDGET = 200_000
 # QuantCode Agent or a child Agent, which would allow recursive runs or
 # cross-task registry control.
 _INNER_AGENT_EXCLUDED_TOOLS = frozenset(
-    {"run_agent", "spawn_subagent", "check_subagent", "kill_subagent", "list_subagents", "check_tool_stream"}
+    {
+        "run_agent",
+        "spawn_subagent",
+        "check_subagent",
+        "kill_subagent",
+        "list_subagents",
+        "check_tool_stream",
+        "review_distill_candidate",
+    }
 )
 
 
@@ -241,8 +249,6 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
                 "environment variable."
             ),
         }
-
-    from runner.agent_engine import AgentRunner
 
     checkpoint_db = _mcp_checkpoint_db()
     resolved_skill = _resolve_skill_name(args.skill_name, group, args.task or "")
@@ -532,7 +538,6 @@ def _resume_mode(
         result = _format_result(final_state, group, actor_id=actor_id, role=role)
 
         # 将 human_decision 注入结果
-        from runner.human_gate import parse_resume_decision
         result["human_decision"] = normalized
         result["thread_id"] = args.thread_id
 

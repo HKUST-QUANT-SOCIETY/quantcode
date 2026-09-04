@@ -53,7 +53,15 @@ from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
 
 _ORCHESTRATOR_ONLY_TOOLS = frozenset(
-    {"run_agent", "spawn_subagent", "check_subagent", "kill_subagent", "list_subagents", "check_tool_stream"}
+    {
+        "run_agent",
+        "spawn_subagent",
+        "check_subagent",
+        "kill_subagent",
+        "list_subagents",
+        "check_tool_stream",
+        "review_distill_candidate",
+    }
 )
 
 try:  # ponytail: metrics 是 best-effort 旁路，缺模块/坏环境不影响主流程

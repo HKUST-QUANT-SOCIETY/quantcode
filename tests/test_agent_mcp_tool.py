@@ -44,7 +44,7 @@ class TestRunAgentArgs:
     def test_inner_agent_excludes_controller_tools(self):
         from runner.agent_mcp_tool import _inner_agent_tool_ids
 
-        assert _inner_agent_tool_ids({"run_agent", "list_capabilities", "spawn_subagent"}) == {
+        assert _inner_agent_tool_ids({"run_agent", "list_capabilities", "spawn_subagent", "review_distill_candidate"}) == {
             "list_capabilities"
         }
 
@@ -102,7 +102,8 @@ class TestRunAgentExecuteErrors:
         """resume mode 需要 thread_id，否则返回 error。"""
         # model check happens before thread_id check in _resume_mode,
         # so we need to pass a dummy model to bypass the model gate.
-        dummy_model = lambda x: type("msg", (), {"content": "", "tool_calls": []})()
+        def dummy_model(x):
+            return type("msg", (), {"content": "", "tool_calls": []})()
         result = _run_agent_execute(
             RunAgentArgs(decision="approve"),
             ctx={"group": "risk", "_model": dummy_model},
