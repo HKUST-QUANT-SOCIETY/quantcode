@@ -130,7 +130,7 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 ## 8. 本轮补充核验（2026-09-05）
 
 - 修正 `search_memory` 的 MemoryService 根目录：查询现在读取 `<project>/.quantcode/memory.db`，并通过回归断言阻止 `.quantcode/.quantcode` 路径漂移。
-- AgentRunner resume 现在同时校验 checkpoint 的 `actor_id`、`role`、`session_id`、`workspace_id`、`workspace_path` 和 `github_subject`；字段不匹配会在执行图前返回 `PermissionError`。
+- AgentRunner resume 现在要求 approver/admin 只恢复同组、带有效创建者 `actor_id`/`session_id`/`role` 的 checkpoint；审批人作为不同主体可以正常恢复，创建者上下文仍保留在 checkpoint、metrics 和 evidence 中。
 - 子 Agent 继承父 Session Context（actor、role、session、workspace、GitHub scope），并继续继承组、allowlist、预算和方案要求。
 - Lens 普通会话删除 `/deploy` 命令；Compose 前缀不再携带可伪造的 group 参数。OpenCode 只读 API 的工具名集合去除重复声明。
 - 四份顶层文档新增一致的 F/P 状态台账和外部待验边界；本台账仍不把真实 SSH gateway、ReturnsDataset 或生产部署队列视为完成。
