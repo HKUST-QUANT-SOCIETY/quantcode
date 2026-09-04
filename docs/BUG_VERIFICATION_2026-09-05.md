@@ -136,7 +136,11 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 
 - 修正 `search_memory` 的 MemoryService 根目录：查询现在读取 `<project>/.quantcode/memory.db`，并通过回归断言阻止 `.quantcode/.quantcode` 路径漂移。
 - AgentRunner resume 现在要求 approver/admin 只恢复同组、带有效创建者 `actor_id`/`session_id`/`role` 的 checkpoint；审批人作为不同主体可以正常恢复，创建者上下文仍保留在 checkpoint、metrics 和 evidence 中。
+- AgentRunner resume 现在复用 `stream(Command(resume=...))`，恢复阶段的 tool/update/agent_end 会进入同一条 execution trace、metrics 和 evidence 链。
 - 子 Agent 继承父 Session Context（actor、role、session、workspace、GitHub scope），并继续继承组、allowlist、预算和方案要求。
+- Memory 组 ACL 已在 FTS SQL 的 LIMIT 前执行，避免其他组高命中噪声挤掉本组结果；evidence 链支持 POSIX/Windows 锁回退，并对坏 JSONL 行严格失败。
+- P-01 因子载入对缺列、损坏 parquet、全部 PIT/invalid 过滤为空分别返回 `invalid_schema`、`data_read_error`、`empty_dataset`，不再把适配器异常伪装成 Agent 崩溃。
+- merge approve/reject evidence 现在写入标准 `gate_id`、`decision.action`、`decided_by`，可由 `build_report()` 重放为 DecisionRecord；Dream consumer 仅消费完整成功 run，临时消费失败会回滚 seen 集合。
 - Lens 普通会话删除 `/deploy` 命令；Compose 前缀不再携带可伪造的 group 参数。OpenCode 只读 API 的工具名集合去除重复声明。
 - 四份顶层文档新增一致的 F/P 状态台账和外部待验边界；本台账仍不把真实 SSH gateway、ReturnsDataset 或生产部署队列视为完成。
 
