@@ -186,6 +186,14 @@ class AgentState(BaseFlowState, total=False):
      不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
     """
 
+    task_id: str
+    session_id: str | None
+    actor_id: str | None
+    role: str | None
+    workspace_id: str | None
+    workspace_path: str | None
+    github_subject: str | None
+    resource_scopes: list[str]
     # P0-8 §4.4: messages 改用自定义 reducer（去重合并），修复 truncate/摘要
     # 节点把整个列表再 add 一遍导致的翻倍 bug（原 Annotated[..., operator.add]）。
     messages: Annotated[list[Any], merge_messages]
@@ -208,6 +216,9 @@ class AgentState(BaseFlowState, total=False):
     # P0-8 §4.4: checkpoint_snapshot 事件列表（operator.add 累积，快照/重建各一条，
     # 随 state/trace 流出；前端按未知类型降级渲染）
     checkpoint_snapshot: Annotated[list[dict[str, Any]], operator.add]
+    # P-07 strict reuse: a successful capability catalog lookup is a
+    # server-side prerequisite before any non-read tool may run.
+    capability_catalog_checked: bool
     # R2 token budget：budget_tokens 限额（None=不限）；budget_used 每次该 agent
     # LLM 调用累计消耗（usage 真值优先，取不到 _estimate_tokens 近似）；
     # budget_grants 记录人审 approve 后的追加额（节点整体返回，最后值覆盖）。
@@ -346,7 +357,13 @@ def make_tool_node(
         ctx = {
             "group": state.get("group", ""),
             "thread_id": state.get("thread_id", ""),
-            "session_id": state.get("thread_id", ""),  # alias
+            "session_id": state.get("session_id") or state.get("thread_id", ""),
+            "actor_id": state.get("actor_id"),
+            "role": state.get("role"),
+            "workspace_id": state.get("workspace_id"),
+            "workspace_path": state.get("workspace_path"),
+            "github_subject": state.get("github_subject"),
+            "resource_scopes": state.get("resource_scopes") or [],
         }
         # Blackboard 路径透传（P-01/F-06：dataset 工具读同一 bb 文件；
         # engine 默认 None → backing 默认路径 .quantcode/blackboard.db）。
@@ -377,6 +394,15 @@ def make_tool_node(
         executed_args: list[dict[str, Any]] = []
         tool_errors: list[str] = []
 
+        try:
+            from runner.config_loader import load_yaml
+            strict_reuse = bool(load_yaml("capabilities", strict=True).get("strict_reuse", False))
+        except Exception:
+            # A malformed capability config must not silently disable the
+            # safety gate.  Treat it as enabled and return a visible tool
+            # error until the configuration is repaired.
+            strict_reuse = True
+
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
@@ -384,6 +410,28 @@ def make_tool_node(
                     content = (
                         f"Tool '{c['name']}' failed: it is not available for the "
                         "authenticated session."
+                    )
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
+                # P-07 hard boundary: prompt text is not sufficient evidence
+                # of reuse.  In strict mode the agent must successfully query
+                # the maintained capability catalog before invoking a
+                # write/side-effect tool.  Read-only and solution workflow
+                # tools remain available so the agent can satisfy the gate.
+                from runner.solution_workflow import SOLUTION_TOOLS, is_readonly_tool
+                if (
+                    strict_reuse
+                    and c["name"] not in SOLUTION_TOOLS
+                    and not is_readonly_tool(c["name"])
+                    and not state.get("capability_catalog_checked")
+                ):
+                    content = (
+                        "Strict reuse is enabled: call list_capabilities successfully "
+                        "before invoking non-read tools."
                     )
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
@@ -499,6 +547,9 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
 
     if tool_name == "write_blackboard":
         updates["task_status"] = "done"
+
+    if tool_name == "list_capabilities" and isinstance(output.get("capabilities"), list):
+        updates["capability_catalog_checked"] = True
 
     # Day 4 控制平面状态回流：标准字段透传给 AgentState/MCP。
     if "output_data" in output and isinstance(output.get("output_data"), dict):
@@ -931,6 +982,13 @@ def init_agent_state(
     budget_tokens: int | None = None,
     blackboard_db_path: str | None = None,
     solution_required: bool = False,
+    actor_id: str | None = None,
+    role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -941,6 +999,7 @@ def init_agent_state(
         group=group,
         flow_name=flow_name,
         thread_id=thread_id,
+        task_id=str((input_data or {}).get("task_id") or thread_id),
         input_data=input_data or {},
         messages=messages,
         iterations=0,
@@ -955,6 +1014,13 @@ def init_agent_state(
         budget_used=0,
         _blackboard_db_path=str(blackboard_db_path) if blackboard_db_path else None,
         solution_required=solution_required,
+        actor_id=actor_id,
+        role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes or [],
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 

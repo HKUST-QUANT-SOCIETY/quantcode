@@ -1,6 +1,6 @@
 # QuantCode 桌面端设计规格（UI_DESIGN_SPEC）
 
-> **版本**：v4（2026-09-04，QuantCode v5 顶层设计同步）
+> **版本**：v4.1（2026-09-05，实现核验同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **UI 仓库**：`opencode-lens`，组件根目录为 `packages/app/src/components/quantcode/`。
 > **上位规范**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)；本文件只定义桌面端接入、展示和操作，不复制领域业务平台。
@@ -34,6 +34,8 @@ OpenCode 提供 Desktop/TUI、session、Prompt/Context、MCP、Provider、Worksp
 
 UI 只消费服务端 session、工具目录、结构化 artifact 和外部平台链接。QuantCode 面板不复制 OpenCode 的会话逻辑，也不重算业务指标。
 
+当前实现核验：`session_context` 是 group/role/actor 的唯一数据源；普通会话已移除自由切组、私钥文本输入和 `/deploy` 命令。`search_memory`、`list_capabilities`、`list_skills`、`list_algorithms`、`ssh_status` 通过受限只读 OpenCode API 接入；未连接、空库、STAGING 和外部未验状态必须显式显示。P-07 候选评审由 Admin/approver 管理面处理。真实本地 SSH Agent/Keychain bridge、SSH gateway 和 Admin 完整管理面仍待外部环境接入。
+
 ### 1.3 交互原则
 
 - OpenCode 的会话、消息、工具状态、文件和终端仍是主工作区；QuantCode 面板提供身份、组织知识、量化 artifact 和治理入口。
@@ -46,7 +48,7 @@ UI 只消费服务端 session、工具目录、结构化 artifact 和外部平�
 
 ### 2.1 SSH 登录界面
 
-登录界面只调用本地 SSH agent 或密钥链，不接收私钥文本。流程如下：
+登录界面只调用本地 SSH agent 或密钥链，不接收私钥文本。当前若桌面 bridge 不可用，必须显示“身份接线未完成”，不能显示假连接成功。流程如下：
 
 1. 选择本机 SSH agent/密钥链中的身份；
 2. 发起公钥认证连接；
@@ -250,6 +252,7 @@ QuantCode 不在 UI 重复实现这些平台的业务页面。`/deploy` 只在 A
 - 角色、组和 repo 可见性必须由权威服务/会话提供，不能长期依赖前端字符串启发式；
 - 新增视图必须说明其业务归属、权限边界、数据源和失败空态；
 - GitGraph/Pop 的自动刷新、系统通知、报告/任务工作台和真实 SSH surface 是增强项，未接通时必须标为未完成。
+- 文档状态必须与 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md` 的 F/P 台账一致；P-07 候选不等于已晋升能力，P-09 `STAGING` 不等于生产部署完成。
 
 ## 15. 组件清单与落位
 
@@ -292,3 +295,4 @@ UI 测试必须覆盖 analyst、approver 和 admin 三类 session，并用服务
 | 2026-09-01 | v1：F/P UI 清单、方案面板、Admin/GitGraph/Pop 初版 |
 | 2026-09-03 | v2：按业务组登录、组内 Memory、Admin 全权限、GitHub 权限边界、本地 SSH 身份、生产隔离、完整 GitGraph/Pop 和按复杂度方案先行 |
 | 2026-09-03 | v3：补齐 OpenCode/MimoCode 底座映射、面板契约、组件落位、本地化和 U1~U9 验收；Admin 部署与普通 Agent Gate 分离 |
+| 2026-09-05 | v4.1：同步 Session Context 唯一身份来源、只读 Memory/能力 API、移除普通会话 `/deploy` 与自由切组；明确 SSH bridge、P-07 晋升和外部生产依赖状态 |

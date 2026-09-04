@@ -36,6 +36,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # R2 token budget 默认值（RunAgentArgs.max_total_tokens 未传时用）
 DEFAULT_TOKEN_BUDGET = 200_000
 
+# These orchestration tools belong to the outer OpenCode controller. They may
+# be listed by MCP for that controller, but must never be handed to the inner
+# QuantCode Agent or a child Agent, which would allow recursive runs or
+# cross-task registry control.
+_INNER_AGENT_EXCLUDED_TOOLS = frozenset(
+    {"run_agent", "spawn_subagent", "check_subagent", "kill_subagent", "list_subagents", "check_tool_stream"}
+)
+
+
+def _inner_agent_tool_ids(tool_ids: set[str] | frozenset[str] | None):
+    if tool_ids is None:
+        return None
+    return frozenset(tool_ids) - _INNER_AGENT_EXCLUDED_TOOLS
+
 
 def _resolve_budget(max_total_tokens: int | None) -> int | None:
     """args 显式值 > env QUANTCODE_TOKEN_BUDGET > DEFAULT_TOKEN_BUDGET。"""
@@ -237,8 +251,13 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     if args.decision is not None:
         return _resume_mode(
             args, group, model, checkpoint_db, resolved_skill,
-            allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+            allowed_tool_ids=_inner_agent_tool_ids(ctx.get("_allowed_tool_ids")),
             actor_id=ctx.get("actor_id"), role=ctx.get("role"),
+            session_id=ctx.get("session_id"),
+            workspace_id=ctx.get("workspace_id"),
+            workspace_path=ctx.get("workspace_path"),
+            github_subject=ctx.get("github_subject"),
+            resource_scopes=ctx.get("resource_scopes"),
         )
 
     # ── start mode ──
@@ -246,6 +265,11 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
         args, group, model, checkpoint_db, resolved_skill,
         allowed_tool_ids=ctx.get("_allowed_tool_ids"),
         actor_id=ctx.get("actor_id"), role=ctx.get("role"),
+        session_id=ctx.get("session_id"),
+        workspace_id=ctx.get("workspace_id"),
+        workspace_path=ctx.get("workspace_path"),
+        github_subject=ctx.get("github_subject"),
+        resource_scopes=ctx.get("resource_scopes"),
     )
 
 def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
@@ -294,6 +318,11 @@ def _start_mode(
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
     actor_id: str | None = None,
     role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> dict[str, Any]:
     """start 模式：启动 AgentRunner，捕获 interrupt → waiting_for_human。"""
     from runner.agent_engine import AgentRunner
@@ -328,9 +357,14 @@ def _start_mode(
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
-        allowed_tool_ids=allowed_tool_ids,
+        allowed_tool_ids=_inner_agent_tool_ids(allowed_tool_ids),
         actor_id=actor_id,
         role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes,
     )
 
     # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
@@ -391,7 +425,7 @@ def _start_mode(
             waiting["task_classification"] = classification
             return waiting
 
-        result = _format_result(final_state, group)
+        result = _format_result(final_state, group, actor_id=actor_id, role=role)
         result["task_classification"] = classification
         return result
 
@@ -444,6 +478,11 @@ def _resume_mode(
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
     actor_id: str | None = None,
     role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> dict[str, Any]:
     """resume 模式：用 Command(resume=...) 恢复已暂停的 gate。"""
     from runner.agent_engine import AgentRunner
@@ -455,6 +494,12 @@ def _resume_mode(
             "error": "thread_id is required for resume mode.",
         }
 
+    if role not in {"approver", "admin"}:
+        return {
+            "status": "error",
+            "error": "PERMISSION_DENIED: only an approver or admin may resume a HumanGate",
+        }
+
     decision = args.decision or "reject"
     normalized = normalize_external_decision(decision)
 
@@ -464,9 +509,14 @@ def _resume_mode(
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
-        allowed_tool_ids=allowed_tool_ids,
+        allowed_tool_ids=_inner_agent_tool_ids(allowed_tool_ids),
         actor_id=actor_id,
         role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes,
     )
 
     try:
@@ -479,7 +529,7 @@ def _resume_mode(
             flow_name="mcp_compose",
         )
 
-        result = _format_result(final_state, group)
+        result = _format_result(final_state, group, actor_id=actor_id, role=role)
 
         # 将 human_decision 注入结果
         from runner.human_gate import parse_resume_decision
@@ -507,7 +557,13 @@ def _resume_mode(
         }
 
 
-def _format_result(state: dict, group: str) -> dict[str, Any]:
+def _format_result(
+    state: dict,
+    group: str,
+    *,
+    actor_id: str | None = None,
+    role: str | None = None,
+) -> dict[str, Any]:
     """从 AgentState 提取结构化输出。"""
     messages = state.get("messages", [])
 
@@ -547,6 +603,11 @@ def _format_result(state: dict, group: str) -> dict[str, Any]:
         "status": "completed" if state.get("task_status") == "done" else "stopped",
         "iterations": state.get("iterations", 0),
         "thread_id": state.get("thread_id", ""),
+        "task_id": state.get("task_id") or state.get("thread_id", ""),
+        "group": group,
+        "actor_id": state.get("actor_id") or actor_id,
+        "role": state.get("role") or role,
+        "session_id": state.get("session_id"),
         "final_message": final_text,
         "tool_calls": tool_calls,
     }

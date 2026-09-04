@@ -8,6 +8,6 @@
 两层投放（F-04）：**目录摘要常驻组上下文**（每次 run 可见，强保证）
 + **细节走 FTS 检索**（弱保证，落属组 ``groups`` scope，复用 Memory GROUP 隔离）。
 """
-from runner.distill import cards, inject  # noqa: F401
+from runner.distill import cards, governance, inject  # noqa: F401
 
-__all__ = ["cards", "inject"]
+__all__ = ["cards", "governance", "inject"]

@@ -47,6 +47,8 @@ def test_risk_allowlist_filters_tools(monkeypatch):
         "write_pr_comment",
         "list_runs",  # meta tool：run_agent 同路，所有组的 MCP server 可见
         "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+        "search_memory",  # F-04：组内长期 Memory 只读检索
+        "session_context",  # F-01/F-05：服务端签发的会话身份摘要
         # A3（2026-09-01）：algorithms.yaml 注册表三件套同走 _meta 通道，六组可见
         "list_algorithms",
         "describe_algorithm",

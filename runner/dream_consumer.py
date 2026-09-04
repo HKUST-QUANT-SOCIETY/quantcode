@@ -25,6 +25,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from runner.distill.governance import review_candidate
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE_DIR = PROJECT_ROOT / ".quantcode" / "evidence"
 CANDIDATES_DIR = PROJECT_ROOT / ".quantcode" / "distill_candidates"
@@ -38,6 +40,7 @@ __all__ = [
     "judge_new_runs",
     "run_records_from_events",
     "scan_completed_runs",
+    "review_candidate",
 ]
 
 

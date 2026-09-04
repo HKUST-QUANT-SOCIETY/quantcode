@@ -35,7 +35,6 @@ from runner.agent_nodes import (
     budget_total,
     budget_warning_event,
     context_usage_ratio,
-    estimate_context_chars as estimate_context_state_chars,
     init_agent_state,
     make_budget_check_node,
     make_llm_node,
@@ -53,8 +52,12 @@ from tools.loop_detector import LoopDetector
 from tools.registry import ToolRegistry, registry as default_registry
 from tools.skills.loader import load_skill
 
+_ORCHESTRATOR_ONLY_TOOLS = frozenset(
+    {"run_agent", "spawn_subagent", "check_subagent", "kill_subagent", "list_subagents", "check_tool_stream"}
+)
+
 try:  # ponytail: metrics 是 best-effort 旁路，缺模块/坏环境不影响主流程
-    from runner.metrics import estimate_context_chars, record_run
+    from runner.metrics import estimate_context_chars, record_run  # noqa: F401
 except ImportError:
     pass
 
@@ -146,10 +149,20 @@ class AgentRunner:
         allowed_tool_ids: set[str] | frozenset[str] | None = None,
         actor_id: str | None = None,
         role: str | None = None,
+        session_id: str | None = None,
+        workspace_id: str | None = None,
+        workspace_path: str | None = None,
+        github_subject: str | None = None,
+        resource_scopes: list[str] | None = None,
     ) -> None:
         self.group = group
         self.actor_id = actor_id
         self.role = role
+        self.session_id = session_id
+        self.workspace_id = workspace_id
+        self.workspace_path = workspace_path
+        self.github_subject = github_subject
+        self.resource_scopes = list(resource_scopes or [])
         # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
         if retry_max_retries > 0 and model is not None:
             from runner.retry import RetryWrapper
@@ -238,11 +251,12 @@ class AgentRunner:
         # 2. 计算当前可见工具。MCP 入口会传入已经由认证 session 计算好的
         # effective set；MCP 生产调用必须显式传入 effective set。直接库
         # 调用属于受信任的嵌入式边界，保留全部注入工具以支持 adapter/测试。
-        tools = (
-            [tool for tool in self.registry.list_all() if tool.id in self.allowed_tool_ids]
-            if self.allowed_tool_ids is not None
-            else self.registry.list_all()
-        )
+        tools = [
+            tool
+            for tool in self.registry.list_all()
+            if tool.id not in _ORCHESTRATOR_ONLY_TOOLS
+            and (self.allowed_tool_ids is None or tool.id in self.allowed_tool_ids)
+        ]
 
         # 3. 构造节点工厂
         if self.model is None:
@@ -312,10 +326,6 @@ class AgentRunner:
         # 未超限 → 直接原路路由（tool_routing）。
         def _pre_tool_routine(state: AgentState) -> str:
             ratio = context_usage_ratio(state)
-            snapshotted = any(
-                isinstance(e, dict) and e.get("kind") == "snapshot"
-                for e in (state.get("checkpoint_snapshot") or [])
-            )
             if ratio > CONTEXT_SNAPSHOT_RATIO:
                 return "checkpoint_gate"
             if ratio > CONTEXT_REBUILD_RATIO:
@@ -475,6 +485,13 @@ class AgentRunner:
                     budget_tokens=self.budget_tokens,
                     blackboard_db_path=self.blackboard_db_path,
                     solution_required=solution_required,
+                    actor_id=self.actor_id,
+                    role=self.role,
+                    session_id=self.session_id,
+                    workspace_id=self.workspace_id,
+                    workspace_path=self.workspace_path,
+                    github_subject=self.github_subject,
+                    resource_scopes=self.resource_scopes,
                 )
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
@@ -577,6 +594,13 @@ class AgentRunner:
                 budget_tokens=self.budget_tokens,
                 blackboard_db_path=self.blackboard_db_path,
                 solution_required=solution_required,
+                actor_id=self.actor_id,
+                role=self.role,
+                session_id=self.session_id,
+                workspace_id=self.workspace_id,
+                workspace_path=self.workspace_path,
+                github_subject=self.github_subject,
+                resource_scopes=self.resource_scopes,
             )
 
         final_state: dict[str, Any] = {}
@@ -797,6 +821,9 @@ class AgentRunner:
         """
         from runner.human_gate import to_react_resume_payload
 
+        if self.role is not None and self.role not in {"approver", "admin"}:
+            raise PermissionError("only an approver or admin may resume a HumanGate")
+
         resume_payload = to_react_resume_payload(decision)
 
         app = self.build(
@@ -805,6 +832,33 @@ class AgentRunner:
             system_prompt=system_prompt or "",
         )
         config = {"configurable": {"thread_id": thread_id}}
+        snapshot = app.get_state(config)
+        values = getattr(snapshot, "values", None)
+        if not isinstance(values, dict) or not values:
+            raise ValueError(f"checkpoint not found for thread_id={thread_id!r}")
+        checkpoint_group = str(values.get("group") or "")
+        if checkpoint_group and checkpoint_group != self.group:
+            raise PermissionError(
+                f"resume group mismatch: checkpoint is '{checkpoint_group}', "
+                f"session is '{self.group}'"
+            )
+        # The checkpoint keeps the creator's Session Context for audit.  The
+        # resumer is intentionally a different actor in the normal approval
+        # flow, so identity values are not compared for equality.  Instead,
+        # privileged resume requires a complete, valid creator context; the
+        # current approver/admin identity is recorded separately by metrics and
+        # evidence.  Legacy embedded runs without a context remain resumable
+        # only when the caller did not supply an authenticated role.
+        if self.role in {"approver", "admin"}:
+            checkpoint_role = str(values.get("role") or "")
+            if checkpoint_role not in {"analyst", "approver", "admin"}:
+                raise PermissionError("checkpoint has no valid creator Session Context role")
+            required_context = ("actor_id", "session_id")
+            missing = [field for field in required_context if not values.get(field)]
+            if missing:
+                raise PermissionError(
+                    "checkpoint missing creator Session Context fields: " + ", ".join(missing)
+                )
         _started_at = time.time()
         try:
             final = app.invoke(Command(resume=resume_payload), config=config)

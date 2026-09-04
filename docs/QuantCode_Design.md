@@ -7,6 +7,8 @@
 > **上位文档**：specs/FUNCTIONAL_SPEC.md 定义功能契约，docs/PRD.md 定义产品目标，docs/UI_DESIGN_SPEC.md 定义桌面端体验。
 > **修订原则**：本版本保留原有 Agent 基础能力和工程设计，并把 OpenCode/MimoCode 的原生能力明确列为底座；只根据组长会议修正运营模式、职责边界和权限语义。不得把“领域产品不由 QuantCode 负责”误读为“QuantCode 删除 Agent 和 Compose 基础设施”。
 
+> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计和服务端 strict reuse 钩子，但生产默认配置与调度 job 尚待启用；真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
+
 ---
 
 ## 1. 项目定位
@@ -416,7 +418,7 @@ ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；�
 | Replay/Resume | 从指定 checkpoint 恢复；恢复后按当前 actor/group/role 重新授权 |
 | Goal/Judge | 独立 judge 评估目标完成度，结果作为 evidence，不替代领域负责人 |
 | RLHF 记录 | 记录工具选择、反馈和失败模式，为后续评估/训练提供数据 |
-| Dream/Distill | 扫描 trace，生成 Memory 候选和 Skill 候选，需验证/确认后晋升 |
+| Dream/Distill | 扫描 trace，生成 Memory/Skill 候选；候选可落盘、去重并由 approver/admin 评审晋升、拒绝或 supersede；strict reuse 服务端钩子已实现，生产启用和调度 job 待接 |
 
 ### 4.4 三个核心契约
 
@@ -970,8 +972,8 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 | F-01 | 首页新建研究、MCP run_agent、组内 Compose 路由 | 控制平面 + AgentRunner |
 | F-02 | Activity、execution trace、artifact、再次运行和回放 | trace bridge + checkpoint |
 | F-03 | HumanGate 写操作门禁（merge/permission；生产部署由 Admin 管理面） | human_gate + permission_engine |
-| F-04 | Memory 与组织能力目录 | runner/memory + CapabilityCard |
-| F-05 | 设置、供应商 readout、本地 SSH 登录和组绑定 | opencode-lens + identity/roster |
+| F-04 | Memory 与组织能力目录 | runner/memory + `search_memory`/CapabilityCard |
+| F-05 | 设置、供应商 readout、本地 SSH 登录和组绑定 | opencode-lens identity surface + identity/roster；真实 gateway 外部待接 |
 | F-06 | 组件发现、调用、适配与契约检查（部署归 P-09） | tools/factor + component adapters |
 | F-07 | 跨组协同与模型风险 CI 基建 | Blackboard + GitHub Actions |
 | F-08 | 策略/期权/基本面/组合工具适配层 | tools/* + flows/*，不复制领域产品 |
@@ -982,7 +984,7 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 | P-04 | 并行 Subagent | tools/subagent + LangGraph subgraph |
 | P-05 | 轻量实验运行记录 | tools/experiments，A/B、OOS 和 ledger |
 | P-06 | Evidence Chain 报告 | schemas/evidence_chain.py + runner/evidence.py |
-| P-07 | 组织知识与能力候选蒸馏、能力卡、ACL/Mask 和常驻摘要 | configs/capabilities.yaml + Memory |
+| P-07 | 组织知识与能力候选蒸馏、能力卡、ACL/Mask 和常驻摘要 | configs/capabilities.yaml + Memory；候选晋升闭环 PARTIAL |
 | P-08 | Admin 组与组织管理中枢 | admin scope、语义查询、GitGraph、Pop |
 | P-09 | Admin 专属 /deploy 黑盒部署适配 | DeployAdapter + Admin 管理面 + evidence |
 | P-10 | Solution-First 方案先行与一致性判断 | SolutionDoc、L0-L3、doc_hash |
@@ -1009,14 +1011,14 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 
 | 功能 | 说明 | 状态 |
 |---|---|---|
-| 组身份与 Skill 加载 | SSH fingerprint → roster → group/role → allowlist/Memory | 基础已存在，真实 surface 待完善 |
+| 组身份与 Skill 加载 | SSH fingerprint → roster → group/role → allowlist/Memory；`session_context` 回流到 UI | 后端通过；真实本地身份/gateway surface 待完善 |
 | 组件能力目录 | gh 调研、CapabilityCard、状态、别名、摘要/详情分层 | 首批已存在，持续核验 |
 | 组件调用与契约检查 | 主链选择、Data/PIT/版本/接口检查 | 逐组件接入 |
 | 六组 Compose | 同一 ReAct + 六组 Skill/工具/Memory | 保留，逐流完善 |
 | Admin 中枢 | 全组运行、错误、Memory、组件、报告和任务查询 | 基础已存在，持续聚合 |
 | GitGraph | 权限范围内完整 repo/分支/提交树 | 基础状态已有，完整树增强 |
 | Pop | repo/package 变化、基线、去重、已读和通知 | 基础 UI 已有，后台增强 |
-| /deploy | Admin 专属黑盒适配器、生产写审计和 evidence | staging 已有，真 adapter 待规格 |
+| /deploy | Admin 专属黑盒适配器、生产写审计和 evidence；普通 Agent 不注册 | staging 已有，真 adapter/队列待规格 |
 | P-10 SolutionDoc | 四维任务分类、L0-L3、冻结、conformance verdict | 已实现，持续回归 |
 
 ### 15.3 领域工具保留策略

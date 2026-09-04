@@ -140,11 +140,11 @@ def test_cli_remove_and_list(tmp_path, capsys):
 
 
 def test_get_mcp_group_tier_b_env_fallback_no_bindings(monkeypatch):
-    """无指纹 + 无绑定文件 → 沿用 QUANTCODE_GROUP（现状不变）。"""
+    """无指纹 + 无绑定文件 → 仅在本地开发读取并锁定 QUANTCODE_GROUP。"""
     monkeypatch.setenv("QUANTCODE_GROUP", "model")
     assert mcp_server._get_mcp_group() == "model"
     monkeypatch.delenv("QUANTCODE_GROUP")
-    assert mcp_server._get_mcp_group() is None
+    assert mcp_server._get_mcp_group() == "model"
 
 
 def test_get_mcp_group_tier_a_hit(monkeypatch):
@@ -210,3 +210,38 @@ def test_get_mcp_group_tier_b_warning_logged(monkeypatch, caplog):
     with caplog.at_level("WARNING", logger="quantcode.mcp"):
         assert mcp_server._get_mcp_group() == "model"
     assert any("环境变量" in r.message for r in caplog.records)
+
+
+def test_get_mcp_group_rejects_unknown_group(monkeypatch):
+    monkeypatch.setenv("QUANTCODE_GROUP", "not-a-research-group")
+    with pytest.raises(RuntimeError, match="invalid QuantCode group"):
+        mcp_server._get_mcp_group()
+
+
+def test_get_mcp_group_rejects_invalid_roster_role(monkeypatch, tmp_path):
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:valid")
+    monkeypatch.setattr(
+        identity,
+        "resolve_identity",
+        lambda _fp: {
+            "fingerprint": "SHA256:valid",
+            "group": "factor",
+            "actor_id": "actor-1",
+            "role": "owner",
+            "workspace_id": "w-1",
+            "workspace_path": "/work/factor",
+        },
+    )
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    with pytest.raises(RuntimeError, match="invalid Session Context role"):
+        mcp_server._get_mcp_group()
+
+
+def test_get_mcp_group_production_does_not_accept_env_group_without_roster(monkeypatch, tmp_path):
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    monkeypatch.setenv("QUANTCODE_GROUP", "factor")
+    monkeypatch.setattr(identity, "DEFAULT_BINDINGS_PATH", tmp_path / "no-roster.yaml")
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    with pytest.raises(RuntimeError, match="production MCP requires SSH roster"):
+        mcp_server._get_mcp_group()

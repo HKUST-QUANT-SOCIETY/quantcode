@@ -1,10 +1,12 @@
 # QuantCode v5 实现审计
 
 > 日期：2026-09-05
-> 规范：FUNCTIONAL_SPEC v0.5 / PRD v5 / Design v5 / UI Spec v4
+> 规范：FUNCTIONAL_SPEC v0.5.1 / PRD v5.1 / Design v5.1 / UI Spec v4.1
 > 测试环境：macOS、Python 3.12、本地 Mock/fixture；外部生产服务未连接
 
 ## 1. 结论
+
+本轮以代码、回归测试和 UI 契约为证据重新核验。状态只表示当前仓库可证明的范围：`IMPLEMENTED`=代码和测试通过，`PARTIAL`=核心路径存在但仍有明确缺口，`STAGING`=仅契约/适配器可用，`BLOCKED`=缺少必要外部条件。任何外部 SSH、Windows、真实数据或生产队列都不在本地“通过”结论内。
 
 | 模块 | 功能性 | 完整性 | 可维护性 | 结论 |
 |---|---|---|---|---|
@@ -65,12 +67,12 @@
 - Capability visibility、strict YAML 写配置、`pyarrow` 依赖、MCP UTF-8 stdio 和 tiktoken 缓存异常已补齐。
 - Lens QuantCode UI 已通过 OpenCode `/experimental/quantcode/tool` 受限 API 读取 `list_skills`、`list_algorithms`、`ssh_status`；任意 MCP tool 名和参数不会被公开。
 - UI 指标精度、共享标签、算法列表渲染和 `lens-field` 动态导入错误态已修复。
-- P-07 仍未完成自动能力卡蒸馏/晋升与服务端 strict reuse；ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
+- P-07 已有候选生成、显式能力卡蒸馏和 approver/admin 晋升/拒绝/supersede 审计；服务端 strict reuse 已实现但生产配置默认为关闭、调度 job 尚未接入。ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
 
 ## 6. 测试报告
 
 ```yaml
-spec_version: v0.5
+spec_version: v0.5.1
 date: 2026-09-05
 environment: macOS / Python 3.12
 external_services: not connected
@@ -79,4 +81,4 @@ test_scope: full pytest + v5 contract suite
 known_legacy_tests: migrated or deleted
 ```
 
-此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `992 passed, 4 skipped, 1 warning`，定向后端回归 `114 passed, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `107 passed`，TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。
+此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1009 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `112 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。

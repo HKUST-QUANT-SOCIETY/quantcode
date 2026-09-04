@@ -72,6 +72,15 @@ class SubagentRegistry:
         model: Any = None,
         checkpoint_db: str | None = None,
         max_iterations: int | None = None,
+        allowed_tool_ids: set[str] | frozenset[str] | None = None,
+        actor_id: str | None = None,
+        role: str | None = None,
+        session_id: str | None = None,
+        workspace_id: str | None = None,
+        workspace_path: str | None = None,
+        github_subject: str | None = None,
+        resource_scopes: list[str] | None = None,
+        solution_required: bool = False,
     ) -> dict[str, Any]:
         """spawn 一个子 agent：子线程跑 ``AgentRunner.stream()``，返回 entry 快照。
 
@@ -113,6 +122,14 @@ class SubagentRegistry:
                 max_iterations if max_iterations is not None
                 else guards_max_iterations()
             ),
+            allowed_tool_ids=allowed_tool_ids,
+            actor_id=actor_id,
+            role=role,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            workspace_path=workspace_path,
+            github_subject=github_subject,
+            resource_scopes=resource_scopes,
         )
 
         with self._lock:
@@ -125,6 +142,14 @@ class SubagentRegistry:
                 "group": group,
                 "skill_name": skill_name,
                 "budget_tokens": budget_tokens,
+                "solution_required": solution_required,
+                "actor_id": actor_id,
+                "role": role,
+                "session_id": session_id,
+                "workspace_id": workspace_id,
+                "workspace_path": workspace_path,
+                "github_subject": github_subject,
+                "resource_scopes": list(resource_scopes or []),
                 "status": "running",
                 "budget_used": 0,
                 "output_data": None,
@@ -158,6 +183,7 @@ class SubagentRegistry:
                 skill_name=skill_name,
                 flow_name="subagent",
                 thread_id=entry["thread_id"],
+                solution_required=bool(entry.get("solution_required")),
             )
             explicit_status = final.get("status")
             status = (

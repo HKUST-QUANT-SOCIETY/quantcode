@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -29,6 +30,7 @@ ADMIN_IDS = (
     "admin_blackboard_read",
     "admin_repo_status",
     "admin_package_updates",
+    "review_distill_candidate",
 )
 ALL_ADMIN_TOOL_IDS = ADMIN_IDS + ("ssh_status",)
 
@@ -419,6 +421,29 @@ def test_admin_tools_meta_visible_via_mcp_tools_list(monkeypatch):
     names = {t["name"] for t in mcp_server.list_tools()["tools"]}
     assert {"ssh_status", "admin_repo_status", "admin_package_updates"} <= names
     assert not ({"admin_list_runs", "admin_errors", "admin_blackboard_read"} & names)
+
+
+def test_distill_candidate_review_requires_approver_and_records_decision(tmp_path):
+    from tools.admin._register import _review_distill_candidate_execute, ReviewDistillCandidateArgs
+
+    draft = tmp_path / "candidate-factor-flow.md"
+    draft.write_text("---\nstatus: draft\n---\n# reviewed\n", encoding="utf-8")
+    (tmp_path / "index.json").write_text(
+        json.dumps({"candidates": [{"name": "factor-flow", "group": "factor", "status": "draft", "skill_md_path": str(draft)}]}),
+        encoding="utf-8",
+    )
+    denied = _review_distill_candidate_execute(
+        ReviewDistillCandidateArgs(candidate_name="factor-flow", action="reject"),
+        {"role": "analyst", "actor_id": "analyst-1", "group": "factor", "candidates_dir": str(tmp_path)},
+    )
+    assert denied["ok"] is False
+    approved = _review_distill_candidate_execute(
+        ReviewDistillCandidateArgs(candidate_name="factor-flow", action="promote"),
+        {"role": "approver", "actor_id": "lead-1", "group": "factor", "candidates_dir": str(tmp_path)},
+    )
+    assert approved["ok"] is True
+    assert approved["candidate"]["status"] == "promoted"
+    assert (tmp_path / "review_audit.jsonl").is_file()
 
 
 def test_admin_tools_not_in_group_allowlist():

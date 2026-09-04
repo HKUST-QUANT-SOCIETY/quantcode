@@ -20,7 +20,7 @@
 
 | 类别 | 数量 | 说明 |
 |---|---:|---|
-| 当前确认的真实缺陷/缺口 | 3 | P-07 自动晋升、SSH 实际连通性探测、ReturnsDataset 外部数据源 |
+| 当前确认的真实缺陷/缺口 | 2 + 1 部分 | SSH 实际连通性探测、ReturnsDataset 外部数据源；P-07 仍缺生产 strict 默认与调度 job |
 | 当前确认的工程维护债 | 1 | UI 根节点全量重建，主要是性能/焦点风险 |
 | 本轮已修复 | 12 | 服务端方案门禁、LLM adapter/权限/配置/跨平台，以及 UI 目录、指标、算法和加载错误态 |
 | 外部环境或旧附件无法确认 | 6 | Windows 锁、Desktop resume、外部 fixture、真实服务等 |
@@ -34,7 +34,7 @@
 |---|---|---|---|---|
 | B-01 | P-10 方案先行可绕过 | **已修复** | 分类结果现在写入 Agent state；L2/L3 在无 phase 时仍按 draft 白名单过滤，入口统一传递 `solution_required`。 | 继续用现有方案状态机；补真实 Desktop resume 回归。 |
 | B-02 | `match_main` adapter `.invoke` 异常并乐观降级 | **已修复** | 同时兼容 callable/invoke，结构校验失败或 LLM 异常统一返回 `compatible=false`、`result_status=UNAVAILABLE`；新增 callable 回归。 | 保持不可用时 fail-closed。 |
-| B-03 | P-07 自动蒸馏和 strict reuse 不完整 | **仍是产品缺口** | Dream consumer 已能从 evidence 增量生成候选，但能力卡到 Memory 仍需显式 `distill_cards_to_memory()`，`strict_reuse` 仍主要是 prompt 纪律。 | 增加受控 job、晋升审计和服务端复用约束。 |
+| B-03 | P-07 自动蒸馏和 strict reuse 不完整 | **部分修复，仍有边界** | Dream consumer 生成候选、`distill_cards_to_memory()` 和 `review_distill_candidate` 已形成受控晋升/拒绝/supersede 审计闭环；strict reuse 现在可在服务端强制执行，但生产配置仍默认为关闭，且候选到 Memory 仍需显式 job。 | 生产环境启用 strict reuse，并把受控 job 接入调度器。 |
 | B-04 | AlphaFlow 卡的可见性与黑盒约束冲突 | **已修复** | `visible_cards()` 现在对普通研究组过滤 `visibility=admin`，Admin 保留全量目录；新增 ACL 测试。 | 继续检查 Memory 详情 API 的角色语义。 |
 | B-05 | `pyarrow` 未声明 | **已修复** | 已加入项目依赖并同步 lock；parquet backend 可在干净安装中解析。 | CI 保持最小安装验证。 |
 | B-06 | 坏 YAML 可能回退到默认生产写路径 | **已修复** | strict 配置读取区分缺失与解析失败，`factor_main` 损坏时 fail-closed。 | 继续将 strict 模式扩展到其他生产写配置。 |
@@ -44,7 +44,7 @@
 | B-10 | factor-screen 与 panels 指标标签不一致 | **已修复** | 提取共享 `metrics.ts`，两个视图消费同一映射。 | 新指标先更新共享映射。 |
 | B-11 | Skill 选择仍硬编码 | **已修复，外部 MCP 连接待验** | UI 通过 OpenCode `/experimental/quantcode/tool` 受限 surface 查询 `list_skills`，按组刷新；失败显示未连接并禁用提交。 | Desktop 启用 QuantCode MCP 后做 E2E。 |
 | B-12 | lens-field 动态导入无错误反馈 | **已修复** | 动态导入增加 catch、控制台日志和非阻断可见降级提示。 | 保持降级提示不阻断研究流程。 |
-| B-13 | SSH UI 未接真实 connect | **部分修复，仍有外部缺口** | UI 已注入后端 `ssh_status` 查询并显示明确的“仅状态、无连通性探测”日志；真正 SSH 私钥认证/网络探测仍未实现。 | 需要独立安全设计和 SSH gateway，不把只读状态冒充连接成功。 |
+| B-13 | SSH UI 未接真实 connect | **部分修复，仍有外部缺口** | UI 现在只选择本地 Agent/Keychain identity，不再渲染私钥输入；后端 `ssh_status` 只返回配置状态并明确“无网络探测”；真正 SSH 私钥认证/网络探测仍未实现。 | 需要独立安全设计和 SSH gateway，不把只读状态冒充连接成功。 |
 | B-14 | settings 中 algorithms 有数据时不渲染 | **已修复** | 有数据时渲染算法 id 与描述，并接入 `list_algorithms` 查询；新增数据分支测试。 | 继续补充来源/版本字段时沿用同一列表。 |
 | B-15 | ReturnsDataset 当前无收益源 | **确认，外部依赖缺口** | `tools/market/backing.py:430-457` 明确返回 `error: no_source`，当前 staging 没有 A 股收益表。因此真实 panel 评估不能在本地完整闭环。 | 接入 canonical StockDailyBar/ReturnsDataset 前保持 `no_source`，不要用代理收益冒充生产评估。 |
 
@@ -59,7 +59,7 @@
 | `check_factor_gate` 缺失 | **已过时/改名** | 当前由 `validate_factor_contract` + acceptance 契约承担，不再保留旧 Gate 名称。 |
 | P-09 必须走普通 HumanGate resume | **不是当前 v5 契约** | v5 将部署移到 Admin management plane；`submit_deploy()` 只返回 `STAGING` 并要求 Admin/evidence。普通 Catalog 不注册部署工具。真实生产队列仍未接入，但不是“普通 Agent resume 失败”。 |
 | pit-screen 首次范围条静态定位 | **已修复** | `pit-screen.tsx:180` 在有 FCF 时同步调用 `paint(compute())`；UI pit 测试通过。 |
-| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `987 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
+| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1009 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
 
 ## 4. 无法在当前环境确认的事项
 
@@ -103,7 +103,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 98 passed, 1 warning
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`992 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1009 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
 
 当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
 
@@ -113,7 +113,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 
 ```text
 bun test --preload ./happydom.ts ./src/components/quantcode
-105 pass, 0 fail
+112 pass, 0 fail
 bun run typecheck
 passed
 ```
@@ -122,9 +122,17 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 
 ## 7. 建议处理顺序
 
-1. 完成 B-03：把能力卡蒸馏、候选晋升和 strict reuse 从显式 API/prompt 纪律升级为受控服务端流程。
+1. 完成 B-03 剩余边界：生产配置启用 strict reuse，并把能力卡蒸馏接入受控调度 job。
 2. 为 B-13 设计独立 SSH gateway：私钥不经普通 UI 查询 API，认证、连通性探测和证书轮换均需审计。
 3. 接入 ReturnsDataset/QuantEvaluator/DataAccess 前，继续保留 `no_source`/`UNAVAILABLE`，不要用 fixture 通过替代生产验收。
 4. 最后用真实 Desktop + Windows 矩阵复测附件中的 resume、Activity、空数据场景和路径/时钟问题。
+
+## 8. 本轮补充核验（2026-09-05）
+
+- 修正 `search_memory` 的 MemoryService 根目录：查询现在读取 `<project>/.quantcode/memory.db`，并通过回归断言阻止 `.quantcode/.quantcode` 路径漂移。
+- AgentRunner resume 现在同时校验 checkpoint 的 `actor_id`、`role`、`session_id`、`workspace_id`、`workspace_path` 和 `github_subject`；字段不匹配会在执行图前返回 `PermissionError`。
+- 子 Agent 继承父 Session Context（actor、role、session、workspace、GitHub scope），并继续继承组、allowlist、预算和方案要求。
+- Lens 普通会话删除 `/deploy` 命令；Compose 前缀不再携带可伪造的 group 参数。OpenCode 只读 API 的工具名集合去除重复声明。
+- 四份顶层文档新增一致的 F/P 状态台账和外部待验边界；本台账仍不把真实 SSH gateway、ReturnsDataset 或生产部署队列视为完成。
 
 本轮已修改后端与外部 `opencode-lens` UI，并为已修复项补充回归测试；未把外部服务依赖（SSH gateway、ReturnsDataset、生产队列）伪装成完成。

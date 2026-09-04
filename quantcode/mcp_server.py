@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,8 @@ from quantcode import identity  # P0-7: SSH key → group 绑定解析
 # 会话内不可变：指纹一旦解析出组即锁定为会话组（一个 MCP server 进程 = 一个会话），
 # 之后即使 env 指纹消失或绑定文件被改，会话组身份也不变（防会话中途降权/换组）。
 _SESSION_GROUP: str | None = None
+_SESSION_ID = f"qc_{uuid.uuid4().hex}"
+_VALID_GROUPS = frozenset({"fundamental", "factor", "model", "risk", "strategy", "options"})
 
 # 管理查询面分为两类：GitGraph/package 元数据按 GitHub 可见范围提供给
 # 普通用户；跨组运行、错误和 Blackboard 查询只给 Admin。该集合同时用于
@@ -70,6 +73,7 @@ _SESSION_GROUP: str | None = None
 _ADMIN_ONLY_META_TOOLS = frozenset(
     {"admin_list_runs", "admin_errors", "admin_blackboard_read"}
 )
+_APPROVER_META_TOOLS = frozenset({"review_distill_candidate"})
 
 
 def _get_ssh_fingerprint() -> str | None:
@@ -84,6 +88,12 @@ def _get_ssh_fingerprint() -> str | None:
 
 def _env_group() -> str | None:
     return os.environ.get("QUANTCODE_GROUP", "").strip() or None
+
+
+def _validate_group(group: str | None) -> str | None:
+    if group is not None and group not in _VALID_GROUPS:
+        raise RuntimeError(f"invalid QuantCode group {group!r}; expected one of {sorted(_VALID_GROUPS)}")
+    return group
 
 
 def _development_mode() -> bool:
@@ -109,7 +119,8 @@ def _get_mcp_group() -> str | None:
 
     fp = _get_ssh_fingerprint()
     if fp is not None:
-        group = identity.resolve_group(fp, identity.load_bindings())
+        entry = identity.resolve_identity(fp)
+        group = _validate_group(entry.get("group") if entry else None)
         if group is None:
             raise RuntimeError(
                 f"P0-7 fail-closed: SSH 指纹 {fp} 未在 "
@@ -119,6 +130,16 @@ def _get_mcp_group() -> str | None:
                 "（指纹可用 ssh-keygen -lf <pubkey> 或 "
                 "python -m quantcode.identity list 核对）。"
             )
+        if not _development_mode():
+            required = ("actor_id", "role", "workspace_id", "workspace_path")
+            if entry is None or any(not entry.get(key) for key in required):
+                raise RuntimeError(
+                    "AUTHENTICATION_REQUIRED: SSH roster entry lacks required Session Context fields"
+                )
+            if str(entry.get("role") or "").strip() not in {"analyst", "approver", "admin"}:
+                raise RuntimeError(
+                    "AUTHENTICATION_REQUIRED: SSH roster entry has an invalid Session Context role"
+                )
         _SESSION_GROUP = group
         return group
 
@@ -126,7 +147,9 @@ def _get_mcp_group() -> str | None:
     if bindings:
         # 有绑定配置但本会话未提供指纹 → 默认 fail-closed
         if _development_mode() and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1":
-            g = _env_group()
+            g = _validate_group(_env_group())
+            if g:
+                _SESSION_GROUP = g
             logger.warning(
                 "_get_mcp_group: 已配置 SSH 组绑定但未提供指纹，"
                 "QUANTCODE_ALLOW_UNAUTH=1 显式降级，组身份来自环境变量 (%s)。",
@@ -149,7 +172,12 @@ def _get_mcp_group() -> str | None:
         raise RuntimeError(
             "AUTHENTICATION_REQUIRED: production MCP requires SSH roster identity"
         )
-    g = _env_group()
+    g = _validate_group(_env_group())
+    if g is not None and not _development_mode():
+        raise RuntimeError(
+            "AUTHENTICATION_REQUIRED: production MCP requires SSH roster identity; "
+            "QUANTCODE_GROUP is only allowed in explicit development mode"
+        )
     if g is None:
         logger.warning(
             "_get_mcp_group: 未配置 SSH 绑定（绑定文件缺失或为空），"
@@ -164,6 +192,8 @@ def _get_mcp_group() -> str | None:
             "python -m quantcode.identity add 绑定 SSH key。",
             g,
         )
+        if g:
+            _SESSION_GROUP = g
     return g
 
 
@@ -368,6 +398,127 @@ registry._tools[list_skills_tool.id] = list_skills_tool
 
 
 # ---------------------------------------------------------------------------
+# session_context 只读工具（UI 读取服务端签发的组/角色摘要）
+# ---------------------------------------------------------------------------
+
+
+class SessionContextArgs(BaseModel):
+    """session_context 无参数，只返回当前 MCP session 的非敏感身份摘要。"""
+
+    pass
+
+
+def _session_context_execute(args: SessionContextArgs, ctx: dict) -> dict:
+    """返回当前认证上下文；不返回私钥、token 或生产拓扑。"""
+    group = str((ctx or {}).get("group") or "").strip() or None
+    fingerprint = _get_ssh_fingerprint()
+    role = "admin" if _is_admin_session(group) else str((ctx or {}).get("role") or "analyst")
+    if role not in {"analyst", "approver", "admin"}:
+        return {"error": "AUTHENTICATION_REQUIRED: invalid Session Context role"}
+    return {
+        "session_id": (ctx or {}).get("session_id") or _SESSION_ID,
+        "group": group,
+        "role": role,
+        "actor_id": (ctx or {}).get("actor_id"),
+        "workspace_id": (ctx or {}).get("workspace_id"),
+        "workspace_path": (ctx or {}).get("workspace_path"),
+        "github_subject": (ctx or {}).get("github_subject"),
+        "resource_scopes": (ctx or {}).get("resource_scopes", []),
+        "identity_source": "ssh_roster" if fingerprint else "development_override",
+    }
+
+
+session_context_tool = ToolDef(
+    id="session_context",
+    description=(
+        "Read-only summary of the authenticated QuantCode session group, role, "
+        "workspace and resource scopes. Secrets and private keys are never returned."
+    ),
+    schema=SessionContextArgs,
+    execute=_session_context_execute,
+)
+session_context_tool._meta = True  # type: ignore[attr-defined]
+registry._tools[session_context_tool.id] = session_context_tool
+
+
+# ---------------------------------------------------------------------------
+# search_memory 只读工具（F-04 UI/Agent 真实 Memory 通道）
+# ---------------------------------------------------------------------------
+
+
+class SearchMemoryArgs(BaseModel):
+    """组内长期 Memory FTS 查询参数。"""
+
+    query: str = Field(min_length=1, max_length=512)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
+    """Search maintained long-term Memory with group ACL; never auto-reconciles disk."""
+    # MemoryService.root is the project root.  It owns the canonical
+    # ``<project>/.quantcode/memory/...`` layout; passing ``.quantcode`` here
+    # would create a second ``.quantcode/.quantcode`` prefix on disk.
+    memory_root = PROJECT_ROOT
+    db_path = memory_root / ".quantcode" / "memory.db"
+    if not db_path.is_file():
+        return {
+            "status": "UNAVAILABLE",
+            "error": "Memory store is not initialized",
+            "hits": [],
+        }
+
+    from runner.memory.service import MemoryService
+
+    group = str((ctx or {}).get("group") or "").strip() or None
+    role = str((ctx or {}).get("role") or "").strip()
+    def long_term(hit: Any) -> bool:
+        return hit.scope != "sessions" and hit.type not in {"checkpoint", "progress"}
+
+    if role == "admin":
+        hits = []
+        # Admin may inspect all group scopes, while the service still applies
+        # its normal fail-closed check for each explicit scope.
+        for scope_id in sorted(_VALID_GROUPS):
+            service = MemoryService(db_path, root=memory_root, requester_group=scope_id)
+            hits.extend(
+                hit
+                for hit in service.search(query=args.query, scope="groups", scope_id=scope_id, limit=args.limit)
+                if long_term(hit)
+            )
+        service = MemoryService(db_path, root=memory_root)
+        hits.extend(
+            hit
+            for hit in service.search(query=args.query, scope="global", limit=args.limit, requester_group=None)
+            if long_term(hit)
+        )
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        selected = hits[: args.limit]
+    else:
+        service = MemoryService(db_path, root=memory_root, requester_group=group)
+        selected = [
+            hit
+            for hit in service.search(query=args.query, limit=args.limit, requester_group=group)
+            if long_term(hit)
+        ][: args.limit]
+    return {
+        "status": "CONNECTED" if selected else "EMPTY",
+        "hits": [hit.to_dict() for hit in selected],
+    }
+
+
+search_memory_tool = ToolDef(
+    id="search_memory",
+    description=(
+        "Search the authenticated group's maintained long-term Memory. "
+        "Runtime checkpoints, progress and raw trace are not returned as knowledge."
+    ),
+    schema=SearchMemoryArgs,
+    execute=_search_memory_execute,
+)
+registry._tools[search_memory_tool.id] = search_memory_tool
+
+
+# ---------------------------------------------------------------------------
 # consume_status 只读工具（dream consumer 状态：候选数/最近消费/rlhf 行数，ROADMAP A4）
 # ---------------------------------------------------------------------------
 
@@ -545,11 +696,28 @@ def _is_admin_session(group: str | None = None) -> bool:
 
     fingerprint = _get_ssh_fingerprint()
     return is_admin(fingerprint, group)
+
+
+def _session_role(group: str | None = None) -> str:
+    """Resolve the roster role for tools/list and tools/call filtering."""
+    if _is_admin_session(group):
+        return "admin"
+    fingerprint = _get_ssh_fingerprint()
+    if fingerprint:
+        try:
+            entry = identity.resolve_identity(fingerprint) or {}
+            role = str(entry.get("role") or "analyst").strip()
+            if role in {"analyst", "approver", "admin"}:
+                return role
+        except Exception:
+            pass
+    return "analyst"
 _ADMIN_ONLY_TOOLS = frozenset({"deploy_alphaflow"})
 
 
-def _tools_for_session(group: str | None) -> list[ToolDef]:
+def _tools_for_session(group: str | None, role: str | None = None) -> list[ToolDef]:
     """返回当前 MCP session 的 effective tool set。"""
+    effective_role = role or _session_role(group)
     if group:
         visible = registry.get_tools_for_group(group)
     else:
@@ -562,6 +730,8 @@ def _tools_for_session(group: str | None) -> list[ToolDef]:
         if not getattr(tool, "_meta", False) or tool in visible:
             continue
         if tool.id in _ADMIN_ONLY_META_TOOLS and not _is_admin_session(group):
+            continue
+        if tool.id in _APPROVER_META_TOOLS and effective_role not in {"approver", "admin"}:
             continue
         visible.append(tool)
     return sorted(visible, key=lambda tool: tool.id)
@@ -577,7 +747,7 @@ def list_tools() -> dict:
     让 OpenCode compose agent 能发现并调用它。
     """
     _mcp_group = _get_mcp_group()
-    tools = _tools_for_session(_mcp_group)
+    tools = _tools_for_session(_mcp_group, _session_role(_mcp_group))
     logger.info(
         "list_tools: group=%s admin=%s → %d tools",
         _mcp_group or "(unset)",
@@ -607,13 +777,15 @@ def call_tool(name: str, arguments: dict) -> dict:
     """
     try:
         mcp_group = _get_mcp_group()
-        allowed_tools = {tool.id for tool in _tools_for_session(mcp_group)}
+        session_role = _session_role(mcp_group)
+        allowed_tools = {tool.id for tool in _tools_for_session(mcp_group, session_role)}
         if name not in allowed_tools:
             raise PermissionError(
                 f"tool '{name}' is not available for the authenticated session"
             )
         ctx: dict[str, Any] = {
             "source": "mcp",
+            "session_id": _SESSION_ID,
             "_model": _get_model(),
             "_allowed_tool_ids": allowed_tools,
         }
@@ -621,6 +793,7 @@ def call_tool(name: str, arguments: dict) -> dict:
         # dict.get("group", "") 返回 None 而非默认值 ""
         if mcp_group:
             ctx["group"] = mcp_group
+        ctx["role"] = session_role
         fingerprint = _get_ssh_fingerprint()
         if fingerprint:
             ctx["identity"] = fingerprint
@@ -636,6 +809,8 @@ def call_tool(name: str, arguments: dict) -> dict:
                     "resource_scopes": roster.get("resource_scopes", []),
                 }
             )
+            if ctx.get("role") not in {"analyst", "approver", "admin"}:
+                raise PermissionError("invalid Session Context role")
         if _is_admin_session(mcp_group):
             ctx["role"] = "admin"
         logger.info("call_tool: %s(%s) group=%s model=%s",

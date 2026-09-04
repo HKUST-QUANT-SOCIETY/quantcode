@@ -41,6 +41,13 @@ class TestRunAgentArgs:
         args = RunAgentArgs(task="test")
         assert args.max_iterations == 50
 
+    def test_inner_agent_excludes_controller_tools(self):
+        from runner.agent_mcp_tool import _inner_agent_tool_ids
+
+        assert _inner_agent_tool_ids({"run_agent", "list_capabilities", "spawn_subagent"}) == {
+            "list_capabilities"
+        }
+
 
 class TestRunAgentExecuteErrors:
     """run_agent 的错误处理。"""
@@ -103,6 +110,14 @@ class TestRunAgentExecuteErrors:
         assert result["status"] == "error"
         assert "thread_id" in result["error"].lower()
 
+    def test_analyst_cannot_resume_human_gate(self):
+        result = _run_agent_execute(
+            RunAgentArgs(decision="approve", thread_id="gate-1"),
+            ctx={"group": "model", "role": "analyst", "_model": lambda _: None},
+        )
+        assert result["status"] == "error"
+        assert "only an approver or admin" in result["error"]
+
 
 class TestFormatResult:
     """_format_result 的状态提取。"""
@@ -140,6 +155,24 @@ class TestFormatResult:
         state = {"messages": [], "execution_trace": trace}
         result = _format_result(state, "model")
         assert result["execution_trace"] == trace
+
+    def test_result_keeps_session_and_task_identity(self):
+        result = _format_result(
+            {
+                "messages": [],
+                "task_id": "task-1",
+                "thread_id": "thread-1",
+                "actor_id": "actor-1",
+                "role": "approver",
+            },
+            "factor",
+            actor_id="fallback-actor",
+            role="analyst",
+        )
+        assert result["task_id"] == "task-1"
+        assert result["group"] == "factor"
+        assert result["actor_id"] == "actor-1"
+        assert result["role"] == "approver"
 
     def test_includes_day4_state_backflow_fields(self):
         """Day4 状态回流字段：output_data / artifacts / gate / errors。"""

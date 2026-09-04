@@ -9,10 +9,6 @@
 """
 from __future__ import annotations
 
-import shutil
-import tempfile
-from pathlib import Path
-from typing import Iterator
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -664,8 +660,6 @@ def test_agent_runner_resets_loop_detector_across_runs(tmp_db, clean_registry):
     # 用一个会循环触发 tool_call 的 LLM：每次都要求调 read_pr
     # 注意：LoopDetector 默认 threshold=5，第一次 run 内根本不会触达，
     # 所以这个测试重点是验证 reset() 被调用，第二次 run 不被上一次污染。
-    from tools.loop_detector import LoopDetector
-
     llm = ScriptedLLM([AIMessage(content="done")])
     runner = AgentRunner(
         group="model",
@@ -764,6 +758,61 @@ def test_agent_runner_separates_seen_states_across_builds(tmp_db, clean_registry
     assert check2(dummy_state) == "rlhf", (
         "两次 build 的 seen_states 应相互隔离"
     )
+
+
+def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, tmp_path):
+    """Approvers resume another actor's run while creator context stays auditable."""
+
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+            "workspace_id": "workspace-a",
+            "workspace_path": "/work/a",
+            "github_subject": "github-a",
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def invoke(self, *args, **kwargs):
+            return {"task_status": "done", "messages": []}
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="approver",
+        session_id="session-b",
+        workspace_id="workspace-b",
+        workspace_path="/work/b",
+        github_subject="github-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+
+    resumed = runner.resume(thread_id="factor-gate-1", decision="approve")
+    assert resumed["task_status"] == "done"
+
+
+def test_resume_rejects_checkpoint_without_creator_context(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {"group": "factor", "role": "analyst"}
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+    runner = AgentRunner(
+        group="factor", model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db", actor_id="approver-b", role="approver",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="missing creator Session Context"):
+        runner.resume(thread_id="factor-gate-2", decision="approve")
 
 
 def test_agent_runner_e2e_seen_states_isolated_across_runs(tmp_db, clean_registry):

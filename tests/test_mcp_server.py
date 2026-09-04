@@ -109,6 +109,74 @@ def test_list_tools_returns_all_registered():
     assert "trigger_risk_flow" in tool_names
 
 
+def test_session_context_returns_authoritative_non_secret_summary(monkeypatch):
+    """session_context 是 UI 的组来源，不能回传私钥或 token。"""
+    monkeypatch.setenv("QUANTCODE_GROUP", "factor")
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
+    importlib.reload(mcp_server)
+    result = mcp_server._session_context_execute(
+        mcp_server.SessionContextArgs(),
+        {
+            "group": "factor",
+            "role": "analyst",
+            "actor_id": "actor-1",
+            "workspace_id": "workspace-1",
+            "workspace_path": "/work/factor",
+            "github_subject": "github-user",
+            "resource_scopes": ["repo:read"],
+            "private_key": "must-not-escape",
+            "token": "must-not-escape",
+        },
+    )
+    assert result["group"] == "factor"
+    assert result["role"] == "analyst"
+    assert "private_key" not in result
+    assert "token" not in result
+
+
+def test_search_memory_uses_group_acl_and_reports_empty_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_server, "PROJECT_ROOT", tmp_path)
+    unavailable = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="factor"), {"group": "factor", "role": "analyst"}
+    )
+    assert unavailable["status"] == "UNAVAILABLE"
+
+    from runner.memory.service import MemoryService
+
+    root = tmp_path / ".quantcode"
+    service = MemoryService(root / "memory.db", root=tmp_path, requester_group="factor")
+    service.write(
+        scope="groups",
+        scope_id="factor",
+        type="reference",
+        key="factor-notes",
+        body="factor canonical evaluator",
+        requester_group="factor",
+    )
+    own = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="evaluator"), {"group": "factor", "role": "analyst"}
+    )
+    assert own["status"] == "CONNECTED"
+    assert own["hits"]
+    assert "/.quantcode/memory/groups/factor/" in own["hits"][0]["path"]
+    assert "/.quantcode/.quantcode/" not in own["hits"][0]["path"]
+    cross = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="evaluator"), {"group": "model", "role": "analyst"}
+    )
+    assert cross["status"] == "EMPTY"
+    assert cross["hits"] == []
+
+
+def test_candidate_review_meta_tool_is_visible_only_to_approver_or_admin():
+    import tools.admin._register as admin_register
+
+    importlib.reload(admin_register)
+    analyst = {tool.id for tool in mcp_server._tools_for_session("factor", "analyst")}
+    approver = {tool.id for tool in mcp_server._tools_for_session("factor", "approver")}
+    assert "review_distill_candidate" not in analyst
+    assert "review_distill_candidate" in approver
+
+
 def test_list_tools_empty_registry(tmp_path):
     """测试 list_tools 在空 registry 下返回空列表。"""
     global_registry._tools.clear()
@@ -147,6 +215,7 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "bash",
         "list_runs",  # meta tool：reload(mcp_server) 后经 meta 通道附加
         "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+        "session_context",  # meta tool：UI 读取服务端签发的组/角色摘要
         # A3（2026-09-01）：algorithms.yaml 注册表三件套同走 _meta 通道，六组可见
         "list_algorithms",
         "describe_algorithm",
@@ -157,7 +226,7 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "run_ab_experiment",
         "list_experiments",
         "get_experiment",
-    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills','list_algorithms','describe_algorithm','run_algorithm','consume_status','run_ab_experiment','list_experiments','get_experiment'}}"
+    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills','session_context','list_algorithms','describe_algorithm','run_algorithm','consume_status','run_ab_experiment','list_experiments','get_experiment'}}"
 
     # Case 2: 不设置 → 全部
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)

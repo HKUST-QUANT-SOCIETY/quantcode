@@ -5,6 +5,8 @@
 > **产品状态**：研究 Agent 平台与组织能力中枢
 > **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD 与 Day1-5 任务表是历史材料；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。
 
+> **2026-09-05 实现核验摘要**：`session_context` 是组/角色唯一来源；普通 UI 不提供自由切组、私钥文本输入或 `/deploy` 命令；Memory 通过只读 `search_memory` 接入，空库和未连接明确返回状态。P-07 已有候选评审审计和可配置 strict reuse，生产默认启用与调度 job、真实 SSH gateway、ReturnsDataset/生产部署队列仍未完成，见 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md`。
+
 ## 0. 产品定义
 
 QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建立在 OpenCode 桌面端和 MimoCode 工作流设计之上。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
@@ -297,7 +299,7 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 | F-08 | 策略、期权、基本面和组合工具适配 | 各业务组 |
 | F-09 | Admin 中枢、GitGraph、Pop 和运行治理 | QuantCode Admin |
 | P-01~P-06 | 数据契约、回测/组合组件适配、Subagent、实验和 evidence | 平台/各组按表执行 |
-| P-07~P-10 | 组织知识候选蒸馏、Admin、Admin-only `/deploy` 和方案先行 | QuantCode |
+| P-07~P-10 | 组织知识候选蒸馏、Admin、Admin-only `/deploy` 和方案先行 | QuantCode；P-07/P-09 当前为 PARTIAL/STAGING |
 
 ## 9. 后续审查顺序
 
@@ -316,3 +318,4 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 | 2026-09-01 | v2：平台红线、HumanGate 收窄、P-07/P-08/P-09/P-10 定版 |
 | 2026-09-03 | v3：根据组长会议与组件指南重建运营模型、组件边界、SSH/生产边界、Admin 权限和 GitGraph 目标 |
 | 2026-09-03 | v4：补齐 OpenCode/MimoCode Agent 底座，明确动态工具目录、个人工作环境、生产服务账号和 Admin 专属部署 |
+| 2026-09-05 | v5.1：同步实现核验；Session Context 唯一身份来源、只读 Memory API、普通 UI 移除自由切组/私钥文本/部署命令；明确 P-07、SSH gateway、ReturnsDataset 和生产队列的未完成边界 |

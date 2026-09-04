@@ -60,6 +60,20 @@ def _check_group_permitted(group: str, ctx: dict) -> str | None:
     return None
 
 
+def _is_admin_context(ctx: dict) -> bool:
+    return str(ctx.get("role") or "").strip() == "admin"
+
+
+def _owns_subagent(snapshot: dict, ctx: dict) -> bool:
+    """A non-admin may only inspect children spawned by its current thread."""
+    if _is_admin_context(ctx):
+        return True
+    parent = str(ctx.get("thread_id") or ctx.get("session_id") or "")
+    if not parent or not ctx.get("group"):
+        return True  # trusted embedded/dev callers retain legacy local behavior
+    return snapshot.get("parent_thread_id") == parent and snapshot.get("group") == ctx.get("group")
+
+
 def _resolve_model(ctx: dict) -> Any | None:
     """优先 ctx['_model']（mcp_server 注入），退化 mcp_server._get_model()。"""
     model = ctx.get("_model")
@@ -98,13 +112,32 @@ def _spawn_subagent_execute(args: SpawnSubagentArgs, ctx: dict) -> dict:
     err = _check_group_permitted(group, ctx)
     if err:
         return {"status": "error", "error": err}
-
+    parent_group = str(ctx.get("group") or "").strip()
+    if parent_group and group != parent_group:
+        return {
+            "status": "error",
+            "error": f"child group '{group}' is not permitted; must inherit parent session group '{parent_group}'",
+        }
     model = _resolve_model(ctx)
     if model is None:
         return {
             "status": "error",
             "error": "No LLM model configured (ctx['_model'] missing / QUANTCODE_API_KEY unset).",
         }
+
+    parent_budget = ctx.get("budget_tokens")
+    parent_used = int(ctx.get("budget_used") or 0)
+    if isinstance(parent_budget, (int, float)) and parent_budget > 0:
+        remaining = max(int(parent_budget) - parent_used, 0)
+        if args.budget_tokens is not None and args.budget_tokens > remaining:
+            return {
+                "status": "error",
+                "error": f"child budget {args.budget_tokens} exceeds parent remaining budget {remaining}",
+            }
+
+    from runner.task_classifier import classify_task
+
+    classification = classify_task(args.task, file_count=0, cross_repo=False)
 
     from runner.parallel_registry import MAX_TREE_DEPTH, parallel_registry
 
@@ -117,6 +150,15 @@ def _spawn_subagent_execute(args: SpawnSubagentArgs, ctx: dict) -> dict:
             parent_thread_id=str(ctx.get("thread_id") or ctx.get("session_id") or ""),
             model=model,
             checkpoint_db=_checkpoint_db_arg(ctx),
+            allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+            actor_id=ctx.get("actor_id"),
+            role=ctx.get("role"),
+            session_id=ctx.get("session_id"),
+            workspace_id=ctx.get("workspace_id"),
+            workspace_path=ctx.get("workspace_path"),
+            github_subject=ctx.get("github_subject"),
+            resource_scopes=ctx.get("resource_scopes"),
+            solution_required=classification.solution_required,
         )
     except ValueError as exc:
         return {"status": "error", "error": str(exc)}
@@ -147,6 +189,8 @@ def _check_subagent_execute(args: CheckSubagentArgs, ctx: dict) -> dict:
             snap = parallel_registry.get_status(args.subagent_id)
         except KeyError:
             return {"status": "error", "error": f"subagent '{args.subagent_id}' not found"}
+        if not _owns_subagent(snap, ctx):
+            return {"status": "error", "error": "PERMISSION_DENIED: subagent is outside this session"}
         if not deadline_wait(snap, TERMINAL_STATUSES) or not deadline_active(deadline, waited, args.wait_s):
             return snap
         import time as _time
@@ -180,6 +224,9 @@ def _kill_subagent_execute(args: KillSubagentArgs, ctx: dict) -> dict:
     from runner.parallel_registry import parallel_registry
 
     try:
+        snapshot = parallel_registry.get_status(args.subagent_id)
+        if not _owns_subagent(snapshot, ctx):
+            return {"status": "error", "error": "PERMISSION_DENIED: subagent is outside this session"}
         return parallel_registry.kill(args.subagent_id, reason=args.reason)
     except KeyError:
         return {"status": "error", "error": f"subagent '{args.subagent_id}' not found"}
@@ -199,7 +246,12 @@ class ListSubagentsArgs(BaseModel):
 def _list_subagents_execute(args: ListSubagentsArgs, ctx: dict) -> dict:
     from runner.parallel_registry import MAX_TREE_DEPTH, parallel_registry
 
-    pid = args.parent_thread_id or str(ctx.get("thread_id") or ctx.get("session_id") or "")
+    current_parent = str(ctx.get("thread_id") or ctx.get("session_id") or "")
+    if args.parent_thread_id and current_parent and args.parent_thread_id != current_parent and not _is_admin_context(ctx):
+        return {"status": "error", "error": "PERMISSION_DENIED: parent thread is outside this session"}
+    pid = args.parent_thread_id or current_parent
+    if not pid and ctx.get("group") and not _is_admin_context(ctx):
+        return {"status": "error", "error": "PERMISSION_DENIED: parent thread is required"}
     children = parallel_registry.list_children(pid) if pid else _list_all()
     return {
         "parent_thread_id": pid,

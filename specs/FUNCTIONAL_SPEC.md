@@ -1,6 +1,6 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
-> **版本**：v0.5（2026-09-04，QuantCode v5 顶层设计同步）
+> **版本**：v0.5.1（2026-09-05，QuantCode v5 实现核验同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **文档性质**：QuantCode 的活功能规格。`docs/PRD.md` 说明产品目标，`docs/QuantCode_Design.md` 说明技术设计，`docs/UI_DESIGN_SPEC.md` 说明桌面端体验；三者服从本文的运营边界。`docs/archive/pre-v5/` 下内容与旧版 PRD/Design 是历史材料。
 > **实现状态说明**：本文的状态只表示当前实现证据，不代表设计已经完成。后续功能审查应以本文的“规范要求”逐项核对代码、UI 和测试。
@@ -150,6 +150,32 @@ DataAccess
 
 `F-XX` 描述用户可见或运行时必须保留的能力，`P-XX` 描述扩展、增强或待接入能力。状态分为 `IMPLEMENTED`、`STAGING`、`PARTIAL` 和 `BLOCKED`。`IMPLEMENTED` 只表示代码和测试已有证据，不能替代身份、权限、外部服务和生产环境验收。
 
+### 3.0.1 v5 功能核验台账（2026-09-05）
+
+| 编号 | 状态 | 功能性 | 完整性 | 可维护性 | 证据/剩余边界 |
+|---|---|---|---|---|---|
+| F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、Lens `session_context`；真实桌面身份桥待验 |
+| F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`、checkpoint、trace contract；本地缓存按 actor/group/workspace 隔离 |
+| F-03 | IMPLEMENTED | 通过 | Admin 部署仍为 STAGING | 通过 | `merge`/`permission` Gate；风险、预算、循环只返回结果/停止状态 |
+| F-04 | IMPLEMENTED | 通过 | 外部组件状态同步和完整 Admin UI 待接 | 通过 | FTS5 Group ACL、`search_memory`、`list_capabilities`、14 张卡；Memory 根为 `<project>/.quantcode` |
+| F-05 | PARTIAL | 后端 challenge/roster 通过 | 本地 Agent/Keychain bridge、网络探测待接 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
+| F-06 | PARTIAL | staging adapter 通过 | canonical DataAccess/QuantEvaluator 生产连接待验 | 通过 | `eval_from_panel` 与契约检查；`UNAVAILABLE` 不生成伪指标 |
+| F-07 | IMPLEMENTED | CI/handoff 通过 | 外部 GitHub/报告平台待验 | 通过 | Model→Risk CI 和 Blackboard 公共契约 |
+| F-08 | PARTIAL | 组内适配可回归 | 各领域 canonical 服务待接 | 通过 | `tools/*` 与 `flows/*` 保留为适配层，不复制业务产品 |
+| F-09 | PARTIAL | Admin 查询和本地 GitGraph/Pop 通过 | GitHub 同步、通知、完整 Desktop 管理面待验 | 通过 | Admin scope、metrics、repo/package 状态 API |
+| P-01 | STAGING | 契约与 fixture 通过 | ReturnsDataset/DataAccess 外部源缺失 | 通过 | `schemas/data_contracts.py`；无收益源必须返回 `no_source` |
+| P-02 | STAGING | 适配层可用 | 真实回测组件待验 | 通过 | 组内回测 artifact，不提供统一产品页 |
+| P-03 | STAGING | 组合契约可用 | 真实组合组件待验 | 通过 | 组合 adapter 只记录引用和 verdict |
+| P-04 | IMPLEMENTED | 子任务、继承、kill 通过 | 跨进程扩展待定 | 通过 | `tools/subagent/_register.py`、`runner/parallel_registry.py`；继承 actor/role/session/workspace/allowlist/budget |
+| P-05 | IMPLEMENTED | A/B/OOS ledger 可记录 | 外部实验平台待验 | 通过 | `tools/experiments` 与 artifact 记录 |
+| P-06 | IMPLEMENTED | 哈希 evidence chain 通过 | 外部审计消费待验 | 通过 | `runner/evidence.py`；关键写入证据失败不报成功 |
+| P-07 | PARTIAL | 候选生成、卡片、受控评审和摘要通过 | 生产 strict reuse 默认为关闭，蒸馏调度 job 待接 | 通过 | `runner/dream_consumer.py`、`runner/distill/cards.py`、`runner/distill/governance.py`；服务端 strict 模式需配置启用 |
+| P-08 | PARTIAL | Admin 只读查询通过 | 全组织后台同步和完整管理 UI 待验 | 通过 | `tools/admin/_register.py`、Lens Admin panel |
+| P-09 | STAGING | Admin deploy contract 通过 | 生产队列、服务账号、回滚协议待外部规格 | 通过 | `runner/admin_operations.py` 返回 `STAGING`，不暴露拓扑 |
+| P-10 | IMPLEMENTED | L0-L3 分类和方案限流通过 | Desktop resume/E2E 待验 | 通过 | `runner/task_classifier.py`、`runner/solution_workflow.py`；L2/L3 phase=None 仍 fail-closed |
+
+表中“通过”只代表当前仓库的确定性测试证据；任何标注“待验”的项目都不得在 UI、MCP 或报告中显示为生产已接通。
+
 所有组流共用以下接口：
 
 | 契约 | 最小字段 | 用途 |
@@ -165,7 +191,7 @@ DataAccess
 
 首页提交任务，服务端从已认证会话得到组身份，加载该组 Skill、能力摘要和可用工具。允许显式选择 Skill，但不能用 `group` 参数越权切换组；多组授权必须来自服务端 roster。`list_skills` 应来自真实目录。
 
-**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定和 `tools/list`/`tools/call` 共用的 effective catalog 已有；桌面身份选择与连接 surface 仍依赖外部 `opencode-lens`。
+**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定、`session_context` 和 `tools/list`/`tools/call` 共用的 effective catalog 已有；Lens 已读取服务端组/角色并移除自由切组，真实本地身份 bridge 仍依赖外部桌面环境。
 
 **验收补充**：提交请求只能使用认证 session 的 `group`；请求中出现不同组时拒绝；`tools/list` 与 `tools/call` 必须使用同一份 effective tool set；无 roster 的生产请求 fail-closed。Skill 列表来自维护员发布目录，不能由用户输入或 Agent 运行时注册。
 
@@ -196,7 +222,7 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 提供组级共享 Memory、公共契约、能力卡片、详情查询、来源和版本信息。Mask 按用户组/GitHub 权限执行，Admin 全可见。`memory_search` 必须有真实后端通道；UI 空态不得伪造结果。
 
-**当前实现**：FTS5、Group ACL、显式 reconcile、14 张能力卡、摘要/详情分层和 `list_capabilities` 已有；专用 Memory MCP 查询、完整 Admin UI 和外部组件状态同步仍需接入。
+**当前实现**：FTS5、Group ACL、显式 reconcile、14 张能力卡、摘要/详情分层、`search_memory` 和 `list_capabilities` 已有；Memory 查询只读且空库返回 `UNAVAILABLE/EMPTY`，完整 Admin UI 和外部组件状态同步仍需接入。
 
 **能力卡字段**：`canonical_repo`、`maturity_status`、`integration_status`、`type`、`domain_authority`、`inputs`、`outputs`、`public_api`、`depends_on`、`consumed_by`、`owner_group`、`visibility`、`deprecated_aliases`、`source_commit`、`observed_at`、`when_to_use` 和 `when_not_to_reinvent`。卡片状态不能用目录存在代替运行时接通。
 
@@ -204,7 +230,7 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 流程为“本地 SSH 身份 → 服务端验证公钥指纹 → roster 匹配 actor/组/角色/个人工作目录 → 建立不可变会话”。私钥只留在本机密钥链或 SSH agent，不进入 LLM、Memory、日志或普通 UI 请求。登录后可读取授权主线、写入个人开发环境；生产环境由独立服务账号运行，不提供研究员直接登录。
 
-**当前实现**：指纹映射、一次性 challenge/signing、SessionContext 和只读状态查询后端已有；桌面登录界面仍需接真实认证/连接 surface，当前 UI stub 不能视为完整登录。
+**当前实现**：指纹映射、一次性 challenge/signing、SessionContext 和只读状态查询后端已有；Lens 仅接受本地 Agent/Keychain identity，当前没有真实 SSH gateway/网络探测，不能视为完整登录。
 
 **失败状态**至少区分密钥拒绝、主机不可达、roster 未命中、资源权限不足和身份接线未完成。研究员登录后拥有被授权服务器上的个人工作目录；该目录属于研究/开发环境。生产 shell、生产服务账号和生产进程控制不属于此功能。
 
@@ -324,3 +350,4 @@ PyTest 全绿只说明测试与当前代码一致。凡是断言风险越限 Hum
 | 2026-09-01 | HumanGate 收窄为写操作；模型 PR 降级为 CI；业务流水线归组内；新增 P-07/P-08/P-09/P-10 |
 | 2026-09-03 | 根据组长会议与组件指南重建运营基线：组内 Memory、组件权威与复用纪律、Admin 全权限、GitHub 权限一致、SSH 不进生产、GitGraph 全增强、方案按复杂度分级 |
 | 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、六组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
+| 2026-09-05 | v0.5.1 核验同步：Session Context 成为唯一组/角色来源；Memory 接入只读 `search_memory`；普通 UI 移除自由切组、私钥文本和 `/deploy`；补充 F/P 功能性、完整性、可维护性台账及外部待验边界 |

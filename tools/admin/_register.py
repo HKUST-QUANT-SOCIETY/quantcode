@@ -29,7 +29,8 @@ import fnmatch
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -64,6 +65,13 @@ def _admin_gate(ctx: dict) -> dict[str, Any] | None:
     ):
         return None
     return {"ok": False, "error": "admin only"}
+
+
+def _candidate_review_gate(ctx: dict) -> dict[str, Any] | None:
+    """Candidate promotion is a governed write for approver/admin roles."""
+    if str(ctx.get("role") or "") in {"approver", "admin"}:
+        return None
+    return {"ok": False, "error": "approver or admin role required"}
 
 
 def _org_metadata_gate(ctx: dict) -> dict[str, Any] | None:
@@ -185,6 +193,37 @@ class AdminErrorsArgs(BaseModel):
     window: int = Field(
         default=200, ge=1, le=2000, description="错误扫描窗口：最近 N 条 run 记录。"
     )
+
+
+class ReviewDistillCandidateArgs(BaseModel):
+    """P-07 candidate decision; promotion never occurs without this tool."""
+
+    candidate_name: str = Field(min_length=1, max_length=128)
+    action: Literal["promote", "reject", "supersede"]
+    superseded_by: str | None = Field(default=None, max_length=128)
+
+
+def _review_distill_candidate_execute(
+    args: ReviewDistillCandidateArgs, ctx: dict
+) -> dict[str, Any]:
+    denied = _candidate_review_gate(ctx)
+    if denied:
+        return denied
+    from runner.distill.governance import review_candidate
+
+    try:
+        item = review_candidate(
+            args.candidate_name,
+            args.action,
+            reviewer_id=str(ctx.get("actor_id") or ""),
+            reviewer_role=str(ctx.get("role") or ""),
+            reviewer_group=str(ctx.get("group") or "") or None,
+            superseded_by=args.superseded_by,
+            candidates_dir=Path(ctx.get("candidates_dir") or (Path(__file__).resolve().parents[2] / ".quantcode" / "distill_candidates")),
+        )
+    except (KeyError, PermissionError, ValueError, FileNotFoundError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "candidate": item}
 
 
 def _admin_errors_execute(args: AdminErrorsArgs, ctx: dict) -> dict[str, Any]:
@@ -487,6 +526,14 @@ def _register_admin_tools() -> None:
             "{'ok': False, 'error': 'admin only'}.",
             AdminErrorsArgs,
             _admin_errors_execute,
+        ),
+        (
+            "review_distill_candidate",
+            "Review a Dream/Distill candidate (P-07). Approver/admin only; "
+            "promote publishes a completed draft, reject or supersede records "
+            "an append-only audit event. This never executes production code.",
+            ReviewDistillCandidateArgs,
+            _review_distill_candidate_execute,
         ),
         (
             "admin_blackboard_read",
