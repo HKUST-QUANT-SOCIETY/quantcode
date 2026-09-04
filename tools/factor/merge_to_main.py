@@ -156,6 +156,7 @@ def merge_to_main_impl(
     thread_id: str = "",
     evidence_dir: str | Path | None = None,
     actor_id: str = "approver",
+    gate_id: str | None = None,
 ) -> dict[str, Any]:
     """合入主线登记簿：gate 不合格拒绝；合格未人审只出 gate（waiting_for_human）；
     人审通过（或 require_human=false）才写 .quantcode/mainline/factors.json。
@@ -231,12 +232,31 @@ def merge_to_main_impl(
             "index_path": str(path),
         }
     from runner.evidence import append_event
+    from runner.human_gate import make_gate_id
+
+    decision_gate_id = gate_id or make_gate_id(thread_id or f"factor-merge-{factor_id}")
+    evidence = {
+        "factor_id": factor_id,
+        "resource": f"factor:{factor_id}",
+        "record": record,
+    }
 
     append_event(
         thread_id or f"factor-merge-{factor_id}",
         "human_gate",
-        {"kind": "merge", "decision": "approve", "actor_id": actor_id,
-         "resource": f"factor:{factor_id}", "record": record},
+        {
+            "gate_id": decision_gate_id,
+            "kind": "merge",
+            "status": "approved",
+            "actor": actor_id,
+            "resource": f"factor:{factor_id}",
+            "evidence": evidence,
+            "decision": {
+                "action": "approve",
+                "decided_by": actor_id,
+                "reason": None,
+            },
+        },
         evidence_dir or (path.parent / ".evidence"),
         required=True,
     )
@@ -332,7 +352,32 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
             thread_id=str(ctx.get("thread_id") or ""),
             evidence_dir=ctx.get("evidence_dir"),
             actor_id=str(ctx.get("actor_id") or "approver"),
+            gate_id=str(result.get("gate_id") or "") or None,
         )
+    from runner.evidence import append_event
+    decision_evidence_dir = ctx.get("evidence_dir")
+    if decision_evidence_dir is None:
+        decision_evidence_dir = _index_path(ctx.get("mainline_index")).parent / ".evidence"
+
+    append_event(
+        str(ctx.get("thread_id") or f"factor-merge-{args.factor_id}"),
+        "human_gate",
+        {
+            "gate_id": result.get("gate_id"),
+            "kind": "merge",
+            "status": "rejected",
+            "actor": str(ctx.get("actor_id") or "approver"),
+            "resource": f"factor:{args.factor_id}",
+            "evidence": result.get("gate", {}).get("evidence", {}),
+            "decision": {
+                "action": "reject",
+                "decided_by": str(ctx.get("actor_id") or "approver"),
+                "reason": "rejected by human gate",
+            },
+        },
+        decision_evidence_dir,
+        required=True,
+    )
     return {
         "merged": False,
         "stage": "human_rejected",

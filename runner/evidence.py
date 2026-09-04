@@ -16,10 +16,21 @@ import hashlib
 import json
 import os
 import re
-import fcntl
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 from pydantic import ValidationError
 
@@ -45,6 +56,45 @@ class EvidenceChainError(Exception):
     """审计链校验失败（任何一环被篡改 / 顺序错乱 / 衔接断裂 / 工件失绑）。"""
 
 
+_APPEND_LOCK = threading.Lock()
+
+
+@contextmanager
+def _locked_append(path: Path):
+    """Open an evidence file with a platform-appropriate append lock.
+
+    POSIX uses ``fcntl``; Windows locks a sibling byte-range lock file via
+    ``msvcrt``.  The process lock remains as a safe fallback for runtimes that
+    expose neither module (for example restricted test interpreters).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _APPEND_LOCK:
+        lock_handle = None
+        file_handle = None
+        try:
+            if fcntl is None and msvcrt is not None:
+                lock_path = path.with_name(f".{path.name}.lock")
+                lock_handle = lock_path.open("a+b")
+                if lock_handle.tell() == 0:
+                    lock_handle.write(b"0")
+                    lock_handle.flush()
+                lock_handle.seek(0)
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_LOCK, 1)
+            file_handle = path.open("a+", encoding="utf-8")
+            if fcntl is not None:
+                fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX)
+            yield file_handle
+        finally:
+            if file_handle is not None:
+                if fcntl is not None:
+                    fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
+                file_handle.close()
+            if lock_handle is not None:
+                lock_handle.seek(0)
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                lock_handle.close()
+
+
 def evidence_path(run_id: str, artifacts_dir: str | Path = EVIDENCE_DIR) -> Path:
     value = str(run_id or "")
     if not RUN_ID_PATTERN.fullmatch(value):
@@ -53,21 +103,24 @@ def evidence_path(run_id: str, artifacts_dir: str | Path = EVIDENCE_DIR) -> Path
 
 
 def _load_events(
-    run_id: str, artifacts_dir: str | Path = EVIDENCE_DIR
+    run_id: str, artifacts_dir: str | Path = EVIDENCE_DIR, *, strict: bool = False
 ) -> list[AuditEvent]:
-    """读回整条链；文件缺失/坏行静默跳过（坏行只可能来自外部篡改，
-    会被 verify 的衔接断裂捕获——不在这里抛）。"""
+    """Read a chain; strict verification rejects malformed lines."""
     try:
         lines = evidence_path(run_id, artifacts_dir).read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     events: list[AuditEvent] = []
-    for line in lines:
+    for line_no, line in enumerate(lines, start=1):
         if not line.strip():
             continue
         try:
             events.append(AuditEvent.model_validate(json.loads(line)))
-        except (json.JSONDecodeError, ValidationError, ValueError):
+        except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+            if strict:
+                raise EvidenceChainError(
+                    f"invalid evidence event at line {line_no} (run_id={run_id!s})"
+                ) from exc
             continue
     return events
 
@@ -88,8 +141,7 @@ def append_event(
     try:
         path = evidence_path(run_id, artifacts_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a+", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with _locked_append(path) as f:
             f.seek(0)
             last: AuditEvent | None = None
             for line in f:
@@ -114,7 +166,6 @@ def append_event(
             f.flush()
             if required:
                 os.fsync(f.fileno())
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         return True
     except Exception as exc:
         if required:
@@ -142,7 +193,7 @@ def verify_chain(
     首环 prev_hash=None、逐环衔接、seq 严格递增；ARTIFACT 环绑定的磁盘文件
     sha256 重算一致。任何异常抛 ``EvidenceChainError``——校验路径绝不静默。
     """
-    events = _load_events(run_id, artifacts_dir)
+    events = _load_events(run_id, artifacts_dir, strict=True)
     if not events:
         raise EvidenceChainError(f"run_id={run_id!s}: 审计链为空或不存在")
 

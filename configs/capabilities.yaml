@@ -12,6 +12,8 @@
 # 复用纪律（运行时指令，runner/distill/inject.py 注入）：需求识别到已有能力覆盖不全
 # → 先向人征询，不许直接跳自造方案。strict_reuse=true 时进一步禁止引入外部自造实现
 # （仅允许已登记能力）——默认 false（P0 只注入纪律提示，不做硬拦截，收窄由主 Agent 裁决）。
+# Local dev/test may opt out for fixture-only runs. Production runtime forces
+# this policy on even if a stale config still contains false.
 strict_reuse: false
 
 # 常驻摘要注入开关与限长（runner/distill/inject.py）。

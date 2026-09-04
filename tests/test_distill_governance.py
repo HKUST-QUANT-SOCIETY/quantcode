@@ -59,6 +59,34 @@ def test_candidate_review_enforces_group_and_role(tmp_path):
         )
 
 
+def test_candidate_supersede_cannot_target_another_group(tmp_path):
+    _candidate(tmp_path)
+    draft = tmp_path / "candidate-model-flow.md"
+    draft.write_text("---\nstatus: draft\n---\n", encoding="utf-8")
+    (tmp_path / "index.json").write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {"name": "factor-flow", "group": "factor", "status": "draft", "skill_md_path": str(tmp_path / "candidate-factor-flow.md")},
+                    {"name": "model-flow", "group": "model", "status": "promoted", "skill_md_path": str(draft)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PermissionError, match="another group"):
+        review_candidate(
+            "factor-flow",
+            "supersede",
+            reviewer_id="factor-lead",
+            reviewer_role="approver",
+            reviewer_group="factor",
+            superseded_by="model-flow",
+            candidates_dir=tmp_path,
+        )
+
+
 def test_candidate_promotion_rejects_out_of_tree_draft(tmp_path):
     outside = tmp_path.parent / "outside-candidate.md"
     outside.write_text("---\nstatus: draft\n---\n", encoding="utf-8")

@@ -145,8 +145,35 @@ def test_quant_evaluator_card_metric_count_from_step0(six_cards):
 
 
 def test_yaml_strict_reuse_flag_present():
-    # P-07 复用纪律开关：默认 false（收窄裁决归主 Agent），键存在即可控。
+    # P-07 复用纪律开关：开发/测试可由 YAML 控制，生产运行时强制开启。
     assert isinstance(strict_reuse_enabled(), bool)
+
+
+def test_production_defaults_to_strict_reuse(monkeypatch, tmp_path):
+    """A stale false config must not disable the production reuse boundary."""
+    (tmp_path / "capabilities.yaml").write_text("strict_reuse: false\ncards: []\n", encoding="utf-8")
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    from runner import config_loader
+
+    config_loader.load_yaml.cache_clear()
+    try:
+        assert strict_reuse_enabled() is True
+    finally:
+        config_loader.load_yaml.cache_clear()
+
+
+def test_malformed_reuse_policy_fails_closed(monkeypatch, tmp_path):
+    (tmp_path / "capabilities.yaml").write_text("strict_reuse: [broken\n", encoding="utf-8")
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
+    from runner import config_loader
+
+    config_loader.load_yaml.cache_clear()
+    try:
+        assert strict_reuse_enabled() is True
+    finally:
+        config_loader.load_yaml.cache_clear()
 
 
 def test_invalid_card_in_yaml_fails_fast(tmp_path, monkeypatch):

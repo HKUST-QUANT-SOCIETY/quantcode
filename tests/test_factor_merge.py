@@ -194,6 +194,30 @@ def test_merge_writes_mainline_index_structure(tmp_path):
         assert key in entry, key
 
 
+def test_approved_merge_writes_decision_record_to_evidence_chain(tmp_path):
+    """An approved merge must be replayable as a HumanGate decision."""
+    idx = tmp_path / "mainline" / "factors.json"
+    evidence_dir = tmp_path / "evidence"
+    out = merge_to_main_impl(
+        "pb_roe",
+        _good_report(),
+        human_approved=True,
+        index_path=idx,
+        evidence_dir=evidence_dir,
+        thread_id="merge-evidence-1",
+        actor_id="factor-approver",
+    )
+
+    from runner.evidence import build_report
+
+    report = build_report("merge-evidence-1", evidence_dir)
+    assert out["merged"] is True
+    assert report.decision is not None
+    assert report.decision.gate_id
+    assert report.decision.action.value == "approve"
+    assert report.decision.decided_by == "factor-approver"
+
+
 def test_merge_thresholds_cover(tmp_path):
     """merge 前置 gate 同样接受 thresholds 覆盖（与 check impl 同参）。"""
     idx = tmp_path / "mainline" / "factors.json"
@@ -283,6 +307,8 @@ def test_agent_flow_eval_then_merge_pause_then_approve(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(cfg_dir))
+    evidence_target = tmp_path / "evidence"
+    monkeypatch.setenv("QUANTCODE_EVIDENCE_DIR", str(evidence_target))
     load_yaml.cache_clear()
     clear_checkpointer_cache()
     idx_path = tmp_path / "mainline" / "factors.json"
@@ -371,6 +397,13 @@ def test_agent_flow_eval_then_merge_pause_then_approve(tmp_path, monkeypatch):
         assert any(
             "merged" in str(getattr(m, "content", "")) for m in resumed["messages"]
         )
+        from runner.evidence import build_report
+
+        evidence_report = build_report("merge-e2e-1", evidence_target)
+        assert evidence_report.decision is not None
+        assert evidence_report.decision.action.value == "approve"
+        assert evidence_report.decision.decided_by == "approver"
+        assert any(event.kind.value == "tool_call" for event in evidence_report.chain)
     finally:
         clear_checkpointer_cache()
         load_yaml.cache_clear()

@@ -534,6 +534,7 @@ class AgentRunner:
         thread_id: str | None = None,
         flow_name: str = "agent",
         resume: bool = False,
+        resume_decision: str | None = None,
         solution_required: bool = False,
     ) -> dict:
         """Run agent via LangGraph app.stream() and return node-level execution_trace.
@@ -589,7 +590,11 @@ class AgentRunner:
         )
         config = {"configurable": {"thread_id": thread_id}}
 
-        if resume:
+        if resume_decision is not None:
+            from runner.human_gate import to_react_resume_payload
+
+            init_state: Any = Command(resume=to_react_resume_payload(resume_decision))
+        elif resume:
             init_state: dict | None = None
         else:
             init_state = init_agent_state(
@@ -827,12 +832,8 @@ class AgentRunner:
         Returns:
             Final state dict after resume.
         """
-        from runner.human_gate import to_react_resume_payload
-
         if self.role is not None and self.role not in {"approver", "admin"}:
             raise PermissionError("only an approver or admin may resume a HumanGate")
-
-        resume_payload = to_react_resume_payload(decision)
 
         app = self.build(
             skill_name=skill_name,
@@ -867,30 +868,16 @@ class AgentRunner:
                 raise PermissionError(
                     "checkpoint missing creator Session Context fields: " + ", ".join(missing)
                 )
-        _started_at = time.time()
-        try:
-            final = app.invoke(Command(resume=resume_payload), config=config)
-        except Exception as exc:
-            _record_run_safe(
-                actor_id=self.actor_id, role=self.role,
-                group=self.group, flow=flow_name, thread_id=thread_id,
-                started_at=_started_at, ended_at=time.time(), status="error",
-                error=f"{type(exc).__name__}: {exc}",
-                trace_events=None, context_chars=None,
-            )
-            raise
-        _record_run_safe(
-            actor_id=self.actor_id, role=self.role,
-            group=self.group, flow=flow_name, thread_id=thread_id,
-            started_at=_started_at, ended_at=time.time(),
-            status=_run_status(final), error=None,
-            trace_events=None, context_chars=None,
+        task = str(values.get("task_goal") or values.get("input_data", {}).get("task") or "")
+        return self.stream(
+            task=task,
+            skill_name=skill_name,
+            meta_skills=meta_skills,
+            system_prompt=system_prompt or "",
+            thread_id=thread_id,
+            flow_name=flow_name,
+            resume_decision=decision,
         )
-        _append_evidence_safe(thread_id, "output_data", {
-            "status": _run_status(final),
-            "flow_name": flow_name, "resume": True,
-        })
-        return final
 
     @staticmethod
     def _append_trace_from_update(

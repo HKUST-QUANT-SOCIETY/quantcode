@@ -15,6 +15,7 @@ list_capabilities 元工具：与 list_runs / list_skills 同走 **_meta 通道*
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from pydantic import ValidationError
@@ -64,8 +65,22 @@ def load_cards(config_name: str = CAPABILITIES_CONFIG) -> list[CapabilityCard]:
 
 
 def strict_reuse_enabled(config_name: str = CAPABILITIES_CONFIG) -> bool:
-    """strict_reuse 开关（P-07 复用纪律：true=禁止引入外部自造实现，仅允许已登记能力）。"""
-    return bool(load_yaml(config_name).get("strict_reuse", False))
+    """Return the P-07 reuse policy for the current runtime.
+
+    Development and test processes may explicitly keep the fixture-friendly
+    YAML value.  A non-development process defaults to strict reuse even when
+    an old config file still says ``false``; production must not silently lose
+    the catalog-before-side-effect boundary during configuration drift.
+    """
+    try:
+        configured = load_yaml(config_name, strict=True).get("strict_reuse")
+    except ValueError:
+        # A malformed policy file must never silently disable the boundary.
+        return True
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if environment not in {"dev", "development", "test"}:
+        return True
+    return bool(configured)
 
 
 # ---------------------------------------------------------------------------

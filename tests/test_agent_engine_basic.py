@@ -806,8 +806,8 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
         def get_state(self, config):
             return _Snapshot()
 
-        def invoke(self, *args, **kwargs):
-            return {"task_status": "done", "messages": []}
+        def stream(self, init, config):
+            yield {"llm": {"task_status": "done", "messages": []}}
 
     runner = AgentRunner(
         group="factor",
@@ -824,6 +824,7 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
 
     resumed = runner.resume(thread_id="factor-gate-1", decision="approve")
     assert resumed["task_status"] == "done"
+    assert resumed["execution_trace"][-1]["type"] == "agent_end"
 
 
 def test_resume_rejects_checkpoint_without_creator_context(monkeypatch, tmp_path):

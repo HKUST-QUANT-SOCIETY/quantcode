@@ -262,7 +262,34 @@ def load_factor_panel_impl(
     source_dir = str(paths[0].parent.parent)
 
     for path in paths:
-        table = pq.read_table(path)
+        try:
+            table = pq.read_table(path)
+        except Exception as exc:  # noqa: BLE001 - adapter boundary must return a typed error
+            return staging_error(
+                "data_read_error",
+                detail=f"unable to read factor parquet {path}: {type(exc).__name__}: {exc}",
+                factor_id=factor_id,
+                path=str(path),
+            )
+        required_columns = {
+            "asset",
+            "value",
+            "calc_time",
+            "factor_version",
+            "data_snapshot_id",
+            "is_valid",
+            "invalid_reason",
+        }
+        if "datetime" not in table.column_names and "datetime_date" not in table.column_names:
+            required_columns.add("datetime")
+        missing_columns = sorted(required_columns.difference(table.column_names))
+        if missing_columns:
+            return staging_error(
+                "invalid_schema",
+                detail=f"factor parquet is missing required columns: {', '.join(missing_columns)}",
+                factor_id=factor_id,
+                path=str(path),
+            )
         columns = {name: table.column(name).to_pylist() for name in table.column_names}
         dt_col = columns.get("datetime") or columns.get("datetime_date") or []
         for i, dt in enumerate(columns.get("datetime", dt_col)):
@@ -296,22 +323,42 @@ def load_factor_panel_impl(
     assets.sort()
     values = [[values_by_key.get((d, a)) for a in assets] for d in dates]
 
-    panel = FactorPanel(
-        factor_id=factor_id,
-        factor_version=factor_version or "unknown",
-        data_snapshot_id=snapshot_id or "unknown",
-        dates=dates,
-        assets=assets,
-        values=values,
-        source_path=source_dir,
-        as_of=as_of,
-        meta={
-            "removed": {"count": removed, "invalid_reasons": invalid_reasons},
-            "pit_filtered": pit_filtered,
-            "year_start": year_start,
-            "year_end": year_end,
-        },
-    )
+    if not dates or not assets or not values_by_key:
+        return staging_error(
+            "empty_dataset",
+            detail=(
+                f"no valid factor rows remain after is_valid/PIT filtering for {factor_id!r}"
+            ),
+            factor_id=factor_id,
+            year_start=year_start,
+            year_end=year_end,
+            removed=removed,
+            pit_filtered=pit_filtered,
+        )
+
+    try:
+        panel = FactorPanel(
+            factor_id=factor_id,
+            factor_version=factor_version or "unknown",
+            data_snapshot_id=snapshot_id or "unknown",
+            dates=dates,
+            assets=assets,
+            values=values,
+            source_path=source_dir,
+            as_of=as_of,
+            meta={
+                "removed": {"count": removed, "invalid_reasons": invalid_reasons},
+                "pit_filtered": pit_filtered,
+                "year_start": year_start,
+                "year_end": year_end,
+            },
+        )
+    except ValueError as exc:
+        return staging_error(
+            "invalid_schema",
+            detail=f"factor data violates FactorPanel/v1: {exc}",
+            factor_id=factor_id,
+        )
     return {"panel": panel, "summary": _panel_summary(panel)}
 
 

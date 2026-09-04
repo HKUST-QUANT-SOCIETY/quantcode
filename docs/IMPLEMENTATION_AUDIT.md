@@ -23,7 +23,7 @@
 | Risk CI | 通过 | `risk_verdict` + CI 报告；高风险不阻断 | 旧 risk-gate/Resume 流删除并改名 `risk_ci` | 继续使用（CI 基建） |
 | Portfolio | 通过 | 确定性 `portfolio_verdict` | 删除 requires_human/interrupt 字段和旧 Gate 名称 | 继续使用（Adapter） |
 | Strategy deployment handoff | 通过 | 只生成 `deployment_candidate` | 删除 `deploy_strategy` 生产语义 | 继续使用 |
-| Evidence / Metrics | 通过 | 哈希链、Artifact 绑定、actor/role、有限 tail 读取 | 并发文件锁；关键管理/合并写入 required | 继续使用 |
+| Evidence / Metrics | 通过 | 哈希链、Artifact 绑定、actor/role、有限 tail 读取 | POSIX/Windows 锁回退；关键管理/合并写入 required | 继续使用 |
 | P-10 Task Classification | 通过 | 四维分类与 L0-L3/Solution 要求已实现 | 复杂度不再代替权限 | 继续使用 |
 | GitGraph / Pop | 契约、Baseline、依赖 diff、Dedupe/read/ack 已实现 | GitHub 后台同步和系统通知需部署环境 | SQLite Pop + 原子 baseline；错误/partial/stale 状态显式 | 外部同步服务待接 |
 | 六组领域工具 | 可回归 | 非 canonical 的 stub/proxy 仅开发用途 | 不进入产品主线或生产 allowlist | 有条件保留 |
@@ -63,11 +63,11 @@
 
 ## 5. 2026-09-05 Bug 修复同步
 
-- Agent 入口按任务分类强制 L2/L3 方案阶段；`match_main` 统一 callable/invoke 并在 LLM 异常时 fail-closed。
+- Agent 入口按任务分类强制 L2/L3 方案阶段；`match_main` 统一 callable/invoke 并在 LLM 异常时 fail-closed；resume 复用 stream，恢复阶段 trace/evidence 不再缺失。
 - Capability visibility、strict YAML 写配置、`pyarrow` 依赖、MCP UTF-8 stdio 和 tiktoken 缓存异常已补齐。
-- Lens QuantCode UI 已通过 OpenCode `/experimental/quantcode/tool` 受限 API 读取 `list_skills`、`list_algorithms`、`ssh_status`；任意 MCP tool 名和参数不会被公开。
+- Lens QuantCode UI 已通过 OpenCode `/experimental/quantcode/tool` 受限 API 读取 `list_skills`、`list_algorithms`、`ssh_status`、`search_memory`、`session_context`；任意 MCP tool 名和参数不会被公开。
 - UI 指标精度、共享标签、算法列表渲染和 `lens-field` 动态导入错误态已修复。
-- P-07 已有候选生成、显式能力卡蒸馏和 approver/admin 晋升/拒绝/supersede 审计；服务端 strict reuse 已实现但生产配置默认为关闭、调度 job 尚未接入。ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
+- P-07 已有候选生成、显式能力卡蒸馏和 approver/admin 晋升/拒绝/supersede 审计；生产运行时 strict reuse 默认开启，`scripts/dream_consume.py --interval` 提供定时消费入口，生产 timer 启用仍需部署环境确认。ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
 
 ## 6. 测试报告
 
@@ -81,4 +81,4 @@ test_scope: full pytest + v5 contract suite
 known_legacy_tests: migrated or deleted
 ```
 
-此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1010 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `114 passed`，session-ui 回归 `57 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。
+此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1025 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `114 passed`，session-ui 回归 `57 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。

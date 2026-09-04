@@ -70,6 +70,97 @@ def test_load_factor_panel_drops_invalid_rows():
     assert n_present == 15
 
 
+class _FakeColumn:
+    def __init__(self, values):
+        self._values = values
+
+    def to_pylist(self):
+        return list(self._values)
+
+
+class _FakeTable:
+    def __init__(self, columns):
+        self._columns = columns
+        self.column_names = list(columns)
+
+    def column(self, name):
+        return _FakeColumn(self._columns[name])
+
+
+def _fake_factor_file(tmp_path):
+    path = tmp_path / "staging" / "factors" / "demo" / "year=2024" / "data.parquet"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"fixture")
+    return path
+
+
+def test_load_factor_panel_missing_columns_returns_explicit_error(tmp_path, monkeypatch):
+    _fake_factor_file(tmp_path)
+    monkeypatch.setenv("QS_DATA_STAGING_ROOT", str(tmp_path / "staging"))
+    monkeypatch.setattr(
+        backing,
+        "_require_pyarrow",
+        lambda: type("FakeParquet", (), {
+            "read_table": staticmethod(lambda _path: _FakeTable({"datetime": []}))
+        }),
+    )
+
+    result = backing.load_factor_panel_impl(
+        "demo", 2024, 2024, AS_OF, backend="staging"
+    )
+
+    assert result["error"] == "invalid_schema"
+    assert "calc_time" in result["detail"]
+
+
+def test_load_factor_panel_all_rows_filtered_returns_empty_dataset(tmp_path, monkeypatch):
+    _fake_factor_file(tmp_path)
+    monkeypatch.setenv("QS_DATA_STAGING_ROOT", str(tmp_path / "staging"))
+    columns = {
+        "datetime": [datetime(2024, 1, 2)],
+        "asset": ["600519.SH"],
+        "value": [1.0],
+        "calc_time": [datetime(2024, 6, 1)],
+        "factor_version": ["v1"],
+        "data_snapshot_id": ["snap"],
+        "is_valid": [1],
+        "invalid_reason": [""],
+    }
+    monkeypatch.setattr(
+        backing,
+        "_require_pyarrow",
+        lambda: type("FakeParquet", (), {
+            "read_table": staticmethod(lambda _path: _FakeTable(columns))
+        }),
+    )
+
+    result = backing.load_factor_panel_impl(
+        "demo", 2024, 2024, EARLY_AS_OF, backend="staging"
+    )
+
+    assert result["error"] == "empty_dataset"
+    assert result["pit_filtered"] == 1
+
+
+def test_load_factor_panel_read_failure_returns_explicit_error(tmp_path, monkeypatch):
+    _fake_factor_file(tmp_path)
+    monkeypatch.setenv("QS_DATA_STAGING_ROOT", str(tmp_path / "staging"))
+    monkeypatch.setattr(
+        backing,
+        "_require_pyarrow",
+        lambda: type("FakeParquet", (), {
+            "read_table": staticmethod(lambda _path: (_ for _ in ()).throw(RuntimeError("corrupt parquet")))
+        }),
+    )
+
+    result = backing.load_factor_panel_impl(
+        "demo", 2024, 2024, AS_OF, backend="staging"
+    )
+
+    assert result["error"] == "data_read_error"
+    assert "corrupt parquet" in result["detail"]
+
+
 # D1-A6: 默认 staging backend 四工具零网络（monkeypatch socket 即证）
 def test_staging_backend_network_fail_closed(monkeypatch):
     class _BlockedSocket(socket.socket):

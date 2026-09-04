@@ -160,12 +160,41 @@ def test_error_run_yields_no_candidate(evidence_dir, candidates_dir):
     assert summary["candidates"] == []
 
 
+def test_waiting_run_is_not_marked_completed(evidence_dir, candidates_dir):
+    """A pending HumanGate is runtime state, never a distillation source."""
+    events = _ok_run(["read_blackboard", "calc_risk"])
+    events[-1] = _event(len(events), "output_data", {"status": "waiting_for_human"})
+    _write_evidence(evidence_dir, "waiting-1", events)
+    _write_evidence(evidence_dir, "waiting-2", events)
+
+    summary = consume_once(evidence_dir=evidence_dir, candidates_dir=candidates_dir)
+
+    assert summary["scanned_runs"] == 0
+    assert summary["new_runs"] == 0
+    assert summary["candidates"] == []
+
+
 def test_run_records_pairs_results(evidence_dir):
     """配对口径：error 环 → 空；成功环 → 与 tool_call 等长的记录列表。"""
     events = _ok_run(["t1", "t2"])
     recs = run_records_from_events("r1", events, group="risk")
     assert [r["action"]["tool_name"] for r in recs] == ["t1", "t2"]
     assert all(r["thread_id"] == "r1" and r["group"] == "risk" for r in recs)
+
+
+def test_run_records_match_tool_results_by_call_id_and_require_all_results():
+    """Multi-call evidence must not be paired by the last-seen call."""
+    events = [
+        {"kind": "tool_call", "payload": {"tool": "first", "args": {}, "tool_call_id": "c1"}},
+        {"kind": "tool_call", "payload": {"tool": "second", "args": {}, "tool_call_id": "c2"}},
+        {"kind": "tool_result", "payload": {"tool": "first", "tool_call_id": "c1", "is_error": False}},
+        {"kind": "tool_result", "payload": {"tool": "second", "tool_call_id": "c2", "is_error": False}},
+    ]
+    recs = run_records_from_events("multi", events, group="factor")
+    assert [r["action"]["tool_name"] for r in recs] == ["first", "second"]
+
+    missing = run_records_from_events("missing", events[:-1], group="factor")
+    assert missing == []
 
 
 # ---------------------------------------------------------------------------
@@ -260,3 +289,22 @@ def test_judge_new_runs_writes_rlhf(monkeypatch, tmp_path):
 def test_judge_new_runs_skips_goalless():
     """无 goal 的 run 直接跳过，不调 judge 不碰文件。"""
     assert dc.judge_new_runs([{"run_id": "x"}]) == []
+
+
+def test_consume_rolls_back_seen_ids_when_processing_fails(evidence_dir, candidates_dir, monkeypatch):
+    """Transient consumer failures must not permanently drop completed runs."""
+    _write_evidence(evidence_dir, "retry-me", _ok_run(["read_blackboard", "calc_risk"]))
+    consumed: set[str] = set()
+
+    def fail_once(*args, **kwargs):
+        raise RuntimeError("temporary distill failure")
+
+    monkeypatch.setattr(dc, "distill_new_runs", fail_once)
+    with pytest.raises(RuntimeError, match="temporary"):
+        consume_once(
+            evidence_dir=evidence_dir,
+            candidates_dir=candidates_dir,
+            consumed_run_ids=consumed,
+        )
+
+    assert consumed == set()

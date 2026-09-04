@@ -115,6 +115,9 @@ def review_candidate(
             )
             if target is None:
                 raise ValueError(f"superseded_by candidate {superseded_by!r} not found")
+            target_group = str(target.get("group") or "").strip()
+            if reviewer_role != "admin" and target_group != group:
+                raise PermissionError("cannot supersede a candidate from another group")
 
         source = Path(str(item.get("skill_md_path") or ""))
         if action == "promote":

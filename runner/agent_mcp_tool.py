@@ -604,8 +604,14 @@ def _format_result(
     if last_msg is not None:
         final_text = str(getattr(last_msg, "content", "")) if hasattr(last_msg, "content") else ""
 
+    explicit_status = state.get("status")
+    status = (
+        str(explicit_status)
+        if explicit_status in {"waiting_for_human", "stopped_budget", "stopped_loop", "failed", "error"}
+        else "completed" if state.get("task_status") == "done" else "stopped"
+    )
     result: dict[str, Any] = {
-        "status": "completed" if state.get("task_status") == "done" else "stopped",
+        "status": status,
         "iterations": state.get("iterations", 0),
         "thread_id": state.get("thread_id", ""),
         "task_id": state.get("task_id") or state.get("thread_id", ""),

@@ -369,6 +369,11 @@ def make_tool_node(
         # engine 默认 None → backing 默认路径 .quantcode/blackboard.db）。
         if state.get("_blackboard_db_path"):
             ctx["blackboard_db_path"] = state["_blackboard_db_path"]
+        # All graph tools must append to the same run evidence chain. Without
+        # this explicit directory, merge_to_main's standalone fallback would
+        # place its HumanGate decision beside the mainline index instead of
+        # next to AgentRunner's tool/output events.
+        ctx["evidence_dir"] = os.environ.get("QUANTCODE_EVIDENCE_DIR")
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
 
         # P-10 方案先行（组 allowlist 过滤段）：workflow 激活（state 已带
@@ -395,8 +400,9 @@ def make_tool_node(
         tool_errors: list[str] = []
 
         try:
-            from runner.config_loader import load_yaml
-            strict_reuse = bool(load_yaml("capabilities", strict=True).get("strict_reuse", False))
+            from runner.distill.cards import strict_reuse_enabled
+
+            strict_reuse = strict_reuse_enabled()
         except Exception:
             # A malformed capability config must not silently disable the
             # safety gate.  Treat it as enabled and return a visible tool

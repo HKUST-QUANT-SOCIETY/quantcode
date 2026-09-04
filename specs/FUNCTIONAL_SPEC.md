@@ -155,7 +155,7 @@ DataAccess
 | 编号 | 状态 | 功能性 | 完整性 | 可维护性 | 证据/剩余边界 |
 |---|---|---|---|---|---|
 | F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、Lens `session_context`；真实桌面身份桥待验 |
-| F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`、checkpoint、trace contract；本地缓存按 actor/group/workspace 隔离 |
+| F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`/resume、checkpoint、trace contract；恢复阶段也写入 execution trace，本地缓存按 actor/group/workspace 隔离 |
 | F-03 | IMPLEMENTED | 通过 | Admin 部署仍为 STAGING | 通过 | `merge`/`permission` Gate；风险、预算、循环只返回结果/停止状态 |
 | F-04 | IMPLEMENTED | 通过 | 外部组件状态同步和完整 Admin UI 待接 | 通过 | FTS5 Group ACL、`search_memory`、`list_capabilities`、14 张卡；Memory 根为 `<project>/.quantcode` |
 | F-05 | PARTIAL | 后端 challenge/roster 通过 | 本地 Agent/Keychain bridge、网络探测待接 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
@@ -169,7 +169,7 @@ DataAccess
 | P-04 | IMPLEMENTED | 子任务、继承、kill 通过 | 跨进程扩展待定 | 通过 | `tools/subagent/_register.py`、`runner/parallel_registry.py`；继承 actor/role/session/workspace/allowlist/budget |
 | P-05 | IMPLEMENTED | A/B/OOS ledger 可记录 | 外部实验平台待验 | 通过 | `tools/experiments` 与 artifact 记录 |
 | P-06 | IMPLEMENTED | 哈希 evidence chain 通过 | 外部审计消费待验 | 通过 | `runner/evidence.py`；关键写入证据失败不报成功 |
-| P-07 | PARTIAL | 候选生成、卡片、受控评审和摘要通过 | 生产 strict reuse 默认为关闭，蒸馏调度 job 待接 | 通过 | `runner/dream_consumer.py`、`runner/distill/cards.py`、`runner/distill/governance.py`；服务端 strict 模式需配置启用 |
+| P-07 | PARTIAL | 候选生成、卡片、受控评审和摘要通过 | 生产 strict reuse 默认开启；消费脚本可定时运行，生产 timer 启用待验 | 通过 | `runner/dream_consumer.py`、`runner/distill/cards.py`、`runner/distill/governance.py`；候选转正仍需 approver/admin |
 | P-08 | PARTIAL | Admin 只读查询通过 | 全组织后台同步和完整管理 UI 待验 | 通过 | `tools/admin/_register.py`、Lens Admin panel |
 | P-09 | STAGING | Admin deploy contract 通过 | 生产队列、服务账号、回滚协议待外部规格 | 通过 | `runner/admin_operations.py` 返回 `STAGING`，不暴露拓扑 |
 | P-10 | IMPLEMENTED | L0-L3 分类和方案限流通过 | Desktop resume/E2E 待验 | 通过 | `runner/task_classifier.py`、`runner/solution_workflow.py`；L2/L3 phase=None 仍 fail-closed |

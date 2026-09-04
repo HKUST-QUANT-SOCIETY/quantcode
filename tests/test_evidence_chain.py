@@ -305,6 +305,26 @@ def test_append_event_links_hashes_and_silent_on_failure(evidence_dir: Path):
         make_audit_event(seq=1, kind="bogus", payload={})
 
 
+def test_append_event_works_without_posix_fcntl(evidence_dir: Path, monkeypatch):
+    """Windows-style runtimes still append valid evidence without fcntl."""
+    monkeypatch.setattr(ev, "fcntl", None)
+    run_id = "run_windows_lock"
+    assert ev.append_event(run_id, AuditEventKind.TOOL_CALL, {"tool": "t"}, evidence_dir)
+    assert [event.seq for event in ev.verify_chain(run_id, evidence_dir)] == [1]
+
+
+def test_verify_rejects_malformed_event_line(evidence_dir: Path):
+    """Verification must not skip forged or truncated JSONL records."""
+    run_id = "run_malformed"
+    ev.append_event(run_id, AuditEventKind.TOOL_CALL, {"tool": "t"}, evidence_dir)
+    path = ev.evidence_path(run_id, evidence_dir)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("not-json\n")
+
+    with pytest.raises(ev.EvidenceChainError, match="invalid evidence event"):
+        ev.verify_chain(run_id, evidence_dir)
+
+
 # ---------------------------------------------------------------------------
 # 集成：AgentRunner.stream() evidence 钩子 → .quantcode/evidence/<thread_id>.jsonl
 # （P1 修复回归：钩子签名错位曾导致生产永远静默零环）

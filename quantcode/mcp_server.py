@@ -64,6 +64,11 @@ from quantcode import identity  # P0-7: SSH key → group 绑定解析
 # 会话内不可变：指纹一旦解析出组即锁定为会话组（一个 MCP server 进程 = 一个会话），
 # 之后即使 env 指纹消失或绑定文件被改，会话组身份也不变（防会话中途降权/换组）。
 _SESSION_GROUP: str | None = None
+# The group alone is not a session identity.  Once the first authenticated
+# request resolves a roster entry, freeze the complete non-secret context for
+# the lifetime of this MCP process so a changed host env cannot swap actor or
+# workspace while retaining the same group.
+_SESSION_CONTEXT: dict[str, Any] | None = None
 _SESSION_ID = f"qc_{uuid.uuid4().hex}"
 _VALID_GROUPS = frozenset({"fundamental", "factor", "model", "risk", "strategy", "options"})
 
@@ -112,10 +117,17 @@ def _get_mcp_group() -> str | None:
        opencode.jsonc 的 ``mcp.<server>.environment.QUANTCODE_GROUP``）
     3. 有绑定配置但无指纹：fail-closed，或显式 ``QUANTCODE_ALLOW_UNAUTH=1`` 降级
     """
-    global _SESSION_GROUP
+    global _SESSION_GROUP, _SESSION_CONTEXT
+    # Tests and explicit process restarts clear the legacy group sentinel.  Do
+    # the same for the full context cache; a real session stores an empty group
+    # as ``""`` so the no-group development fallback remains immutable too.
+    if _SESSION_GROUP is None and _SESSION_CONTEXT is not None:
+        _SESSION_CONTEXT = None
+    if _SESSION_CONTEXT is not None:
+        return str(_SESSION_CONTEXT.get("group") or "") or None
     if _SESSION_GROUP is not None:
         # 会话内已通过指纹解析 → 不可变，直接返回
-        return _SESSION_GROUP
+        return _SESSION_GROUP or None
 
     fp = _get_ssh_fingerprint()
     if fp is not None:
@@ -194,6 +206,9 @@ def _get_mcp_group() -> str | None:
         )
         if g:
             _SESSION_GROUP = g
+    # Empty string is a locked development-session sentinel; ``None`` remains
+    # reserved for an unresolved/failed production session.
+    _SESSION_GROUP = g or ""
     return g
 
 
@@ -411,20 +426,21 @@ class SessionContextArgs(BaseModel):
 def _session_context_execute(args: SessionContextArgs, ctx: dict) -> dict:
     """返回当前认证上下文；不返回私钥、token 或生产拓扑。"""
     group = str((ctx or {}).get("group") or "").strip() or None
-    fingerprint = _get_ssh_fingerprint()
-    role = "admin" if _is_admin_session(group) else str((ctx or {}).get("role") or "analyst")
+    context = ctx or {}
+    role = "admin" if _is_admin_session(group) else str(context.get("role") or "analyst")
     if role not in {"analyst", "approver", "admin"}:
         return {"error": "AUTHENTICATION_REQUIRED: invalid Session Context role"}
     return {
-        "session_id": (ctx or {}).get("session_id") or _SESSION_ID,
+        "session_id": context.get("session_id") or _SESSION_ID,
         "group": group,
         "role": role,
-        "actor_id": (ctx or {}).get("actor_id"),
-        "workspace_id": (ctx or {}).get("workspace_id"),
-        "workspace_path": (ctx or {}).get("workspace_path"),
-        "github_subject": (ctx or {}).get("github_subject"),
-        "resource_scopes": (ctx or {}).get("resource_scopes", []),
-        "identity_source": "ssh_roster" if fingerprint else "development_override",
+        "actor_id": context.get("actor_id"),
+        "workspace_id": context.get("workspace_id"),
+        "workspace_path": context.get("workspace_path"),
+        "github_subject": context.get("github_subject"),
+        "resource_scopes": context.get("resource_scopes", []),
+        "identity_source": context.get("identity_source")
+        or ("ssh_roster" if context.get("ssh_fingerprint") else "development_override"),
     }
 
 
@@ -694,24 +710,69 @@ def _is_admin_session(group: str | None = None) -> bool:
     """按当前 MCP session 判断 Admin；身份来自 SSH 指纹或显式 Admin 进程。"""
     from runner.admin_scope import is_admin
 
+    if _SESSION_CONTEXT is not None:
+        return _SESSION_CONTEXT.get("role") == "admin"
     fingerprint = _get_ssh_fingerprint()
     return is_admin(fingerprint, group)
 
 
 def _session_role(group: str | None = None) -> str:
     """Resolve the roster role for tools/list and tools/call filtering."""
-    if _is_admin_session(group):
-        return "admin"
+    context = _session_context_for_call(group)
+    return str(context.get("role") or "analyst")
+
+
+def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
+    """Resolve and freeze the complete non-secret MCP session context.
+
+    ``_SESSION_GROUP`` is kept for compatibility with existing callers, but it
+    is not sufficient for authorization: actor, role, workspace and GitHub
+    scope must all come from the same roster entry and remain stable together.
+    """
+    global _SESSION_CONTEXT
+
+    mcp_group = group if group is not None else _get_mcp_group()
+    if _SESSION_CONTEXT is not None:
+        cached_group = str(_SESSION_CONTEXT.get("group") or "") or None
+        if cached_group != mcp_group:
+            raise RuntimeError("AUTHENTICATION_REQUIRED: session group changed")
+        return dict(_SESSION_CONTEXT)
+
     fingerprint = _get_ssh_fingerprint()
+    context: dict[str, Any] = {
+        "source": "mcp",
+        "session_id": _SESSION_ID,
+        "group": mcp_group,
+        "role": "analyst",
+        "identity_source": "development_override",
+    }
     if fingerprint:
         try:
             entry = identity.resolve_identity(fingerprint) or {}
-            role = str(entry.get("role") or "analyst").strip()
-            if role in {"analyst", "approver", "admin"}:
-                return role
+            context.update(
+                {
+                    "identity": fingerprint,
+                    "ssh_fingerprint": fingerprint,
+                    "actor_id": entry.get("actor_id"),
+                    "role": str(entry.get("role") or "analyst").strip(),
+                    "workspace_id": entry.get("workspace_id"),
+                    "workspace_path": entry.get("workspace_path"),
+                    "github_subject": entry.get("github_subject"),
+                    "resource_scopes": list(entry.get("resource_scopes") or []),
+                    "identity_source": "ssh_roster",
+                }
+            )
         except Exception:
+            # _get_mcp_group already fail-closes production roster failures;
+            # keep this helper defensive for trusted development callers.
             pass
-    return "analyst"
+    if _is_admin_session(mcp_group):
+        context["role"] = "admin"
+    if context["role"] not in {"analyst", "approver", "admin"}:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: invalid Session Context role")
+
+    _SESSION_CONTEXT = dict(context)
+    return dict(context)
 _ADMIN_ONLY_TOOLS = frozenset({"deploy_alphaflow"})
 
 
@@ -777,42 +838,19 @@ def call_tool(name: str, arguments: dict) -> dict:
     """
     try:
         mcp_group = _get_mcp_group()
-        session_role = _session_role(mcp_group)
+        session_context = _session_context_for_call(mcp_group)
+        session_role = str(session_context.get("role") or "analyst")
         allowed_tools = {tool.id for tool in _tools_for_session(mcp_group, session_role)}
         if name not in allowed_tools:
             raise PermissionError(
                 f"tool '{name}' is not available for the authenticated session"
             )
         ctx: dict[str, Any] = {
-            "source": "mcp",
+            **session_context,
             "session_id": _SESSION_ID,
             "_model": _get_model(),
             "_allowed_tool_ids": allowed_tools,
         }
-        # ★ 只有 group 非空时才注入，避免 ctx["group"]=None 导致
-        # dict.get("group", "") 返回 None 而非默认值 ""
-        if mcp_group:
-            ctx["group"] = mcp_group
-        ctx["role"] = session_role
-        fingerprint = _get_ssh_fingerprint()
-        if fingerprint:
-            ctx["identity"] = fingerprint
-            ctx["ssh_fingerprint"] = fingerprint
-            roster = identity.resolve_identity(fingerprint) or {}
-            ctx.update(
-                {
-                    "actor_id": roster.get("actor_id"),
-                    "role": roster.get("role", "analyst"),
-                    "workspace_id": roster.get("workspace_id"),
-                    "workspace_path": roster.get("workspace_path"),
-                    "github_subject": roster.get("github_subject"),
-                    "resource_scopes": roster.get("resource_scopes", []),
-                }
-            )
-            if ctx.get("role") not in {"analyst", "approver", "admin"}:
-                raise PermissionError("invalid Session Context role")
-        if _is_admin_session(mcp_group):
-            ctx["role"] = "admin"
         logger.info("call_tool: %s(%s) group=%s model=%s",
                      name, json.dumps(arguments, default=str)[:200],
                      mcp_group or "(unset)",

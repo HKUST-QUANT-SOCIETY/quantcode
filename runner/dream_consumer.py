@@ -91,7 +91,10 @@ def scan_completed_runs(
             if (
                 event.get("kind") == "output_data"
                 and isinstance(event.get("payload"), dict)
-                and "status" in event["payload"]
+                # Only successful terminal runs are valid distillation input.
+                # Waiting/error/budget snapshots are runtime state, not
+                # reusable knowledge.
+                and event["payload"].get("status") == "completed"
             ):
                 completed = True
         if completed:
@@ -117,12 +120,14 @@ def run_records_from_events(
     """
     call_ids: list[str] = []
     records: list[dict[str, Any]] = []
-    ok_by_id: dict[str, bool] = {}
+    results_by_id: dict[str, dict[str, Any]] = {}
     for e in events:
         kind = e.get("kind")
         payload = e.get("payload") if isinstance(e.get("payload"), dict) else {}
         if kind == "tool_call":
             tcid = str(payload.get("tool_call_id", ""))
+            if not tcid or tcid in call_ids:
+                return []
             call_ids.append(tcid)
             records.append({
                 "thread_id": run_id,
@@ -133,9 +138,16 @@ def run_records_from_events(
                 },
                 "observation": {"success": True, "summary": ""},
             })
-        elif kind == "tool_result" and call_ids:
-            ok_by_id[call_ids[-1]] = not bool(payload.get("is_error", False))
-    if not ok_by_id or not all(ok_by_id.values()):
+        elif kind == "tool_result":
+            tcid = str(payload.get("tool_call_id", ""))
+            if not tcid or tcid in results_by_id:
+                return []
+            results_by_id[tcid] = payload
+    # Every call must have exactly one explicit result.  Pair by id rather than
+    # relying on event order, since one AI message may issue multiple calls.
+    if not call_ids or set(call_ids) != set(results_by_id):
+        return []
+    if any(bool(results_by_id[tcid].get("is_error", False)) for tcid in call_ids):
         return []
     return records
 
@@ -276,10 +288,18 @@ def consume_once(
         if recs:
             runs.append({**run, "_records": recs})
 
-    fresh = distill_new_runs(
-        runs, candidates_dir=candidates_dir, min_occurrences=min_occurrences
-    )
-    judged = judge_new_runs(runs, llm=llm) if with_judge else []
+    try:
+        fresh = distill_new_runs(
+            runs, candidates_dir=candidates_dir, min_occurrences=min_occurrences
+        )
+        judged = judge_new_runs(runs, llm=llm) if with_judge else []
+    except Exception:
+        # ``scan_completed_runs`` adds ids to the caller's incremental set.
+        # Roll them back when downstream processing fails so a transient LLM,
+        # filesystem or parser error can be retried on the next interval.
+        if consumed_run_ids is not None:
+            consumed_run_ids.difference_update(run["run_id"] for run in scanned)
+        raise
 
     Path(candidates_dir).mkdir(parents=True, exist_ok=True)
     (Path(candidates_dir) / ".last_consumed").write_text(

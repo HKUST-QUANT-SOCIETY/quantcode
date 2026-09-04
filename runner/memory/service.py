@@ -209,6 +209,12 @@ class MemoryService:
         if type:
             conditions.append("memory_fts.type = ?")
             params.append(type)
+        # Apply the group ACL before SQLite's LIMIT.  Filtering only after an
+        # over-fetch can still hide an authorized hit when another group has a
+        # large number of equally relevant rows.
+        if rgroup:
+            conditions.append("(memory_fts.scope != 'groups' OR memory_fts.scope_id = ?)")
+            params.append(rgroup)
         where_clause = " AND ".join(conditions)                                      # noqa: F841
         if where_clause:
             where_sql = f"AND {where_clause}"

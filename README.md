@@ -323,7 +323,7 @@ pytest tests/test_model_risk_handoff_e2e.py -v
 QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ```
 
-**Test status**: 987 passed, 4 skipped (2026-09-04). The skipped tests require explicit real-LLM access.
+**Test status**: 1025 passed, 4 skipped (2026-09-05). The skipped tests require explicit real-LLM access.
 
 **Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM plus deterministic local fixtures), risk metrics (real returns + explicit stub marking), metrics/monitor read path.
 

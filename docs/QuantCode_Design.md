@@ -7,7 +7,7 @@
 > **上位文档**：specs/FUNCTIONAL_SPEC.md 定义功能契约，docs/PRD.md 定义产品目标，docs/UI_DESIGN_SPEC.md 定义桌面端体验。
 > **修订原则**：本版本保留原有 Agent 基础能力和工程设计，并把 OpenCode/MimoCode 的原生能力明确列为底座；只根据组长会议修正运营模式、职责边界和权限语义。不得把“领域产品不由 QuantCode 负责”误读为“QuantCode 删除 Agent 和 Compose 基础设施”。
 
-> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计和服务端 strict reuse 钩子，但生产默认配置与调度 job 尚待启用；真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
+> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
 
 ---
 
@@ -418,7 +418,7 @@ ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；�
 | Replay/Resume | 从指定 checkpoint 恢复；恢复后按当前 actor/group/role 重新授权 |
 | Goal/Judge | 独立 judge 评估目标完成度，结果作为 evidence，不替代领域负责人 |
 | RLHF 记录 | 记录工具选择、反馈和失败模式，为后续评估/训练提供数据 |
-| Dream/Distill | 扫描 trace，生成 Memory/Skill 候选；候选可落盘、去重并由 approver/admin 评审晋升、拒绝或 supersede；strict reuse 服务端钩子已实现，生产启用和调度 job 待接 |
+| Dream/Distill | 扫描 trace，生成 Memory/Skill 候选；候选可落盘、去重并由 approver/admin 评审晋升、拒绝或 supersede；strict reuse 生产默认开启，消费脚本支持 `--interval`，生产 timer 启用待验 |
 
 ### 4.4 三个核心契约
 

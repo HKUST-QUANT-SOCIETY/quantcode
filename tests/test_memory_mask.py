@@ -68,6 +68,34 @@ def test_cross_group_cannot_search_asset_card_details(tmp_path: Path):
     assert svc.search(query=_PLATFORM_TERM, requester_group="factor") == []
 
 
+def test_group_acl_is_applied_before_limit(tmp_path: Path):
+    """A noisy other-group prefix must not hide an authorized result."""
+    model = MemoryService(tmp_path / "bb.db", root=tmp_path, requester_group="model")
+    factor = MemoryService(tmp_path / "bb.db", root=tmp_path, requester_group="factor")
+    for i in range(40):
+        model.write(
+            scope="groups",
+            scope_id="model",
+            type="reference",
+            key=f"noise-{i}",
+            body="needle shared term",
+            requester_group="model",
+        )
+    factor.write(
+        scope="groups",
+        scope_id="factor",
+        type="reference",
+        key="authorized",
+        body="needle shared term",
+        requester_group="factor",
+    )
+
+    hits = factor.search(query="needle", limit=1)
+
+    assert len(hits) == 1
+    assert hits[0].path.endswith("authorized.md")
+
+
 def test_explicit_groups_scope_cross_read_raises(tmp_path: Path):
     """显式 scope=groups 跨组读 → MemoryPermissionError（既有 GROUP 隔离 fail-closed）。"""
     svc = MemoryService(tmp_path / "bb.db", root=tmp_path, auto_reconcile=False)

@@ -144,6 +144,11 @@ class TestFormatResult:
         assert result["iterations"] == 3
         assert result["thread_id"] == "tid-1"
 
+    def test_preserves_explicit_terminal_statuses(self):
+        for status in ("stopped_budget", "stopped_loop", "failed", "error"):
+            result = _format_result({"status": status, "messages": []}, "model")
+            assert result["status"] == status
+
     def test_includes_risk_metrics(self):
         """state 有 risk_metrics → 包含在结果中。"""
         state = {"messages": [], "risk_metrics": {"var_99": 0.08}}

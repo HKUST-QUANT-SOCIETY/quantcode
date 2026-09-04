@@ -29,6 +29,7 @@ def _clean_registry(monkeypatch, tmp_path):
         identity, "DEFAULT_BINDINGS_PATH", tmp_path / "nonexistent" / "authorized_groups.yaml"
     )
     monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
     global_registry._tools.clear()
     importlib.reload(tools.model._register)
     yield
@@ -132,6 +133,49 @@ def test_session_context_returns_authoritative_non_secret_summary(monkeypatch):
     assert result["role"] == "analyst"
     assert "private_key" not in result
     assert "token" not in result
+
+
+def test_mcp_session_context_freezes_identity_across_env_changes(monkeypatch):
+    """A process session cannot swap actor/workspace by changing its fingerprint."""
+    entries = {
+        "SHA256:first": {
+            "fingerprint": "SHA256:first",
+            "group": "factor",
+            "actor_id": "actor-first",
+            "role": "approver",
+            "workspace_id": "workspace-first",
+            "workspace_path": "/work/first",
+            "github_subject": "github-first",
+            "resource_scopes": ["repo:first"],
+        },
+        "SHA256:second": {
+            "fingerprint": "SHA256:second",
+            "group": "factor",
+            "actor_id": "actor-second",
+            "role": "admin",
+            "workspace_id": "workspace-second",
+            "workspace_path": "/work/second",
+            "github_subject": "github-second",
+            "resource_scopes": ["repo:all"],
+        },
+    }
+    monkeypatch.setattr(identity, "resolve_identity", lambda fp: entries.get(fp))
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:first")
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
+    # The autouse fixture resets the registry; reload the server so the
+    # session_context meta tool is present on the real call_tool path.
+    importlib.reload(mcp_server)
+
+    first = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:second")
+    second = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+
+    assert first["actor_id"] == second["actor_id"] == "actor-first"
+    assert first["role"] == second["role"] == "approver"
+    assert first["workspace_id"] == second["workspace_id"] == "workspace-first"
+    assert second["github_subject"] == "github-first"
+    assert second["identity_source"] == "ssh_roster"
 
 
 def test_search_memory_uses_group_acl_and_reports_empty_store(monkeypatch, tmp_path):
