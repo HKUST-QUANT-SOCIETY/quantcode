@@ -1,8 +1,8 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
-> **版本**：v0.4（2026-09-03，OpenCode/MimoCode 基线与运营模型重定版）
+> **版本**：v0.5（2026-09-04，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
-> **文档性质**：QuantCode 的活功能规格。`docs/PRD.md` 说明产品目标，`docs/QuantCode_Design.md` 说明技术设计，`docs/UI_DESIGN_SPEC.md` 说明桌面端体验；三者服从本文的运营边界。`docs/Day1~5_*` 与旧版 PRD/Design 是历史材料。
+> **文档性质**：QuantCode 的活功能规格。`docs/PRD.md` 说明产品目标，`docs/QuantCode_Design.md` 说明技术设计，`docs/UI_DESIGN_SPEC.md` 说明桌面端体验；三者服从本文的运营边界。`docs/archive/pre-v5/` 下内容与旧版 PRD/Design 是历史材料。
 > **实现状态说明**：本文的状态只表示当前实现证据，不代表设计已经完成。后续功能审查应以本文的“规范要求”逐项核对代码、UI 和测试。
 
 ---
@@ -17,7 +17,27 @@
 6. **权限跟随权威身份。** 普通用户只能看到其 GitHub 身份和组权限允许的 repo、Memory、组件详情和任务；Admin 跨组查看组织内容。前端隐藏不构成安全边界，后端和外部服务必须再次校验。
 7. **研究员使用个人工作环境。** 研究员可以 SSH 进入被授权服务器上的个人目录并写代码。生产环境使用独立服务账号，研究员不取得该账号、不进入生产 shell；Admin 管理面负责发起 `/deploy`。
 
-### 0.1 底座能力与 QuantCode 增量
+### 0.1 v5 决策锁
+
+| ID | 不变量 |
+|---|---|
+| D-001 | 一个 Session 只绑定 roster 签发的一个业务组。 |
+| D-002 | 同组共享经确认的长期 Memory；其他组默认不可读详情。 |
+| D-003 | Agent 制定方案前查询 Capability Catalog 与 Group Memory。 |
+| D-004 | 部分/无能力覆盖时说明缺口并取得用户决定。 |
+| D-005 | Agent 负责发现、编排、适配、契约检查和记录，不替代领域判断。 |
+| D-006 | 普通 HumanGate 只有 `merge`、`permission`。 |
+| D-007 | Admin 在 QuantCode 管理面拥有全组织权限且操作留痕。 |
+| D-008 | 普通研究员和 Agent 不进入生产环境。 |
+| D-009 | `/deploy` 只属于 Admin 管理面。 |
+| D-010 | SSH 私钥只留在本机 Agent/Keychain。 |
+| D-011 | GitGraph/Pop 保留完整图、基线、差异和提醒目标。 |
+| D-012 | 领域业务真相由 canonical components 维护。 |
+| D-013 | 数据与标签契约来自数据层唯一权威。 |
+| D-014 | OpenCode/MimoCode Agent 底座能力继续保留。 |
+| D-015 | 测试服从当前规范，旧断言不得反向定义设计。 |
+
+### 0.2 底座能力与 QuantCode 增量
 
 | 来源 | 功能边界 |
 |---|---|
@@ -29,7 +49,20 @@
 
 ## 1. 当前运营模型
 
-### 1.1 五种运行模式
+### 1.1 任务四维模型
+
+业务模式、复杂度、执行策略和治理类别彼此正交：
+
+| 维度 | 枚举 |
+|---|---|
+| 业务模式 | `research_analysis`、`engineering`、`component_adaptation`、`admin_operations`、`admin_deploy` |
+| 复杂度 | L0 查询；L1 有界任务；L2 多文件/跨仓适配；L3 共享主线或共享资产高影响变更 |
+| 执行策略 | `plan`、`build`、`compose` |
+| 治理类别 | `read_only`、`personal_workspace_write`、`shared_write`、`cross_group_restricted_access`、`admin_production_action` |
+
+L2/L3 必须形成 SolutionDoc；L0/L1 不得被固定讨论轮次阻塞。L3 不表示生产部署。
+
+### 1.2 五种运行模式
 
 | 模式 | 典型用户 | Agent/系统行为 | 治理方式 |
 |---|---|---|---|
@@ -39,7 +72,7 @@
 | 生产变更 | Admin | 通过 Admin 管理面和生产服务账号执行受控部署 | Admin 操作审计，不进入普通 Agent Gate |
 | 运营管理 | Admin | 查看所有组的任务、错误、组件、Memory、Blackboard、GitGraph 和通知 | 查询不需要；审批动作仍留 Gate 记录 |
 
-### 1.2 Agent 参与边界
+### 1.3 Agent 参与边界
 
 **Agent 应做**：识别任务类型；检索能力目录和组级 Memory；优先选择标准组件；在需要时询问人；组合只读工具和适配器；执行数据、PIT、版本和工程契约检查；把运行状态、错误、产物和决策写入可追踪记录；把需要生产处理的 artifact 交给 Admin 管理面。
 
@@ -47,7 +80,7 @@
 
 **人和领域组件负责**：研究员负责问题、假设和结果解释；各组负责人负责本域算法、指标口径和业务验收；标准组件负责数据、计算、评估、优化、资产治理、模型、风险、组合和回测；报告平台负责面向研究员或外部产品的汇报；Admin 负责组织级可见性、权限、审批和运行治理。
 
-### 1.3 领域职责边界
+### 1.4 领域职责边界
 
 | 领域 | 权威职责 | QuantCode 的职责 | 不应越权承担 |
 |---|---|---|---|
@@ -64,17 +97,17 @@
 
 ## 2. 共享契约与信息层
 
-### 2.1 组内 Memory
+### 2.1 组内长期知识 Memory 与 Runtime State
 
 - 同一组成员共享该组 Memory；它应沉淀已验证的研究结论、失败和错误、工程决策、组件用法、数据口径和 Best Practice。
 - 全组织契约（例如目标收益 `TargetReturnView/v1`）进入 global/shared 层；不应把组内敏感实现写进公共层。
-- 会话/任务记录与长期知识分开。原始 trace 只能作为候选来源；经过确定性检查、领域负责人确认或明确标注后，内容才能晋升为长期 Memory。
+- `Memory` 在产品语义上只表示可复用、经确认的长期组织知识。会话/任务记录与长期知识分开；Checkpoint、Task Progress、Subagent 状态、原始 Trace、临时摘要、预算和循环状态统一属于 `Runtime State`，不得出现在长期知识列表。原始 trace 只能作为候选来源；经过确定性检查、领域负责人确认或明确标注后，内容才能晋升为长期 Memory。
 - 每条可复用知识都应保留来源、时间、适用条件、验证状态和被推翻/替代关系。过期内容标记 superseded，不静默覆盖。
 - Admin 拥有全部可见性，可读取和管理所有组 Memory；这类访问应有审计记录。普通组员只能读取本组详情和被授权的共享摘要。
 
 ### 2.2 能力目录与组件注册
 
-组件清单以组织仓库实读和 `gh` 可验证信息为准，不能凭会议记忆手写数量。能力卡至少包含：`canonical_repo`、状态（PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY）、领域权威、输入/输出、公开 API、依赖、消费者、属组和废弃映射。
+组件清单以组织仓库实读和 `gh` 可验证信息为准，不能凭会议记忆手写数量。能力卡至少包含：`canonical_repo`、`maturity_status`（PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY）、`integration_status`（CONNECTED/PARTIAL/UNAVAILABLE/UNVERIFIED）、领域权威、输入/输出、公开 API、依赖、消费者、属组和废弃映射。
 
 当前标准主链：
 
@@ -97,7 +130,7 @@ DataAccess
 1. **摘要层**：每次 Agent run 注入可见能力的 id、名称、用途和“何时别自造”。
 2. **详情层**：通过受 ACL 保护的 Memory/目录查询取得 API、字段和实现约束。
 
-游客或未认证用户只看公开契约；普通组员按 GitHub/组权限看到摘要和被授权详情；Admin 看到完整目录。目录发现不代表运行时已经接入，卡片必须明确 `status`。
+游客或未认证用户只看公开契约；普通组员按 GitHub/组权限看到摘要和被授权详情；Admin 看到完整目录。目录发现不代表运行时已经接入，卡片必须明确 `maturity_status` 和 `integration_status`。
 
 工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。第一阶段六组共用研究/开发工具集合；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
 
@@ -128,11 +161,11 @@ DataAccess
 
 契约由 Pydantic v2 维护，并导出 JSON Schema。子任务、artifact、metrics 和 Blackboard 条目必须携带任务归属；恢复 checkpoint 时重新校验当前 session 权限。
 
-### F-01 新建研究与组路由
+### F-01 新建任务与组内 Agent 路由
 
 首页提交任务，服务端从已认证会话得到组身份，加载该组 Skill、能力摘要和可用工具。允许显式选择 Skill，但不能用 `group` 参数越权切换组；多组授权必须来自服务端 roster。`list_skills` 应来自真实目录。
 
-**当前实现**：桌面首页、MCP `run_agent` 和基础工具过滤已存在；SSH 真实认证、roster 自动组绑定、动态 Skill/Tool Catalog 和组覆盖防护仍需接通。
+**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定和 `tools/list`/`tools/call` 共用的 effective catalog 已有；桌面身份选择与连接 surface 仍依赖外部 `opencode-lens`。
 
 **验收补充**：提交请求只能使用认证 session 的 `group`；请求中出现不同组时拒绝；`tools/list` 与 `tools/call` 必须使用同一份 effective tool set；无 roster 的生产请求 fail-closed。Skill 列表来自维护员发布目录，不能由用户输入或 Agent 运行时注册。
 
@@ -140,9 +173,9 @@ DataAccess
 
 Activity 显示思考、工具调用/结果、产物、错误、方案状态、Gate 和 checkpoint；同一 `thread_id` 的事件可去重合并，支持从 checkpoint 回放。服务端历史应与本地缓存区分，避免跨用户泄露。
 
-**当前实现**：trace、metrics、checkpoint 和 replay 基础已存在；服务端历史、按人维度和 UI 全量验收待审查。
+**当前实现**：trace、metrics、checkpoint、context rebuild 和 replay 后端已有；Admin 运行查询和 actor/role 记录已有，服务端历史的完整 UI surface 仍依赖外部桌面端。
 
-**事件要求**：至少支持 `agent_start`、`skill_loaded`、`node_update`、`llm_thought`、`tool_call`、`tool_result`、`artifact`、`error`、`checkpoint_snapshot`、`human_gate` 和 `agent_end`。事件使用 `thread_id + iteration + seq` 去重，mock、proxy、staging、降级和权限拒绝必须保留原状态。
+**事件要求**：至少支持 `agent_start`、`skill_loaded`、`node_update`、`decision_summary`、`tool_call`、`tool_result`、`artifact`、`error`、`checkpoint_snapshot`、`human_gate` 和 `agent_end`。事件使用 `thread_id + iteration + seq` 去重，mock、proxy、staging、降级和权限拒绝必须保留原状态。
 
 ### F-03 HumanGate 写操作门禁
 
@@ -155,7 +188,7 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 预算是运行时资源限制：达到上限时告警、停止或进入预算耗尽状态。研究输出、RiskProfile 越限、组合评估失败和 CI 结果通过 `pass/fail`、报告或错误记录表达，不触发产出 Gate。
 
-**当前实现**：Gate 载体、permission 和 merge 入口已有；风险越限、预算和旧部署路径仍有旧语义，需按本规格迁移。Admin 专属部署和生产服务账号边界尚未在服务端完全接通。
+**当前实现**：`merge`/`permission` Gate、Risk CI verdict、预算/循环停止状态和 Admin staging 部署接口已有；真实生产队列、服务账号和桌面 Admin surface 仍是外部依赖。
 
 **严格边界**：普通 Agent 的 Gate kind 白名单只有 `merge` 和 `permission`。风险、评估、报告、普通开发、CI、预算和循环检测分别返回领域结果、报告、错误或停止状态。Admin `/deploy` 使用独立管理接口和部署审计，不注册为普通 Agent 工具，也不在普通 Agent GatePanel 中生成卡片。
 
@@ -163,19 +196,19 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 提供组级共享 Memory、公共契约、能力卡片、详情查询、来源和版本信息。Mask 按用户组/GitHub 权限执行，Admin 全可见。`memory_search` 必须有真实后端通道；UI 空态不得伪造结果。
 
-**当前实现**：FTS5、Group 隔离、六张首批卡和常驻摘要已有；详情分级、真实 Memory MCP 查询和 Admin 审计待审查。
+**当前实现**：FTS5、Group ACL、显式 reconcile、14 张能力卡、摘要/详情分层和 `list_capabilities` 已有；专用 Memory MCP 查询、完整 Admin UI 和外部组件状态同步仍需接入。
 
-**能力卡字段**：`canonical_repo`、`status`、`type`、`domain_authority`、`inputs`、`outputs`、`public_api`、`depends_on`、`consumed_by`、`owner_group`、`visibility`、`deprecated_aliases`、`source_commit`、`observed_at`、`when_to_use` 和 `when_not_to_reinvent`。卡片状态不能用目录存在代替运行时接通。
+**能力卡字段**：`canonical_repo`、`maturity_status`、`integration_status`、`type`、`domain_authority`、`inputs`、`outputs`、`public_api`、`depends_on`、`consumed_by`、`owner_group`、`visibility`、`deprecated_aliases`、`source_commit`、`observed_at`、`when_to_use` 和 `when_not_to_reinvent`。卡片状态不能用目录存在代替运行时接通。
 
 ### F-05 SSH 身份登录
 
 流程为“本地 SSH 身份 → 服务端验证公钥指纹 → roster 匹配 actor/组/角色/个人工作目录 → 建立不可变会话”。私钥只留在本机密钥链或 SSH agent，不进入 LLM、Memory、日志或普通 UI 请求。登录后可读取授权主线、写入个人开发环境；生产环境由独立服务账号运行，不提供研究员直接登录。
 
-**当前实现**：指纹映射和只读状态查询有基础，桌面登录界面仍需接真实认证/连接 surface；当前 UI stub 不能视为完整登录。
+**当前实现**：指纹映射、一次性 challenge/signing、SessionContext 和只读状态查询后端已有；桌面登录界面仍需接真实认证/连接 surface，当前 UI stub 不能视为完整登录。
 
 **失败状态**至少区分密钥拒绝、主机不可达、roster 未命中、资源权限不足和身份接线未完成。研究员登录后拥有被授权服务器上的个人工作目录；该目录属于研究/开发环境。生产 shell、生产服务账号和生产进程控制不属于此功能。
 
-### F-06 外部组件登记、评估调用、契约检测与部署适配
+### F-06 组件发现、调用、适配与契约检查
 
 因子路径必须区分：
 
@@ -188,9 +221,9 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 需要训练/OOS → Modeling
 ```
 
-QuantCode 负责发现、选择、调用、适配和记录；评估器负责计算证据；研究员负责算法调优；Admin 管理面负责把已调试代码交给 `/deploy` 黑盒适配器。论文复现和研究方向调优不属于 QuantCode 功能。
+QuantCode 负责发现、选择、调用、适配、契约检查和记录；评估器负责计算证据；研究员负责算法调优。已调试 artifact 如需生产处理，交给独立的 Admin Deploy（P-09），不属于普通 Agent 功能。论文复现和研究方向调优不属于 QuantCode 功能。
 
-**当前实现**：`eval_from_panel`、真实数据契约、能力卡和 staging adapter 已有；组织组件逐一接入、真实 AlphaFlow adapter、Admin 部署权限和口径违规 warning 仍需审查。
+**当前实现**：`eval_from_panel`、真实数据契约、能力卡和 staging adapter 已有；组织组件逐一接入、真实 AlphaFlow adapter 和口径违规 warning 仍需后续接入。
 
 **状态要求**：评估结果必须带 `source`、`environment` 和 `result_status`。`mock`、`proxy`、`staging` 结果不能冒充生产证据。QuantCode 负责选择和记录；QuantEvaluator 负责指标计算；研究员负责算法调优和科学结论；Admin 管理面负责把已调试 artifact 交给部署适配器。
 
@@ -212,7 +245,7 @@ Admin 是组织级角色，在 QuantCode 平台拥有无限权限，包括全组
 
 GitGraph 的完整目标是：按当前用户权限列出全部可见 repo、分支、HEAD、最近提交和变更节点；Admin 按组织权限查看全部 repo。更新节点高亮，package/依赖版本更新单独显示。Pop 使用同一权限边界，全组可见不等于跨权限可见。
 
-**当前实现**：Admin 元工具、基础查询和应用内 GitGraph/Pop 已有；按人运行记录、完整分支树、后台自动刷新、基线/去重/确认、系统级通知和报告/任务工作台仍需审查或后续实现。
+**当前实现**：Admin 元工具、actor/role 运行查询、GitGraph/Pop 契约、基线/去重/read/ack 和本地服务已有；GitHub 后台同步、完整分支树、系统级通知和报告/任务工作台仍依赖外部服务或桌面端。
 
 **权限要求**：普通用户的 GitGraph 和 Pop 查询使用当前 GitHub subject/token scope；Admin 使用组织授权范围。业务组归属只影响能力卡和上下文，不能代替 GitHub repo 权限。错误、权限不足、仓库缺失和服务不可用必须分别返回。
 
@@ -223,15 +256,15 @@ GitGraph 的完整目标是：按当前用户权限列出全部可见 repo、分
 | 编号 | 设计定位 | 当前口径 |
 |---|---|---|
 | P-01 | DataAccess/FactorPanel/ReturnsDataset 数据契约与 staging 接入 | 平台消费；真实数据接入仍依赖外部服务 |
-| P-02 | 回测引擎 | 组内工具，不做 QuantCode 产品 UI |
-| P-03 | 组合层 | 组内工具，不做 QuantCode 产品 UI |
+| P-02 | 回测组件适配 | 组内工具，不做 QuantCode 产品 UI |
+| P-03 | 组合组件适配 | 组内工具，不做 QuantCode 产品 UI |
 | P-04 | 并行 subagent | 平台基础设施，必须继承组权限和预算 |
-| P-05 | 实验管理 | 记录 A/B、OOS、证据和复现关系 |
+| P-05 | 轻量实验运行记录 | 记录 A/B、OOS、证据和复现关系 |
 | P-06 | evidence chain | 运行、产物、Gate 和决策的可验证留痕 |
-| P-07 | 组织资产蒸馏 | 组件调研 → 能力卡 → ACL/Mask → 常驻摘要 + 详情 Memory；组件状态以实物为准 |
+| P-07 | 组织知识与能力候选蒸馏 | 组件调研 → 能力卡 → ACL/Mask → 常驻摘要 + 详情 Memory；组件状态以实物为准 |
 | P-08 | Admin 中枢 | 全权限角色的语义查询、错误沉淀、GitGraph、Pop 和运行治理 |
-| P-09 | `/deploy` 黑盒适配 | Admin 管理面提交已调试代码，生产服务账号经受控接口执行并留存部署记录 |
-| P-10 | 方案先行 | 按任务复杂度分级；架构性任务先出方案，流程控制不改变 HumanGate 范围 |
+| P-09 | Admin-only `/deploy` 黑盒适配 | Admin 管理面提交已调试代码，生产服务账号经受控接口执行并留存部署记录 |
+| P-10 | Solution-First 与复杂度分级 | 四维任务分类；L2/L3 先出方案，流程控制不改变 HumanGate 范围 |
 
 ### P-10 复杂度分级
 
@@ -240,7 +273,7 @@ GitGraph 的完整目标是：按当前用户权限列出全部可见 repo、分
 | L0 只读/查询 | 查组件、看状态、读报告 | 直接执行，记录 trace |
 | L1 有界研究/小修改 | 单文件修复、一次评估、参数实验 | 可生成轻量计划，不强制冻结 |
 | L2 架构/多模块 | 新模块、跨仓接入、较大功能 | 先产方案，讨论后冻结，再生成代码 |
-| L3 生产变更 | 部署、主线入库、不可逆写 | L2 方案 + evidence；merge/permission 进入 HumanGate，部署由 Admin 管理面发起 |
+| L3 共享高影响变更 | 共享主线或共享资产写入 | L2 方案 + evidence；merge/permission 进入 HumanGate。生产部署独立归 `admin_deploy`。 |
 
 ### 4.1 计划功能验收要点
 
@@ -252,7 +285,7 @@ GitGraph 的完整目标是：按当前用户权限列出全部可见 repo、分
 | P-04 | `ComposeTask` parent/children → 子任务状态 | 子任务继承 actor、group、workspace、allowlist 和预算，并支持独立终止 |
 | P-05 | A/B、OOS、trial ledger → 实验 artifact | 记录数据版本、切分、参数和复现关系，禁止把训练内结果当 OOS |
 | P-06 | run、artifact、Gate、决策 → evidence chain | 哈希链可验证；关键写操作证据失败时阻止成功状态 |
-| P-07 | 组织仓库实读 → 能力卡、ACL/Mask、组内摘要 | 卡片含 canonical、状态、依赖、消费者、别名和复用纪律；目录存在不代表已接通 |
+| P-07 | 组织仓库实读 → 能力卡、ACL/Mask、组内摘要 | 卡片含 canonical、maturity/integration 双状态、依赖、消费者、别名和复用纪律；目录存在不代表已接通 |
 | P-08 | Admin session → 跨组查询、错误聚合、GitGraph、Pop | 非 Admin 拒绝跨组查询；普通用户遵守 GitHub 可见范围；错误不伪装成空结果 |
 | P-09 | Admin artifact + manifest → 受控部署请求/结果 | 生产服务账号执行；普通 Agent 不可见、不可调用；结果只返回状态、artifact、记录哈希和错误 |
 | P-10 | `SolutionDoc` → frozen 实现 → conformance verdict | L2/L3 先冻结方案；L0/L1 不被固定轮次阻塞；偏离文件面必须报告 |

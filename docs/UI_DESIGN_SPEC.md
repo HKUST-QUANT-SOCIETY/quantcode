@@ -1,6 +1,6 @@
 # QuantCode 桌面端设计规格（UI_DESIGN_SPEC）
 
-> **版本**：v3（2026-09-03，OpenCode/MimoCode 基线与运营模型重定版）
+> **版本**：v4（2026-09-04，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **UI 仓库**：`opencode-lens`，组件根目录为 `packages/app/src/components/quantcode/`。
 > **上位规范**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)；本文件只定义桌面端接入、展示和操作，不复制领域业务平台。
@@ -114,14 +114,14 @@ UI 只消费服务端 session、工具目录、结构化 artifact 和外部平�
 
 首页提供自然语言任务、已绑定的组/角色、可用 Skill 和最近任务。组由认证会话提供，页面不提供组选择器。Skill 列表从维护员发布的 `list_skills` 目录获取，加载失败显示明确错误。
 
-提交前显示当前可用能力的摘要：组件名、用途、状态和“何时别自造”。首页提供提示和复用入口，详细 API 仍在能力目录中查看。
+提交前显示当前可用能力的摘要：组件名、用途、成熟度、接入状态和“何时别自造”。首页提供提示和复用入口，详细 API 仍在能力目录中查看。
 
-任务按复杂度处理：
+任务由后端分别判断业务模式、复杂度、执行策略和治理类别，再按复杂度处理：
 
 - L0 查询/只读：直接提交；
 - L1 有界研究/小修改：可生成轻量计划；
 - L2 架构/多模块：展示方案面板，冻结后才进入代码阶段；
-- L3 生产变更：方案、部署信息、Admin 管理面和审计均可见；普通研究 Agent 不出现部署入口。
+- L3 共享高影响变更：方案、共享写入和审计均可见；生产部署独立归 Admin 管理面，普通研究 Agent 不出现部署入口。
 
 ## 5. 会话与执行记录
 
@@ -155,7 +155,7 @@ draft → discussion/revision → frozen → implementation → conformance verd
 
 ### 7.1 组内 Memory
 
-Memory 页面默认展示当前组共享知识：研究结论、失败记录、组件用法、数据口径、工程决策和 Best Practice。公共契约单独标识。普通组员不能搜索其他组的详细 Memory；Admin 可以查看全部内容。
+Memory 页面只展示已确认的长期 Group Knowledge（Checkpoint、Progress、Trace 等 Runtime State 留在 Work/Activity），默认展示当前组共享知识：研究结论、失败记录、组件用法、数据口径、工程决策和 Best Practice。公共契约单独标识。普通组员不能搜索其他组的详细 Memory；Admin 可以查看全部内容。
 
 每条结果显示 scope、来源、更新时间、验证状态和 superseded 关系。未接通真实后端时显示空态/未连接，不展示假数据。
 
@@ -163,7 +163,7 @@ Memory 页面默认展示当前组共享知识：研究结论、失败记录、�
 
 能力卡至少展示：
 
-- canonical repo 和状态：PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY；
+- canonical repo、`maturity_status`（PRODUCTION/STAGING/RESEARCH/SCAFFOLD/LEGACY）和 `integration_status`（CONNECTED/PARTIAL/UNAVAILABLE/UNVERIFIED）；
 - 公开用途、输入/输出摘要、领域权威、依赖和消费者；
 - “何时用”和“何时别自造”；
 - 属组、可见性和来源 commit/观察时间；
@@ -215,7 +215,7 @@ GitGraph 不按“属组仓库”静态写死，而按当前 GitHub 权限查询
 1. repo 新提交、分支或仓库状态变化；
 2. 依赖库/package 版本变化。
 
-Pop 与 GitGraph 使用相同可见性边界：普通用户只收到自己可见 repo 的消息，Admin 收到组织范围消息。每条 Pop 应有来源、时间、变化摘要、跳转、去重键、已读/确认状态。
+Pop 与 GitGraph 使用相同可见性边界：普通用户只收到自己可见 repo 的消息，Admin 收到组织范围消息。每条 Pop 应有来源、时间、变化摘要、old/new 值、baseline、跳转、去重键、已读/确认状态。
 
 ### 11.2 完整增强目标
 

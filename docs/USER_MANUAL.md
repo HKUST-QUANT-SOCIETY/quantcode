@@ -1,8 +1,8 @@
 # QuantCode 用户手册
 
 > **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员
-> **版本**：v1.2
-> **最后更新**：2026-09-03
+> **版本**：v5
+> **最后更新**：2026-09-04
 
 ---
 
@@ -112,7 +112,7 @@ QuantCode:
 建议: IC均值与IR达到验收线，可以进入下一步。
 ```
 
-> **注意**：以上为示例数字。实际指标来自 AutoEval 评估（API 不可用时降级为 mock 数据并明确标注 `_is_mock`），是否通过以 `runner/acceptance.py` 的验收阈值判定为准（|ic_mean| ≥ 0.03、ir ≥ 0.5、turnover ≤ 0.8、t_stat ≥ 2.0）。
+> **注意**：以上为示例数字，不是运行证据。实际指标只能来自 canonical QuantEvaluator；服务未接通时显示 `UNAVAILABLE`，不会返回 mock 指标。
 
 ### 关键工具
 
@@ -120,7 +120,7 @@ QuantCode:
 |---|---|---|
 | `match_main` | 匹配主线因子库 | 提出因子想法时自动 |
 | `gen_schema` | 生成FactorSpec | 匹配后自动 |
-| `autoeval` | 提交AutoEval评估 | FactorSpec生成后自动 |
+| `quant_evaluator` | 提交AutoEval评估 | FactorSpec生成后自动 |
 
 ### 输出Artifact
 
@@ -128,8 +128,8 @@ QuantCode:
 
 ### 常见问题
 
-**Q: AutoEval评估需要多久？**
-A: 取决于因子复杂度与 API 状态。若 AutoEval 服务不可用，工具会降级返回 mock 数据并标注 `_is_mock`，请据此判断结果可信度。
+**Q: QuantEvaluator 不可用怎么办？**
+A: 工具返回 `UNAVAILABLE` 和可操作错误。请检查组件连接或联系维护者，不能用本地 proxy/mock 替代生产评估。
 
 **Q: IC均值低于0.03还有价值吗？**
 A: 验收判定（`runner/acceptance.py`）会返回 fail。你可以结合 IR / t统计量决定是否继续优化；通过验收的因子可提交 `merge_to_main`，由 `merge` HumanGate 等待授权的 approver 或 Admin 作最终决定。
@@ -230,7 +230,7 @@ QuantCode:
 | `read_blackboard` | 读取Model组写入的ModelSpec |
 | `calc_risk` | 计算风险指标 |
 | `generate_risk_profile` | 生成RiskProfile |
-| `check_gate` | 检查是否超阈值 |
+| `risk_verdict` | 检查是否超阈值 |
 | `write_pr_comment` | 写GitHub PR评论 |
 
 ### HumanGate机制
@@ -328,7 +328,7 @@ QuantCode:
 | `select_signals` | 筛选因子/模型 |
 | `combine_signals` | 组合优化 |
 | `run_strategy_backtest` | 回测 |
-| `deploy_strategy` | 产出待部署 artifact；不能直接部署生产 |
+| `deployment_candidate` | 产出待部署 artifact；不能直接部署生产 |
 
 ### 风险控制
 

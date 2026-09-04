@@ -1,13 +1,13 @@
 # QuantCode 产品需求文档（PRD）
 
-> **版本**：v4（2026-09-03，OpenCode/MimoCode 基线与运营模型重定版）
+> **版本**：v5（2026-09-04，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
-> **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD、Day1-5 任务表和旧用户手册均为历史材料。
+> **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD 与 Day1-5 任务表是历史材料；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。
 
 ## 0. 产品定义
 
-QuantCode 是建立在 OpenCode 桌面端和 MimoCode 工作流设计之上的研究 Agent 平台。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
+QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建立在 OpenCode 桌面端和 MimoCode 工作流设计之上。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
 
 各研究组和外部平台维护业务真相：报告平台汇总研究成果和策略表现，各组维护算法、回测、组合、期权和基本面业务，生产系统负责实际运行。QuantCode 把这些系统接入研究工作流，提供编排、契约、可观测和组织协作。
 
@@ -92,18 +92,18 @@ Admin 是组织级角色，在 QuantCode 平台拥有无限权限，包括全部
 
 ### 3.2 任务提交
 
-用户用自然语言或模板提交任务。Agent 先识别任务级别：
+用户用自然语言或模板提交任务。Agent 将业务模式、复杂度（L0-L3）、执行策略（plan/build/compose）和治理类别分开判断：
 
-- **只读/查询**：直接查能力、状态、资料或报告；
-- **有界研究/小修改**：可生成轻量计划，不强制冻结；
-- **架构/多模块**：先形成方案，讨论后冻结，再进入代码阶段；
-- **生产变更**：由 Admin 管理面提交到受控服务账号，保留方案、审计和部署记录。
+- **只读/查询**：直接查能力、状态、资料或报告（L0、read_only）；
+- **有界研究/小修改**：可生成轻量计划，不强制冻结（L1、personal_workspace_write）；
+- **架构/多模块**：先形成方案，讨论后冻结，再进入代码阶段（L2）；
+- **共享高影响变更**：共享主线/共享资产的 L3 变更，使用 merge/permission Gate；生产部署独立归 `admin_deploy`，仅由 Admin 管理面提交。
 
 用户不需要记住组件调用顺序。Agent 先查组织能力目录和组 Memory，再调用已有组件；能力覆盖不全时先说明缺口并询问用户。
 
 ### 3.3 结果与沉淀
 
-每次运行产生结构化 trace、artifact、错误和状态。研究员看到可验证的结果来源；经确认的结论、失败和组件使用经验可以沉淀到本组 Memory。结果报告和策略表现由报告平台消费，QuantCode 不复制一套报告产品。
+每次运行产生结构化 trace、artifact、错误和 Runtime State（Checkpoint、Progress、Task 状态）；这些运行状态不进入长期 Group Memory。研究员看到可验证的结果来源；经确认的结论、失败和组件使用经验可以沉淀到本组 Memory。结果报告和策略表现由报告平台消费，QuantCode 不复制一套报告产品。
 
 ### 3.4 Admin 中枢
 
@@ -287,17 +287,17 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 
 | 编号 | 产品含义 | 归属 |
 |---|---|---|
-| F-01 | 新建研究、组路由和 Skill 加载 | QuantCode |
+| F-01 | 新建任务与组内 Agent 路由 | QuantCode |
 | F-02 | Activity、trace、artifact、checkpoint 和回放 | QuantCode |
 | F-03 | `merge`/`permission` HumanGate；Admin 部署独立处理 | QuantCode 治理 |
 | F-04 | 组内 Memory、公共契约和能力目录 | QuantCode |
 | F-05 | 本地 SSH 公钥身份、roster 和个人工作目录 | QuantCode + SSH gateway |
-| F-06 | 外部组件登记、评估调用、数据契约和部署适配 | QuantCode + canonical components |
+| F-06 | 组件发现、调用、适配与契约检查（部署归 P-09） | QuantCode + canonical components |
 | F-07 | Blackboard handoff 和 Model→Risk CI 基建 | QuantCode + GitHub Actions |
 | F-08 | 策略、期权、基本面和组合工具适配 | 各业务组 |
 | F-09 | Admin 中枢、GitGraph、Pop 和运行治理 | QuantCode Admin |
-| P-01~P-06 | 数据契约、组内工具、Subagent、实验和 evidence | 平台/各组按表执行 |
-| P-07~P-10 | 资产蒸馏、Admin、Admin-only `/deploy` 和方案先行 | QuantCode |
+| P-01~P-06 | 数据契约、回测/组合组件适配、Subagent、实验和 evidence | 平台/各组按表执行 |
+| P-07~P-10 | 组织知识候选蒸馏、Admin、Admin-only `/deploy` 和方案先行 | QuantCode |
 
 ## 9. 后续审查顺序
 

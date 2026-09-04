@@ -12,7 +12,7 @@ F-XX 用户功能 / P-XX 平台功能  →  契约先行 + 机器可验证断言
 - FUNCTIONAL_SPEC 是唯一入参：只定义"是什么/给谁/验收口径"，不写实现；编号 F-XX / P-XX 跨季不复用。
 - 域 SPEC：契约必须先于代码变更落地；断言是测试的规格来源，测试是断言的执行体。
 - verdict 回填：pytest/playwright 机器验证结果填入 §6，禁止人工补写。
-- 与老文档关系：docs/PRD.md（v2）与 docs/QuantCode_Design.md（v2 对齐）为顶层设计活文档；docs/Day1~5 系列 = **历史快照，只读**；冲突时以 SPEC 为准。
+- 与老文档关系：docs/PRD.md、docs/QuantCode_Design.md 和 docs/UI_DESIGN_SPEC.md 当前均为 v5 顶层活文档；docs/archive/pre-v5/ = **历史快照，只读**；冲突时以 SPEC 为准。
 - schema 单一真源：schemas/*.py（Pydantic v2）；JSON Schema 为生成物，CI 校验两者一致。
 
 ## 2. SPEC 固定章节（§0–§6，缺章节不得离开 draft）

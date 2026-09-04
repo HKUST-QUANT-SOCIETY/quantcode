@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1021%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-987%20passed-brightgreen.svg)](tests/)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
 [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
@@ -48,7 +48,7 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 | 2026-08-29 | 🧭 Group identity via SSH key fingerprint and roster binding; local development may use an explicit fallback, while production requires roster authentication |
 | 2026-08-28 | 🔁 Minimal replay CLI (list/show/resume), auto checkpoint (>70% snapshot / >90% rebuild), unified single checkpoint DB |
 | 2026-07-16 | 🎯 **Beta Release** — 6-group E2E demos functional |
-| 2026-07-15 | 🔐 Risk Gate E2E: GitHub PR comments with auto-generated `RiskProfile` |
+| 2026-07-15 | 🔐 Risk CI E2E: GitHub PR comments with auto-generated `RiskProfile` |
 | 2026-07-10 | 🧪 Factor tools migrated from stub → real LLM (DeepSeek) for `gen_schema` + `match_main` |
 | 2026-07-09 | 📐 HumanGate deterministic routing engine (Pattern 5: interrupt-resume) |
 | 2026-07-05 | 🏗️ AgentRunner ReAct engine + self-built StateGraph (no `create_react_agent`) |
@@ -66,7 +66,7 @@ Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-pic
 ```
 User intent → Group-specific AgentRunner → Tool chain → Schema validation → Output artifact
      ↓
-  Factor: match_main → gen_schema → autoeval → FactorReport
+  Factor: match_main → gen_schema → quant_evaluator → FactorReport
   Model: read_pr → extract_metadata → generate_model_spec → (triggers Risk flow)
   Risk: read_blackboard → calc_risk → generate_risk_profile → CI/report result
      ↓
@@ -85,8 +85,8 @@ User intent → Group-specific AgentRunner → Tool chain → Schema validation 
 
 - **AgentRunner** — Self-built StateGraph ReAct engine (not `create_react_agent`). Loads group-specific tools, injects skill markdown as system prompt, routes via `tool_routing_edge` → `route_next_step`.
 - **ToolRegistry** — Global singleton. Each group's `_register.py` declares tools at import time. Tests use `importlib.reload()` to re-register after other tests clear the registry.
-- **Blackboard** — SQLite-backed shared state with GLOBAL/PROJECT/GROUP/SESSION/TASK scopes. Model group writes an authorized `ModelSpec` entry → Risk flow reads the permitted fields.
-- **Memory** — FTS5 full-text search + 5-scope ACL. Factor agent can't read Model group's memory.
+- **Blackboard** — SQLite-backed shared state with scoped ACL and transactional writes. Cross-group handoff carries only a minimal Artifact reference.
+- **Memory** — FTS5 long-term Group Knowledge. Checkpoint/Progress/Trace remain Runtime State and do not appear as organizational Memory.
 - **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskProfile`, `StrategyReport`, etc.
 
 ---
@@ -97,9 +97,9 @@ Each group has a vertical Compose flow that produces a typed research or enginee
 
 ### 1. Factor (Owner: 肖骥超)
 
-**Goal**: Automate factor development from idea to AutoEval evaluation with deterministic acceptance verdict.
+**Goal**: Discover and call the canonical QuantEvaluator without duplicating its metrics.
 
-**Tools**: `match_main`, `gen_schema`, `autoeval` — all three always registered with real LLM/API implementations; if the API call fails, each tool automatically degrades to a mock/fallback result marked with `_is_mock` / `_fallback`.
+**Tools**: `match_main`, `gen_schema`, `quant_evaluator`. The evaluator returns a `ComponentCallResult`; an unavailable service returns `UNAVAILABLE`, never invented metrics.
 
 **Flow**:
 ```python
@@ -107,21 +107,18 @@ idea = "高ROE低PB价值因子"
   ↓ match_main (LLM) → finds similar factors in main branch
   ↓ gen_schema (LLM) → generates a FactorSpec satisfying the schema contract
     (operators / estimated_runtime_seconds / forward_return_horizon included)
-  ↓ autoeval (API) → submits to AutoEval service, returns IC/IR/turnover;
-    API unavailable → mock payload marked _is_mock
-  ↓ Schema validation → artifacts/factor/{name}-report.json
-  ↓ Acceptance verdict via runner/acceptance.py:
-    |ic_mean| >= 0.03, ir >= 0.5, turnover <= 0.8, t_stat >= 2.0
-    (thresholds: runner/acceptance.py, defaults)
+  ↓ quant_evaluator (API) → canonical evaluation result + source/version/environment
+    API unavailable → result_status=UNAVAILABLE, no FactorReport fabricated
+  ↓ optional shared write → validate_factor_contract → merge HumanGate
 ```
 
-> `check_factor_gate` validates the evidence. `merge_to_main` creates a shared-asset merge request and pauses on the `merge` HumanGate; an authorized approver or Admin makes the final decision.
+> `validate_factor_contract` validates the evidence. `merge_to_main` creates a shared-asset merge request and pauses on the `merge` HumanGate; an authorized approver or Admin makes the final decision.
 
 **Demo**: `python scripts/demo_jerry_tracks.py --track factor` (factor track entry shared with the other 3 tracks; `runner/jerry_demos.py` remains the underlying module)
 
 **Tests**: `tests/test_factor_tools.py`
 
-**Status**: ✅ `match_main` / `gen_schema` real LLM; `autoeval` real API with automatic mock fallback (`_is_mock` marked) when unconfigured/failing
+**Status**: QuantEvaluator adapter is implemented; production connection remains environment-dependent and fails honestly when unavailable.
 
 ### 1b. SSH mainline reading (factor supporting feature)
 
@@ -159,13 +156,13 @@ PR #42 opened → read_pr → extract model type/params from diff
 
 **Goal**: Generate a structured `RiskProfile` for the CI/report chain and return threshold results.
 
-**Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `check_gate`, `write_pr_comment`, `request_human_review`
+**Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `risk_verdict`, `write_pr_comment`, `request_human_review`
 
 **Flow**:
 ```python
 ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, position_limit}
   ↓ generate_risk_profile → enriched RiskProfile with thresholds
-  ↓ check_gate → {verdict: "pass|fail", reasons: [...]}
+  ↓ risk_verdict → {verdict: "pass|fail", reasons: [...]}
   ↓ write_pr_comment → GitHub PR comment or CI artifact with full RiskProfile JSON
 ```
 
@@ -264,7 +261,7 @@ Open QuantCode desktop → authenticate with a local SSH identity → let the se
 我想开发一个基于ROE和PB的价值因子
 ```
 
-Agent auto-runs: `match_main` → `gen_schema` → `autoeval` → shows you IC/IR results with the acceptance verdict.
+Agent auto-runs: `match_main` → `gen_schema` → `quant_evaluator`. It shows metrics only when returned by the canonical component.
 
 ### Provider binding (desktop)
 
@@ -310,7 +307,7 @@ python scripts/demo_jerry_tracks.py --track factor  # factor track entry
 ## Testing
 
 ```bash
-# Full suite (1021 tests)
+# Full suite
 pytest
 
 # Specific group
@@ -326,9 +323,9 @@ pytest tests/test_model_risk_handoff_e2e.py -v
 QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ```
 
-**Test status**: 1021 passed, 5 skipped (as of 2026-09-03). The 5 skipped tests require real LLM API access.
+**Test status**: 987 passed, 4 skipped (2026-09-04). The skipped tests require explicit real-LLM access.
 
-**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM + mock fallback), risk metrics (real returns + stub marking), metrics/monitor read path.
+**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM plus deterministic local fixtures), risk metrics (real returns + explicit stub marking), metrics/monitor read path.
 
 ## Sessions & Monitoring
 
@@ -344,9 +341,9 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ## Documentation
 
 - **[User Manual](docs/USER_MANUAL.md)** — End-to-end guides for all 6 groups
-- **[Architecture Spec](docs/Architecture_Spec.md)** — System design, Pattern 1/2/5, state management
-- **[Module Architecture](docs/MODULE_ARCHITECTURE.md)** — 15 modules documented (1234 lines)
-- **[Testing Guide](TEST_GUIDE.md)** — How to write tests, mock LLMs, fixture patterns (745 lines)
+- **[Technical Design](docs/QuantCode_Design.md)** — current v5 architecture and module boundaries
+- **[Historical specifications](docs/archive/pre-v5/README.md)** — pre-v5 material, not current behavior
+- **[Testing Guide](TEST_GUIDE.md)** — current v5 test commands and contract boundaries
 - **[PRD](docs/PRD.md)** — Product requirements, acceptance criteria
 
 ---
@@ -355,7 +352,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 **Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
 
-**Current stage**: Beta — 1021 tests pass and five are skipped for real LLM access. The main production gaps are the real SSH/roster surface, dynamic catalog enforcement, Admin-only deployment authorization, the production AlphaFlow adapter, and desktop packaging. Staging, mock, proxy, and external-service gaps remain labeled in the artifacts and audit ledger.
+**Current stage**: Beta — 987 tests pass and four real-LLM tests are skipped. Remaining production dependencies are the desktop identity/Admin UI, organization GitHub background sync, canonical component connections, the production deploy queue/service account, and packaging. Staging, proxy and unavailable states remain explicit.
 
 **Production readiness estimate**: 4-6 weeks to GA per [product evaluation](https://github.com/HKUST-QUANT-SOCIETY/quantcode/issues/X).
 
@@ -363,7 +360,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 ## Roadmap
 
-- [x] **AutoEval integration** — factor `autoeval` tool now calls the real API; unconfigured/failing calls degrade to an `_is_mock`-marked payload (real service URL hardening ongoing). *(done 2026-08)*
+- [x] **QuantEvaluator adapter** — calls the canonical API and returns an explicit `UNAVAILABLE` envelope when disconnected; no mock fallback.
 - [x] **Replay / auto checkpoint** — `scripts/replay.py` (list/show/resume shared-write or permission runs) + context >70% snapshot / >90% rebuild. *(done 2026-08)*
 - [x] **Monitoring dashboard v0** — `list_runs` read-only MCP tool + desktop Monitor panel aggregating `.quantcode/metrics.jsonl`. *(done 2026-08)*
 - [x] **Shared-write merge path** — factor asset merge requests use the `merge` HumanGate contract; domain owners retain the final decision

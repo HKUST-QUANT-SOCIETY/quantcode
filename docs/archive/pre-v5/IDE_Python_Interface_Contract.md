@@ -25,7 +25,7 @@
   "arguments": {
     "task": "测 PB-ROE 因子",          // 必传
     "group": "factor",                 // 可选，不传读 QUANTCODE_GROUP
-    "skill_name": "factor-autoeval",   // 可选，不传用默认 prompt
+    "skill_name": "factor-evaluation",   // 可选，不传用默认 prompt
     "max_iterations": 50,              // 可选，默认 50
     "thread_id": "可选：指定则用该值"
   }

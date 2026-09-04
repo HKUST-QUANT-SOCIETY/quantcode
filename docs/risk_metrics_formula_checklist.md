@@ -1,9 +1,9 @@
 # 风控统计指标计算口径清单
 
-Owner: 肖骥超 / T4 为杨欣琳 `risk-gate` 提供统计口径支持
+Owner: 肖骥超 / T4 为杨欣琳 `risk-ci` 提供统计口径支持
 
 这份文档只定义指标怎么算、输入是什么、输出应该长什么样。它不替代
-`risk-gate`，也不直接生成 `risk.json`。变量名保留英文，方便之后写进
+`risk-ci`，也不直接生成 `risk.json`。变量名保留英文，方便之后写进
 schema、runner 和代码。
 
 ---
@@ -144,7 +144,7 @@ tail_risk_var_99 ≈ -0.08
 盈利写成正数，例如 0.03
 ```
 
-不要把 VaR 写成正的 0.05，除非整个 `risk-gate` schema 明确采用“损失为正”的约定。当前建议使用收益率符号，因此亏损为负。
+不要把 VaR 写成正的 0.05，除非整个 `risk-ci` schema 明确采用“损失为正”的约定。当前建议使用收益率符号，因此亏损为负。
 
 Day 1 PRD 阻塞条件：
 
@@ -152,7 +152,7 @@ Day 1 PRD 阻塞条件：
 tail_risk_var_99 must not be null
 ```
 
-也就是说，`risk-gate` 至少要能给出一个 VaR 数值；如果数据不足，应明确说明 insufficient data，而不是静默返回 null。
+也就是说，`risk-ci` 至少要能给出一个 VaR 数值；如果数据不足，应明确说明 insufficient data，而不是静默返回 null。
 
 ---
 
@@ -472,7 +472,7 @@ position_limit <= 0.30
 
 ---
 
-## 建议给 `risk-gate` 的字段
+## 建议给 `risk-ci` 的字段
 
 建议 `risk.json` 至少包含：
 

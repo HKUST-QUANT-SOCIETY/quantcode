@@ -12,9 +12,9 @@ ASCII diagram placeholder for quantcode_flow.png
      v
 [Tool Chain Execution]
      |
-     +-- Factor: match_main → gen_schema → autoeval
+     +-- Factor: match_main → gen_schema → quant_evaluator
      +-- Model: read_pr → extract_metadata → generate_model_spec
-     +-- Risk: calc_risk → generate_risk_profile → check_gate
+     +-- Risk: calc_risk → generate_risk_profile → risk_verdict
      |
      v
 [Schema Validation]
