@@ -26,7 +26,7 @@
 | 外部环境或旧附件无法确认 | 6 | Windows 锁、Desktop resume、外部 fixture、真实服务等 |
 | 不是缺陷或不符合当前 v5 契约 | 7 | 闭包、局部状态、显式 token 错误、旧名称等 |
 
-本轮已经落地的修复包括：L2/L3 任务服务端强制方案阶段；`match_main` 统一 callable/invoke 协议并在失败时返回 `UNAVAILABLE`；能力卡 visibility 服务端过滤；声明 `pyarrow` 并严格阻断坏 YAML 写路径；MCP stdio UTF-8 与 tiktoken 缓存异常降级；QuantCode UI 接入受限的 OpenCode 只读 API（仅 `list_skills`、`ssh_status`、`list_capabilities`、`list_algorithms`），修复指标精度、共享指标标签、算法列表、动态模块错误反馈，并补充对应回归测试。
+本轮已经落地的修复包括：L2/L3 任务服务端强制方案阶段；`match_main` 统一 callable/invoke 协议并在失败时返回 `UNAVAILABLE`；能力卡 visibility 服务端过滤；声明 `pyarrow` 并严格阻断坏 YAML 写路径；MCP stdio UTF-8 与 tiktoken 缓存异常降级；QuantCode UI 接入受限的 OpenCode 只读 API（`list_skills`、`ssh_status`、`list_capabilities`、`list_algorithms`、`search_memory`、`session_context`），修复指标精度、共享指标标签、算法列表、动态模块错误反馈，并补充对应回归测试。
 
 ## 2. 当前确认的真实缺陷
 
@@ -113,7 +113,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 
 ```text
 bun test --preload ./happydom.ts ./src/components/quantcode
-112 pass, 0 fail
+114 pass, 0 fail
 bun run typecheck
 passed
 ```
