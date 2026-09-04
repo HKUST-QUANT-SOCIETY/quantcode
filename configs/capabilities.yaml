@@ -23,6 +23,12 @@ cards:
   - id: target-return-view-v1
     name: 目标收益口径契约（TargetReturnView/v1）
     type: contract
+    canonical_repo: quantcode
+    domain_authority: data-contract
+    visibility: global_shared
+    maturity_status: PRODUCTION
+    integration_status: PARTIAL
+    observed_at: "2026-09-04"
     api_surface:
       - "schemas/data_contracts.py::TargetReturnView/v1 — horizon∈{1,5,10,20}、adjusted=hfq（后复权）、alignment=t+1→t+2"
       - "唯一取值源 = 数据仓目标收益表（后复权表）；本契约只登记口径，不定义计算"
@@ -38,6 +44,12 @@ cards:
   - id: quant-evaluator
     name: Quant Evaluator 批量因子评估器
     type: asset
+    canonical_repo: quant_evaluator
+    domain_authority: factor-evaluation
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: PARTIAL
+    observed_at: "2026-09-04"
     api_surface:
       - "quant_evaluator.api：EvaluationRequest / EvaluationBundle / evaluate()（评估唯一入口）"
       - "quant_evaluator.contracts.label_bundle.LabelBundle — 显式前向标签，硬口径 price_convention='vwap_to_vwap'"
@@ -51,6 +63,12 @@ cards:
   - id: factor-engine
     name: Factor Engine DSL 因子计算引擎
     type: asset
+    canonical_repo: factor_engine
+    domain_authority: factor-computation
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: PARTIAL
+    observed_at: "2026-09-04"
     api_surface:
       - "factor_engine.api：col / rank / ts_mean / Factor / parse_expr（DSL，460+ 注册算子）"
       - "factor_engine.runtime.engine.FactorEngine + backend.factory.build_backend('auto')（SQL 下推→Polars→Pandas）"
@@ -64,6 +82,12 @@ cards:
   - id: data-access
     name: Data Access PIT 数据层
     type: asset
+    canonical_repo: data_access
+    domain_authority: data
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: PARTIAL
+    observed_at: "2026-09-04"
     api_surface:
       - "data_access.get_store() → read / read_frame / read_uri / read_factors / read_joined / read_asof（读写唯一入口）"
       - "写：write_arrow / upsert / publish_from_staging；HTTP：data-access-server + DataAccessClient"
@@ -77,6 +101,12 @@ cards:
   - id: quant-platform
     name: Quant Platform DTO 集成契约层
     type: asset
+    canonical_repo: quant_platform
+    domain_authority: platform-contracts
+    visibility: group
+    maturity_status: STAGING
+    integration_status: PARTIAL
+    observed_at: "2026-09-04"
     api_surface:
       - "app/contracts/*：纯 stdlib frozen DTO（23 模块：artifact_ref/jobs/workflow/lifecycle/rbac/backtest/factor_library...）"
       - "app/adapters/data_access_storage.py（DataAccessStorageAdapter）；app/worker + orchestrator（candidate→evaluation→admission 骨架）"
@@ -89,6 +119,12 @@ cards:
   - id: alpha-flow
     name: AlphaFlow 部署底层
     type: asset
+    canonical_repo: alpha_flow
+    domain_authority: production-deployment
+    visibility: admin
+    maturity_status: SCAFFOLD
+    integration_status: UNAVAILABLE
+    observed_at: "2026-09-04"
     api_surface:
       - "模块边界：alpha_core / alpha_data / alpha_mining / alpha_bus / alpha_materializer / alpha_eval / alpha_sink / alpha_monitor（脚手架态）"
       - "架构说明：docs/quant_architecture.html"
@@ -97,3 +133,123 @@ cards:
     owner_group: strategy
     source_commit: "5ea62c4"
     distilled_at: "2026-09-01"
+
+  - id: factor-optimizer
+    name: Factor Optimizer 因子结构与参数搜索
+    type: asset
+    canonical_repo: factor_optimizer
+    domain_authority: factor-optimization
+    visibility: group
+    maturity_status: STAGING
+    integration_status: UNVERIFIED
+    when_to_use: "需要搜索因子结构、窗口或处理方案时"
+    when_not_to_reinvent: "不要在 QuantCode 内自建参数或结构搜索器"
+    owner_group: factor
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: factor-assets
+    name: Factor Assets 因子身份与生命周期
+    type: asset
+    canonical_repo: factor_assets
+    domain_authority: factor-assets
+    visibility: group
+    maturity_status: STAGING
+    integration_status: UNVERIFIED
+    when_to_use: "因子身份、去重、聚类、生命周期或入库"
+    when_not_to_reinvent: "不要维护第二套因子事实源"
+    owner_group: factor
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: factor-preprocess
+    name: Factor Preprocess 特征预处理
+    type: asset
+    canonical_repo: factor_preprocess
+    domain_authority: feature-preprocessing
+    visibility: group
+    maturity_status: STAGING
+    integration_status: UNVERIFIED
+    when_to_use: "winsor、rank、zscore、中性化和 FeatureBundle"
+    when_not_to_reinvent: "模型仓不要重复实现公共预处理逻辑"
+    owner_group: model
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: modeling
+    name: Modeling 时序训练与 OOS
+    type: asset
+    canonical_repo: modeling
+    domain_authority: model-training
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: UNVERIFIED
+    when_to_use: "walk-forward、purge/embargo、训练与 OOS"
+    when_not_to_reinvent: "不要由 Agent 自行决定或重算时序切分口径"
+    owner_group: model
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: barra-engine
+    name: Barra Engine 风险模型
+    type: asset
+    canonical_repo: barra_engine
+    domain_authority: risk-model
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: UNVERIFIED
+    when_to_use: "需要风险暴露或协方差输入时"
+    when_not_to_reinvent: "不要在平台层重算风险模型"
+    owner_group: risk
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: riskfolio-qs
+    name: Riskfolio-QS 组合优化
+    type: asset
+    canonical_repo: riskfolio_qs
+    domain_authority: portfolio-optimization
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: UNVERIFIED
+    when_to_use: "组合约束和目标仓位优化"
+    when_not_to_reinvent: "不要在 QuantCode 内建设第二套组合优化器"
+    owner_group: strategy
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: vectorbt-qs
+    name: VectorBT-QS 准确回测
+    type: asset
+    canonical_repo: vectorbt_qs
+    domain_authority: backtesting
+    visibility: group
+    maturity_status: PRODUCTION
+    integration_status: UNVERIFIED
+    when_to_use: "真实成交、成本和公司行动回放"
+    when_not_to_reinvent: "不要在 QuantCode 内重建回测引擎"
+    owner_group: strategy
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"
+
+  - id: platform-web
+    name: Platform Web 只读展示门户
+    type: asset
+    canonical_repo: platform_web
+    domain_authority: presentation
+    visibility: group
+    maturity_status: STAGING
+    integration_status: UNVERIFIED
+    when_to_use: "需要跳转组织研究门户和外部展示时"
+    when_not_to_reinvent: "QuantCode 不复制报告与领域业务页面"
+    owner_group: fundamental
+    source_commit: ""
+    distilled_at: "2026-09-04"
+    observed_at: "2026-09-04"

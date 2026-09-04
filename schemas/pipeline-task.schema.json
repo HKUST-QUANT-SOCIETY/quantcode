@@ -16,7 +16,7 @@
     "skill": {
       "type": "string",
       "description": "OpenCode skill 名称，自由扩展（参考 .opencode/groups/<group>/skills/）",
-      "examples": ["risk-gate", "pit-rag", "research-pdf", "factor:autoeval", "model:pr-submit"]
+      "examples": ["risk-ci", "pit-rag", "research-pdf", "factor:evaluation", "model:pr-submit"]
     },
     "status": {
       "type": "string",

@@ -6,7 +6,7 @@
 - 奇异协方差回退 equal_weight + 注记
 - 截断后 Σw = 1 守恒（max_single_weight 后处理）
 - 调仓 delta 阈值 + 成本（佣金/印花税）
-- 超阈值 → 裁决 fail（requires_human=False、无 interrupt payload，G2-A8 收窄）
+- 超阈值 → 裁决 fail（无 HumanGate payload，G2-A8 收窄）
   + AgentRunner 端到端零 interrupt 完成（ScriptedLLM）
 - configs/portfolio.yaml 单源（tmp 值生效）
 """
@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 
 from schemas.portfolio import (
-    PortfolioGateVerdict,
+    PortfolioVerdict,
     PortfolioWeights,
     RebalancePlan,
     TargetPortfolio,
@@ -213,43 +213,41 @@ def test_rebalance_plan_as_dict_via_tool():
 # ---------------------------------------------------------------------------
 
 
-def test_gate_passthrough_when_within_thresholds():
-    from tools.portfolio.gate import check_portfolio_gate_impl
+def test_verdict_passthrough_when_within_thresholds():
+    from tools.portfolio.gate import portfolio_verdict_impl
     from tools.portfolio.rebalance import rebalance_plan_impl
 
     plan = rebalance_plan_impl({}, {"A": 0.05, "B": 0.05})
-    v = check_portfolio_gate_impl(plan, thresholds={"max_single_weight": 0.10, "max_turnover": 0.5})
-    assert isinstance(v, PortfolioGateVerdict)
+    v = portfolio_verdict_impl(plan, thresholds={"max_single_weight": 0.10, "max_turnover": 0.5})
+    assert isinstance(v, PortfolioVerdict)
     assert v.breached == []
-    assert v.requires_human is False
-    assert v.interrupt_payload is None
+    assert v.verdict == "pass"
 
 
-def test_gate_breach_verdict_fail_without_interrupt_payload():
+def test_verdict_breach_verdict_fail_without_interrupt_payload():
     """G2-A8 收窄：越限 = 裁决 fail（breached/reasons 承载），不再构造 HumanGate payload。"""
-    from tools.portfolio.gate import check_portfolio_gate_impl
+    from tools.portfolio.gate import portfolio_verdict_impl
     from tools.portfolio.rebalance import rebalance_plan_impl
 
     plan = rebalance_plan_impl({}, {"A": 0.5})
-    v = check_portfolio_gate_impl(
-        plan, thresholds={"max_single_weight": 0.10, "max_turnover": 0.4}, thread_id="t-gate-1"
+    v = portfolio_verdict_impl(
+        plan, thresholds={"max_single_weight": 0.10, "max_turnover": 0.4}
     )
-    assert v.requires_human is False
-    assert v.interrupt_payload is None
+    assert v.verdict == "fail"
     assert set(v.breached) == {"single_weight", "turnover"}
     assert len(v.reasons) == len(v.breached)
     assert all("max_single_weight" in r or "max_turnover" in r for r in v.reasons)
 
 
-def test_gate_drawdown_proxy():
-    from tools.portfolio.gate import check_portfolio_gate_impl, max_drawdown_proxy_impl
+def test_verdict_drawdown_proxy():
+    from tools.portfolio.gate import portfolio_verdict_impl, max_drawdown_proxy_impl
     from tools.portfolio.rebalance import rebalance_plan_impl
 
     assert max_drawdown_proxy_impl([1.0, 1.2, 0.9, 1.1]) == pytest.approx(0.25)
     plan = rebalance_plan_impl({}, {"A": 0.05})
-    v = check_portfolio_gate_impl(plan, thresholds={"max_drawdown_proxy": 0.20}, equity_curve=[1.0, 1.2, 0.9])
+    v = portfolio_verdict_impl(plan, thresholds={"max_drawdown_proxy": 0.20}, equity_curve=[1.0, 1.2, 0.9])
     assert "drawdown_proxy" in v.breached
-    v2 = check_portfolio_gate_impl(plan, thresholds={"max_drawdown_proxy": 0.20}, equity_curve=[1.0, 1.1])
+    v2 = portfolio_verdict_impl(plan, thresholds={"max_drawdown_proxy": 0.20}, equity_curve=[1.0, 1.1])
     assert "drawdown_proxy" not in v2.breached
 
 
@@ -293,7 +291,7 @@ def tmp_db(tmp_path):
 
 
 def test_runagent_portfolio_gate_breach_zero_interrupts(tmp_db, clean_registry):
-    """G2-A8 收窄 E2E：LLM 调 construct_portfolio → rebalance_plan → check_portfolio_gate，
+    """G2-A8 收窄 E2E：LLM 调 construct_portfolio → rebalance_plan → portfolio_verdict，
     gate 超阈 → 裁决 fail 随 tool_result 返回，全程零 __interrupt__，流程正常完成。"""
     pytest.importorskip("langgraph")
     register_tool(_gate_mark_done_tool())
@@ -321,7 +319,7 @@ def test_runagent_portfolio_gate_breach_zero_interrupts(tmp_db, clean_registry):
                 "s2",
             ),
             _ai_with_tools(
-                [("check_portfolio_gate", {
+                [("portfolio_verdict", {
                     "plan": {"trades": [
                         {"asset": "A", "from_w": 0.0, "to_w": 0.5, "est_cost": 0.00015},
                         {"asset": "B", "from_w": 0.0, "to_w": 0.5, "est_cost": 0.00015},
@@ -349,12 +347,12 @@ def test_runagent_portfolio_gate_breach_zero_interrupts(tmp_db, clean_registry):
     )
     assert final.get("status") != "waiting_for_human"
     assert final.get("task_status") == "done"
-    # 裁决 fail 随 tool_result 返回（breached / requires_human=False 可见）
+    # 裁决 fail 随 tool_result 返回。
     tool_outputs = [str(getattr(m, "content", "")) for m in final["messages"]]
     assert any("single_weight" in output for output in tool_outputs), (
         f"expected breached verdict in tool outputs; trace={final.get('execution_trace')}"
     )
-    assert any("requires_human" in output and "False" in output for output in tool_outputs)
+    assert any("verdict" in output and "fail" in output for output in tool_outputs)
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +396,7 @@ def test_config_yaml_single_source(tmp_path, monkeypatch):
         load_yaml.cache_clear()
         importlib.reload(gate_mod)
         plan = reb_mod.rebalance_plan_impl({}, {"A": 0.5}, rebalance_min_turnover=0.0)
-        v = gate_mod.check_portfolio_gate_impl(plan)
+        v = gate_mod.portfolio_verdict_impl(plan)
         assert "turnover" in v.breached
         assert v.thresholds["max_turnover"] == pytest.approx(0.01)
     finally:

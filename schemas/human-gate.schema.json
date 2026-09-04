@@ -1,188 +1,93 @@
 {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://hkust-quant-society.github.io/quantcode/schemas/human-gate.schema.json",
-    "title": "Human Gate",
-    "description": "风控流程中需要人工审批的关卡，用于记录触发条件、风险阈值、超时策略、通知方式和最终人工决策",
-    "type": "object",
-    "required": [
-      "gate_id",
-      "task_id",
-      "status",
-      "trigger",
-      "risk_thresholds",
-      "timeout_minutes",
-      "notify_channels",
-      "required_approvers",
-      "created_at"
-    ],
-    "properties": {
-      "gate_id": {
-        "type": "string",
-        "description": "HumanGate 唯一 ID，建议格式 hg_<task_id>_<timestamp>"
-      },
-      "task_id": {
-        "type": "string",
-        "pattern": "^T\\d+(\\.\\d+){0,4}$",
-        "description": "关联的 ComposeTask task_id"
-      },
-      "session_id": {
-        "type": "string",
-        "pattern": "^S[0-9a-f]{16}$",
-        "description": "关联的 ComposeTask session_id"
-      },
-      "pr_url": {
-        "type": "string",
-        "format": "uri",
-        "description": "触发本次风控审批的 GitHub PR 链接"
-      },
-      "head_sha": {
-        "type": "string",
-        "description": "触发审批时 PR 对应的 commit SHA，用于 dedupe"
-      },
-      "status": {
-        "type": "string",
-        "enum": ["pending", "approved", "rejected", "timed_out", "escalated", "cancelled"],
-        "description": "人工审批关卡状态"
-      },
-      "trigger": {
-        "type": "string",
-        "enum": [
-          "max_drawdown_exceeded",
-          "position_limit_exceeded",
-          "correlation_exceeded",
-          "var_exceeded",
-          "missing_risk_profile",
-          "risk_gate_uncertain",
-          "manual_request",
-          "workflow_failure"
-        ],
-        "description": "触发人工审批的原因"
-      },
-      "trigger_reason": {
-        "type": "string",
-        "description": "自然语言说明，解释为什么需要人工审批"
-      },
-      "risk_thresholds": {
-        "type": "object",
-        "description": "触发 HumanGate 的风控阈值",
-        "properties": {
-          "max_drawdown": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "position_limit": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "correlation_with_existing": {
-            "type": "number",
-            "minimum": -1,
-            "maximum": 1
-          },
-          "tail_risk_var_99": {
-            "type": ["number", "null"]
-          }
-        },
-        "additionalProperties": false
-      },
-      "observed_values": {
-        "type": "object",
-        "description": "实际检测到的风控指标值，通常来自 RiskProfile",
-        "properties": {
-          "max_drawdown": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "position_limit": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1
-          },
-          "correlation_with_existing": {
-            "type": "number",
-            "minimum": -1,
-            "maximum": 1
-          },
-          "tail_risk_var_99": {
-            "type": ["number", "null"]
-          }
-        },
-        "additionalProperties": false
-      },
-      "timeout_minutes": {
-        "type": "integer",
-        "minimum": 1,
-        "description": "等待人工审批的最长时间，超过后进入 timed_out"
-      },
-      "created_at": {
-        "type": "string",
-        "format": "date-time",
-        "description": "HumanGate 创建时间"
-      },
-      "expires_at": {
-        "type": "string",
-        "format": "date-time",
-        "description": "HumanGate 超时时间"
-      },
-      "notify_channels": {
-        "type": "array",
-        "description": "通知人工 reviewer 的方式",
-        "items": {
-          "type": "string",
-          "enum": ["github_pr_comment", "github_issue", "slack", "email", "opencode", "manual"]
-        },
-        "minItems": 1,
-        "uniqueItems": true
-      },
-      "required_approvers": {
-        "type": "array",
-        "description": "需要参与审批的人或角色",
-        "items": {
+  "additionalProperties": false,
+  "description": "LangGraph interrupt/resume 时传递的结构化 HumanGate payload（单一真相源）。",
+  "properties": {
+    "kind": {
+      "enum": [
+        "merge",
+        "permission"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "resource": {
+      "anyOf": [
+        {
           "type": "string"
         },
-        "minItems": 1,
-        "uniqueItems": true
-      },
-      "decision": {
-        "type": ["object", "null"],
-        "description": "人工审批结果；pending 状态下可以为 null",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": ["approve", "reject", "escalate"]
-          },
-          "decided_by": {
-            "type": "string"
-          },
-          "decided_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "conditions": {
-            "type": "array",
-            "description": "有条件通过时的附加限制",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": ["action", "decided_by", "decided_at", "reason"],
-        "additionalProperties": false
-      },
-      "dedupe_key": {
-        "type": "string",
-        "description": "用于避免 GitHub PR 重复评论的稳定 key，建议包含 pr_url 和 head_sha"
-      },
-      "analyst_notes": {
-        "type": "string",
-        "description": "risk-gate 或 reviewer 生成的补充说明"
-      }
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resource"
     },
-    "additionalProperties": false
-  }
+    "actor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actor"
+    },
+    "evidence": {
+      "additionalProperties": true,
+      "title": "Evidence",
+      "type": "object"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "gate_id": {
+      "minLength": 1,
+      "title": "Gate Id",
+      "type": "string"
+    },
+    "message": {
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision"
+    }
+  },
+  "required": [
+    "kind",
+    "gate_id",
+    "message",
+    "reasons"
+  ],
+  "title": "HumanGateInterruptPayload",
+  "type": "object"
+}

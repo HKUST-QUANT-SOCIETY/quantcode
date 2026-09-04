@@ -25,7 +25,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from runner.acceptance import run_acceptance
-from schemas.risk_profile import RiskGateVerdict, RiskProfile, RiskThresholds
+from schemas.risk_profile import RiskVerdict, RiskProfile, RiskThresholds
 
 BANNER = "#" * 400  # ≈100 tokens（chars/4 估算，与 test_token_budget 同款）
 
@@ -114,7 +114,7 @@ def test_research_flow_zero_interrupts(tmp_path):
 
 
 def test_portfolio_breach_path_zero_interrupts(tmp_path):
-    """组合越限研究路径：check_portfolio_gate 越限 → 裁决 fail 返回，零 interrupt。"""
+    """组合越限研究路径：portfolio_verdict 越限 → 裁决 fail 返回，零 interrupt。"""
     pytest.importorskip("langgraph")
     from tools.registry import register_tool
     from tools.registry import registry as global_registry
@@ -131,7 +131,7 @@ def test_portfolio_breach_path_zero_interrupts(tmp_path):
         llm = ScriptedLLM(
             [
                 _ai("rebalance_plan", {"current": {}, "target": {"A": 0.5, "B": 0.5}}, "p1"),
-                _ai("check_portfolio_gate", {
+                _ai("portfolio_verdict", {
                     "plan": {"trades": [
                         {"asset": "A", "from_w": 0.0, "to_w": 0.5, "est_cost": 0.00015},
                         {"asset": "B", "from_w": 0.0, "to_w": 0.5, "est_cost": 0.00015},
@@ -177,11 +177,11 @@ def test_threshold_breach_verdict_is_fail():
     )
     assert "max_drawdown" in breach.breached_thresholds(thresholds)
     assert "tail_risk_var_99" in breach.breached_thresholds(thresholds)
-    assert breach.evaluate_verdict(thresholds) == RiskGateVerdict.FAIL
+    assert breach.evaluate_verdict(thresholds) == RiskVerdict.FAIL
     assert breach.evaluate_verdict(thresholds) == "fail"
     # 产出门禁语义删除的防漂移锚点：枚举不再有 needs_human / rejected
-    assert not hasattr(RiskGateVerdict, "NEEDS_HUMAN")
-    assert not hasattr(RiskGateVerdict, "REJECTED")
+    assert not hasattr(RiskVerdict, "NEEDS_HUMAN")
+    assert not hasattr(RiskVerdict, "REJECTED")
 
     # 未越限 → pass
     ok = RiskProfile(
@@ -193,10 +193,10 @@ def test_threshold_breach_verdict_is_fail():
         capacity_estimate_usd=1_000_000,
         tail_risk_var_99=0.02,
     )
-    assert ok.evaluate_verdict(thresholds) == RiskGateVerdict.PASS
+    assert ok.evaluate_verdict(thresholds) == RiskVerdict.PASS
 
     # acceptance 单源同样 fail（评估流程内化，纯判定零 interrupt）
-    acc = run_acceptance("risk-gate", breach.model_dump(mode="json"))
+    acc = run_acceptance("risk-evaluation", breach.model_dump(mode="json"))
     assert acc.verdict == "fail"
 
 
@@ -220,7 +220,7 @@ def _mark_done_tool():
 
 
 def _eligible_factor_report() -> dict:
-    """过 check_factor_gate 的合格报告（阈值走 configs/acceptance.factor.yaml 单源）。"""
+    """过 validate_factor_contract 的合格报告（阈值走 configs/acceptance.factor.yaml 单源）。"""
     return {
         "factor_name": "narrowing_factor",
         "verdict": "pass",
@@ -277,10 +277,7 @@ def test_write_gate_triggers_preserved(tmp_path, monkeypatch):
         monkeypatch.delenv("QUANTCODE_PERMISSIONS_FILE", raising=False)
         permission_engine.reset_cache()
 
-    # ── ③ 预算（QUANTCODE_TOKEN_BUDGET）：硬约束阻断，不是"标记后放行" ──────
-    # 回归：tests/test_token_budget.py。现实现经 kind=budget 的 gate 实现阻断
-    # （approve=追加额度继续，reject=硬停）；按 AG-A 卡片要求断言阻断语义：
-    # 超限必然 halt（绝不带着超限继续跑完），reject 后终止并留 budget_exhausted。
+    # ── ③ 预算：硬约束停止，但不是 HumanGate ────────────────────────────
     from runner.agent_engine import AgentRunner
 
     llm = ScriptedLLM([AIMessage(content=BANNER)])
@@ -296,20 +293,10 @@ def test_write_gate_triggers_preserved(tmp_path, monkeypatch):
         thread_id="narrowing-budget-1",
         flow_name="narrowing_budget",
     )
-    assert paused.get("status") == "waiting_for_human", "预算超限必须阻断执行"
-    interrupts = paused.get("__interrupt__") or []
-    payload = getattr(interrupts[0], "value", {}) if interrupts else {}
-    assert payload.get("kind") == "budget"
-
-    resumed = runner.resume(
-        thread_id="narrowing-budget-1",
-        decision="reject",
-        system_prompt="x",
-        flow_name="narrowing_budget",
-    )
-    assert resumed.get("task_status") == "done"
-    assert resumed.get("output_data", {}).get("budget_exhausted") is True
-    assert not resumed.get("__interrupt__")
+    assert paused.get("status") == "stopped_budget", "预算超限必须阻断执行"
+    assert paused.get("task_status") == "done"
+    assert paused.get("output_data", {}).get("budget_exhausted") is True
+    assert not paused.get("__interrupt__")
 
 
 # ---------------------------------------------------------------------------

@@ -222,11 +222,11 @@ def test_phase_filter_whitelist():
     for tid in SOLUTION_TOOLS:
         assert tool_allowed_in_phase(tid, "draft")
     for tid in ("read_pr", "read_blackboard", "list_factors", "get_experiment",
-                "check_gate", "match_main", "pit_rag_search", "pool_browse",
+                "risk_verdict", "match_main", "pit_rag_search", "pool_browse",
                 "describe_algorithm", "extract_metadata"):
         assert tool_allowed_in_phase(tid, "draft"), tid
     for tid in ("write_blackboard", "write_pr_comment", "merge_to_main",
-                "deploy_strategy", "run_strategy_backtest", "spawn_subagent",
+                "deployment_candidate", "run_strategy_backtest", "spawn_subagent",
                 "mark_task_done", "trigger_risk_flow"):
         assert not tool_allowed_in_phase(tid, "draft"), tid
     # 拒绝信息含验收文案

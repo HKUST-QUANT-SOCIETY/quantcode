@@ -47,7 +47,7 @@ def factor_thresholds() -> dict[str, Any]:
 def risk_thresholds() -> dict[str, Any]:
     """risk 验收阈值：configs/acceptance.risk.yaml 优先，缺项回退代码默认。
 
-    供 runner/risk_agent._risk_acceptance_thresholds 等既有调用方共享单源。
+    供 runner/risk_ci._risk_acceptance_thresholds 等调用方共享单源。
     """
     merged = dict(_RISK_DEFAULTS)
     merged.update(load_yaml_checked("acceptance.risk", _RISK_REQUIRED))
@@ -71,9 +71,9 @@ class AcceptanceResult:
         return all(c.passed for c in self.checks)
 
 
-def _check_risk_gate(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
+def _check_risk_evaluation(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
     """RiskProfile 验收：max_drawdown / position_limit / correlation / VaR"""
-    # 显式 thresholds（如 risk_agent 传 RiskThresholds 同源值）优先，否则 yaml 单源
+    # 显式 thresholds（如 risk_ci 传 RiskThresholds 同源值）优先，否则 yaml 单源
     t = thresholds if thresholds else risk_thresholds()
     max_dd = t.get("max_drawdown", 0.20)
     pos_limit = t.get("position_limit", 0.30)
@@ -176,9 +176,9 @@ def _check_research_pdf(payload: dict[str, Any], thresholds: dict[str, Any] | No
 
 
 _DISPATCH: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[CheckResult]]] = {
-    "risk-gate": _check_risk_gate,
+    "risk-evaluation": _check_risk_evaluation,
     "factor-eval": _check_factor_eval,
-    "factor:autoeval": _check_factor_eval,
+    "factor:evaluation": _check_factor_eval,
     "pit-rag": _check_pit_rag,
     "research-pdf": _check_research_pdf,
 }

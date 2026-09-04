@@ -18,6 +18,7 @@ TEST_FP = "SHA256:oVDaaoONrPL38IxAoGR14Do45YIKvDt5o7ASsv0jiaA"
 @pytest.fixture(autouse=True)
 def _isolated_identity(monkeypatch, tmp_path):
     """隔离环境：清指纹相关 env、把绑定文件指向 tmp、清进程内缓存。"""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
     for var in (
         "QUANTCODE_SSH_KEY_FINGERPRINT",
         "QUANTCODE_SSH_FINGERPRINT",

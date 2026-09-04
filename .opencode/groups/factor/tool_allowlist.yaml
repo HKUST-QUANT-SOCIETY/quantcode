@@ -1,7 +1,6 @@
 # factor 组 tool 白名单 — Day 4
 # 由 tools/registry.py::load_group_config 读取
-# Day 4 起新增 3 个 factor 专属 tool(match_main / gen_schema / autoeval)
-# 配合共享工具 4 个,AgentRunner(group="factor") 可跑通 idea → match_main → gen_schema → autoeval
+# Factor adapters: match_main / gen_schema / canonical QuantEvaluator
 allowlist:
   # 共享工具
   - search_memory  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
@@ -11,13 +10,11 @@ allowlist:
   # factor 专属 tool(Day 4 尹一帆)
   - match_main
   - gen_schema
-  - autoeval
+  - quant_evaluator
   # 验收闸门 + 主线登记（PRD §4.1.3 / F-06；merge_to_main 人审走 HumanGate）
-  - check_factor_gate
+  - validate_factor_contract
   - merge_to_main
   # qs-cold 数据工具（P-01，specs/data/SPEC.md §2.4；load_returns 推迟 — SPEC §5）
   - list_factors
   - load_factor_panel
   - pool_browse
-  - eval_from_panel
-  - eval_factor_panel

@@ -238,7 +238,7 @@ def test_tool_real_data_end_to_end(tmp_path):
 
 def test_verdict_linked_to_acceptance_thresholds(tmp_path):
     """verdict 联动阈值：ic 达标但 t_stat=0 (<2.0) → fail；全达标 → pass；
-    run_acceptance("factor:autoeval") 与本判定同源。"""
+    run_acceptance("factor:evaluation") 与本判定同源。"""
     from flows.factor_eval_real import _verdict_from_thresholds
     from runner.acceptance import factor_thresholds, run_acceptance
 
@@ -257,7 +257,7 @@ def test_verdict_linked_to_acceptance_thresholds(tmp_path):
     payload = {"ic_metrics": {"ic_mean": t["ic_abs_min"], "ir": t["ir_min"],
                               "t_stat": t["t_stat_min"]},
                "turnover": {"monthly": t["turnover_monthly_max"]}}
-    assert run_acceptance("factor:autoeval", payload).verdict == "pass"
+    assert run_acceptance("factor:evaluation", payload).verdict == "pass"
 
 
 def test_tool_registered_and_callable_via_registry(tmp_path):

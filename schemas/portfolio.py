@@ -1,4 +1,4 @@
-"""Portfolio schemas — 构建组合 / 调仓计划 / 组合 gate 裁决（PonyTail 极简版）。
+"""Portfolio schemas — 构建组合 / 调仓计划 / 组合评估。
 
 数值全部确定性（numpy 纯计算），LLM 零参与。与 schemas/risk_profile.py 同风格。
 """
@@ -49,18 +49,15 @@ class RebalancePlan(BaseModel):
     fee_total: float = Field(ge=0, description="双边佣金 + 卖出印花税合计。")
 
 
-class PortfolioGateVerdict(BaseModel):
-    """组合 gate 裁决（requires_human=True 时附 interrupt payload）。"""
+class PortfolioVerdict(BaseModel):
+    """Deterministic portfolio pass/fail result; never a HumanGate."""
 
     model_config = ConfigDict(extra="forbid")
 
     thresholds: dict[str, Any] = Field(description="本次裁决实际使用的阈值。")
     breached: list[str] = Field(default_factory=list, description="超限项名（single_weight/turnover/drawdown_proxy）。")
-    requires_human: bool
+    verdict: Literal["pass", "fail"]
     reasons: list[str] = Field(default_factory=list, description="人类可读的违规说明。")
-    interrupt_payload: dict[str, Any] | None = Field(
-        default=None, description="非空时可直接交给 LangGraph interrupt / OpenCode human_gate。"
-    )
 
 
 __all__ = [
@@ -68,5 +65,5 @@ __all__ = [
     "TargetPortfolio",
     "PortfolioWeights",
     "RebalancePlan",
-    "PortfolioGateVerdict",
+    "PortfolioVerdict",
 ]

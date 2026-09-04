@@ -4,8 +4,8 @@
 两者可叠加：业务 skill 作为主工作流，元 skill 作为方法论补充。
 
 参考：
-- Architecture_Spec.md §0：MimoCode 的 15 个 compose skill 是 markdown 文本，引擎无关
-- Day 3 任务清单"喂入 1 个 MimoCode skill markdown（如 plan 或 brainstorm）验证可用"
+- docs/QuantCode_Design.md §2：MimoCode 的通用 compose skill 是 markdown 文本，引擎无关
+- docs/archive/pre-v5/Day3_TaskList.md：历史落地背景
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
 # 同时保留不含 src/ 的备选，兼容历史布局。
 #
 # 仓库内受跟踪的 meta-skill 副本（15 个 compose skill，132KB，替代已删除的
-# 144MB vendor/mimo-code fork 镜像——见 docs/audit/DEVIATION_REGISTRY.md P0-11）。
+# 144MB vendor/mimo-code fork 镜像——见 docs/IMPLEMENTATION_AUDIT.md）。
 TRACKED_BUNDLE = PROJECT_ROOT / ".opencode" / "meta-skills"
 MIMOCODE_SKILLS_DIR_VENDORED = TRACKED_BUNDLE
 

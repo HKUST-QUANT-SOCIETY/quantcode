@@ -85,7 +85,7 @@ def candidates_dir(tmp_path) -> Path:
 def test_consume_once_produces_candidate(evidence_dir, candidates_dir):
     """两个成功 run 走同一 tool 序列 → 蒸馏出候选草案 + index 登记。"""
     for run_id in ("run-a", "run-b"):
-        _write_evidence(evidence_dir, run_id, _ok_run(["read_blackboard", "calc_risk", "check_gate"]))
+        _write_evidence(evidence_dir, run_id, _ok_run(["read_blackboard", "calc_risk", "risk_verdict"]))
 
     summary = consume_once(
         evidence_dir=evidence_dir, candidates_dir=candidates_dir, group="risk",
@@ -111,8 +111,8 @@ def test_consume_once_produces_candidate(evidence_dir, candidates_dir):
 # ---------------------------------------------------------------------------
 
 def test_second_run_dedupes(evidence_dir, candidates_dir):
-    _write_evidence(evidence_dir, "run-a", _ok_run(["read_blackboard", "calc_risk", "check_gate"]))
-    _write_evidence(evidence_dir, "run-b", _ok_run(["read_blackboard", "calc_risk", "check_gate"]))
+    _write_evidence(evidence_dir, "run-a", _ok_run(["read_blackboard", "calc_risk", "risk_verdict"]))
+    _write_evidence(evidence_dir, "run-b", _ok_run(["read_blackboard", "calc_risk", "risk_verdict"]))
 
     first = consume_once(evidence_dir=evidence_dir, candidates_dir=candidates_dir, group="risk")
     n_first = len(first["candidates"])

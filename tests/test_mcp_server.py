@@ -15,6 +15,7 @@ import tools.model._register  # noqa: F401  注册 model 5 个 tool
 @pytest.fixture(autouse=True)
 def _clean_registry(monkeypatch, tmp_path):
     """清空 + 重新注册 model tools。"""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
     # P0-7：隔离身份解析 — 清指纹/降级 env，绑定文件指向 tmp（不存在）→ 走 env 降级路径，
     # 不被开发者本机真实 .opencode/authorized_groups.yaml 干扰。
@@ -389,7 +390,7 @@ def test_handle_notifications_initialized_returns_none():
 def test_list_tools_includes_factor_tools_when_group_is_factor(monkeypatch):
     """🟢Day 4 #E 验收:QUANTCODE_GROUP=factor 时 MCP 暴露 ≥3 个 factor tool。
 
-    触发 factor._register 注册 3 个 stub tool(match_main/gen_schema/autoeval),
+    触发 factor._register 注册 3 个 stub tool(match_main/gen_schema/quant_evaluator),
     验证 tools/list 返回的 ids 含这 3 个。
     """
     import tools.factor._register  # noqa: F401  触发 factor tool 注册
@@ -399,7 +400,7 @@ def test_list_tools_includes_factor_tools_when_group_is_factor(monkeypatch):
     tool_names = {t["name"] for t in mcp_server.list_tools()["tools"]}
     assert "match_main" in tool_names, f"match_main missing: {tool_names}"
     assert "gen_schema" in tool_names, f"gen_schema missing: {tool_names}"
-    assert "autoeval" in tool_names, f"autoeval missing: {tool_names}"
+    assert "quant_evaluator" in tool_names, f"quant_evaluator missing: {tool_names}"
     assert len(tool_names) >= 3, f"factor group 至少 3 tools,实际 {len(tool_names)}"
 
 
@@ -417,9 +418,9 @@ def test_list_tools_factor_group_excludes_risk_tools(monkeypatch):
     importlib.reload(tools.risk._register)
     tool_names = {t["name"] for t in mcp_server.list_tools()["tools"]}
     # factor 3 个都在
-    assert {"match_main", "gen_schema", "autoeval"} <= tool_names
+    assert {"match_main", "gen_schema", "quant_evaluator"} <= tool_names
     # risk 工具全被排除
-    risk_ids = {"read_blackboard", "calc_risk", "check_gate", "write_pr_comment", "generate_risk_profile"}
+    risk_ids = {"read_blackboard", "calc_risk", "risk_verdict", "write_pr_comment", "generate_risk_profile"}
     leaked = tool_names & risk_ids
     assert not leaked, f"risk tools 泄漏到 factor group:{leaked}"
 
@@ -500,13 +501,13 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
     tool_names = {t["name"] for t in tools_listed}
     assert "match_main" in tool_names, f"factor group 应有 match_main,got {tool_names}"
     assert "gen_schema" in tool_names, f"factor group 应有 gen_schema,got {tool_names}"
-    assert "autoeval" in tool_names, f"factor group 应有 autoeval,got {tool_names}"
+    assert "quant_evaluator" in tool_names, f"factor group 应有 quant_evaluator,got {tool_names}"
 
 
-def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
-    """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call check_gate。
+def test_mcp_subprocess_stdio_risk_group_call_risk_verdict(tmp_path):
+    """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call risk_verdict。
 
-    端到端:subprocess → stdio → tools/call → 真实 check_gate 执行 → 返 JSON 响应。
+    端到端:subprocess → stdio → tools/call → 真实 risk_verdict 执行 → 返 JSON 响应。
     """
     import os
     import subprocess
@@ -532,12 +533,12 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 1. tools/list(确认 check_gate 可用)
-    # 2. tools/call check_gate with high_risk profile
+    # 1. tools/list(确认 risk_verdict 可用)
+    # 2. tools/call risk_verdict with high_risk profile
     list_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
     call_req = json.dumps({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "check_gate", "arguments": {"risk_profile": profile}}
+        "params": {"name": "risk_verdict", "arguments": {"risk_profile": profile}}
     }) + "\n"
 
     proc = subprocess.run(
@@ -568,9 +569,9 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     # content[0].text 是 str,parse 成 dict
     text = result["content"][0]["text"]
     call_data = json.loads(text)
-    # check_gate 应返 requires_human=True(因 var 0.06 > 0.04 阈值)
-    assert call_data.get("requires_human") is True, (
-        f"check_gate 应返 requires_human=True,got {call_data}"
+    # risk_verdict 应返 breached=True(因 var 0.06 > 0.04 阈值)
+    assert call_data.get("breached") is True, (
+        f"risk_verdict 应返 breached=True,got {call_data}"
     )
     assert "tail_risk_var_99" in call_data.get("reasons", []), (
         f"reasons 应含 tail_risk_var_99,got {call_data.get('reasons')}"

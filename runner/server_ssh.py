@@ -1,7 +1,7 @@
 """server_ssh — SSH 读取各组主线服务器代码（P0-7，A09-04/05）。
 
 规划来源：
-- docs/Architecture_Spec.md:591 — ``server_ssh.py：SSH 读不同组服务器主线``
+- docs/QuantCode_Design.md — SSH 读取授权主线的模块边界
 - docs/QuantCode_Design.md:370-374 — match_main 通过 SSH 读 Server A/B 主线代码并缓存到本地
 
 设计（PonyTail 最小可用）：

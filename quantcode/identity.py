@@ -1,6 +1,6 @@
 """SSH key → group 身份绑定（P0-7）。
 
-设计要求（``docs/Architecture_Spec.md`` §2.1）：SSH key 与组**长期绑定**，
+设计要求（``docs/QuantCode_Design.md`` §2.1）：SSH key 与组**长期绑定**，
 会话内不可变；MCP server 启动时凭宿主注入的公钥指纹解析出组身份，
 未命中一律 fail-closed。
 
@@ -68,9 +68,20 @@ def _load_entries(path: Path | str | None = None) -> list[dict]:
         group = str(item.get("group", "")).strip()
         if fp and group:
             entry: dict = {"fingerprint": fp, "group": group}
-            note = str(item.get("note", "") or "").strip()
-            if note:
-                entry["note"] = note
+            for key in (
+                "actor_id",
+                "role",
+                "workspace_id",
+                "workspace_path",
+                "github_subject",
+                "note",
+            ):
+                value = str(item.get(key, "") or "").strip()
+                if value:
+                    entry[key] = value
+            scopes = item.get("resource_scopes")
+            if isinstance(scopes, list):
+                entry["resource_scopes"] = [str(scope) for scope in scopes]
             entries.append(entry)
     return entries
 
@@ -95,6 +106,15 @@ def load_bindings(path: Path | str | None = None) -> dict[str, str]:
 def resolve_group(fingerprint: str, bindings: dict[str, str]) -> str | None:
     """按指纹查组。未命中返回 ``None``（调用方 fail-closed）。"""
     return bindings.get(fingerprint.strip())
+
+
+def resolve_identity(fingerprint: str, path: Path | str | None = None) -> dict | None:
+    """Return the full roster entry for a fingerprint, or ``None``."""
+    target = fingerprint.strip()
+    for entry in _load_entries(path):
+        if entry["fingerprint"] == target:
+            return dict(entry)
+    return None
 
 
 # ---------------------------------------------------------------------------

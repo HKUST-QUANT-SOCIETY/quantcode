@@ -77,7 +77,7 @@ class RunAgentArgs(BaseModel):
     # R2 token budget：None → env QUANTCODE_TOKEN_BUDGET（缺省 200000）
     max_total_tokens: int | None = Field(
         default=None,
-        description="可选：本次 run 的总 token 预算。超限时暂停待人审批。"
+        description="可选：本次 run 的总 token 预算。超限时返回 STOPPED_BUDGET（不创建 HumanGate）。"
         "不传则读环境变量 QUANTCODE_TOKEN_BUDGET（缺省 200000）。",
     )
 
@@ -113,10 +113,10 @@ ORCHESTRATOR_DISPATCH: dict[str, list[tuple[tuple[str, ...], str]]] = {
         (("lit review", "literature review", "paper", "survey", "arxiv"), "model-lit-review"),
     ],
     "risk": [
-        (("pr", "risk", "gate", "review"), "risk-gate"),
+        (("pr", "risk", "verdict", "review"), "risk-ci"),
     ],
     "factor": [
-        (("factor", "autoeval", "ic", "ir"), "factor-autoeval"),
+        (("factor", "evaluation", "ic", "ir"), "factor-evaluation"),
     ],
     "options": [
         (("options", "vol", "greeks", "backtest", "gc", "期权"), "options-compose"),
@@ -190,16 +190,18 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
                 f"request asked for '{requested_group}'"
             ),
         }
+    if not session_group:
+        # Production requests must carry a server-issued Session Context.
+        # Explicit group values are accepted only for local development tests.
+        dev_mode = bool((ctx or {}).get("_development_mode")) or (
+            os.environ.get("QUANTCODE_ENV", "").strip().lower() in {"dev", "development", "test"}
+            and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1"
+        )
+        if not dev_mode:
+            return {"status": "error", "error": "AUTHENTICATION_REQUIRED: Session Context is required"}
     group = session_group or requested_group
     if not group:
-        return {
-            "status": "error",
-            "error": (
-                "No group configured. Either pass 'group' in run_agent args, or set "
-                "QUANTCODE_GROUP environment variable (e.g., QUANTCODE_GROUP=model) "
-                "via shell export or the mcp.<server>.environment block in opencode.jsonc."
-            ),
-        }
+        return {"status": "error", "error": "AUTHENTICATION_REQUIRED: Session Context is required (QUANTCODE_GROUP is only allowed in explicit development mode)"}
 
     # start mode 缺 task 是请求错误，与 model 是否配置无关 —— 必须在 model gate 前校验，
     # 否则无 API key 环境下会误报 "No LLM model configured"（PR25 遗留的环境依赖）。
@@ -236,12 +238,14 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
         return _resume_mode(
             args, group, model, checkpoint_db, resolved_skill,
             allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+            actor_id=ctx.get("actor_id"), role=ctx.get("role"),
         )
 
     # ── start mode ──
     return _start_mode(
         args, group, model, checkpoint_db, resolved_skill,
         allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+        actor_id=ctx.get("actor_id"), role=ctx.get("role"),
     )
 
 def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
@@ -288,6 +292,8 @@ def _start_mode(
     resolved_skill: str | None,
     *,
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    actor_id: str | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
     """start 模式：启动 AgentRunner，捕获 interrupt → waiting_for_human。"""
     from runner.agent_engine import AgentRunner
@@ -299,6 +305,9 @@ def _start_mode(
             "status": "error",
             "error": "task is required for start mode (no decision provided).",
         }
+    from runner.task_classifier import classify_task
+
+    classification = classify_task(args.task).model_dump(mode="json")
 
     # ★ 提前生成 thread_id：interrupt() 抛异常时 final_state 不可达，
     # 但异常恢复需要知道 thread_id 才能构建 config。
@@ -320,6 +329,8 @@ def _start_mode(
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
         allowed_tool_ids=allowed_tool_ids,
+        actor_id=actor_id,
+        role=role,
     )
 
     # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
@@ -370,12 +381,16 @@ def _start_mode(
 
         interrupt = extract_interrupt_payload(final_state)
         if interrupt is not None:
-            return format_waiting_for_human(
+            waiting = format_waiting_for_human(
                 thread_id=final_state.get("thread_id", thread_id),
                 interrupt_payload=interrupt,
             )
+            waiting["task_classification"] = classification
+            return waiting
 
-        return _format_result(final_state, group)
+        result = _format_result(final_state, group)
+        result["task_classification"] = classification
+        return result
 
     except Exception as e:
         # interrupt() 会在 LangGraph 内部抛 GraphInterrupt 异常；
@@ -400,10 +415,12 @@ def _start_mode(
                         {"__interrupt__": list(snapshot.interrupts)}
                     )
                     if interrupt_val:
-                        return format_waiting_for_human(
+                        waiting = format_waiting_for_human(
                             thread_id=thread_id,
                             interrupt_payload=interrupt_val,
                         )
+                        waiting["task_classification"] = classification
+                        return waiting
             except Exception:
                 pass
 
@@ -422,6 +439,8 @@ def _resume_mode(
     resolved_skill: str | None,
     *,
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    actor_id: str | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
     """resume 模式：用 Command(resume=...) 恢复已暂停的 gate。"""
     from runner.agent_engine import AgentRunner
@@ -443,6 +462,8 @@ def _resume_mode(
         checkpoint_db=checkpoint_db,
         budget_tokens=_resolve_budget(args.max_total_tokens),
         allowed_tool_ids=allowed_tool_ids,
+        actor_id=actor_id,
+        role=role,
     )
 
     try:

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hkust-quant-society.github.io/quantcode/schemas/risk-profile.schema.json",
   "title": "Risk Profile",
-  "description": "策略代码经 risk-gate skill 分析后的风控画像，用于 CI 自动门禁",
+  "description": "策略代码经 risk-ci skill 分析后的风控画像，用于 CI 风险评估",
   "type": "object",
   "required": [
     "strategy_id",

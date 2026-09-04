@@ -33,7 +33,7 @@ class ICMethod(StrEnum):
 
 
 class FactorVerdict(StrEnum):
-    """factor:autoeval runner verdict."""
+    """factor:evaluation runner verdict."""
 
     PASS = "pass"
     FAIL = "fail"
@@ -59,7 +59,7 @@ class FactorSpec(BaseModel):
     """
     factor Compose flow input contract.
 
-    Used as ComposeTask[FactorSpec, FactorReport].input for factor:autoeval.
+    Used as ComposeTask[FactorSpec, FactorReport].input for factor:evaluation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -170,7 +170,7 @@ class LayeredBacktest(BaseModel):
 
 class FactorReport(BaseModel):
     """
-    factor:autoeval output contract.
+    factor:evaluation output contract.
 
     Used as ComposeTask[FactorSpec, FactorReport].output.
     """

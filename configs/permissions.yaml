@@ -7,7 +7,7 @@
 # 声明式示例（改注释为生效条目即启用；启用后相应组 e2e 需带 human_approved
 # 或走 HumanGate resume 流程）：
 #   fundamental.render_report: ask
-#   strategy.deploy_strategy: ask
+#   strategy.deployment_candidate: ask
 permissions:
   fundamental.publish: deny
   # F-03 触发点② SSH 分级（governance SPEC §2.3 ②；分级判定

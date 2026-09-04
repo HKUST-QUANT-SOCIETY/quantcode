@@ -57,7 +57,7 @@ def run_strategy_demo(
     report = StrategyReport.model_validate(report_raw)
 
     deploy = registry.call(
-        "deploy_strategy",
+        "deployment_candidate",
         {
             "strategy_name": report.strategy_name,
             "verdict": report.verdict.value,

@@ -7,7 +7,7 @@
    - gen_schema 降级输出是 FactorSpec(extra="forbid") 契约合法 dict
      （降级事实走 logging.warning，不再往输出塞 _fallback 非法键），
      FactorSpec(**output) 直接验证通过
-   - autoeval 返回 _is_mock 标记（共享 flows.factor_autoeval.MOCK_AUTOEVAL_PAYLOAD_V1）
+   - quant_evaluator 返回 _is_mock 标记（共享 flows.factor_evaluation_adapter.MOCK_AUTOEVAL_PAYLOAD_V1）
 3. AgentRunner(group="factor") 跑通 3 步自主推理
 4. factor group allowlist 解析 ≥3 个 factor tool
 """
@@ -27,11 +27,11 @@ def _ensure_factor_registered():
     test_agent_engine_basic / test_mcp_server 等会清空全局 registry。
     恒真版注册是幂等的（register_tool 覆盖式），直接重新注册即可。
     """
-    from tools.factor._register import autoeval_tool, gen_schema_tool, match_main_tool
+    from tools.factor._register import quant_evaluator_tool, gen_schema_tool, match_main_tool
 
     register_tool(match_main_tool)
     register_tool(gen_schema_tool)
-    register_tool(autoeval_tool)
+    register_tool(quant_evaluator_tool)
     yield
 
 
@@ -59,7 +59,7 @@ def _no_llm_no_network(monkeypatch):
 
 def test_factor_tools_registered():
     """3 个 tool 都注册进全局 registry,get 不抛 KeyError。"""
-    for tid in ("match_main", "gen_schema", "autoeval"):
+    for tid in ("match_main", "gen_schema", "quant_evaluator"):
         t = global_registry.get(tid)
         assert t.id == tid
         assert t.description  # 非空
@@ -196,18 +196,14 @@ def test_gen_schema_llm_response_missing_contract_fields_gets_patched(monkeypatc
     assert "fields" not in out and "rebalance" not in out  # extra=forbid 键被过滤
 
 
-def test_autoeval_fallback_returns_mock_marker():
-    """无 AutoEval API 配置时降级：返回 _is_mock 标记 + 共享 flows 常量的 mock 数据。"""
-    from flows.factor_autoeval import MOCK_AUTOEVAL_PAYLOAD_V1
-
-    t = global_registry.get("autoeval")
+def test_quant_evaluator_unavailable_never_returns_mock_metrics(monkeypatch):
+    monkeypatch.delenv("QUANT_EVALUATOR_API_URL", raising=False)
+    monkeypatch.delenv("QUANT_EVALUATOR_API_KEY", raising=False)
+    t = global_registry.get("quant_evaluator")
     out = t.execute(t.schema(spec={"name": "pb_roe"}), ctx={})
-
-    assert out["_is_mock"] is True
-    assert "_reason" in out
-    # 与 flows.factor_autoeval 共享同一常量（不双维护）：字段集合是其超集
-    assert set(MOCK_AUTOEVAL_PAYLOAD_V1.keys()) <= set(out.keys())
-    assert out["eval_run_id"] == "pb_roe-mock-eval"
+    assert out["result_status"] == "UNAVAILABLE"
+    assert out["output_data"] is None
+    assert "_is_mock" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +217,7 @@ class _ScriptedLLM:
     ⚠️ Caveat(Day 4 严格性):
     本 mock **不是真 LLM 决策**。它严格按预设顺序返 AIMessage,本质是 scripted
     pipeline 用 AgentRunner 包装。"3 步自主推理"在本测试里只验证:
-    1. 工具链顺序可达(match_main → gen_schema → autoeval 都能被工具节点处理)
+    1. 工具链顺序可达(match_main → gen_schema → quant_evaluator 都能被工具节点处理)
     2. AgentRunner 状态机正确推进(messages 累积 / iterations 计数)
 
     **不验证**:LLM 真看到 state 后"自主决定"下一步调什么。生产环境用真 LLM 时
@@ -242,7 +238,7 @@ class _ScriptedLLM:
 
 
 def test_agent_runner_factor_react_three_steps(tmp_path):
-    """🟢Day 4 #B 验收:factor 经 AgentRunner 跑通 match_main → gen_schema → autoeval。
+    """🟢Day 4 #B 验收:factor 经 AgentRunner 跑通 match_main → gen_schema → quant_evaluator。
 
     3 步 tool_call,LLM 自主决定顺序,assert state 含 3 ToolMessage + iterations=2。
     """
@@ -270,7 +266,7 @@ def test_agent_runner_factor_react_three_steps(tmp_path):
             content="",
             tool_calls=[
                 {
-                    "name": "autoeval",
+                    "name": "quant_evaluator",
                     "args": {"spec": {"name": "pb_roe"}},
                     "id": "3",
                 }
@@ -318,9 +314,9 @@ def test_factor_group_allowlist_resolves_three_tools():
     """
     tools = global_registry.get_tools_for_group("factor")
     tool_ids = {t.id for t in tools}
-    assert {"match_main", "gen_schema", "autoeval"} <= tool_ids, (
+    assert {"match_main", "gen_schema", "quant_evaluator"} <= tool_ids, (
         f"factor allowlist 缺 3 个 factor tool: {tool_ids}"
     )
     # 至少 3 个 factor tool(共享 4 个未必注册到 registry,不强求)
-    factor_count = len(tool_ids & {"match_main", "gen_schema", "autoeval"})
+    factor_count = len(tool_ids & {"match_main", "gen_schema", "quant_evaluator"})
     assert factor_count == 3

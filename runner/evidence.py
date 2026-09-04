@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import fcntl
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,28 +77,49 @@ def append_event(
     kind: str | AuditEventKind,
     payload: dict[str, Any],
     artifacts_dir: str | Path = EVIDENCE_DIR,
-) -> None:
+    *,
+    required: bool = False,
+) -> bool:
     """追加一环到 ``.quantcode/evidence/<run_id>.jsonl``，环哈希衔接前环。
 
-    metrics 风格：任何 I/O / 序列化失败都静默，绝不影响主流程（best-effort）。
+    ``required=True`` is used by merge/permission/Admin operations and raises
+    if durability cannot be confirmed. Other trace hooks remain best-effort.
     """
     try:
-        events = _load_events(run_id, artifacts_dir)
-        event = make_audit_event(
-            seq=(events[-1].seq + 1) if events else 1,
-            kind=kind,
-            payload=dict(payload or {}),
-            prev_hash=events[-1].entry_hash if events else None,
-            at=datetime.now(timezone.utc),
-        )
         path = evidence_path(run_id, artifacts_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
+        with path.open("a+", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            f.seek(0)
+            last: AuditEvent | None = None
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    last = AuditEvent.model_validate(json.loads(line))
+                except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                    if required:
+                        raise EvidenceChainError("existing evidence chain is invalid") from exc
+            event = make_audit_event(
+                seq=(last.seq + 1) if last else 1,
+                kind=kind,
+                payload=dict(payload or {}),
+                prev_hash=last.entry_hash if last else None,
+                at=datetime.now(timezone.utc),
+            )
+            f.seek(0, os.SEEK_END)
             f.write(
                 json.dumps(event.model_dump(mode="json"), ensure_ascii=False) + "\n"
             )
-    except Exception:  # ponytail: 审计日志 best-effort，缺环优于砸主流程
-        pass
+            f.flush()
+            if required:
+                os.fsync(f.fileno())
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        return True
+    except Exception as exc:
+        if required:
+            raise EvidenceChainError("required evidence write failed") from exc
+        return False
 
 
 def _hash_file(path: Path) -> tuple[str, int]:

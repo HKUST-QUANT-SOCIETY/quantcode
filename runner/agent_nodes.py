@@ -26,7 +26,6 @@ from typing import Annotated, Any, Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from runner.langgraph_base import BaseFlowState
-from runner.human_gate import normalize_external_decision, parse_resume_decision
 from runner.routing.fingerprint import compute_state_fingerprint
 from runner.routing.router import RouteDecision, route_next_step
 from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
@@ -170,9 +169,7 @@ class AgentState(BaseFlowState, total=False):
     - risk_metrics  — 风控指标（由 calc_risk_stub 写入，router.py 消费）
     - risk_profile  — 风控画像（generate_risk_profile 写入；calc_risk_stub 测试场景下也注入，router.py 消费）
     - task_status   — 任务状态（"done" 触发 finish）
-    - human_review_result — 人工审核结果（"proceed"/"abort"，由 request_human_review tool 写入）
     - task_goal     — 任务目标描述（取自 input_data.task）
-    - _gate_purpose — Day 5: risk/loop/max_iter, 内部追踪 gate 来源
     - current_step  — LLM 本轮意图的完整工具批次（list[str]，用于 fingerprint）
     - last_tool     — 本轮实际执行的 tool 列表（list[str]，用于 fingerprint）
     - tool_args     — 本轮实际执行的 tool 参数列表（list[dict]，用于 fingerprint）
@@ -197,9 +194,8 @@ class AgentState(BaseFlowState, total=False):
     risk_metrics: dict | None
     risk_profile: dict | None
     task_status: str | None
-    human_review_result: str | None
+    status: str | None
     task_goal: str
-    _gate_purpose: str | None  # Day 5: risk/loop/max_iter, 内部追踪 gate 来源
     current_step: list[str] | None
     last_tool: list[str] | None
     tool_args: list[dict[str, Any]] | None
@@ -329,7 +325,6 @@ def make_tool_node(
     tool 返回的是非 str 数据且是 dict 时，会尝试注入 state：
     - ``calc_risk_stub`` → ``risk_metrics``
     - ``task_done`` / ``mark_complete`` → ``task_status="done"``
-    - ``request_human_review`` → ``human_review_result``
     """
 
     def tool_node(state: AgentState) -> dict:
@@ -347,11 +342,6 @@ def make_tool_node(
             "thread_id": state.get("thread_id", ""),
             "session_id": state.get("thread_id", ""),  # alias
         }
-        # HumanGate approve（任何 kind：risk/merge/portfolio/permission/budget）
-        # resume 后注入 human_approved —— 副作用类 tool 据此放行（P-04/F-06）。
-        # ponytail: 首步无 review 时保持缺省，副作用 tool 自行 fail-closed。
-        if state.get("human_review_result") == "proceed":
-            ctx["human_approved"] = True
         # Blackboard 路径透传（P-01/F-06：dataset 工具读同一 bb 文件；
         # engine 默认 None → backing 默认路径 .quantcode/blackboard.db）。
         if state.get("_blackboard_db_path"):
@@ -470,15 +460,13 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     - calc_risk → risk_metrics（完整 dict，含阈值）
     - mark_task_done / task_done → task_status="done"
     - write_blackboard → task_status="done"（流程最后一步，写入完成后标记结束）
-    - request_human_review → human_review_result（"proceed"/"abort"，由 _human_gate_node 最终裁决）
     """
     updates: dict[str, Any] = {}
 
     if tool_name == "calc_risk_stub":
         # 注入 risk_metrics
         updates["risk_metrics"] = output
-        # 测试场景支持：自动构造简单的 risk_profile 让 HumanGate 能触发
-        # 生产场景会通过 generate_risk_profile 工具覆盖此值
+        # 测试场景支持：自动构造简单的 risk_profile 供结果展示。
         updates["risk_profile"] = {
             "strategy_id": output.get("strategy_id"),
             "as_of_date": output.get("as_of_date"),
@@ -491,8 +479,7 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
         updates["risk_metrics"] = output
 
     if tool_name == "generate_risk_profile":
-        # 生产场景：generate_risk_profile 返回 {"risk_profile": {...}}，
-        # 提取进 state 供 route_next_step 的 HUMAN_GATE 条件消费。
+        # 生产场景：generate_risk_profile 返回 {"risk_profile": {...}}。
         profile = output.get("risk_profile")
         if isinstance(profile, dict):
             updates["risk_profile"] = profile
@@ -502,15 +489,6 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
 
     if tool_name == "write_blackboard":
         updates["task_status"] = "done"
-
-    if tool_name in ("request_human_review", "human_review"):
-        # Day 4 俞高磊：request_human_review 现在含 interrupt() 暂停，
-        # 外部 resume 后返回 {"decision": "proceed"/"abort"}
-        decision = output.get("decision", "abort")
-        updates["human_review_result"] = decision
-        # 同时注入 gate_purpose 标记这是 risk gate
-        if "_gate_purpose" not in updates:
-            updates["_gate_purpose"] = "risk"
 
     # Day 4 控制平面状态回流：标准字段透传给 AgentState/MCP。
     if "output_data" in output and isinstance(output.get("output_data"), dict):
@@ -622,6 +600,9 @@ def make_routing_edge(
 
     def routing_edge(state: AgentState) -> str:
         messages = state.get("messages", [])
+        budget = budget_total(state)
+        if budget is not None and int(state.get("budget_used") or 0) > budget:
+            return "budget"
         if not messages:
             # print("[DEBUG routing_edge] no messages → end")
             return "end"
@@ -657,9 +638,9 @@ def make_tool_routing_edge(
     历史作为路由输入，委托 ``route_next_step`` 做出决策：
 
     路由结果映射：
-    - 死循环 → "human_gate"
+    - 死循环 → "end"
     - max_iterations → "max_iter"
-    - risk threshold → "human_gate"
+    - risk threshold → no gate
     - finish → "end"
     - 正常 → "rlhf"（继续循环，回到 rlhf 或 llm 节点）
 
@@ -704,7 +685,6 @@ def make_tool_routing_edge(
             "fingerprint_history": list(fingerprint_history),
             "risk_metrics": state.get("risk_metrics"),
             "risk_profile": state.get("risk_profile"),
-            "human_review_result": state.get("human_review_result"),
             "task_status": state.get("task_status"),
             "execution_trace": _build_execution_trace(messages),
             "task_goal": state.get("task_goal", "") or state.get("input_data", {}).get("task", ""),
@@ -720,13 +700,12 @@ def make_tool_routing_edge(
         #       f"tool_args={state.get('tool_args')!r}")
 
         if result.decision == RouteDecision.ABORT_LOOP:
-            return "human_gate"
+            # Runtime loop failure; stop without a human gate.
+            return "loop_stop"
         elif result.decision == RouteDecision.ABORT_MAX_ITERATIONS:
             # Write RLHF entry for max_iter abort before routing to END
             _log_abort_rlhf(state, "abort_max_iterations")
             return "max_iter"
-        elif result.decision == RouteDecision.HUMAN_GATE:
-            return "human_gate"
         elif result.decision == RouteDecision.FINISH:
             return "end"
         # CONTINUE → 继续执行
@@ -1161,13 +1140,10 @@ def make_budget_check_node(
     *,
     grant_tokens: int = 50000,
 ) -> Callable[[AgentState], dict]:
-    """构造 budget_gate 节点：budget_used 超预算时 interrupt(kind="budget") 暂停。
+    """构造 budget_gate 节点：超预算返回 stopped_budget，不创建 HumanGate。
 
-    - 未超限且未发过警告 → 返回 budget_warning 事件（进 checkpoint_snapshot/
-      execution_trace，前端按未知类型降级渲染），继续正常路由。
-    - 超限 → interrupt(payload) 等外部 Command(resume={"decision": ...})：
-      approve → budget_grants 追加 grant_tokens 继续跑；
-      reject/其他 → output_data.budget_exhausted=True 正常收尾。
+    - 未超限 → 继续正常路由。
+    - 超限 → 返回 stopped_budget 和 output_data.budget_exhausted=True，正常收尾。
     """
     def budget_gate_node(state: AgentState) -> dict:
         used = int(state.get("budget_used") or 0)
@@ -1176,36 +1152,19 @@ def make_budget_check_node(
         if budget is None or over_by <= 0:
             return {}
 
-        decision = None
-        if not state.get("human_review_result"):
-            from langgraph.types import interrupt as lg_interrupt
-
-            decision = parse_resume_decision(
-                lg_interrupt({
-                    "kind": "budget",
-                    "budget_tokens": budget,
-                    "budget_used": used,
-                    "over_by": over_by,
-                })
-            )
-            external = normalize_external_decision(decision or "")
-            decision = "proceed" if external == "approve" else "abort"
-
-        if decision == "proceed":
+        if budget is not None and over_by > 0:
+            output = dict(state.get("output_data") or {})
+            output["budget_exhausted"] = True
+            output["budget_used"] = used
+            output["budget_tokens"] = int(budget)
             return {
-                "human_review_result": "proceed",
-                "_gate_purpose": "budget",
-                "budget_grants": [grant_tokens],
+                "status": "stopped_budget",
+                "task_status": "done",
+                "budget_used": used,
+                "budget_tokens": int(budget),
+                "output_data": output,
             }
-        # reject → 正常收尾（completed + budget_exhausted 标记）
-        output = dict(state.get("output_data") or {})
-        output["budget_exhausted"] = True
-        return {
-            "human_review_result": "abort",
-            "_gate_purpose": "budget",
-            "task_status": "done",
-            "output_data": output,
-        }
+        return {}
 
     return budget_gate_node
 

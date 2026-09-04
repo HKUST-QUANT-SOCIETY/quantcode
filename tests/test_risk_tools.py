@@ -9,7 +9,7 @@ import pytest
 from schemas.risk_profile import RiskProfile, RiskThresholds
 from tools.risk.risk_tools import (
     calc_risk,
-    check_gate,
+    risk_verdict,
     clear_write_pr_comment_dedupe_cache,
     generate_risk_profile,
     read_blackboard,
@@ -52,22 +52,22 @@ def test_calc_risk_normal_scenario():
     model_spec = _sample_model_spec()
     metrics = calc_risk(model_spec, scenario="normal")
     profile = generate_risk_profile(model_spec, metrics)
-    gate = check_gate(profile, RiskThresholds())
+    gate = risk_verdict(profile, RiskThresholds())
 
     assert metrics["strategy_id"] == "pb_roe_ranker"
     assert metrics["max_drawdown"] == 0.08
-    assert gate["requires_human"] is False
+    assert gate["breached"] is False
 
 
 def test_calc_risk_high_risk_scenario():
     model_spec = _sample_model_spec()
     metrics = calc_risk(model_spec, scenario="high_risk")
     profile = generate_risk_profile(model_spec, metrics)
-    gate = check_gate(profile, RiskThresholds())
+    gate = risk_verdict(profile, RiskThresholds())
 
     assert metrics["strategy_id"] == "pb_roe_ranker"
     assert metrics["max_drawdown"] == 0.22
-    assert gate["requires_human"] is True
+    assert gate["breached"] is True
 
 
 def test_calc_risk_rejects_unknown_scenario():
@@ -88,21 +88,21 @@ def test_generate_risk_profile_from_stub_metrics():
     assert profile.max_drawdown == 0.08
 
 
-def test_check_gate_normal_profile():
+def test_risk_verdict_normal_profile():
     model_spec = _sample_model_spec()
     profile = generate_risk_profile(model_spec, calc_risk(model_spec, "normal"))
-    result = check_gate(profile, RiskThresholds())
+    result = risk_verdict(profile, RiskThresholds())
 
-    assert result["requires_human"] is False
+    assert result["breached"] is False
     assert result["reasons"] == []
 
 
-def test_check_gate_high_risk_profile():
+def test_risk_verdict_high_risk_profile():
     model_spec = _sample_model_spec()
     profile = generate_risk_profile(model_spec, calc_risk(model_spec, "high_risk"))
-    result = check_gate(profile, RiskThresholds())
+    result = risk_verdict(profile, RiskThresholds())
 
-    assert result["requires_human"] is True
+    assert result["breached"] is True
     assert "max_drawdown" in result["reasons"]
     assert "tail_risk_var_99" in result["reasons"]
 
@@ -171,6 +171,6 @@ def test_write_pr_comment_posts_formal_github_comment(tmp_path, monkeypatch):
     assert calls[0]["method"] == "POST"
     assert calls[0]["path"] == "/issues/42/comments"
     body = calls[0]["payload"]["body"]
-    assert "QuantCode Risk Gate Report" in body
+    assert "QuantCode Risk CI Report" in body
     assert "RiskProfile JSON" in body
-    assert "<!-- quantcode:risk-gate:profile:abcdef1234567890:" in body
+    assert "<!-- quantcode:risk-ci:profile:abcdef1234567890:" in body

@@ -937,8 +937,8 @@ def test_agent_runner_no_retry_by_default(tmp_db, clean_registry):
 # ---------------------------------------------------------------------------
 
 
-def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
-    """验证 human_gate 条件边触发后端到端工作。
+def test_high_risk_does_not_trigger_human_gate(tmp_db, clean_registry):
+    """v5：风险结果可进入 state，但不创建普通 HumanGate。
 
     场景：
     1. mock LLM 调 read_pr，然后一步调 calc_risk(high_risk) + generate_risk_profile
@@ -983,11 +983,9 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
         thread_id="human-gate-e2e-1",
     )
 
-    # 关键断言：风险超标后 human_gate 应立即暂停
-    # iterations=2 表示：step1(read_pr) → step2(calc_risk + generate_risk_profile) → human_gate
-    assert final["iterations"] == 2, (
-        f"Expected human_gate after risk tools but got {final['iterations']} iterations"
-    )
+    assert "__interrupt__" not in final
+    assert final.get("status") != "waiting_for_human"
+    assert final.get("gate") is None
 
     # 验证 risk_metrics 确实被注入到 final state
     assert "risk_metrics" in final, "risk_metrics should be in final state"
@@ -995,5 +993,5 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
     assert risk is not None, "risk_metrics should not be None"
     assert risk.get("tail_risk_var_99", 0) > 0.05, "should be high risk data"
 
-    print(f"[human_gate_test] PASS: iterations={final['iterations']}, "
+    print(f"[risk_verdict_test] PASS: iterations={final['iterations']}, "
           f"risk_metrics.tail_risk_var_99={risk['tail_risk_var_99']}")

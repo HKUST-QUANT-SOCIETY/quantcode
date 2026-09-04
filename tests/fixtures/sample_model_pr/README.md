@@ -80,7 +80,7 @@
   "commit_sha": "abcdef1"
 }
 Risk Review Handoff
-请风控组基于上述 ModelSpec 执行 risk-gate 检查，重点关注：
+请风控组基于上述 ModelSpec 执行 risk-ci 检查，重点关注：
 - CSI1000 universe / benchmark 是否一致
 - 最大单票仓位 5% 是否符合限制
 - 持仓周期 20 天对应的换手和容量假设

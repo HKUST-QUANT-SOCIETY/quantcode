@@ -64,7 +64,7 @@ class ScriptedRiskLLM:
                         },
                     ),
                     (
-                        "check_gate",
+                        "risk_verdict",
                         {"risk_profile": self._risk_profile},
                     ),
                 ],
@@ -106,22 +106,20 @@ def test_risk_tools_are_react_ready_until_human_gate_boundary(tmp_path):
 
     final = runner.run(
         task="Run risk gate for PR #42 with a high-risk profile",
-        skill_name="risk-gate",
+        skill_name="risk-ci",
         thread_id="risk-react-ready-high-risk",
     )
 
     allowed = set(llm.calls[0])
-    assert {"read_blackboard", "calc_risk", "generate_risk_profile", "check_gate"} <= allowed
+    assert {"read_blackboard", "calc_risk", "generate_risk_profile", "risk_verdict"} <= allowed
     assert "write_pr_comment" in allowed
     assert "read_pr" not in allowed
 
     tool_outputs = [str(getattr(m, "content", "")) for m in final["messages"]]
-    assert any("requires_human" in output and "True" in output for output in tool_outputs)
+    assert any("breached" in output and "True" in output for output in tool_outputs)
     assert any("max_drawdown" in output for output in tool_outputs)
     assert any("tail_risk_var_99" in output for output in tool_outputs)
-    # Day 5（甲方案）：确定性引擎在 check_gate(requires_human=True) 后路由到
-    # _human_gate_node 并 interrupt()，不再回 LLM 生成 "Reached HumanGate boundary." 文本。
-    # HumanGate 边界体现为 __interrupt__ 存在 + check_gate 输出停在最后一条。
-    assert "__interrupt__" in final, "high-risk 应在 HumanGate 处 interrupt"
-    last_content = str(getattr(final["messages"][-1], "content", ""))
-    assert "requires_human" in last_content and "True" in last_content
+    # v5：风险 verdict 留在领域结果/CI 报告，不触发普通 HumanGate。
+    assert "__interrupt__" not in final
+    assert final.get("status") != "waiting_for_human"
+    assert any("breached" in output and "True" in output for output in tool_outputs)

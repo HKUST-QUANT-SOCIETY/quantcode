@@ -1,9 +1,9 @@
-"""portfolio tools — 三件套注册（_meta 通道，构造/调仓/gate 均为确定性数值工具）。
+"""portfolio tools — 三件套注册（构造/调仓/评估均为确定性数值工具）。
 
 import 即注册（与 tools/market/_register.py 同风格）：
 - construct_portfolio(returns_by_asset | cov, config) → PortfolioWeights
 - rebalance_plan(current, target, config/thresholds)  → RebalancePlan
-- check_portfolio_gate(plan, thresholds, equity_curve)→ PortfolioGateVerdict
+- portfolio_verdict(plan, thresholds, equity_curve) → PortfolioVerdict
 
 三个 tool 数值全确定性、LLM 零参与；作为平台级能力走 _meta 通道
 （与 list_algorithms 三件套同路），不进各组 tool_allowlist。
@@ -56,8 +56,8 @@ class RebalancePlanArgs(BaseModel):
     )
 
 
-class CheckPortfolioGateArgs(BaseModel):
-    """check_portfolio_gate 入参（thresholds 键名走摘要）。"""
+class PortfolioVerdictArgs(BaseModel):
+    """portfolio_verdict 入参（thresholds 键名走摘要）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -72,7 +72,6 @@ class CheckPortfolioGateArgs(BaseModel):
     equity_curve: list[float] | None = Field(
         default=None, description="可选净值序列 → 回撤代理检查。"
     )
-    thread_id: str = ""
 
 def _construct_execute(args: ConstructPortfolioArgs, ctx: dict) -> dict:
     from schemas.portfolio import TargetPortfolio
@@ -105,21 +104,15 @@ def _rebalance_execute(args: RebalancePlanArgs, ctx: dict) -> dict:
     return plan.model_dump(mode="json")
 
 
-def _gate_execute(args: CheckPortfolioGateArgs, ctx: dict) -> dict:
-    from tools.portfolio.gate import check_portfolio_gate_impl
+def _verdict_execute(args: PortfolioVerdictArgs, ctx: dict) -> dict:
+    from tools.portfolio.gate import portfolio_verdict_impl
 
-    verdict = check_portfolio_gate_impl(
+    verdict = portfolio_verdict_impl(
         args.plan,
         thresholds=args.thresholds,
         weights=args.weights,
         equity_curve=args.equity_curve,
-        thread_id=args.thread_id or str(ctx.get("thread_id") or ctx.get("session_id") or ""),
     )
-    # 超阈且在 LangGraph 内：maybe_interrupt 已被 resume → impl 返回 decision dict
-    # （镜像 request_human_review 契约；外部 resume 侧读 decision）。
-    # 未超阈 / 进程外直调 → 返回 PortfolioGateVerdict dict。
-    if isinstance(verdict, dict):
-        return verdict
     return verdict.model_dump(mode="json")
 
 
@@ -148,25 +141,24 @@ rebalance_plan_tool = ToolDef(
     execute=_rebalance_execute,
 )
 
-check_portfolio_gate_tool = ToolDef(
-    id="check_portfolio_gate",
+portfolio_verdict_tool = ToolDef(
+    id="portfolio_verdict",
     description=(
         "Evaluate a rebalance plan against portfolio thresholds "
         "(max_single_weight, max_turnover, max_drawdown_proxy from optional equity_curve). "
-        "Returns breached list and requires_human; when breached it also builds a "
-        "HumanGate interrupt payload (kind=portfolio) and triggers the pause."
+        "Returns a pass/fail verdict and breached reasons. Never creates a HumanGate."
     ),
-    schema=CheckPortfolioGateArgs,
-    execute=_gate_execute,
+    schema=PortfolioVerdictArgs,
+    execute=_verdict_execute,
 )
 
 # 平台级确定性数值工具：走 _meta 通道（不进各组 allowlist），与 algorithms 三件套同路。
-for _t in (construct_portfolio_tool, rebalance_plan_tool, check_portfolio_gate_tool):
+for _t in (construct_portfolio_tool, rebalance_plan_tool, portfolio_verdict_tool):
     _t._meta = True  # type: ignore[attr-defined]
     register_tool(_t)  # 覆盖式幂等注册
 
 __all__ = [
     "construct_portfolio_tool",
     "rebalance_plan_tool",
-    "check_portfolio_gate_tool",
+    "portfolio_verdict_tool",
 ]

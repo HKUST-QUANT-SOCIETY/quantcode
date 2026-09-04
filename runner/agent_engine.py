@@ -100,8 +100,9 @@ def _record_run_safe(**kwargs: Any) -> None:
 
 # 计算 status 的共用规则：waiting_for_human > completed > stopped
 def _run_status(final_state: dict) -> str:
-    if final_state.get("status") == "waiting_for_human":
-        return "waiting_for_human"
+    explicit = final_state.get("status")
+    if explicit in {"waiting_for_human", "stopped_budget", "stopped_loop", "failed", "error"}:
+        return str(explicit)
     if final_state.get("task_status") == "done":
         return "completed"
     return "stopped"
@@ -143,8 +144,12 @@ class AgentRunner:
         budget_tokens: int | None = None,  # R2 token budget；None=不启用
         blackboard_db_path: str | Path | None = None,  # P-01/F-06: dataset 工具同源 bb
         allowed_tool_ids: set[str] | frozenset[str] | None = None,
+        actor_id: str | None = None,
+        role: str | None = None,
     ) -> None:
         self.group = group
+        self.actor_id = actor_id
+        self.role = role
         # Day 5:若启用 retry,自动包 RetryWrapper(不侵入节点函数)
         if retry_max_retries > 0 and model is not None:
             from runner.retry import RetryWrapper
@@ -156,6 +161,7 @@ class AgentRunner:
             )
         else:
             self.model = model  # 可选：build 时若不传则用占位（mock 用）
+        self._uses_default_registry = registry is None
         self.registry = registry or default_registry
         self.loop_detector = loop_detector or LoopDetector()
         self.max_iterations = max_iterations
@@ -230,12 +236,12 @@ class AgentRunner:
         system_prompt = system_prompt + _tc_instruction
 
         # 2. 计算当前可见工具。MCP 入口会传入已经由认证 session 计算好的
-        # effective set；未传时使用仓库内本组 allowlist。后者是受信任的
-        # 库调用/测试入口，保留其对注入 registry 的兼容执行语义。
+        # effective set；MCP 生产调用必须显式传入 effective set。直接库
+        # 调用属于受信任的嵌入式边界，保留全部注入工具以支持 adapter/测试。
         tools = (
             [tool for tool in self.registry.list_all() if tool.id in self.allowed_tool_ids]
             if self.allowed_tool_ids is not None
-            else self.registry.get_tools_for_group(self.group)
+            else self.registry.list_all()
         )
 
         # 3. 构造节点工厂
@@ -246,9 +252,10 @@ class AgentRunner:
         llm_node = make_llm_node(self.model, tools=tools)  # tools 通过闭包注入
         tool_node = make_tool_node(
             self.registry,
-            # 只有 MCP 认证边界传入的 effective set 才需要在执行时再次
-            # 校验。直接库调用维持历史的自定义 registry 行为。
-            allowed_tool_ids=self.allowed_tool_ids,
+            # 在 MCP 认证边界传入的 effective set 会在执行侧再次锁定，
+            # 防止 LLM 伪造不在 tools/list 中的 tool call；未显式传入时
+            # 使用本次 build 的本组工具集合，兼容直接库调用和测试 registry。
+            allowed_tool_ids={tool.id for tool in tools},
         )
         # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
         # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
@@ -271,128 +278,15 @@ class AgentRunner:
         # rebuild 管 context 窗口占比。
         rebuild_node = make_rebuild_context_node()
 
-        # human_gate 节点：区分 risk gate 和 loop gate — Day 4 俞高磊接入杨欣琳 HumanGate 接口
-        # Day 7: risk gate 在此节点直接调 interrupt()（不再依赖 LLM 主动调
-        # request_human_review tool），确保 routing → human_gate → interrupt 的
-        # 链路对 LLM 行为 100% 可靠。
-        def _human_gate_node(state: AgentState) -> dict:
-            """Gate 节点——risk gate 在此调用 LangGraph interrupt() 暂停。
-
-            - risk gate：若 human_review_result 尚不存在，立即 interrupt()。
-              恢复时通过 Command(resume={"decision": ...}) 注入决定。
-            - loop gate：测试阶段始终放行（proceed）。
-            - 已有结果：直接标准化 proceed/abort。
-            """
-            human_result = state.get("human_review_result")
-            gate_purpose = state.get("_gate_purpose", "")
-
-            if human_result == "proceed":
-                return {
-                    "_gate_purpose": gate_purpose or "risk",
-                    "human_review_result": "proceed",
-                }
-            elif human_result == "abort":
-                return {
-                    "_gate_purpose": gate_purpose or "risk",
-                    "human_review_result": "abort",
-                }
-            elif gate_purpose == "loop":
-                # Loop gate: 测试阶段始终放行
-                return {
-                    "_gate_purpose": "loop",
-                    "human_review_result": "proceed",
-                }
-            else:
-                # ★ risk gate 但还没有 human_review_result：
-                # 在此节点直接调 interrupt()，等外部 Command(resume=...)
-                from runner.human_gate import (
-                    build_interrupt_payload,
-                    make_gate_id,
-                    parse_resume_decision,
-                )
-                from langgraph.types import interrupt as lg_interrupt
-
-                thread_id = state.get("thread_id", "")
-                risk_metrics = state.get("risk_metrics") or {}
-                reasons = list(risk_metrics.get("breached_limits", []))
-                if not reasons and risk_metrics:
-                    # 复用 RiskProfile.breached_thresholds 单一实现（schemas 默认阈值）
-                    from pydantic import ValidationError
-
-                    from schemas import RiskProfile, RiskThresholds
-
-                    try:
-                        profile = RiskProfile(
-                            **{
-                                k: v
-                                for k, v in risk_metrics.items()
-                                if k in RiskProfile.model_fields
-                            }
-                        )
-                        reasons = profile.breached_thresholds(RiskThresholds())
-                    except ValidationError:
-                        reasons = []
-
-                gate_id = make_gate_id(thread_id)
-                payload = build_interrupt_payload(
-                    gate_id=gate_id,
-                    risk_profile=risk_metrics,
-                    reasons=reasons,
-                    message=f"⏸️ HumanGate: risk thresholds exceeded ({', '.join(reasons[:3])})",
-                )
-
-                # ★ 真暂停：等待外部 Command(resume={"decision": ...})
-                resume_value = lg_interrupt(payload)
-
-                decision_raw = parse_resume_decision(resume_value) or "abort"
-                # 归一化外部 approve/reject → 内部 proceed/abort
-                from runner.human_gate import normalize_external_decision
-                external = normalize_external_decision(decision_raw)
-                internal = "proceed" if external == "approve" else "abort"
-
-                return {
-                    "_gate_purpose": "risk",
-                    "human_review_result": internal,
-                }
-
-        def _human_gate_routing(state: AgentState) -> str:
-            # 从 state 读人工审核结果（已归一化为 proceed/abort）
-            decision = state.get("human_review_result", "abort")
-            gate_purpose = state.get("_gate_purpose", "risk")
-
-            # ── Day 5 RLHF 记录 ──
-            # NOTE：这里写入的是 human_gate **路由决策点** 的记录
-            # （system/human 共同决定 proceed/abort）。
-            # rlhf_collect_node 随后写的另一条记录是 **每步执行决策点**
-            # （system_decision=continue + human_decision=""）。
-            # 两个不同的决策点，分开记录是正确的——前者反思 gate
-            # 准确性（label=0/1），后者记录 step-level 行为轨迹。
-            from runner.routing.rlhf_logger import make_rlhf_entry, log_rlhf_entry
-            from runner.routing.fingerprint import compute_state_fingerprint
-
-            system_decision = "human_gate" if gate_purpose == "risk" else "abort_loop"
-            entry = make_rlhf_entry(
-                thread_id=state.get("thread_id", ""),
-                group=state.get("group", ""),
-                state_fingerprint=compute_state_fingerprint(dict(state)),
-                system_decision=system_decision,
-                human_decision=decision,           # "proceed" or "abort" (already normalized)
-                risk_features=state.get("risk_metrics"),
-                checkpoint_id=state.get("thread_id", ""),
-                iteration=state.get("iterations", 0),
-            )
-            log_rlhf_entry(entry)
-
-            if decision == "proceed":
-                return "continue"
-            return "end"
-
         # 4. 构造 StateGraph
         workflow = StateGraph(AgentState)
 
         workflow.add_node("llm", llm_node)
         workflow.add_node("tool", tool_node)
-        workflow.add_node("human_gate", _human_gate_node)
+        workflow.add_node(
+            "loop_stop",
+            lambda state: {"status": "stopped_loop", "task_status": "done"},
+        )
         workflow.add_node("rlhf", rlhf_node)   # Day 5: rlhf 节点始终存在
         if truncate_node is not None:
             workflow.add_node("truncate", truncate_node)
@@ -404,7 +298,7 @@ class AgentRunner:
         workflow.add_conditional_edges(
             "llm",
             llm_routing,
-            {"continue": "tool", "end": END},
+            {"continue": "tool", "end": END, "budget": "budget_gate"},
         )
         # Day 5：有 truncate 时 tool → truncate → 路由；否则 tool 直接路由。
         # 路由源（tool_routing 条件边挂在这个节点上）
@@ -434,9 +328,9 @@ class AgentRunner:
             _pre_tool_routine,
             {
                 "rlhf": "rlhf",
-                "max_iter": END,
+                "max_iter": "loop_stop",
                 "end": END,
-                "human_gate": "human_gate",
+                "loop_stop": "loop_stop",
                 "rebuild": "rebuild_context",
                 "checkpoint_gate": "checkpoint_gate",
             },
@@ -472,9 +366,9 @@ class AgentRunner:
             _post_checkpoint_gate,
             {
                 "rlhf": "rlhf",
-                "max_iter": END,
+                "max_iter": "loop_stop",
                 "end": END,
-                "human_gate": "human_gate",
+                "loop_stop": "loop_stop",
                 "rebuild": "rebuild_context",
             },
         )
@@ -484,18 +378,9 @@ class AgentRunner:
             tool_routing,
             {
                 "rlhf": "rlhf",
-                "max_iter": END,
+                "max_iter": "loop_stop",
                 "end": END,
-                "human_gate": "human_gate",
-            },
-        )
-        # human_gate 之后：条件边
-        workflow.add_conditional_edges(
-            "human_gate",
-            _human_gate_routing,
-            {
-                "continue": "rlhf",       # 审核通过 → rlhf node → 回工作流
-                "end": END,                # 审核拒绝 → 终止
+                "loop_stop": "loop_stop",
             },
         )
         # R2 token budget：budget gate 节点常驻 graph（未启用预算时是 no-op 工件）。
@@ -503,7 +388,12 @@ class AgentRunner:
         budget_gate_node = make_budget_check_node()
         workflow.add_node("budget_gate", budget_gate_node)
         workflow.add_edge("rlhf", "budget_gate")
-        workflow.add_edge("budget_gate", "llm")
+        def _after_budget(state: AgentState) -> str:
+            return "end" if state.get("status") == "stopped_budget" or state.get("task_status") == "done" else "llm"
+
+        workflow.add_conditional_edges(
+            "budget_gate", _after_budget, {"end": END, "llm": "llm"}
+        )
 
         # 5. compile + 接 checkpointer
         # Day 4 俞高磊：interrupt 通过 request_human_review tool 内的
@@ -587,6 +477,7 @@ class AgentRunner:
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
             _record_run_safe(
+                actor_id=self.actor_id, role=self.role,
                 group=self.group, flow=flow_name, thread_id=thread_id,
                 started_at=_started_at, ended_at=time.time(), status="error",
                 error=f"{type(exc).__name__}: {exc}",
@@ -594,6 +485,7 @@ class AgentRunner:
             )
             raise
         _record_run_safe(
+            actor_id=self.actor_id, role=self.role,
             group=self.group, flow=flow_name, thread_id=thread_id,
             started_at=_started_at, ended_at=time.time(),
             status=_run_status(final), error=None,
@@ -763,6 +655,7 @@ class AgentRunner:
         except Exception as exc:
             emit("error", data={"error": f"{type(exc).__name__}: {exc}"})
             _record_run_safe(
+                actor_id=self.actor_id, role=self.role,
                 group=self.group, flow=flow_name, thread_id=thread_id,
                 started_at=_started_at, ended_at=time.time(), status="error",
                 error=f"{type(exc).__name__}: {exc}",
@@ -815,11 +708,7 @@ class AgentRunner:
                     )
                 ))
 
-        status = (
-            "waiting_for_human" if final_state.get("status") == "waiting_for_human"
-            else "completed" if final_state.get("task_status") == "done"
-            else "stopped"
-        )
+        status = _run_status(final_state)
         emit("agent_end", data={
             "status": status,
             "iterations": final_state.get("iterations", 0),
@@ -832,6 +721,7 @@ class AgentRunner:
             else None
         )
         _record_run_safe(
+            actor_id=self.actor_id, role=self.role,
             group=self.group, flow=flow_name, thread_id=thread_id,
             started_at=_started_at, ended_at=time.time(), status=status,
             error=None, trace_events=trace, context_chars=_ctx_chars,
@@ -914,21 +804,9 @@ class AgentRunner:
         _started_at = time.time()
         try:
             final = app.invoke(Command(resume=resume_payload), config=config)
-            # 兜底：resume 后如果路由层又挂了【空 risk gate】（ABORT_LOOP 触达
-            # human_gate 但无任何 risk_metrics，没有可审内容），auto-proceed 放行，
-            # 避免把 merge/e2e 的已完成结果用无负载 gate 卡住（P-04/F-06 收尾）。
-            # ponytail: 只处理空 gate；真实 risk/budget/merge/permission gate 仍等人。
-            from runner.human_gate import extract_interrupt_payload
-
-            for _ in range(8):  # 上限防御：极端回路不无限 resume
-                payload = extract_interrupt_payload(final)
-                if not payload or payload.get("risk_profile") or payload.get("kind"):
-                    break
-                final = app.invoke(
-                    Command(resume=resume_payload), config=config
-                )
         except Exception as exc:
             _record_run_safe(
+                actor_id=self.actor_id, role=self.role,
                 group=self.group, flow=flow_name, thread_id=thread_id,
                 started_at=_started_at, ended_at=time.time(), status="error",
                 error=f"{type(exc).__name__}: {exc}",
@@ -936,6 +814,7 @@ class AgentRunner:
             )
             raise
         _record_run_safe(
+            actor_id=self.actor_id, role=self.role,
             group=self.group, flow=flow_name, thread_id=thread_id,
             started_at=_started_at, ended_at=time.time(),
             status=_run_status(final), error=None,
@@ -966,7 +845,7 @@ class AgentRunner:
                 content = str(getattr(msg, "content", ""))
                 if content.strip():
                     trace_emit(
-                        "llm_thought",
+                        "decision_summary",
                         node=node_name,
                         iteration=iteration,
                         data={"content": content[:1000]},

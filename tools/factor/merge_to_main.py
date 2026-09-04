@@ -1,8 +1,8 @@
-"""check_factor_gate + merge_to_main — 因子验收闸门与主线登记（PRD §4.1.3 / F-06）。
+"""validate_factor_contract + merge_to_main — 因子验收闸门与主线登记（PRD §4.1.3 / F-06）。
 
 两个 ToolDef 共一文件（PRD 承诺的两个能力，合并闭环的最后一环）：
 
-- check_factor_gate(report)：FactorReport dict 逐项校验（verdict==pass +
+- validate_factor_contract(report)：FactorReport dict 逐项校验（verdict==pass +
   |ic_mean|/ir/t_stat/turnover 阈值，阈值缺省走 runner.acceptance.factor_thresholds()
   即 configs/acceptance.factor.yaml 单源）。纯判定，零 LLM，零状态写入。
 - merge_to_main(factor_id, report)：gate 通过 → HumanGate interrupt（复用
@@ -53,17 +53,17 @@ def _index_path(override: str | Path | None = None) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# A. check_factor_gate：纯判定
+# A. validate_factor_contract：纯判定
 # ---------------------------------------------------------------------------
 
 
-def check_factor_gate_impl(
+def validate_factor_contract_impl(
     report: dict[str, Any], thresholds: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """FactorReport dict → {eligible, reasons, verdict}。不写任何状态。
 
     缺失字段（factor_name / ic_metrics.* / turnover.monthly）→ reasons；
-    数值判定复用 runner.acceptance.run_acceptance("factor:autoeval") 与
+    数值判定复用 runner.acceptance.run_acceptance("factor:evaluation") 与
     验收 yaml 单源；verdict 必须 == "pass"（marginal 也不放行）。
     """
     if not isinstance(report, dict):
@@ -96,7 +96,7 @@ def check_factor_gate_impl(
         from runner.acceptance import run_acceptance
 
         acc = run_acceptance(
-            "factor:autoeval",
+            "factor:evaluation",
             {"ic_metrics": ic, "turnover": report.get("turnover")},
             thresholds,
         )
@@ -154,6 +154,8 @@ def merge_to_main_impl(
     index_path: str | Path | None = None,
     report_path: str | None = None,
     thread_id: str = "",
+    evidence_dir: str | Path | None = None,
+    actor_id: str = "approver",
 ) -> dict[str, Any]:
     """合入主线登记簿：gate 不合格拒绝；合格未人审只出 gate（waiting_for_human）；
     人审通过（或 require_human=false）才写 .quantcode/mainline/factors.json。
@@ -162,7 +164,7 @@ def merge_to_main_impl(
     dry_run=True 只返回将写入的记录，不落盘、不触发 gate。
     """
     if dry_run:
-        gate = check_factor_gate_impl(report, thresholds)
+        gate = validate_factor_contract_impl(report, thresholds)
         return {
             "merged": False,
             "stage": "dry_run",
@@ -171,7 +173,7 @@ def merge_to_main_impl(
             "gate": gate,
         }
 
-    gate = check_factor_gate_impl(report, thresholds)
+    gate = validate_factor_contract_impl(report, thresholds)
     if not gate["eligible"]:
         return {
             "merged": False,
@@ -195,11 +197,12 @@ def merge_to_main_impl(
         metrics["ir"] = ic.get("ir")
         payload = build_interrupt_payload(
             gate_id=gate_id,
-            risk_profile=metrics,
+            kind="merge",
+            resource=f"factor:{factor_id}",
+            evidence=metrics,
             reasons=gate["reasons"],
             message=f"⏸️ HumanGate(kind=merge): 合入主线待审批 — {factor_id}",
         )
-        payload["kind"] = "merge"  # gate 消费方按 kind 分流（permission/budget 同款）
         return {
             "merged": False,
             "stage": "waiting_for_human",
@@ -227,6 +230,16 @@ def merge_to_main_impl(
             "record": existing,
             "index_path": str(path),
         }
+    from runner.evidence import append_event
+
+    append_event(
+        thread_id or f"factor-merge-{factor_id}",
+        "human_gate",
+        {"kind": "merge", "decision": "approve", "actor_id": actor_id,
+         "resource": f"factor:{factor_id}", "record": record},
+        evidence_dir or (path.parent / ".evidence"),
+        required=True,
+    )
     entries.append(record)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -246,13 +259,13 @@ def merge_to_main_impl(
 # ---------------------------------------------------------------------------
 
 
-class CheckGateArgs(BaseModel):
-    """check_factor_gate 输入。"""
+class ValidateFactorContractArgs(BaseModel):
+    """validate_factor_contract 输入。"""
 
     model_config = ConfigDict(extra="forbid")
 
     report: dict[str, Any] = Field(
-        description="FactorReport dict (autoeval / eval_from_panel summary output)."
+        description="FactorReport dict (quant_evaluator / eval_from_panel summary output)."
     )
 
 
@@ -267,7 +280,7 @@ class MergeMainArgs(BaseModel):
 
     factor_id: str = Field(min_length=1, description="Stable factor id for the mainline record.")
     report: dict[str, Any] = Field(
-        description="FactorReport dict from autoeval / eval_from_panel summary."
+        description="FactorReport dict from quant_evaluator / eval_from_panel summary."
     )
     dry_run: bool = Field(
         default=False,
@@ -275,8 +288,8 @@ class MergeMainArgs(BaseModel):
     )
 
 
-def _check_gate_execute(args: CheckGateArgs, ctx: dict) -> dict[str, Any]:
-    return check_factor_gate_impl(args.report, thresholds=ctx.get("thresholds"))
+def _validate_factor_contract_execute(args: ValidateFactorContractArgs, ctx: dict) -> dict[str, Any]:
+    return validate_factor_contract_impl(args.report, thresholds=ctx.get("thresholds"))
 
 
 def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
@@ -289,6 +302,8 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
         index_path=ctx.get("mainline_index"),
         report_path=ctx.get("report_path"),
         thread_id=str(ctx.get("thread_id") or ""),
+        evidence_dir=ctx.get("evidence_dir"),
+        actor_id=str(ctx.get("actor_id") or "approver"),
     )
     if result.get("stage") != "waiting_for_human" or args.dry_run:
         return result
@@ -315,6 +330,8 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
             index_path=ctx.get("mainline_index"),
             report_path=ctx.get("report_path"),
             thread_id=str(ctx.get("thread_id") or ""),
+            evidence_dir=ctx.get("evidence_dir"),
+            actor_id=str(ctx.get("actor_id") or "approver"),
         )
     return {
         "merged": False,
@@ -324,22 +341,22 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
     }
 
 
-check_factor_gate_tool = ToolDef(
-    id="check_factor_gate",
+validate_factor_contract_tool = ToolDef(
+    id="validate_factor_contract",
     description=(
         "Check whether a FactorReport passes the merge gate: verdict must be 'pass' "
         "and |ic_mean|/ir/t_stat/turnover must meet configs/acceptance.factor.yaml "
         "thresholds. Pure check, no side effects. Returns {eligible, reasons, verdict}."
     ),
-    schema=CheckGateArgs,
-    execute=_check_gate_execute,
+    schema=ValidateFactorContractArgs,
+    execute=_validate_factor_contract_execute,
 )
 
 merge_to_main_tool = ToolDef(
     id="merge_to_main",
     description=(
         "Merge a factor into the mainline registry (.quantcode/mainline/factors.json). "
-        "Runs check_factor_gate first; eligible factors pause at a HumanGate "
+        "Runs validate_factor_contract first; eligible factors pause at a HumanGate "
         "(kind=merge) until a human approves, then the record is written. "
         "dry_run=True previews the record without writes. Idempotent by code_hash."
     ),
@@ -349,10 +366,10 @@ merge_to_main_tool = ToolDef(
 
 
 __all__ = [
-    "CheckGateArgs",
+    "ValidateFactorContractArgs",
     "MergeMainArgs",
-    "check_factor_gate_impl",
-    "check_factor_gate_tool",
+    "validate_factor_contract_impl",
+    "validate_factor_contract_tool",
     "merge_to_main_impl",
     "merge_to_main_tool",
 ]

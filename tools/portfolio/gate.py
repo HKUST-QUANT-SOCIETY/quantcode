@@ -1,4 +1,4 @@
-"""check_portfolio_gate — 组合阈值裁决（确定性）。
+"""portfolio_verdict — 组合阈值裁决（确定性）。
 
 v0.2 收窄（F-03 / governance G2-A8）：组合越限 = gate 判定 **fail**——
 breached / reasons 随裁决返回，由报告平台承接，不再构造 HumanGate
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from schemas.portfolio import PortfolioGateVerdict, RebalancePlan
+from schemas.portfolio import PortfolioVerdict, RebalancePlan
 
 # 代码兜底默认（configs/portfolio.yaml 同源：max_single_weight/commission/
 # stamp_tax/rebalance_min_turnover/max_turnover_gate/max_drawdown_proxy）
@@ -44,13 +44,12 @@ def max_drawdown_proxy_impl(equity_curve: list[float]) -> float:
     return float(dd)
 
 
-def check_portfolio_gate_impl(
+def portfolio_verdict_impl(
     plan: RebalancePlan | dict[str, Any],
     thresholds: dict[str, Any] | None = None,
     weights: dict[str, float] | None = None,
     equity_curve: list[float] | None = None,
-    thread_id: str = "",
-) -> PortfolioGateVerdict:
+) -> PortfolioVerdict:
     """裁决组合计划是否越过阈值；越限 → 裁决 fail（不再触发人审暂停）。
 
     thresholds 键（键名 LLM 可给摘要，缺省用默认）：
@@ -58,8 +57,6 @@ def check_portfolio_gate_impl(
     - max_turnover          换手上限
     - max_drawdown_proxy    回撤代理上限（仅当提供 equity_curve）
 
-    ponytail: ``thread_id`` 形参保留（registry 调用方传参、签名兼容），
-    收窄后裁决不再产生 gate payload，故当前未使用。
     """
     if isinstance(plan, dict):
         plan = RebalancePlan(**plan)
@@ -98,13 +95,9 @@ def check_portfolio_gate_impl(
 
     # v0.2 收窄：越限 → 裁决 fail（breached/reasons 承载失败语义），不再构造
     # interrupt payload、不再经 maybe_interrupt() 暂停等 resume。
-    # schemas/portfolio.py 在本次文件集外，``requires_human`` / ``interrupt_payload``
-    # 字段保留但语义收窄：requires_human 恒 False（是否违规看 breached/reasons）。
-    # ponytail: 原 maybe_interrupt() 一并删除（仓库内无其他调用方）。
-    return PortfolioGateVerdict(
+    return PortfolioVerdict(
         thresholds={"max_single_weight": max_single, "max_turnover": max_turnover, "max_drawdown_proxy": max_dd},
         breached=breached,
-        requires_human=False,
+        verdict="fail" if breached else "pass",
         reasons=reasons,
-        interrupt_payload=None,
     )

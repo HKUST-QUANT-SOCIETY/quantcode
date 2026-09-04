@@ -24,7 +24,7 @@ OpenCode 配置（``opencode.jsonc`` 的 ``mcp`` 段）::
 
 参考：
 - MCP 协议：https://modelcontextprotocol.io/
-- 本仓库规划：``docs/Architecture_Spec.md`` §2 控制平面
+- 本仓库规划：``docs/QuantCode_Design.md`` §2 控制平面
 """
 from __future__ import annotations
 
@@ -49,13 +49,12 @@ from tools.registry import registry, ToolDef
 from tools.schema_utils import pydantic_to_json_schema  # Day 4: 提取到公共模块
 from quantcode import identity  # P0-7: SSH key → group 绑定解析
 
-# Day 3 评审修复（🟢#6）：MCP server 暴露的 tool 集合受 ``QUANTCODE_GROUP`` 环境变量过滤。
-# 默认（未设置）保持原行为：返回所有已注册 tool（兼容 day3-merge 后尚未分组的 tool）。
-# 设置如 ``QUANTCODE_GROUP=model`` 后只返回该组 allowlist 内的 tool，避免泄漏
-# 尚未上线或跨组的内部 tool。
+# MCP server 暴露的 tool 集合按会话身份和组 allowlist 过滤。
+# 开发测试可显式使用 ``QUANTCODE_ENV=test`` + ``QUANTCODE_ALLOW_UNAUTH=1``；
+# 生产环境无 roster 身份时 fail-closed，避免泄漏未授权内部 tool。
 #
 # P0-7：组身份解析升级为三级（SSH key → 组长期绑定，会话内不可变，
-# 见 ``docs/Architecture_Spec.md`` §2.1 与 ``quantcode/identity.py``）：
+# 见 ``docs/QuantCode_Design.md`` §2.1 与 ``quantcode/identity.py``）：
 #   a) env ``QUANTCODE_SSH_KEY_FINGERPRINT``（别名 ``QUANTCODE_SSH_FINGERPRINT``）
 #      存在 → 查绑定映射；命中 → 返回该组并进程内缓存；未命中 → fail-closed。
 #   b) 无指纹且映射文件缺失/为空 → 沿用 ``QUANTCODE_GROUP`` env（本地单用户降级）。
@@ -85,6 +84,12 @@ def _get_ssh_fingerprint() -> str | None:
 
 def _env_group() -> str | None:
     return os.environ.get("QUANTCODE_GROUP", "").strip() or None
+
+
+def _development_mode() -> bool:
+    return os.environ.get("QUANTCODE_ENV", "").strip().lower() in {
+        "dev", "development", "test"
+    }
 
 
 def _get_mcp_group() -> str | None:
@@ -120,7 +125,7 @@ def _get_mcp_group() -> str | None:
     bindings = identity.load_bindings()
     if bindings:
         # 有绑定配置但本会话未提供指纹 → 默认 fail-closed
-        if os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1":
+        if _development_mode() and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1":
             g = _env_group()
             logger.warning(
                 "_get_mcp_group: 已配置 SSH 组绑定但未提供指纹，"
@@ -139,7 +144,11 @@ def _get_mcp_group() -> str | None:
             "3) 本地单用户显式降级: export QUANTCODE_ALLOW_UNAUTH=1。"
         )
 
-    # 无绑定配置 → 沿用 env（本地单用户降级）
+    # No roster is allowed only in an explicit local development process.
+    if not _development_mode():
+        raise RuntimeError(
+            "AUTHENTICATION_REQUIRED: production MCP requires SSH roster identity"
+        )
     g = _env_group()
     if g is None:
         logger.warning(
@@ -191,7 +200,6 @@ import runner.agent_mcp_tool  # noqa: F401  触发 run_agent tool 注册（Day 4
 import tools.solution._register  # noqa: F401,E402  触发 solution 四工具注册（P-10，AG-J 移交项）
 import runner.distill.cards  # noqa: F401,E402  触发 list_capabilities 元工具注册（P-07，_meta 通道）
 import tools.admin._register  # noqa: F401,E402  触发 admin 六工具注册（P-08，AG-D：_meta 通道 + 运行时 admin 门禁）
-import tools.deploy._register  # noqa: F401,E402  触发 /deploy 黑盒工具注册（P-09，AG-H 移交项）
 
 
 # ---------------------------------------------------------------------------
@@ -537,6 +545,7 @@ def _is_admin_session(group: str | None = None) -> bool:
 
     fingerprint = _get_ssh_fingerprint()
     return is_admin(fingerprint, group)
+_ADMIN_ONLY_TOOLS = frozenset({"deploy_alphaflow"})
 
 
 def _tools_for_session(group: str | None) -> list[ToolDef]:
@@ -545,6 +554,9 @@ def _tools_for_session(group: str | None) -> list[ToolDef]:
         visible = registry.get_tools_for_group(group)
     else:
         visible = registry.list_all()
+
+    if not _is_admin_session(group):
+        visible = [tool for tool in visible if tool.id not in _ADMIN_ONLY_TOOLS]
 
     for tool in registry.list_all():
         if not getattr(tool, "_meta", False) or tool in visible:
@@ -613,6 +625,19 @@ def call_tool(name: str, arguments: dict) -> dict:
         if fingerprint:
             ctx["identity"] = fingerprint
             ctx["ssh_fingerprint"] = fingerprint
+            roster = identity.resolve_identity(fingerprint) or {}
+            ctx.update(
+                {
+                    "actor_id": roster.get("actor_id"),
+                    "role": roster.get("role", "analyst"),
+                    "workspace_id": roster.get("workspace_id"),
+                    "workspace_path": roster.get("workspace_path"),
+                    "github_subject": roster.get("github_subject"),
+                    "resource_scopes": roster.get("resource_scopes", []),
+                }
+            )
+        if _is_admin_session(mcp_group):
+            ctx["role"] = "admin"
         logger.info("call_tool: %s(%s) group=%s model=%s",
                      name, json.dumps(arguments, default=str)[:200],
                      mcp_group or "(unset)",

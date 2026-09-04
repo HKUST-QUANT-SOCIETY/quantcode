@@ -561,7 +561,7 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
     import tools.risk._register  # noqa: F401
     from runner.compose_executor import execute_compose_flow, unregister_flow
     from runner.langgraph_base import clear_checkpointer_cache
-    from runner.risk_agent import register_risk_gate_flow
+    from runner.risk_ci import register_risk_ci_flow
     from tools.model import trigger_risk_flow as rf_module
     from tools.model import write_blackboard as wb_module
     from tools.risk.risk_tools import clear_write_pr_comment_dedupe_cache
@@ -592,10 +592,10 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
     assert trigger_result["review"]["blackboard_key"] == blackboard_key
 
     try:
-        register_risk_gate_flow(checkpoint_db=tmp_path / "checkpoints.db")
+        register_risk_ci_flow(checkpoint_db=tmp_path / "checkpoints.db")
         result = execute_compose_flow(
             group="risk",
-            flow_name="risk:gate",
+            flow_name="risk:ci",
             input_data={
                 "scenario": "normal",
                 "project_id": VALID_SESSION,
@@ -610,7 +610,7 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
             thread_id="risk-model-to-risk-test",
         )
     finally:
-        unregister_flow("risk", "risk:gate")
+        unregister_flow("risk", "risk:ci")
         clear_checkpointer_cache()
         clear_write_pr_comment_dedupe_cache()
 

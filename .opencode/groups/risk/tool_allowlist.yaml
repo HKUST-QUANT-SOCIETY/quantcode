@@ -3,7 +3,7 @@ allowlist:
   - read_blackboard
   - calc_risk
   - generate_risk_profile
-  - check_gate
+  - risk_verdict
   - request_human_review
   - write_pr_comment
   # 共享工具

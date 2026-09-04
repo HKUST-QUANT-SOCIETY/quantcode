@@ -1,6 +1,6 @@
 """真实数据因子评估流（FactorPanel → FactorReport 兼容 dict → 验收）。
 
-与 flows/factor_autoeval.py（mock AutoEval API 路径）互补：本流不依赖外部
+与 flows/factor_evaluation_adapter.py（mock AutoEval API 路径）互补：本流不依赖外部
 AutoEval 服务，直接对 Blackboard ``shared.datasets.panel/*`` 的 FactorPanel
 契约数据算真实统计（纯 numpy；scipy 不在运行依赖里，rank 自实现）。
 
@@ -16,7 +16,7 @@ AutoEval 服务，直接对 Blackboard ``shared.datasets.panel/*`` 的 FactorPan
 
 产出 dict 与 schemas/factor.py FactorReport 字段兼容，verdict 判定走
 runner/acceptance.factor_thresholds()（configs/acceptance.factor.yaml 单源），
-并调用 run_acceptance("factor:autoeval", report) 做验收复核（只调用不改）。
+并调用 run_acceptance("factor:evaluation", report) 做验收复核（只调用不改）。
 """
 from __future__ import annotations
 
@@ -245,7 +245,7 @@ def evaluate_factor_panel(panel: Any) -> dict[str, Any]:
 
     from runner.acceptance import run_acceptance
 
-    result = run_acceptance("factor:autoeval", report)
+    result = run_acceptance("factor:evaluation", report)
     acceptance = {
         "verdict": result.verdict,
         "checks": [

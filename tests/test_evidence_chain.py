@@ -252,31 +252,13 @@ def test_artifact_sha256_binding(evidence_dir: Path, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_existing_human_gate_contract_unchanged():
-    from runner.human_gate import normalize_external_decision, should_interrupt
-    from schemas.human_gate import HumanGate, HumanGateStatus
-    from schemas.risk_profile import RiskProfile, RiskThresholds
+    from runner.human_gate import normalize_external_decision
+    from schemas.human_gate import HumanGate
 
-    # should_interrupt 对 approved/rejected 恒 False（既有 test_should_not_interrupt_*）
-    high_risk = RiskProfile(
-        strategy_id="demo",
-        as_of_date="2024-03-15",
-        max_drawdown=0.20,
-        position_limit=0.10,
-        correlation_with_existing=0.20,
-        capacity_estimate_usd=1_000_000,
-        tail_risk_var_99=0.02,
-    )
-    assert should_interrupt(high_risk, RiskThresholds()) is True  # 未决闸会拦
-    for status in (HumanGateStatus.APPROVED, HumanGateStatus.REJECTED):
-        gate = HumanGate(
-            gate_id="hg_test_1",
-            status=status,
-            decision=HumanGateDecision(
-                action=HumanGateDecisionAction.APPROVE,
-                decided_by="risk-lead",
-            ),
-        )
-        assert should_interrupt(high_risk, RiskThresholds(), gate=gate) is False
+    HumanGate(gate_id="hg_merge", kind="merge", status="pending")
+    HumanGate(gate_id="hg_permission", kind="permission", status="pending")
+    with pytest.raises(ValidationError):
+        HumanGate(gate_id="hg_risk", kind="risk", status="pending")  # type: ignore[arg-type]
 
     # normalize_external_decision fail-closed（既有 TestNormalizeExternalDecision 语义）
     assert normalize_external_decision("garbage") == "reject"
@@ -295,7 +277,7 @@ def test_existing_human_gate_contract_unchanged():
         )
     # AuditEventKind 覆盖 SPEC §2.2 六类
     assert {k.value for k in AuditEventKind} == {
-        "tool_call", "tool_result", "risk_gate", "human_gate", "artifact", "output_data",
+        "tool_call", "tool_result", "risk_verdict", "human_gate", "artifact", "output_data",
     }
 
 
@@ -428,7 +410,7 @@ def test_stream_run_writes_evidence_chain(tmp_path, monkeypatch):
     assert "tool_call" in kinds
     assert "tool_result" in kinds
     assert "artifact" in kinds
-    assert "human_gate" in kinds  # __interrupt__ 分支的 hook（P2#14）
+    assert "human_gate" not in kinds  # 普通完成路径不伪造 Gate 证据
     assert kinds.count("output_data") >= 1
     # artifact 环按 G2-A6 绑定真实文件
     artifact_event = next(e for e in ev.verify_chain(thread_id, evidence_target) if e.kind == AuditEventKind.ARTIFACT)

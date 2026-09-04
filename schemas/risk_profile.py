@@ -1,4 +1,4 @@
-"""QuantCode RiskProfile schema — risk:gate 输出契约。
+"""QuantCode RiskProfile schema — risk:ci 输出契约。
 
 Owner: 杨欣琳（实现）/ 刘炽（schema + fixtures）
 
@@ -14,8 +14,8 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class RiskGateVerdict(StrEnum):
-    """risk:gate 评估结论。
+class RiskVerdict(StrEnum):
+    """risk:ci 评估结论。
 
     v0.2 收窄（F-03 / governance G2-A8）：评估结论只有 pass / fail——
     越限 = fail（随风控报告披露，报告平台 / CI 承接），产出不再触发
@@ -28,7 +28,7 @@ class RiskGateVerdict(StrEnum):
 
 
 class RiskThresholds(BaseModel):
-    """HumanGate 默认风控阈值（与 statistics_stub 注释一致）。"""
+    """风险评估默认阈值（与 statistics_stub 注释一致）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -39,7 +39,7 @@ class RiskThresholds(BaseModel):
 
 
 class RiskProfile(BaseModel):
-    """策略经 risk:gate 分析后的风控画像。
+    """策略经 risk:ci 分析后的风控画像。
 
     ComposeTask[ModelSpec, RiskProfile] 的输出契约。
     """
@@ -56,15 +56,15 @@ class RiskProfile(BaseModel):
     pr_url: str | None = Field(default=None, max_length=512)
     analyst_notes: str | None = Field(default=None, max_length=4096)
 
-    def evaluate_verdict(self, thresholds: RiskThresholds | None = None) -> RiskGateVerdict:
+    def evaluate_verdict(self, thresholds: RiskThresholds | None = None) -> RiskVerdict:
         """根据阈值判断评估结论。
 
         v0.2 收窄（F-03 / G2-A8）：越限 → ``fail``（评估结论，随报告披露）；
         不再返回 needs_human、不触发任何产出门禁 interrupt。
         """
         if self.breached_thresholds(thresholds):
-            return RiskGateVerdict.FAIL
-        return RiskGateVerdict.PASS
+            return RiskVerdict.FAIL
+        return RiskVerdict.PASS
 
     def breached_thresholds(self, thresholds: RiskThresholds | None = None) -> list[str]:
         """返回超出阈值的指标名列表。"""

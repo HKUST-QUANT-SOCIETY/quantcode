@@ -63,17 +63,17 @@ def test_dedupe_within_langgraph_node_returns_cached_result_for_same_factor(tmp_
     app = _compile_demo_app(tmp_path, call_autoeval_api)
     input_state = {
         "group": "factor",
-        "flow_name": "factor:autoeval",
+        "flow_name": "factor:evaluation",
         "input_data": {"name": "pb_roe"},
     }
 
     first = app.invoke(
         input_state,
-        config={"configurable": {"thread_id": "factor-autoeval-dedupe-1"}},
+        config={"configurable": {"thread_id": "factor-evaluation-dedupe-1"}},
     )
     second = app.invoke(
         input_state,
-        config={"configurable": {"thread_id": "factor-autoeval-dedupe-2"}},
+        config={"configurable": {"thread_id": "factor-evaluation-dedupe-2"}},
     )
 
     assert first["output_data"] == {"factor_name": "pb_roe", "call_number": 1}
@@ -97,16 +97,16 @@ def test_dedupe_within_langgraph_node_keeps_different_factors_separate(tmp_path)
     app = _compile_demo_app(tmp_path, call_autoeval_api)
 
     pb_roe = app.invoke(
-        {"group": "factor", "flow_name": "factor:autoeval", "input_data": {"name": "pb_roe"}},
-        config={"configurable": {"thread_id": "factor-autoeval-pb-roe"}},
+        {"group": "factor", "flow_name": "factor:evaluation", "input_data": {"name": "pb_roe"}},
+        config={"configurable": {"thread_id": "factor-evaluation-pb-roe"}},
     )
     eps_growth = app.invoke(
         {
             "group": "factor",
-            "flow_name": "factor:autoeval",
+            "flow_name": "factor:evaluation",
             "input_data": {"name": "eps_growth"},
         },
-        config={"configurable": {"thread_id": "factor-autoeval-eps-growth"}},
+        config={"configurable": {"thread_id": "factor-evaluation-eps-growth"}},
     )
 
     assert pb_roe["output_data"] == {"factor_name": "pb_roe", "call_number": 1}
@@ -132,7 +132,7 @@ def test_failed_langgraph_node_is_not_deduped_and_resumes_from_failed_step(tmp_p
         factor_name = state["input_spec"]["name"]
         call_attempts.append(factor_name)
         if len(call_attempts) == 1:
-            raise RuntimeError("temporary autoeval outage")
+            raise RuntimeError("temporary quant_evaluator outage")
         return {"eval_result": {"factor_name": factor_name, "attempt": len(call_attempts)}}
 
     def generate_report(state: MiniFactorState) -> dict[str, Any]:
@@ -148,13 +148,13 @@ def test_failed_langgraph_node_is_not_deduped_and_resumes_from_failed_step(tmp_p
         state_schema=MiniFactorState,
     )
     app = workflow.compile(checkpointer=get_checkpointer(tmp_path / "checkpoints.db"))
-    config = {"configurable": {"thread_id": "factor-autoeval-resume"}}
+    config = {"configurable": {"thread_id": "factor-evaluation-resume"}}
 
-    with pytest.raises(RuntimeError, match="temporary autoeval outage"):
+    with pytest.raises(RuntimeError, match="temporary quant_evaluator outage"):
         app.invoke(
             {
                 "group": "factor",
-                "flow_name": "factor:autoeval",
+                "flow_name": "factor:evaluation",
                 "input_data": {"name": "pb_roe"},
             },
             config=config,

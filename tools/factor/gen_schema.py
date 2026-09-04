@@ -8,7 +8,7 @@
   forward_return_horizon 只允许 Literal[1,3,5,10,20]（默认 5）。
 - 因此本 tool 的输出 **只含 FactorSpec 认识的字段**：
   旧版降级输出里的 ``_fallback``/``_error``/``fields``/``rebalance`` 键会让下游
-  ``FactorSpec(**output)``（flows/factor_autoeval.validate_factor_spec 等）直接炸
+  ``FactorSpec(**output)``（flows/factor_evaluation_adapter.validate_factor_spec 等）直接炸
   ValidationError，已移除；降级事实通过 logging.warning + 本 docstring 诚实标注，
   不再以非法键混进契约数据。
 - 降级路径：operators 从 formula 粗提取（无 token 时用 ["mean"]）、

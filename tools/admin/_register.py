@@ -59,7 +59,9 @@ def _admin_gate(ctx: dict) -> dict[str, Any] | None:
     from runner.admin_scope import is_admin
 
     ident = ctx.get("identity") or ctx.get("ssh_fingerprint")
-    if is_admin(ident if isinstance(ident, str) else None, ctx.get("group")):
+    if ctx.get("role") == "admin" or is_admin(
+        ident if isinstance(ident, str) else None, ctx.get("group")
+    ):
         return None
     return {"ok": False, "error": "admin only"}
 
@@ -88,7 +90,9 @@ def _resolve_github_token(ctx: dict) -> str | None:
                 ident = _get_ssh_fingerprint()
             except Exception:
                 ident = None
-        if is_admin(ident if isinstance(ident, str) else None, ctx.get("group")):
+        if ctx.get("role") == "admin" or is_admin(
+            ident if isinstance(ident, str) else None, ctx.get("group")
+        ):
             token = os.environ.get("GITHUB_TOKEN")
     return str(token) if token else None
 
@@ -273,6 +277,8 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
             "error": "GITHUB_TOKEN not set (nor ctx['github_token']) — GitHub API unavailable",
             "org": GH_ORG,
             "repos": [],
+            "sync_status": "UNAVAILABLE",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
         repos = _gh_get(f"/orgs/{GH_ORG}/repos?per_page=100&sort=pushed", token)
@@ -312,7 +318,16 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
         except Exception as e:
             item["error"] = f"commit fetch failed: {e}"
         out.append(item)
-    return {"ok": True, "org": GH_ORG, "count": len(out), "repos": out}
+    partial = any("error" in repo for repo in out)
+    return {
+        "ok": True,
+        "org": GH_ORG,
+        "count": len(out),
+        "repos": out,
+        "sync_status": "PARTIAL" if partial else "CONNECTED",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "visibility_source": ctx.get("github_subject") or "organization-admin",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +373,8 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
             "error": "GITHUB_TOKEN not set (nor ctx['github_token']) — GitHub API unavailable",
             "org": GH_ORG,
             "updates": [],
+            "sync_status": "UNAVAILABLE",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
         repos = _gh_get(f"/orgs/{GH_ORG}/repos?per_page=100", token)
@@ -420,6 +437,8 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
         "window_days": args.since_days,
         "repos_checked": checked,
         "updates": updates,
+        "sync_status": "CONNECTED",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

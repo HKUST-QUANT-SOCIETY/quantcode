@@ -65,16 +65,17 @@ def test_deny_raises(perm_file):
 # ---------------------------------------------------------------------------
 
 def test_ask_without_approve_interrupts(perm_file):
-    _set(perm_file, "permissions:\n  strategy.deploy_strategy: ask\n")
-    verdict = check("deploy_strategy", "strategy", {"thread_id": "t1"})
+    _set(perm_file, "permissions:\n  strategy.deployment_candidate: ask\n")
+    verdict = check("deployment_candidate", "strategy", {"thread_id": "t1"})
     assert verdict["decision"] == "ask"
     assert "requires human approval" in verdict["reason"]
 
     payload = permission_engine.permission_interrupt_payload(
-        "deploy_strategy", "strategy", verdict["reason"], {"thread_id": "t1"}
+        "deployment_candidate", "strategy", verdict["reason"], {"thread_id": "t1"}
     )
     assert payload["kind"] == "permission"
-    assert payload["tool_id"] == "deploy_strategy"
+    assert payload["resource"] == "deployment_candidate"
+    assert payload["evidence"]["tool_id"] == "deployment_candidate"
     assert payload["reasons"]
 
     # 真实链路：ask 必须走 interrupt 暂停而非直接执行/报错。
@@ -82,7 +83,7 @@ def test_ask_without_approve_interrupts(perm_file):
     # RuntimeError("Called get_config outside of a runnable context")——
     # 两个异常都发生在 check 判定 ask 之后、tool 执行之前，语义等价。
     with pytest.raises(Exception) as ei:
-        enforce("deploy_strategy", "strategy", {"thread_id": "t2"})
+        enforce("deployment_candidate", "strategy", {"thread_id": "t2"})
     msg = f"{type(ei.value).__name__}: {ei.value}"
     assert "Interrupt" in msg or "interrupt" in msg.lower() or "runnable" in msg.lower()
 
@@ -92,9 +93,9 @@ def test_ask_without_approve_interrupts(perm_file):
 # ---------------------------------------------------------------------------
 
 def test_ask_with_approved_allows(perm_file):
-    _set(perm_file, "permissions:\n  strategy.deploy_strategy: ask\n")
+    _set(perm_file, "permissions:\n  strategy.deployment_candidate: ask\n")
     verdict = check(
-        "deploy_strategy", "strategy", {"human_approved": True, "thread_id": "t1"}
+        "deployment_candidate", "strategy", {"human_approved": True, "thread_id": "t1"}
     )
     assert verdict["decision"] == "allow"
     assert "approved" in verdict["reason"]
@@ -168,7 +169,7 @@ def test_react_agent_permission_ask_interrupt_and_resume(perm_file):
     from runner.langgraph_base import clear_checkpointer_cache
 
     importlib.reload(tools.strategy._register)
-    _set(perm_file, "permissions:\n  strategy.deploy_strategy: ask\n")
+    _set(perm_file, "permissions:\n  strategy.deployment_candidate: ask\n")
 
     calls: list[str] = []
 
@@ -176,10 +177,10 @@ def test_react_agent_permission_ask_interrupt_and_resume(perm_file):
         calls.append(args.strategy_name)
         return {"status": "deployed_stub", "strategy_name": args.strategy_name}
 
-    t = registry.get("deploy_strategy")
-    registry._tools.pop("deploy_strategy", None)  # 换 spy 版（re-register 语义）
+    t = registry.get("deployment_candidate")
+    registry._tools.pop("deployment_candidate", None)  # 换 spy 版（re-register 语义）
     registry.register(ToolDef(
-        id="deploy_strategy",
+        id="deployment_candidate",
         description=t.description,
         schema=t.schema,
         execute=_spy_exec,
@@ -196,17 +197,17 @@ def test_react_agent_permission_ask_interrupt_and_resume(perm_file):
             self.n += 1
             if self.n == 1:
                 return AIMessage(content="", tool_calls=[{
-                    "name": "deploy_strategy",
+                    "name": "deployment_candidate",
                     "args": {"strategy_name": "perm-e2e"},
                     "id": "c-perm-1",
                 }])
             return AIMessage(content="deploy done")
 
     tmp = perm_file.parent
-    t = registry.get("deploy_strategy")
-    registry._tools.pop("deploy_strategy", None)  # 换 spy 版（re-register 语义）
+    t = registry.get("deployment_candidate")
+    registry._tools.pop("deployment_candidate", None)  # 换 spy 版（re-register 语义）
     registry.register(ToolDef(
-        id="deploy_strategy",
+        id="deployment_candidate",
         description=t.description,
         schema=t.schema,
         execute=_spy_exec,
@@ -242,5 +243,5 @@ def test_react_agent_permission_ask_interrupt_and_resume(perm_file):
         assert calls == ["perm-e2e"], f"approve 后工具应执行且仅一次: {calls}"
     finally:
         clear_checkpointer_cache()
-        registry._tools.pop("deploy_strategy", None)
+        registry._tools.pop("deployment_candidate", None)
         registry.register(t)  # 还原真实 deploy tool

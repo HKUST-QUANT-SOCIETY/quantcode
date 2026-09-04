@@ -27,16 +27,16 @@ def _entry(group: str, thread_id: str, tool_name: str) -> dict:
 
 
 def _risk_thread(thread_id: str) -> list[dict]:
-    """一个典型的 risk 流：read_blackboard → calc_risk → check_gate。"""
+    """一个典型的 risk 流：read_blackboard → calc_risk → risk_verdict。"""
     return [
         _entry("risk", thread_id, "read_blackboard"),
         _entry("risk", thread_id, "calc_risk"),
-        _entry("risk", thread_id, "check_gate"),
+        _entry("risk", thread_id, "risk_verdict"),
     ]
 
 
 def test_distill_identifies_repeated_pattern(tmp_path):
-    """两个 thread 走同样的 read_blackboard→calc_risk→check_gate 序列，
+    """两个 thread 走同样的 read_blackboard→calc_risk→risk_verdict 序列，
     Distill 应识别出 ≥1 个候选。"""
     rlhf = tmp_path / "rlhf.jsonl"
     _write_rlhf(rlhf, _risk_thread("t1") + _risk_thread("t2"))

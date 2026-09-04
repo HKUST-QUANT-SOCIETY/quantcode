@@ -16,7 +16,7 @@ EXPECTED = {
     "select_signals",
     "combine_signals",
     "run_strategy_backtest",
-    "deploy_strategy",
+    "deployment_candidate",
 }
 
 
@@ -35,6 +35,7 @@ def test_strategy_allowlist():
         "select_signals",
         "combine_signals",
         "run_strategy_backtest",
+        "deployment_candidate",
     }
 
 
@@ -74,19 +75,19 @@ def test_select_combine_backtest_pipeline():
     assert 0 <= validated.backtest.max_drawdown <= 1
 
 
-def test_deploy_strategy_needs_human():
+def test_deployment_candidate_failed_verdict_is_not_a_gate():
     result = registry.call(
-        "deploy_strategy",
+        "deployment_candidate",
         {"strategy_name": "x", "verdict": "needs_human"},
     )
     assert result["deployed"] is False
-    assert result["status"] == "needs_human"
+    assert result["status"] == "validation_failed"
 
 
-def test_deploy_strategy_only_creates_admin_request():
+def test_deployment_candidate_only_creates_admin_request():
     """策略 Agent 只能生成待部署状态，不能宣称已部署。"""
     result = registry.call(
-        "deploy_strategy",
+        "deployment_candidate",
         {"strategy_name": "x", "verdict": "pass"},
     )
     assert result["deployed"] is False

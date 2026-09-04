@@ -183,18 +183,22 @@ class BlackboardService:
         json.dumps(entry.value)
 
         entry_key = self._entry_key(entry.scope, entry.group, entry.key)
-        existing = self._load_by_entry_key(entry_key)
-        data = entry.model_dump()
-        now = _utc_now()
-        if existing is not None:
-            merged = self._apply_write_policy(existing, entry)
-            data = merged.model_dump()
-            data["created_at"] = existing.created_at
-            data["version"] = existing.version + 1
-        data["updated_at"] = now
-        stored = BlackboardEntry(**data)
-
         with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT entry_json FROM blackboard_entries WHERE session_id=? AND entry_key=?",
+                (self.session_id, entry_key),
+            ).fetchone()
+            existing = BlackboardEntry.model_validate_json(row["entry_json"]) if row else None
+            data = entry.model_dump()
+            now = _utc_now()
+            if existing is not None:
+                merged = self._apply_write_policy(existing, entry)
+                data = merged.model_dump()
+                data["created_at"] = existing.created_at
+                data["version"] = existing.version + 1
+            data["updated_at"] = now
+            stored = BlackboardEntry(**data)
             conn.execute(
                 """
                 INSERT INTO blackboard_entries (

@@ -97,11 +97,11 @@ def test_budget_used_fallback_estimate_math():
 
 
 # ---------------------------------------------------------------------------
-# 2. 超预算 → waiting_for_human + budget_warning + kind=budget payload
+# 2. 超预算 → stopped_budget（不创建 HumanGate）
 # ---------------------------------------------------------------------------
 
 
-def test_budget_gate_pauses_with_budget_warning(tmp_path, checkpointer_clean):
+def test_budget_exhaustion_stops_without_human_gate(tmp_path, checkpointer_clean):
     llm = ScriptedLLM([AIMessage(content=BANNER)])
     runner = AgentRunner(
         group="model",
@@ -115,7 +115,8 @@ def test_budget_gate_pauses_with_budget_warning(tmp_path, checkpointer_clean):
         thread_id="budget-pause-1",
         flow_name="budget_test",
     )
-    assert final.get("status") == "waiting_for_human"
+    assert final.get("status") == "stopped_budget"
+    assert final.get("output_data", {}).get("budget_exhausted") is True
 
     trace = final["execution_trace"]
     assert "budget_warning" in [e["type"] for e in trace]
@@ -124,19 +125,15 @@ def test_budget_gate_pauses_with_budget_warning(tmp_path, checkpointer_clean):
     assert warning["data"]["budget_used"] > 1
     assert warning["data"]["over_by"] == warning["data"]["budget_used"] - 1
 
-    interrupts = final.get("__interrupt__")
-    assert interrupts, f"expected interrupt, got keys={sorted(final.keys())}"
-    payload = getattr(interrupts[0], "value", {})
-    assert payload.get("kind") == "budget"
-    assert set(payload) >= {"budget_tokens", "budget_used", "over_by"}
+    assert not final.get("__interrupt__")
 
 
 # ---------------------------------------------------------------------------
-# 3. approve → 追加 50000 并继续
+# 3. 预算停止不可通过 HumanGate resume 加额
 # ---------------------------------------------------------------------------
 
 
-def test_budget_resume_approve_grants_and_continues(tmp_path, checkpointer_clean):
+def test_budget_stop_has_no_approval_resume(tmp_path, checkpointer_clean):
     llm = ScriptedLLM([AIMessage(content=BANNER), AIMessage(content="finished")])
     runner = AgentRunner(
         group="model",
@@ -150,26 +147,17 @@ def test_budget_resume_approve_grants_and_continues(tmp_path, checkpointer_clean
         thread_id="budget-approve-1",
         flow_name="budget_test",
     )
-    assert paused.get("status") == "waiting_for_human"
-
-    resumed = runner.resume(
-        thread_id="budget-approve-1",
-        decision="approve",
-        system_prompt="x",
-        flow_name="budget_test",
-    )
-    assert resumed.get("budget_grants") == [50000]
-    # 追加后预算 50001，继续跑出了第二次 LLM 回复
-    contents = [str(m.content) for m in resumed["messages"]]
-    assert "finished" in contents
+    assert paused.get("status") == "stopped_budget"
+    assert paused.get("budget_grants") in (None, [])
+    assert not paused.get("__interrupt__")
 
 
 # ---------------------------------------------------------------------------
-# 4. reject → completed + budget_exhausted
+# 4. budget_exhausted 状态可直接读取
 # ---------------------------------------------------------------------------
 
 
-def test_budget_resume_reject_completes_with_budget_exhausted(tmp_path, checkpointer_clean):
+def test_budget_stop_records_exhaustion(tmp_path, checkpointer_clean):
     llm = ScriptedLLM([AIMessage(content=BANNER)])
     runner = AgentRunner(
         group="model",
@@ -183,17 +171,10 @@ def test_budget_resume_reject_completes_with_budget_exhausted(tmp_path, checkpoi
         thread_id="budget-reject-1",
         flow_name="budget_test",
     )
-    assert paused.get("status") == "waiting_for_human"
-
-    resumed = runner.resume(
-        thread_id="budget-reject-1",
-        decision="reject",
-        system_prompt="x",
-        flow_name="budget_test",
-    )
-    assert resumed.get("task_status") == "done"
-    assert resumed.get("output_data", {}).get("budget_exhausted") is True
-    assert not resumed.get("__interrupt__")
+    assert paused.get("status") == "stopped_budget"
+    assert paused.get("task_status") == "done"
+    assert paused.get("output_data", {}).get("budget_exhausted") is True
+    assert not paused.get("__interrupt__")
 
 
 # ---------------------------------------------------------------------------

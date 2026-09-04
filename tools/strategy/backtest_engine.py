@@ -36,7 +36,7 @@ DEFAULT_FEES = {
 }
 
 # verdict 阈值出处：与 flows/strategy_compose.py 内联规则一致（工具层同款）。
-# configs/acceptance.risk.yaml 只有 risk-gate 语义的 max_drawdown(0.15) 且无
+# configs/acceptance.risk.yaml 只有 risk-ci 语义的 max_drawdown(0.15) 且无
 # sharpe 键——读不出本验收组合，故内联并注释（ROADMAP D3b：sharpe≥0.5 且 dd≤0.25）。
 # verdict 阈值单源 = configs/backtest.yaml（verdict_sharpe_min / verdict_max_dd_max；
 # strategy:compose 与 run_strategy_backtest 共同 import 本模块出口，ROADMAP D3b）。

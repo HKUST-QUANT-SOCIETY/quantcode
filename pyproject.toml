@@ -35,7 +35,7 @@ ssh = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["runner*", "tools*", "schemas*", "flows*"]
+include = ["quantcode*", "runner*", "tools*", "schemas*", "flows*"]
 exclude = ["vendor*", "templates*", "docs*", "tests*"]
 
 [tool.ruff]

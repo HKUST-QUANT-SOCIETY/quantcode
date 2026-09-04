@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,8 @@ def record_run(
     error: str | None = None,
     context_chars: int | None = None,
     trace_events: list[dict] | None = None,
+    actor_id: str | None = None,
+    role: str | None = None,
 ) -> None:
     """追加一行 run 记录到 `.quantcode/metrics.jsonl`（best-effort，失败静默）。"""
     try:
@@ -62,6 +65,8 @@ def record_run(
         entry = {
             "ts": round(time.time(), 3),
             "group": str(group or ""),
+            "actor_id": actor_id,
+            "role": role,
             "flow": str(flow or ""),
             "thread_id": str(thread_id or ""),
             "duration_s": duration,
@@ -71,7 +76,9 @@ def record_run(
                 1 for e in events if isinstance(e, dict) and e.get("type") == "tool_call"
             ),
             "llm_thoughts": sum(
-                1 for e in events if isinstance(e, dict) and e.get("type") == "llm_thought"
+                1 for e in events
+                if isinstance(e, dict)
+                and e.get("type") in {"llm_thought", "decision_summary"}
             ),
             "context_chars": (
                 context_chars if context_chars is not None else estimate_context_chars(events)
@@ -90,11 +97,11 @@ def read_recent(limit: int = 50) -> list[dict]:
         return []
     try:
         with METRICS_PATH.open("r", encoding="utf-8") as f:
-            lines = f.readlines()
+            lines = deque(f, maxlen=limit)
     except OSError:
         return []
     out: list[dict] = []
-    for line in lines[-limit:]:
+    for line in lines:
         try:
             obj = json.loads(line)
         except (json.JSONDecodeError, ValueError):

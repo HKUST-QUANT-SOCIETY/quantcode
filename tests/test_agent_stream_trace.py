@@ -166,7 +166,7 @@ def test_stream_trace_includes_output_data_and_artifacts(tmp_db, clean_registry)
     assert any(e["type"] == "artifact" for e in trace)
 
 
-def test_stream_trace_contains_human_gate(tmp_db, clean_registry):
+def test_stream_trace_risk_verdict_has_no_human_gate(tmp_db, clean_registry):
     from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
     from tools.risk.statistics_stub import calc_risk_stub
 
@@ -193,8 +193,8 @@ def test_stream_trace_contains_human_gate(tmp_db, clean_registry):
         flow_name="trace_test",
     )
 
-    assert result.get("status") == "waiting_for_human"
-    assert result.get("gate") is not None
+    assert result.get("status") != "waiting_for_human"
+    assert result.get("gate") is None
     trace = result["execution_trace"]
     assert any(e["type"] == "risk_metrics" for e in trace)
-    assert any(e["type"] == "human_gate" for e in trace)
+    assert not any(e["type"] == "human_gate" for e in trace)

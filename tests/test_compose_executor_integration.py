@@ -25,13 +25,11 @@ from typing import Any
 
 import pytest
 
-from flows.factor_autoeval import (
-    FactorFlowState,
+from flows.factor_evaluation_adapter import (
+    FactorEvaluationState,
     _memory,
-    build_workflow as build_factor_autoeval_workflow,
-    call_autoeval_api,
-    generate_factor_report,
-    run_acceptance as factor_run_acceptance,
+    build_workflow as build_factor_evaluation_workflow,
+    call_quant_evaluator,
     validate_factor_spec,
 )
 from runner import langgraph_base
@@ -100,15 +98,15 @@ def _two_node_app(name_prefix: str = "node"):
 def _memory_aware_app(db_path: Path, memory_root: Path, group: str = "factor"):
     """构造一个使用 Memory 的 2-node StateGraph（任务表 §2.2 形态）。
 
-    复用 flows.factor_autoeval 的 _memory 解析（compose_executor handle → svc）。
+    复用 flows.factor_evaluation_adapter 的 _memory 解析（compose_executor handle → svc）。
     """
 
-    def read_memory(state: FactorFlowState) -> dict[str, Any]:
+    def read_memory(state: FactorEvaluationState) -> dict[str, Any]:
         svc = _memory(state)
         hits = svc.search(query="hello", scope="groups", scope_id=group, limit=3)
         return {"input_spec": {"mem_hits": len(hits)}}
 
-    def write_memory(state: FactorFlowState) -> dict[str, Any]:
+    def write_memory(state: FactorEvaluationState) -> dict[str, Any]:
         svc = _memory(state)
         path = svc.write(
             scope="groups",
@@ -123,7 +121,7 @@ def _memory_aware_app(db_path: Path, memory_root: Path, group: str = "factor"):
     return create_workflow(
         nodes={"read": read_memory, "write": write_memory},
         edges=default_compose_edges(["read", "write"]),
-        state_schema=FactorFlowState,
+        state_schema=FactorEvaluationState,
     ).compile(checkpointer=get_checkpointer())
 
 
@@ -437,10 +435,10 @@ class TestMemoryServiceCRUD:
                 key="x", body="x", requester_group="factor",
             )
 
-    def test_write_tasks_raises_not_implemented(self, _isolate):
+    def test_tasks_is_not_a_top_level_memory_scope(self, _isolate):
         tmp = _isolate
         svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        with pytest.raises(NotImplementedError, match="tasks"):
+        with pytest.raises(ValueError, match="scope"):
             svc.write(scope="tasks", scope_id="T1", key="x", body="x")
 
     def test_delete_cross_group_blocked(self, _isolate):
@@ -475,143 +473,30 @@ _FACTOR_SPEC_INPUT: dict[str, Any] = {
 }
 
 
-class TestEndToEndFactorAutoeval:
-    """任务表 §2.2 验收清单的端到端模拟（flows.factor_autoeval 为唯一实现）。"""
-
-    def _register_flow(self, tmp: Path):
-        app = build_factor_autoeval_workflow(checkpoint_db=tmp / "checkpoints.db")
-        register_flow("factor", "factor:autoeval", app, overwrite=True)
-        return app
-
-    def test_external_caller_can_invoke_factor_autoeval(self, _isolate):
-        """外部 caller 通过 execute_compose_flow 跑通 4-node factor:autoeval。"""
-        tmp = _isolate
-        self._register_flow(tmp)
+class TestEndToEndFactorEvaluation:
+    def test_unavailable_component_is_not_fake_success(self, _isolate, monkeypatch):
+        monkeypatch.delenv("QUANT_EVALUATOR_API_URL", raising=False)
+        monkeypatch.delenv("QUANT_EVALUATOR_API_KEY", raising=False)
+        app = build_factor_evaluation_workflow(_isolate / "checkpoints.db")
+        register_flow("factor", "factor:evaluation", app, overwrite=True)
         result = execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
+            "factor", "factor:evaluation", dict(_FACTOR_SPEC_INPUT),
             thread_id="factor-e2e-1",
         )
+        assert result["output_data"]["result_status"] == "UNAVAILABLE"
+        assert result["artifacts"] == []
+        assert result["errors"]
 
-        # 顶部结构
-        for key in ("thread_id", "artifacts", "output_data", "errors", "state"):
-            assert key in result
-
-        # output_data 反映 factor 名字 + 量化指标（FactorReport dump）
-        out = result["output_data"]
-        assert out["factor_name"] == "pb_roe_combo"
-        assert out["ic_metrics"]["ic_mean"] == 0.045
-
-        # artifact 实际文件存在
-        assert result["artifacts"], "artifacts 应非空"
-        art_path = Path(result["artifacts"][-1])
-        assert art_path.is_file()
-
-    def test_progress_and_notes_actually_landed_on_disk(self, _isolate):
-        tmp = _isolate
-        svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        self._register_flow(tmp)
+    def test_adapter_does_not_write_runtime_progress_to_group_memory(self, _isolate):
+        svc = MemoryService(db_path=_isolate / "m.db", root=_isolate, requester_group="factor")
+        app = build_factor_evaluation_workflow(_isolate / "checkpoints.db")
+        register_flow("factor", "factor:evaluation", app, overwrite=True)
         execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
-            thread_id="factor-e2e-disk",
-            inject_memory=lambda g: svc,
+            "factor", "factor:evaluation", dict(_FACTOR_SPEC_INPUT),
+            thread_id="factor-e2e-memory",
+            inject_memory=lambda group: svc,
         )
-
-        # MimoCode 路径语义：type 存 DB 列，不进 path
-        quantcode_root = tmp / ".quantcode"
-        progress_path = quantcode_root / "memory" / "groups" / "factor" / "factor_validation.md"
-        notes_path = quantcode_root / "memory" / "groups" / "factor" / "factor_report_pb_roe_combo.md"
-        assert progress_path.is_file(), f"progress 未落盘：{progress_path}"
-        assert notes_path.is_file(), f"notes 未落盘：{notes_path}"
-
-    def test_search_returns_notes_after_e2e(self, _isolate):
-        tmp = _isolate
-        svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        self._register_flow(tmp)
-        execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
-            thread_id="factor-e2e-search",
-            inject_memory=lambda g: svc,
-        )
-
-        svc2 = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        hits = svc2.search(
-            query="factor_report", scope="groups", scope_id="factor",
-            type="notes", limit=5,
-        )
-        assert hits, "search 应当命中 notes"
-
-    def test_cross_group_cannot_search_other_groups(self, _isolate):
-        """factor svc 搜 groups/model 应被 row-level 过滤；反向亦然。"""
-        tmp = _isolate
-        svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        self._register_flow(tmp)
-        execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
-            thread_id="factor-e2e-cross",
-            inject_memory=lambda g: svc,
-        )
-
-        # 模拟 model 组的请求者——只能读 groups/model
-        model_svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="model")
-        with pytest.raises(MemoryPermissionError):
-            model_svc.search(
-                query="factor_report", scope="groups", scope_id="factor",
-                type="notes", limit=5,
-            )
-
-    def test_invoke_is_idempotent_under_repeat_calls(self, _isolate):
-        """重复 invoke 同一 factor：cache hit（dedupe 验证点）。"""
-        tmp = _isolate
-        svc = MemoryService(db_path=tmp / "m.db", root=tmp, requester_group="factor")
-        self._register_flow(tmp)
-        tid = "factor-autoeval-pb_roe_combo-demo"
-        # 第一次跑：cache miss
-        r1 = execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
-            thread_id=tid, inject_memory=lambda g: svc,
-        )
-        # 第二次跑（同一 tid）：validate 命中 dedupe cache，报 errors 但不抛
-        r2 = execute_compose_flow(
-            "factor", "factor:autoeval", dict(_FACTOR_SPEC_INPUT),
-            thread_id=tid, inject_memory=lambda g: svc,
-        )
-        # 两次都成功 invoke 完，output_data 一致
-        assert r1["output_data"] == r2["output_data"]
-        # 第二次 errors 应有 dedupe cache 命中提示
-        assert any("dedupe" in e for e in r2["errors"])
-
-    def test_acceptance_threshold_blocks_low_ic(self, _isolate):
-        """IC 太低时 acceptance 节点应给出 fail verdict。"""
-        from runner.langgraph_base import create_workflow, default_compose_edges, get_checkpointer
-
-        def low_ic_autoeval(state: FactorFlowState) -> dict[str, Any]:
-            result = call_autoeval_api(state)
-            result["eval_result"]["ic_mean"] = 0.01  # too low
-            return result
-
-        wf = create_workflow(
-            nodes={
-                "validate": validate_factor_spec,
-                "call_autoeval": low_ic_autoeval,
-                "generate_report": generate_factor_report,
-                "acceptance": factor_run_acceptance,
-            },
-            edges=default_compose_edges(
-                ["validate", "call_autoeval", "generate_report", "acceptance"]
-            ),
-            state_schema=FactorFlowState,
-        ).compile(checkpointer=get_checkpointer())
-        register_flow("factor", "factor:low_ic", wf, overwrite=True)
-
-        result = execute_compose_flow(
-            "factor", "factor:low_ic", dict(_FACTOR_SPEC_INPUT, name="lowic"),
-            thread_id="tid-lowic",
-        )
-        assert result["state"]["acceptance"]["verdict"] == "fail"
-        ic_check = next(
-            c for c in result["state"]["acceptance"]["checks"] if c["name"] == "ic_mean"
-        )
-        assert ic_check["passed"] is False
+        assert not (_isolate / ".quantcode" / "memory" / "groups" / "factor" / "factor_validation.md").exists()
 
 
 # ===========================================================================

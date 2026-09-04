@@ -25,7 +25,7 @@ class AuditEventKind(StrEnum):
 
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
-    RISK_GATE = "risk_gate"
+    RISK_VERDICT = "risk_verdict"
     HUMAN_GATE = "human_gate"
     ARTIFACT = "artifact"
     OUTPUT_DATA = "output_data"

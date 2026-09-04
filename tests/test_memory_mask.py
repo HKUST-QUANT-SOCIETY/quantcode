@@ -31,10 +31,10 @@ _PLATFORM_TERM = "orchestrator"           # quant-platform（model 属组）
 
 @pytest.fixture()
 def distilled(tmp_path: Path) -> MemoryService:
-    """六卡蒸馏进临时 Memory db，返回未认证（guest）语义的 service。"""
+    """Capability catalog 蒸馏进临时 Memory db。"""
     svc = MemoryService(tmp_path / "bb.db", root=tmp_path, auto_reconcile=False)
     written = distill_cards_to_memory(svc, load_cards())
-    assert len(written) == 6  # 六卡全部落盘
+    assert len(written) == 14
     return svc
 
 

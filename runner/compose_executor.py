@@ -16,11 +16,11 @@ Skill / Node 作者通过 :func:`execute_compose_flow` 调用任何 Compose 流�
     from runner.compose_executor import register_flow, execute_compose_flow
 
     app = create_workflow(...).compile(checkpointer=get_checkpointer())
-    register_flow('factor', 'factor:autoeval', app)
+    register_flow('factor', 'factor:evaluation', app)
 
     result = execute_compose_flow(
         group='factor',
-        flow_name='factor:autoeval',
+        flow_name='factor:evaluation',
         input_data={'name': 'pb_roe', ...},
     )
     print(result['artifacts'])
@@ -360,7 +360,7 @@ if __name__ == "__main__":
 # 任务要求：四条流的注册不依赖 demo 脚本手工 register_flow，改为
 # ``import flows.<module>`` 即注册；本文件底部统一 import，保证
 # ``quantcode.mcp_server`` 主路径 import compose_executor 时注册即生效。
-# （factor:autoeval 沿用 demo 脚本注册方式，保持既有测试/query 习惯不变。）
+# （factor:evaluation 沿用 demo 脚本注册方式，保持既有测试/query 习惯不变。）
 
 import flows.fundamental_research  # noqa: E402,F401  register ("fundamental", "fundamental:research")
 import flows.model_submit  # noqa: E402,F401  register ("model", "model:submit")

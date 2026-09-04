@@ -2,7 +2,7 @@
 
 覆盖：
 - CapabilityCard 契约：type 枚举 / 必填 / extra=forbid / source_commit 默认；
-- 首批六卡从 configs/capabilities.yaml 加载（Step 0 实读蒸馏，见
+- v2 能力目录从 configs/capabilities.yaml 加载（Step 0 实读蒸馏，见
   docs/audit/ASSET_INVENTORY.md）；
 - 权限 Mask：游客组（None/guest/未知组）仅 contract 卡可见（fail-closed）；
 - 常驻摘要：每卡一行 id+name+when_to_use、限长、摘要不含 api_surface 细节；
@@ -36,7 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 YAML_PATH = PROJECT_ROOT / "configs" / "capabilities.yaml"
 SCHEMA_PATH = PROJECT_ROOT / "schemas" / "capability-card.schema.json"
 
-# 首批六卡 id（P-07 定版：1 契约卡 + 5 资产卡）。
+# v2 catalog: one global contract plus the canonical chain and deploy scaffold.
 EXPECTED_IDS = {
     "target-return-view-v1",
     "quant-evaluator",
@@ -44,6 +44,14 @@ EXPECTED_IDS = {
     "data-access",
     "quant-platform",
     "alpha-flow",
+    "factor-optimizer",
+    "factor-assets",
+    "factor-preprocess",
+    "modeling",
+    "barra-engine",
+    "riskfolio-qs",
+    "vectorbt-qs",
+    "platform-web",
 }
 
 
@@ -96,7 +104,7 @@ def test_card_distilled_at_iso_date_pattern():
 
 
 # ---------------------------------------------------------------------------
-# 首批六卡从 yaml 加载
+# 能力目录从 yaml 加载
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -104,21 +112,23 @@ def six_cards() -> list[CapabilityCard]:
     return load_cards()
 
 
-def test_yaml_exists_and_loads_six_cards(six_cards):
+def test_yaml_exists_and_loads_catalog(six_cards):
     assert YAML_PATH.is_file()
     assert {c.id for c in six_cards} == EXPECTED_IDS
-    assert len(six_cards) == 6
+    assert len(six_cards) == 14
 
 
-def test_yaml_has_one_contract_and_five_assets(six_cards):
+def test_yaml_has_one_contract_and_truthful_asset_statuses(six_cards):
     by_id = {c.id: c for c in six_cards}
     assert by_id["target-return-view-v1"].type == "contract"
     assets = [c for c in six_cards if c.type == "asset"]
-    assert len(assets) == 5
-    # 五张资产卡都有非空 source_commit（Step 0 gh 实测 HEAD）与非空 api_surface。
+    assert len(assets) == 13
     for c in assets:
-        assert c.source_commit, f"{c.id} 缺 source_commit"
-        assert c.api_surface, f"{c.id} 缺 api_surface"
+        assert c.canonical_repo
+        assert c.maturity_status
+        assert c.integration_status
+        if not c.source_commit:
+            assert c.integration_status == "UNVERIFIED"
 
 
 def test_contract_card_references_target_return_view(six_cards):
@@ -188,7 +198,7 @@ def test_asset_card_with_non_group_owner_rejected():
 # ---------------------------------------------------------------------------
 
 def test_digest_contains_one_line_per_card(six_cards):
-    digest = capability_digest("factor")
+    digest = capability_digest("factor", max_chars=10000)
     for card in six_cards:
         assert f"- {card.id} | {card.name} | " in digest, f"缺 {card.id} 摘要行"
     # api_surface 细节不进常驻摘要（数据字段清单类细节 Mask 的实现之一）。
@@ -257,7 +267,7 @@ def test_agent_engine_build_seam_appends_digest():
 # JSON Schema 一致性
 # ---------------------------------------------------------------------------
 
-def test_six_cards_validate_against_json_schema(six_cards):
+def test_cards_validate_against_json_schema(six_cards):
     import jsonschema
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))

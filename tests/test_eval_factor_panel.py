@@ -241,12 +241,12 @@ def test_eval_factor_panel_registered_and_callable(tmp_path):
     assert out["acceptance"]["verdict"] == "pass"
 
 
-def test_allowlist_contains_eval_factor_panel():
-    """factor 组 allowlist 必须含 eval_factor_panel（防幽灵 id，P1-6 教训）。"""
+def test_proxy_evaluator_not_in_factor_production_allowlist():
+    """v5: local proxy evaluator is a regression utility, not a production capability."""
     from tools.registry import GROUPS_DIR
 
     text = (GROUPS_DIR / "factor" / "tool_allowlist.yaml").read_text(encoding="utf-8")
-    assert "eval_factor_panel" in text
+    assert "eval_factor_panel" not in text
     assert "eval_factor_panel" in registry.list_ids()
 
 

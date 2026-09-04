@@ -6,17 +6,19 @@ model_validate，背书走 tools/market/backing.read_panel_from_blackboard），
 算真实 rank IC / 换手率 / 5 分层 / 多空差，写
 artifacts/factor/{name}-report-real.json，返回 summary（不含大矩阵）。
 
-配 panel 数据时优先本工具而非 autoeval（autoeval 走外部 AutoEval 服务或
+配 panel 数据时优先本工具而非 quant_evaluator（quant_evaluator 走外部 AutoEval 服务或
 mock 降级）。
 """
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from tools.registry import ToolDef
+from schemas.component_call_result import ComponentCallResult, ComponentResultStatus
 
 
 class EvalFromPanelArgs(BaseModel):
@@ -49,7 +51,7 @@ _EVAL_NOTES = (
     "statistics (spearman rank IC / turnover / 5-quantile layers / long-short). "
     "Proxy returns are next-day factor-value changes (factor momentum) — qs-cold "
     "has no returns table yet, so results carry a proxy_return_warning and are "
-    "not for pool admission. Prefer this over autoeval when panel data exists. "
+    "not for pool admission. Prefer this over quant_evaluator when panel data exists. "
     "Writes artifacts/factor/{name}-report-real.json."
 )
 
@@ -129,6 +131,18 @@ def eval_from_panel_impl(
         result["report"]["factor_name"] = factor_name
         result["report"]["eval_run_id"] = f"{factor_name}-{result['engine']}"
     # summary 只回统计与工件路径，values 矩阵不进返回值（SPEC §2.3）
+    envelope = ComponentCallResult(
+        component_id="factor-proxy-evaluator",
+        component_version="internal-dev-v1",
+        contract_version="component-call-result.v1",
+        environment="development",
+        result_status=ComponentResultStatus.PROXY,
+        source="flows.factor_eval_real",
+        observed_at=datetime.now(timezone.utc),
+        output_data=result["report"],
+        warnings=[result["proxy_return_warning"]],
+        artifacts=[{"path": path} for path in result["artifacts"]],
+    ).model_dump(mode="json")
     return {
         "panel_key": panel_key,
         "engine": result["engine"],
@@ -136,6 +150,7 @@ def eval_from_panel_impl(
         "acceptance": result["acceptance"],
         "artifacts": result["artifacts"],
         "proxy_return_warning": result["proxy_return_warning"],
+        "component_result": envelope,
     }
 
 

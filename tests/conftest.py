@@ -38,6 +38,12 @@ if _PROJECT_ROOT_FOR_QUANTCODE.is_dir():
         sys.path.insert(0, _path_str)
 
 
+@pytest.fixture(autouse=True)
+def _explicit_test_environment(monkeypatch):
+    """Unauthenticated environment fallbacks are legal only in explicit tests."""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
+
+
 # ---------------------------------------------------------------------------
 # Day 4: 真 LLM fixtures（DeepSeek）
 # ---------------------------------------------------------------------------

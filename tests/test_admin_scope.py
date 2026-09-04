@@ -40,6 +40,7 @@ TASK_ID = "T0.11111111"  # TASK_ID_PATTERN：T0 = 未分配任务的诚实占位
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     """隔离：清判定 env、绑定文件与 metrics.jsonl 指向 tmp、重注册 admin 工具。"""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
     for var in ("QUANTCODE_ADMIN", "GITHUB_TOKEN", "QUANTCODE_GROUP"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(

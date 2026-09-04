@@ -1,4 +1,4 @@
-name: Risk Gate
+name: Risk CI
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       scenario:
-        description: "statistics_stub scenario fed to run_risk_gate_tool.py"
+        description: "statistics_stub scenario fed to run_risk_ci_tool.py"
         required: false
         default: normal
         type: choice
@@ -20,14 +20,14 @@ permissions:
   pull-requests: write  # Required for posting PR comments via /issues/{number}/comments API
 
 # Owner: 杨欣琳（T2 风控 / 跨组接收）
-# 调用 .opencode/groups/risk/skills/risk-gate/SKILL.md
+# 调用 .opencode/groups/risk/skills/risk-ci/SKILL.md
 # 副作用（写 PR 评论）依赖 tools/utils/dedupe.py（陈镇鸿 Day 1 实现）
 # 数据源是 statistics_stub 占位数据（非真实策略收益），step 名如实标注 "(stub data)"。
 # dedupe 行为已有 tests/test_risk_dedupe.py 覆盖，不再在 CI 里重复跑第二遍验证。
 # pull_request 触发行为不变：scenario 固定走默认 normal（inputs 上下文为空时回退 'normal'）。
 
 jobs:
-  risk-gate:
+  risk-ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || 'opencode1234567890abcdef' }}
           PR_URL: ${{ github.event.pull_request.html_url || '' }}
         run: >
-          python scripts/run_risk_gate_tool.py
+          python scripts/run_risk_ci_tool.py
           --scenario ${{ inputs.scenario || 'normal' }}
           --pr-number "$PR_NUMBER"
           --head-sha "$HEAD_SHA"

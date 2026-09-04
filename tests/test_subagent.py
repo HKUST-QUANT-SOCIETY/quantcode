@@ -151,7 +151,7 @@ def test_spawn_factor_subtask_completes_with_output_data(
     gen_schema 是 factor 真版 tool（无 API key 自动降级规则版，确定性输出），
     第二步 task_done 注入 task_status=done → completed。
     """
-    import tools.factor._register  # noqa: F401  注册 match_main/gen_schema/autoeval
+    import tools.factor._register  # noqa: F401  注册 match_main/gen_schema/quant_evaluator
 
     model = ScriptedLLM([
         _ai("gen_schema", "s1", {"idea": "PB-ROE factor", "match_result": {"fields": ["pb"]}}),
@@ -336,18 +336,15 @@ def test_spawn_depth_guard_blocks_beyond_max_tree_depth(reg, sub_tools, tmp_db):
 
 
 # ---------------------------------------------------------------------------
-# 4. 预算耗尽 → waiting_for_human 暂停（不 kill）
+# 4. 预算耗尽 → stopped_budget（不 kill）
 # ---------------------------------------------------------------------------
 
 
 BANNER = "#" * 400  # ≈100 tokens（chars/4 估算）
 
 
-def test_budget_exhausted_subagent_pauses_not_killed(reg, sub_tools, tmp_db):
-    """预算 1 的子任务：第一次 LLM 后 budget gate interrupt → waiting_for_human。
-
-    按 Wave1 budget gate 语义暂停（可 resume），kill 计数不动它（非 aborted）。
-    """
+def test_budget_exhausted_subagent_stops_not_killed(reg, sub_tools, tmp_db):
+    """v5：预算耗尽是运行时停止状态，不创建 HumanGate。"""
     llm = ScriptedLLM([AIMessage(content=BANNER)])
     entry = reg.create_subagent(
         "banner task", "factor",
@@ -357,17 +354,16 @@ def test_budget_exhausted_subagent_pauses_not_killed(reg, sub_tools, tmp_db):
     snap = entry
     while time.time() < deadline:
         snap = reg.get_status(entry["subagent_id"])
-        if snap["status"] in ("waiting_for_human", "error", "aborted"):
+        if snap["status"] in ("stopped_budget", "error", "aborted"):
             break
         time.sleep(0.05)
-    assert snap["status"] == "waiting_for_human", snap
-    assert snap["output_data"] is None  # 未产出，暂停非终止
+    assert snap["status"] == "stopped_budget", snap
+    assert snap["output_data"] is not None
     assert snap["budget_used"] > 1
 
-    # 预算暂停 ≠ kill：kill 一个已 waiting 的子任务不会覆盖成 aborted
-    # （waited 是终态，kill 幂等返回原状态）
+    # 预算停止 ≠ kill：kill 一个已 stopped 的子任务不会覆盖成 aborted
     killed = reg.kill(entry["subagent_id"], reason="should not flip")
-    assert killed["status"] == "waiting_for_human"
+    assert killed["status"] == "stopped_budget"
     assert killed["stop_requested"] is True  # 标记存在，但状态保持暂停
 
 

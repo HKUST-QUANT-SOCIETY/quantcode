@@ -81,11 +81,12 @@ def _registered():
 
 @pytest.fixture
 def deploy_ctx(tmp_path):
-    """ctx 工厂：artifacts/evidence 落 tmp_path；默认未经批准。"""
+    """ctx 工厂：role 来自服务端会话，approved 参数仅保留测试兼容名。"""
     def _make(approved: bool = False, thread_id: str = "t-deploy") -> dict:
         return {
             "thread_id": thread_id,
             "human_approved": approved,
+            "role": "admin" if approved else "analyst",
             "artifacts_dir": str(tmp_path / "artifacts"),
             "evidence_dir": str(tmp_path / "evidence"),
         }
@@ -123,43 +124,25 @@ def test_deploy_action_classifies_as_prod_write():
 # ---------------------------------------------------------------------------
 
 
-def test_deploy_requires_prod_gate(deploy_ctx, source_file):
+def test_deploy_requires_admin_management_plane(deploy_ctx, source_file):
     ctx = deploy_ctx(approved=False)
     result = registry.call("deploy_alphaflow", {"source": str(source_file)}, ctx=ctx)
 
-    # 中止：ok=False + 黑盒安全话术（指向 HumanGate kind=deploy）
+    # v5：部署不属于普通 HumanGate，而是 Admin 管理面能力
     assert result["ok"] is False
-    assert "kind=deploy" in result["error"]
+    assert "admin_only" in result["error"]
     # 无 artifact 产出
     assert _no_artifacts(ctx)
     # 中止路径不留 ARTIFACT 环（evidence 无该 run 的链文件）
     assert not (Path(ctx["evidence_dir"]) / f"{ctx['thread_id']}.jsonl").exists()
 
-    # 语义等价：未经批准裸调 enforce_ssh 即闸的原始形态（RuntimeError/interrupt，
-    # 与 test_ssh_gate 同款断言）——工具层收敛为 ok=False 不吞闸。
-    from runner.permission_engine import enforce_ssh
-
-    with pytest.raises(Exception) as ei:
-        enforce_ssh("deploy_alphaflow", "prod", {"thread_id": "raw"})
-    msg = f"{type(ei.value).__name__}: {ei.value}"
-    assert "Interrupt" in msg or "interrupt" in msg.lower() or "runnable" in msg.lower()
-
-
 def test_deploy_reject_decision_aborts(deploy_ctx, source_file, monkeypatch):
-    """人审 reject → PermissionError → 中止（fail-closed，无 artifact）。
-
-    _register 直接 from-import enforce_ssh（单行钩子用法）→ 打补丁要打在
-    引用点 tools.deploy._register 命名空间。
-    """
-    import tools.deploy._register as deploy_reg
-
-    def _reject(action, target_env, ctx=None):
-        raise PermissionError("rejected by human")
-
-    monkeypatch.setattr(deploy_reg, "enforce_ssh", _reject)
+    """普通研究会话即使声明 human_approved 也不能部署。"""
     ctx = deploy_ctx(approved=False)
+    ctx["human_approved"] = True
     result = registry.call("deploy_alphaflow", {"source": str(source_file)}, ctx=ctx)
     assert result["ok"] is False
+    assert "admin_only" in result["error"]
     assert _no_artifacts(ctx)
 
 
@@ -168,7 +151,7 @@ def test_deploy_reject_decision_aborts(deploy_ctx, source_file, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_deploy_approved_produces_record(deploy_ctx, source_file):
+def test_admin_deploy_produces_record(deploy_ctx, source_file):
     ctx = deploy_ctx(approved=True)
     result = registry.call("deploy_alphaflow", {"source": str(source_file)}, ctx=ctx)
 
@@ -200,7 +183,7 @@ def test_deploy_approved_produces_record(deploy_ctx, source_file):
     assert artifact_events[0].payload["tool"] == "deploy_alphaflow"
 
 
-def test_deploy_approved_description_source(deploy_ctx):
+def test_admin_deploy_description_source(deploy_ctx):
     """非路径非空描述 → 描述文本即工件（占位语义，接口已锁）。"""
     ctx = deploy_ctx(approved=True, thread_id="t-desc")
     result = registry.call(

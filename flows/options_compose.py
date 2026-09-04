@@ -174,7 +174,7 @@ def options_verdict_node(state: OptionsComposeFlowState) -> dict[str, Any]:
 
 
 def build_workflow(checkpoint_db: str | PathLike[str] | None = None):
-    """Build the LangGraph app（结构对齐 flows.factor_autoeval.build_workflow）。"""
+    """Build the LangGraph app（结构对齐 flows.factor_evaluation_adapter.build_workflow）。"""
     try:
         from runner.langgraph_base import (
             create_workflow,

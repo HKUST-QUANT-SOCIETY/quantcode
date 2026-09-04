@@ -29,7 +29,9 @@ from runner.langgraph_base import CHECKPOINTS_DB, make_thread_id
 MAX_TREE_DEPTH = 4
 
 # 终态集合（kill 幂等判断用）
-TERMINAL_STATUSES = frozenset({"completed", "stopped", "waiting_for_human", "aborted", "error"})
+TERMINAL_STATUSES = frozenset(
+    {"completed", "stopped", "stopped_budget", "stopped_loop", "waiting_for_human", "aborted", "error"}
+)
 
 
 def guards_max_iterations() -> int:
@@ -157,9 +159,10 @@ class SubagentRegistry:
                 flow_name="subagent",
                 thread_id=entry["thread_id"],
             )
+            explicit_status = final.get("status")
             status = (
-                "waiting_for_human"
-                if final.get("status") == "waiting_for_human"
+                str(explicit_status)
+                if explicit_status in {"waiting_for_human", "stopped_budget", "stopped_loop"}
                 else "completed" if final.get("task_status") == "done"
                 else "stopped"
             )

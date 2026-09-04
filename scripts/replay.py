@@ -1,17 +1,14 @@
 """最小 replay 工具 — 查看 / 恢复 LangGraph checkpoint 线程。
 
-⚠️ 最小 replay，PRD §5.3 完整时间旅行另行（当前只做 list / show / resume 三个动作）。
+⚠️ 最小 replay，PRD §5.3 完整时间旅行另行（当前只做 list / show 两个只读动作）。
 
 用法：
     python -m scripts.replay list [--db PATH]
     python -m scripts.replay show --thread THREAD [--db PATH]
-    python -m scripts.replay resume --thread THREAD --decision approve|reject [--db PATH]
 
 - list   ：sqlite3 只读列出 DISTINCT thread_id + 最近 checkpoint_id
            （LangGraph 的 checkpoint_id 是时间有序 UUID，MAX 即最近）。
 - show   ：该 thread 最近 checkpoint 概要（channel_values / 节点写入，尽力容错）。
-- resume ：仅支持 risk:gate（核对 runner.risk_agent.resume_risk_gate(app, thread_id,
-           decision) 签名后调用）；其他 thread 打印「暂仅支持 risk:gate」。
 """
 from __future__ import annotations
 
@@ -26,10 +23,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from runner.langgraph_base import CHECKPOINTS_DB  # noqa: E402
-
-# resume 仅支持的流：risk:gate（thread_id 由 make_thread_id 生成，flow 段为 risk_gate）
-SUPPORTED_RESUME_PREFIX = "risk-risk_gate"
-
 
 # ---------------------------------------------------------------------------
 # 只读连接与 list
@@ -133,32 +126,13 @@ def show_thread(db_path: str | Path, thread_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# resume：仅 risk:gate
-# ---------------------------------------------------------------------------
-
-def resume_risk_gate_thread(
-    db_path: str | Path,
-    thread_id: str,
-    decision: str,
-) -> dict[str, Any]:
-    """恢复 risk:gate 线程。
-
-    核对 runner/risk_agent.resume_risk_gate 签名：(app, thread_id, decision, *, config)。
-    """
-    from runner.risk_agent import build_risk_agent, resume_risk_gate
-
-    app = build_risk_agent(db_path)
-    return resume_risk_gate(app, thread_id, decision)
-
-
-# ---------------------------------------------------------------------------
 # CLI 入口
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="replay",
-        description="最小 replay：查看/恢复 LangGraph checkpoint 线程（PRD §5.3 完整时间旅行另行）",
+        description="最小 replay：只读查看 LangGraph checkpoint 线程",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -172,9 +146,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("list", parents=[common], help="列出所有 thread（DISTINCT + 最近 checkpoint）")
     p_show = sub.add_parser("show", parents=[common], help="查看某 thread 最近 checkpoint 概要")
     p_show.add_argument("--thread", required=True)
-    p_resume = sub.add_parser("resume", parents=[common], help="恢复 risk:gate 人审（approve/reject）")
-    p_resume.add_argument("--thread", required=True)
-    p_resume.add_argument("--decision", required=True, choices=["approve", "reject"])
     return parser
 
 
@@ -195,28 +166,6 @@ def main(argv: list[str] | None = None) -> int:
         print(show_thread(db, args.thread))
         return 0
 
-    # resume
-    if not str(args.thread).startswith(SUPPORTED_RESUME_PREFIX):
-        print("暂仅支持 risk:gate")
-        return 1
-    existing = {item["thread_id"] for item in list_threads(db)}
-    if args.thread not in existing:
-        print(f"checkpoint db 中不存在该 thread: {args.thread}")
-        return 1
-
-    result = resume_risk_gate_thread(db, args.thread, args.decision)
-    summary = {
-        key: result.get(key)
-        for key in (
-            "gate_decision",
-            "human_review_result",
-            "output_data",
-            "artifacts",
-            "errors",
-        )
-        if key in result
-    }
-    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
     return 0
 
 

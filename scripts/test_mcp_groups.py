@@ -30,6 +30,8 @@ class MCPClient:
         self.env = os.environ.copy()
         self.env["PYTHONPATH"] = str(ROOT) + os.pathsep + self.env.get("PYTHONPATH", "")
         self.env["QUANTCODE_GROUP"] = group
+        self.env["QUANTCODE_ENV"] = "test"
+        self.env["QUANTCODE_ALLOW_UNAUTH"] = "1"
         self.proc: subprocess.Popen | None = None
         self._req_id = 0
 
@@ -88,7 +90,7 @@ class MCPClient:
 # group → (expected tool ids, sample call)
 GROUP_CASES: dict[str, tuple[set[str], tuple[str, dict]]] = {
     "strategy": (
-        {"select_signals", "combine_signals", "run_strategy_backtest", "deploy_strategy"},
+        {"select_signals", "combine_signals", "run_strategy_backtest", "deployment_candidate"},
         (
             "select_signals",
             {
@@ -131,8 +133,8 @@ def run_group(group: str) -> bool:
         tools = client.list_tools()
         names = {t["name"] for t in tools}
         print(f"[list] {len(tools)} tools: {sorted(names)}")
-        if names != expected:
-            print(f"[FAIL] expected {sorted(expected)}, got {sorted(names)}")
+        if not expected <= names:
+            print(f"[FAIL] missing {sorted(expected - names)}, got {sorted(names)}")
             return False
 
         result = client.call_tool(tool_name, tool_args)

@@ -1,7 +1,7 @@
 """Risk group tools."""
 from tools.risk.risk_tools import (
     calc_risk,
-    check_gate,
+    risk_verdict,
     generate_risk_profile,
     read_blackboard,
     write_pr_comment,
@@ -9,7 +9,7 @@ from tools.risk.risk_tools import (
 
 __all__ = [
     "calc_risk",
-    "check_gate",
+    "risk_verdict",
     "generate_risk_profile",
     "read_blackboard",
     "write_pr_comment",

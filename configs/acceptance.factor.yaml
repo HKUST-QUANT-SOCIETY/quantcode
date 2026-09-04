@@ -1,4 +1,4 @@
-# factor:autoeval / factor-eval 验收阈值（架构决策 3「配置不喂 LLM」单源）。
+# factor:evaluation / factor-eval 验收阈值（架构决策 3「配置不喂 LLM」单源）。
 # 数值 = runner/acceptance.py 代码默认的历史值，改动前后行为零变化。
 # 读取方：runner/acceptance.py（yaml 缺文件/缺键时回退代码默认并 warning 一次）。
 ic_abs_min: 0.03

@@ -1,25 +1,25 @@
 from runner.acceptance import run_acceptance
 
 
-def test_risk_gate_pass():
+def test_risk_ci_pass():
     payload = {
         "max_drawdown": 0.12,
         "position_limit": 0.20,
         "correlation_with_existing": 0.30,
         "tail_risk_var_99": -0.05,
     }
-    result = run_acceptance("risk-gate", payload)
+    result = run_acceptance("risk-evaluation", payload)
     assert result.verdict == "pass", [c.message for c in result.checks if not c.passed]
 
 
-def test_risk_gate_fail_var_missing():
+def test_risk_ci_fail_var_missing():
     payload = {
         "max_drawdown": 0.12,
         "position_limit": 0.20,
         "correlation_with_existing": 0.30,
         "tail_risk_var_99": None,
     }
-    result = run_acceptance("risk-gate", payload)
+    result = run_acceptance("risk-evaluation", payload)
     assert result.verdict == "fail"
     assert any(c.name == "var_99_present" and not c.passed for c in result.checks)
 

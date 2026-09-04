@@ -23,6 +23,7 @@ import tools.model._register  # noqa: F401  注册 model tools（对齐 test_mcp
 @pytest.fixture(autouse=True)
 def _clean_registry(monkeypatch, tmp_path):
     """与 test_mcp_server._clean_registry 同款：隔离身份解析 + 清空 registry。"""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
     for _var in (
         "QUANTCODE_SSH_KEY_FINGERPRINT",

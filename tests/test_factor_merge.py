@@ -1,4 +1,4 @@
-"""check_factor_gate / merge_to_main 测试（PRD §4.1.3 / F-06 闭合）。
+"""validate_factor_contract / merge_to_main 测试（PRD §4.1.3 / F-06 闭合）。
 
 覆盖:
 1. gate 判定：pass+达标 → eligible；marginal/fail → false+reasons；阈值覆盖生效
@@ -21,7 +21,7 @@ import tools.factor._register as _factor_register
 from tools.registry import registry
 
 from tools.factor.merge_to_main import (
-    check_factor_gate_impl,
+    validate_factor_contract_impl,
     merge_to_main_impl,
 )
 
@@ -52,12 +52,12 @@ def _good_report(**overrides) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 1. check_factor_gate 纯判定
+# 1. validate_factor_contract 纯判定
 # ---------------------------------------------------------------------------
 
 
 def test_gate_pass_report_eligible():
-    out = check_factor_gate_impl(_good_report())
+    out = validate_factor_contract_impl(_good_report())
     assert out["eligible"] is True
     assert out["reasons"] == []
     assert out["verdict"] == "pass"
@@ -65,7 +65,7 @@ def test_gate_pass_report_eligible():
 
 def test_gate_marginal_not_eligible_with_reason():
     report = _good_report(verdict="marginal")
-    out = check_factor_gate_impl(report)
+    out = validate_factor_contract_impl(report)
     assert out["eligible"] is False
     assert any("verdict" in r for r in out["reasons"])
     assert out["verdict"] == "marginal"
@@ -75,7 +75,7 @@ def test_gate_metric_below_threshold_gives_reasons():
     report = _good_report(ic_metrics={
         "ic_mean": 0.01, "ic_std": 0.03, "ir": 0.2, "t_stat": 1.0,
     })
-    out = check_factor_gate_impl(report)
+    out = validate_factor_contract_impl(report)
     assert out["eligible"] is False
     text = " | ".join(out["reasons"])
     assert "ic_mean" in text and "ir" in text and "t_stat" in text
@@ -84,7 +84,7 @@ def test_gate_metric_below_threshold_gives_reasons():
 def test_gate_missing_fields_fail_closed():
     report = _good_report()
     del report["ic_metrics"], report["turnover"]
-    out = check_factor_gate_impl(report)
+    out = validate_factor_contract_impl(report)
     assert out["eligible"] is False
     assert any("ic_metrics" in r for r in out["reasons"])
     assert any("turnover" in r for r in out["reasons"])
@@ -98,9 +98,9 @@ def test_gate_thresholds_override_via_tmp_yaml(tmp_path, monkeypatch):
     runner.config_loader.load_yaml.cache_clear()
     try:
         # tmp 配置目录无 acceptance.factor.yaml → 代码默认兜底：|0.12| 达标
-        assert check_factor_gate_impl(_good_report())["eligible"] is True
+        assert validate_factor_contract_impl(_good_report())["eligible"] is True
         # 显式阈值收紧 → 不达标
-        out = check_factor_gate_impl(
+        out = validate_factor_contract_impl(
             _good_report(), thresholds={"ic_abs_min": 0.5, "ir_min": 0.5,
                                         "turnover_monthly_max": 0.8, "t_stat_min": 2.0}
         )
@@ -111,9 +111,9 @@ def test_gate_thresholds_override_via_tmp_yaml(tmp_path, monkeypatch):
 
 
 def test_check_gate_tool_no_report_write_side_effects(tmp_path):
-    """check_factor_gate_tool 纯判定：不写任何文件、不产生 gate。"""
+    """validate_factor_contract_tool 纯判定：不写任何文件、不产生 gate。"""
     before = sorted(p.name for p in tmp_path.iterdir())
-    out = registry.call("check_factor_gate", {"report": _good_report()}, ctx={})
+    out = registry.call("validate_factor_contract", {"report": _good_report()}, ctx={})
     assert out["eligible"] is True
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
@@ -144,7 +144,7 @@ def test_merge_waiting_for_human_builds_merge_gate(tmp_path):
     gate = out["gate"]
     assert gate["kind"] == "merge"
     assert gate["gate_id"].startswith("hg_t-merge_")
-    assert gate["risk_profile"]["factor_id"] == "pb_roe"
+    assert gate["evidence"]["factor_id"] == "pb_roe"
     # 未落盘：等人审
     assert not idx.exists()
 
@@ -357,7 +357,7 @@ def test_agent_flow_eval_then_merge_pause_then_approve(tmp_path, monkeypatch):
 
         payload = extract_interrupt_payload(paused)
         assert payload is not None and payload.get("kind") == "merge", payload
-        assert (payload.get("risk_profile") or {}).get("factor_id") == "pb_roe_lead"
+        assert (payload.get("evidence") or {}).get("factor_id") == "pb_roe_lead"
         assert not idx_path.exists(), "人审前不落盘"
 
         resumed = runner.resume(

@@ -93,7 +93,7 @@ def test_missing_yaml_warns_once(config_dir_env):
     assert any(r.levelno == logging.WARNING and "不存在" in r.getMessage() for r in records)
 
 
-def test_risk_yaml_override_risk_gate(config_dir_env):
+def test_risk_yaml_override_risk_ci(config_dir_env):
     (config_dir_env / "acceptance.risk.yaml").write_text(
         "max_drawdown: 0.05\nposition_limit: 0.30\ncorrelation_limit: 0.60\n",
         encoding="utf-8",
@@ -104,7 +104,7 @@ def test_risk_yaml_override_risk_gate(config_dir_env):
         "correlation_with_existing": 0.30,
         "tail_risk_var_99": -0.05,
     }
-    assert acceptance.run_acceptance("risk-gate", payload).verdict == "fail"
+    assert acceptance.run_acceptance("risk-evaluation", payload).verdict == "fail"
 
 
 def test_acceptance_yaml_shipped_values_match_history():

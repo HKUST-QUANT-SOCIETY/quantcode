@@ -110,7 +110,7 @@ def test_factor_report_valid():
     assert report.target_tier == "Tier3B"
 
 
-def test_factor_autoeval_as_compose_task():
+def test_factor_evaluation_as_compose_task():
     spec = _make_factor_spec()
     report = _make_factor_report()
 
@@ -137,7 +137,7 @@ def test_factor_result_shared_via_project_blackboard():
     entry = BlackboardEntry(
         scope=BlackboardScope.PROJECT,
         group=None,
-        key="shared.factor_autoeval_results.pb_roe_combo",
+        key="shared.factor_evaluation_results.pb_roe_combo",
         write_policy=WritePolicy.GROUP_APPEND,
         value=report.model_dump(mode="json"),
         written_by_task_id="T4",
@@ -148,7 +148,7 @@ def test_factor_result_shared_via_project_blackboard():
     retrieved = bb.get_entry(
         BlackboardScope.PROJECT,
         None,
-        "shared.factor_autoeval_results.pb_roe_combo",
+        "shared.factor_evaluation_results.pb_roe_combo",
     )
 
     assert retrieved is not None
@@ -158,7 +158,7 @@ def test_factor_result_shared_via_project_blackboard():
 
 def test_factor_report_passes_acceptance_runner():
     report = _make_factor_report()
-    result = run_acceptance("factor:autoeval", report.model_dump(mode="json"))
+    result = run_acceptance("factor:evaluation", report.model_dump(mode="json"))
     assert result.verdict == "pass", [c.message for c in result.checks if not c.passed]
 
 

@@ -52,7 +52,7 @@ class TestRunAgentExecuteErrors:
             ctx={},
         )
         assert result["status"] == "error"
-        assert "QUANTCODE_GROUP" in result["error"]
+        assert "AUTHENTICATION_REQUIRED" in result["error"]
 
     def test_group_empty_string_returns_error(self):
         """group 为空字符串 → 返回 error status。"""

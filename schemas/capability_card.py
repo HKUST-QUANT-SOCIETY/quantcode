@@ -64,6 +64,17 @@ class CapabilityCard(BaseModel):
     type: CardType = Field(
         description="asset=资产卡（repo 蒸馏）；contract=口径契约卡（如 TargetReturnView/v1）",
     )
+    canonical_repo: str | None = Field(default=None, max_length=256, description="Canonical repository or component identifier")
+    domain_authority: str | None = Field(default=None, max_length=128)
+    visibility: str = Field(default="group", max_length=64)
+    maturity_status: Literal["PRODUCTION", "STAGING", "RESEARCH", "SCAFFOLD", "LEGACY"] = "SCAFFOLD"
+    integration_status: Literal["CONNECTED", "PARTIAL", "UNAVAILABLE", "UNVERIFIED"] = "UNVERIFIED"
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    consumed_by: list[str] = Field(default_factory=list)
+    deprecated_aliases: list[str] = Field(default_factory=list)
+    observed_at: str | None = Field(default=None, max_length=64)
     api_surface: list[str] = Field(
         default_factory=list,
         description="关键入口列表（每条 = 模块路径/门面函数/契约类型名 + 一句话）；"

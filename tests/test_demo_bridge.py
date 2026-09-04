@@ -91,7 +91,7 @@ def test_main_human_gate_two_phase(monkeypatch, capsys):
 
     monkeypatch.setattr("runner.agent_mcp_tool._run_agent_execute", _fake)
     rc = demo_bridge.main(
-        ["--group", "risk", "--skill", "risk-gate", "--task", "high_risk", "--auto-approve"]
+        ["--group", "risk", "--skill", "risk-ci", "--task", "high_risk", "--auto-approve"]
     )
     assert rc == 0
     assert calls["n"] == 2  # start + resume

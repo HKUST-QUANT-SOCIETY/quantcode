@@ -129,18 +129,12 @@ def generate_risk_profile(
     return RiskProfile(**payload)
 
 
-def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
-    """检查 RiskProfile 阈值，返回 verdict / requires_human / reasons / risk_profile。
-
-    v0.2 收窄（F-03 / G2-A8）：越限的**评估结论**是 ``verdict="fail"``
-    （单源 = RiskProfile.evaluate_verdict），随报告披露、不再触发产出门禁。
-    ``requires_human`` 仅保留给确定性 risk ReAct 路由（runner/routing/router.py
-    的 HUMAN_GATE 分支）消费，不等于"产出需要人审"。
-    """
+def risk_verdict(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
+    """Evaluate risk limits as a domain verdict; never create a HumanGate."""
     reasons = profile.breached_thresholds(thresholds)
     return {
         "verdict": str(profile.evaluate_verdict(thresholds)),
-        "requires_human": bool(reasons),
+        "breached": bool(reasons),
         "reasons": reasons,
         "risk_profile": profile.model_dump(mode="json"),
     }
@@ -166,7 +160,7 @@ def _pr_comment_dedupe_key(
 
 
 def _risk_comment_marker(head_sha: str, profile: RiskProfile) -> str:
-    return f"<!-- quantcode:risk-gate:profile:{head_sha}:{_profile_hash(profile)} -->"
+    return f"<!-- quantcode:risk-ci:profile:{head_sha}:{_profile_hash(profile)} -->"
 
 
 def _pct(value: float | None) -> str:
@@ -185,7 +179,7 @@ def format_risk_comment(
     pr_number: str,
     head_sha: str,
 ) -> str:
-    """生成 QuantCode Risk Gate Report Markdown（含 dedupe marker）。"""
+    """生成 QuantCode Risk CI Report Markdown（含 dedupe marker）。"""
     thresholds = RiskThresholds()
     breaches = set(profile.breached_thresholds(thresholds))
     verdict = profile.evaluate_verdict(thresholds)
@@ -218,7 +212,7 @@ def format_risk_comment(
     ]
     table = "\n".join(f"| {name} | {value} | {limit} | {status} |" for name, value, limit, status in rows)
     breached_text = ", ".join(sorted(breaches)) if breaches else "None"
-    return f"""## QuantCode Risk Gate Report
+    return f"""## QuantCode Risk CI Report
 
 **Verdict:** `{verdict}`  
 **Strategy:** `{profile.strategy_id}`  

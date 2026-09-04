@@ -1,4 +1,4 @@
-"""replay 工具测试 — make_thread_id（task_id 格式/唯一性）+ scripts.replay（list/show/resume 守门）。
+"""replay 工具测试 — make_thread_id（task_id 格式/唯一性）+ scripts.replay（list/show）。
 
 覆盖：
 1. make_thread_id 不带 task_id：<group>-<flow>-<uuid8>，同秒同参不碰撞。
@@ -6,7 +6,6 @@
 3. 旧签名（ts/suffix）行为不变（向后兼容）。
 4. replay list 对手工插行的 tmp checkpoints.db（LangGraph checkpoints 表结构）能列出
    DISTINCT thread + 最近 checkpoint；空库容错返回空。
-5. resume 对非 risk:gate thread 打印「暂仅支持 risk:gate」。
 """
 from __future__ import annotations
 
@@ -28,21 +27,21 @@ from scripts.replay import list_threads, main, show_thread
 class TestMakeThreadId:
     def test_without_task_id_format_and_uniqueness(self):
         """默认格式 <group>-<flow>-<uuid8>；同秒同参不碰撞。"""
-        first = make_thread_id("risk", "risk:gate")
-        second = make_thread_id("risk", "risk:gate")
+        first = make_thread_id("risk", "risk:ci")
+        second = make_thread_id("risk", "risk:ci")
         for tid in (first, second):
             group, flow, unique = tid.split("-")
             assert group == "risk"
-            assert flow == "risk_gate"
+            assert flow == "risk_ci"
             assert len(unique) == 8
             int(unique, 16)  # uuid 截 8 位 hex
         assert first != second
 
     def test_with_task_id_format_and_uniqueness(self):
         """带 task_id 格式 <group>-<flow>-<task_id>-<uuid8>；同秒同参不碰撞。"""
-        prefix = "factor-factor_autoeval-T42-"
-        first = make_thread_id("factor", "factor:autoeval", task_id="T42")
-        second = make_thread_id("factor", "factor:autoeval", task_id="T42")
+        prefix = "factor-factor_evaluation-T42-"
+        first = make_thread_id("factor", "factor:evaluation", task_id="T42")
+        second = make_thread_id("factor", "factor:evaluation", task_id="T42")
         for tid in (first, second):
             assert tid.startswith(prefix)
             unique = tid[len(prefix):]
@@ -53,14 +52,14 @@ class TestMakeThreadId:
     def test_legacy_ts_suffix_unchanged(self):
         """旧签名（ts/suffix）输出保持不变，已有测试/脚本不受影响。"""
         assert (
-            make_thread_id("risk", "risk:gate", ts=10, suffix="agent-normal")
-            == "risk-risk_gate-10-agent-normal"
+            make_thread_id("risk", "risk:ci", ts=10, suffix="agent-normal")
+            == "risk-risk_ci-10-agent-normal"
         )
-        assert make_thread_id("factor", "factor:autoeval", ts=1) == "factor-factor_autoeval-1"
+        assert make_thread_id("factor", "factor:evaluation", ts=1) == "factor-factor_evaluation-1"
 
 
 # ---------------------------------------------------------------------------
-# replay list / show / resume 守门
+# replay list / show
 # ---------------------------------------------------------------------------
 
 def _seed_checkpoints(db_path) -> None:
@@ -76,7 +75,7 @@ def _seed_checkpoints(db_path) -> None:
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
                 (
-                    "risk-risk_gate-aaaa1111",
+                    "risk-risk_ci-aaaa1111",
                     "",
                     "1ef4f797-8335-6428-8001-8a1503f9b875",
                     None,
@@ -85,7 +84,7 @@ def _seed_checkpoints(db_path) -> None:
                     None,
                 ),
                 (
-                    "risk-risk_gate-aaaa1111",
+                    "risk-risk_ci-aaaa1111",
                     "",
                     "1ef4f798-8335-6428-8001-8a1503f9b875",
                     "1ef4f797-8335-6428-8001-8a1503f9b875",
@@ -94,7 +93,7 @@ def _seed_checkpoints(db_path) -> None:
                     None,
                 ),
                 (
-                    "factor-factor_autoeval-bbbb2222",
+                    "factor-factor_evaluation-bbbb2222",
                     "",
                     "1ef4f797-8335-6428-8001-8a1503f9b876",
                     None,
@@ -117,14 +116,14 @@ class TestReplayList:
         threads = list_threads(db)
         ids = [t["thread_id"] for t in threads]
         assert sorted(ids) == [
-            "factor-factor_autoeval-bbbb2222",
-            "risk-risk_gate-aaaa1111",
+            "factor-factor_evaluation-bbbb2222",
+            "risk-risk_ci-aaaa1111",
         ]
         # DISTINCT：每个 thread 只出现一次
         assert len(ids) == len(set(ids))
         # 最近 checkpoint_id（同一 thread 两行，取 MAX）
         latest = {t["thread_id"]: t["checkpoint_id"] for t in threads}
-        assert latest["risk-risk_gate-aaaa1111"] == "1ef4f798-8335-6428-8001-8a1503f9b875"
+        assert latest["risk-risk_ci-aaaa1111"] == "1ef4f798-8335-6428-8001-8a1503f9b875"
 
     def test_empty_db_tolerated(self, tmp_path):
         db = tmp_path / "empty.db"
@@ -136,8 +135,8 @@ class TestReplayList:
         _seed_checkpoints(db)
         assert main(["list", "--db", str(db)]) == 0
         out = capsys.readouterr().out
-        assert "risk-risk_gate-aaaa1111" in out
-        assert "factor-factor_autoeval-bbbb2222" in out
+        assert "risk-risk_ci-aaaa1111" in out
+        assert "factor-factor_evaluation-bbbb2222" in out
 
 
 class TestReplayShow:
@@ -145,30 +144,11 @@ class TestReplayShow:
         db = tmp_path / "checkpoints.db"
         _seed_checkpoints(db)
         # stub blob 解码失败也要降级展示，不抛异常
-        out = show_thread(db, "risk-risk_gate-aaaa1111")
-        assert "risk-risk_gate-aaaa1111" in out
+        out = show_thread(db, "risk-risk_ci-aaaa1111")
+        assert "risk-risk_ci-aaaa1111" in out
         assert "checkpoint_id" in out
 
     def test_show_missing_thread(self, tmp_path):
         db = tmp_path / "checkpoints.db"
         _seed_checkpoints(db)
         assert "thread 不存在" in show_thread(db, "nope-1")
-
-
-class TestReplayResumeGate:
-    def test_resume_rejects_non_risk_gate_thread(self, tmp_path, capsys):
-        db = tmp_path / "checkpoints.db"
-        _seed_checkpoints(db)
-        rc = main(
-            [
-                "resume",
-                "--thread",
-                "factor-factor_autoeval-bbbb2222",
-                "--decision",
-                "approve",
-                "--db",
-                str(db),
-            ]
-        )
-        assert rc == 1
-        assert "暂仅支持 risk:gate" in capsys.readouterr().out

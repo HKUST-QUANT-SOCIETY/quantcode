@@ -113,14 +113,15 @@ class MemoryService:
         root: str | Path | None = None,
         floor_ratio: float = DEFAULT_FLOOR_RATIO,
         requester_group: str | None = None,
-        auto_reconcile: bool = True,
+        auto_reconcile: bool = False,
     ) -> None:
         """Args:
         db_path: sqlite 文件。
         root: ``.quantcode`` 根；为 None 时默指 db_path 父目录。reconcile 必需。
         floor_ratio: 相对 floor，默认 0.15；设 0 关闭过滤。
         requester_group: 当前 caller 所属 6 组之一；``groups`` scope 越权时拦截。
-        auto_reconcile: search() 进入时是否先 reconcile（默认 True，对齐 MimoCode）。
+        auto_reconcile: compatibility option. Defaults False so queries only read
+            the maintained index; call ``reconcile()`` explicitly for disk imports.
         """
         self.db_path = Path(db_path)
         if not file_exists_and_initialized(self.db_path):
@@ -333,17 +334,6 @@ class MemoryService:
             _check_group_read_allowed(scope, scope_id, rgroup)
 
         resolved_type = type or detect_type(key)
-        # tasks scope 用 key 推 type 时需要把 tasks/<tid>/<key> 整体传进去（与 parse_path 行为一致）
-        if resolved_type == "free" and scope == "tasks" and "/" in key:
-            resolved_type = detect_type(key)
-
-        # build_path 对 tasks 是 NotImplementedError —— caller 走 parse_path 路径即可
-        if scope == "tasks":
-            raise NotImplementedError(
-                "write(scope='tasks'): tasks 路径含 sid 嵌入，暂不支持；"
-                "请走 parse_path() 解析的路径直接调 index_from_disk。"
-            )
-
         path_str = build_path(root=str(self.root), scope=scope, key=key, scope_id=scope_id)
         path = Path(path_str)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -411,8 +401,6 @@ class MemoryService:
                 raise ValueError("get: scope=groups 必须传 scope_id")
             _check_group_read_allowed(scope, scope_id, rgroup)
 
-        if scope == "tasks":
-            raise NotImplementedError("get(scope='tasks'): 暂不支持，见 write() 说明")
         path_str = build_path(root=str(self.root), scope=scope, key=key, scope_id=scope_id)
         path = Path(path_str)
         if not path.is_file():
@@ -433,9 +421,6 @@ class MemoryService:
             ``True`` 表示确实删了一条（文件或 DB 行存在过）。
         """
         from .paths import build_path
-
-        if scope == "tasks":
-            raise NotImplementedError("delete(scope='tasks'): 暂不支持")
 
         # 写权限
         rgroup = requester_group if requester_group is not None else self.requester_group

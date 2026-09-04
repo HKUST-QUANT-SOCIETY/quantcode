@@ -12,7 +12,7 @@
 - 复用：``tools.utils.dedupe``（给副作用 tool 加去重，Day 1 陈镇鸿）
 
 参考：
-- Architecture_Spec.md §3.3
+- docs/QuantCode_Design.md §3.3
 - MimoCode ``packages/opencode/src/tool/tool.ts`` 中的 ``Def`` 接口
 """
 from __future__ import annotations

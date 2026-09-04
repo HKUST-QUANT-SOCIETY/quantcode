@@ -81,7 +81,7 @@ SOLUTION_TOOLS = (
 # 盘点）：registry 内不存在通用 file 写/edit 工具（write_file/bash 等是 OpenCode
 # 平台侧 tool，不经本 registry，见 tests/test_allowlist_consistency.py 的
 # PLATFORM_TOOLS）；registry 内的写/副作用类按命名归纳为 write_*（write_blackboard、
-# write_pr_comment）、merge_to_main（代码合入）、deploy_strategy（部署写）、
+# write_pr_comment）、merge_to_main（共享写入）、deployment_candidate（Admin 交接）、
 # spawn_subagent / trigger_risk_flow（流程副作用）、run_*（执行类）、
 # generate_* / mark_task_done 等——它们全部不命中下列只读前缀。
 # 因此采用**白名单**实现：命中只读前缀或方案类工具 → 放行，其余一律视为写类
@@ -100,6 +100,7 @@ READONLY_TOOL_PREFIXES = (
     "pool_",
     "request_",
 )
+READONLY_TOOL_IDS = frozenset({"risk_verdict", "portfolio_verdict"})
 
 # 拒绝信息（P-10 验收草案断言文案："方案未冻结，代码工具不可用"）。
 PHASE_DENY_MESSAGE = "方案未冻结，代码工具不可用"
@@ -107,7 +108,7 @@ PHASE_DENY_MESSAGE = "方案未冻结，代码工具不可用"
 
 def is_readonly_tool(tool_id: str) -> bool:
     """按前缀白名单判定只读工具（draft 态放行）。"""
-    return str(tool_id).startswith(READONLY_TOOL_PREFIXES)
+    return tool_id in READONLY_TOOL_IDS or str(tool_id).startswith(READONLY_TOOL_PREFIXES)
 
 
 def tool_allowed_in_phase(tool_id: str, phase: str | None) -> bool:

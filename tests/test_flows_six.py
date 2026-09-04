@@ -7,7 +7,7 @@
 - ("fundamental", "fundamental:research") flows/fundamental_research.py
 
 测试模式：ScriptedLLM 不适用（Compose 流没有 LLM 节点），这里按
-tests/test_factor_autoeval_flow.py 的模式直接构造 state / 调 node 函数，
+tests/test_factor_evaluation_flow.py 的模式直接构造 state / 调 node 函数，
 并各附一条 build_workflow().invoke 全图 smoke。
 
 Stub 行为如实标注：
@@ -181,7 +181,7 @@ def test_strategy_compose_flow_state(tmp_path, monkeypatch):
 def _invoke_registered(group, flow_name, input_data, tmp_path, ts):
     """走 FLOW_REGISTRY 的全图 smoke helper。
 
-    自动注册的 app 绑定默认 checkpoint DB；这里按 test_factor_autoeval_flow.py
+    自动注册的 app 绑定默认 checkpoint DB；这里按 test_factor_evaluation_flow.py
     的方式用 tmp checkpoint db 重新 build + overwrite 注册，测试后还原，
     避免 clear_checkpointer_cache() 关闭共享连接导致 "closed database"。
     """
