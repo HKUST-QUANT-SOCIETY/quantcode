@@ -77,6 +77,13 @@ def test_strip_frontmatter_handles_chinese() -> None:
     assert "正文内容。" in result
 
 
+def test_strip_frontmatter_handles_windows_line_endings() -> None:
+    text = "---\r\nname: factor\r\n---\r\n\r\n# Body\r\n"
+    result = _strip_frontmatter(text)
+    assert "name: factor" not in result
+    assert "# Body" in result
+
+
 # ---------- 业务 skill 加载 ----------
 
 def test_load_business_skill_returns_main_workflow() -> None:
@@ -93,6 +100,13 @@ def test_load_business_skill_missing_raises() -> None:
     """load_skill(business, 不存在) 应抛 FileNotFoundError。"""
     with pytest.raises(FileNotFoundError):
         load_skill("nonexistent", group="factor")
+
+
+@pytest.mark.parametrize("value", ["../outside", "nested/skill", r"..\\outside", ""])
+def test_skill_paths_reject_traversal(value: str) -> None:
+    with pytest.raises((ValueError, FileNotFoundError)):
+        load_skill(value, group="factor")
+    assert "方法论：tdd" in load_skill("tdd", meta_skills=[value])
 
 
 # ---------- 元 skill 加载 ----------

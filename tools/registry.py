@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import functools
+import re
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -230,7 +231,13 @@ def load_group_config(group: str) -> dict:
           - extract_metadata
           ...
     """
-    cfg_path = GROUPS_DIR / group / "tool_allowlist.yaml"
+    group_name = str(group or "").strip()
+    # Group names are identifiers, not filesystem paths.  This guard matters
+    # for direct library callers as well as MCP, whose authenticated path has
+    # a separate roster check.
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", group_name):
+        return {"allowlist": []}
+    cfg_path = GROUPS_DIR / group_name / "tool_allowlist.yaml"
     if not cfg_path.exists():
         return {"allowlist": []}
     try:

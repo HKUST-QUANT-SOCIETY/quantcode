@@ -43,7 +43,7 @@ class WritePrCommentArgs(BaseModel):
 
 
 def _read_blackboard_execute(args: ReadBlackboardArgs, ctx: dict) -> dict[str, Any]:
-    return risk_tools.read_blackboard(args.input_data)
+    return risk_tools.read_blackboard(args.input_data, ctx=ctx)
 
 
 def _calc_risk_execute(args: CalcRiskArgs, ctx: dict) -> dict[str, Any]:

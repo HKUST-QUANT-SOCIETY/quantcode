@@ -67,6 +67,51 @@ def test_pit_rag_chroma_backend_preferred():
         assert result["backend"] == "fixture_json"
 
 
+def test_pit_rag_missing_fixture_returns_explicit_unavailable(tmp_path):
+    result = registry.call(
+        "pit_rag_search",
+        {
+            "query": "missing corpus",
+            "as_of_date": "2025-01-01",
+            "fixture_path": str(tmp_path / "missing.json"),
+            "force_fixture": True,
+        },
+    )
+    assert result["status"] == "UNAVAILABLE"
+    assert result["error"] == "corpus_unavailable"
+    assert result["documents"] == []
+
+
+def test_pit_rag_rejects_external_fixture_in_production(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    result = registry.call(
+        "pit_rag_search",
+        {
+            "query": "external corpus",
+            "as_of_date": "2025-01-01",
+            "fixture_path": str(tmp_path / "corpus.json"),
+            "force_fixture": True,
+        },
+    )
+    assert result["status"] == "UNAVAILABLE"
+    assert result["error"] == "invalid_fixture_path"
+
+
+def test_pit_rag_rejects_windows_style_fixture_escape(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    result = registry.call(
+        "pit_rag_search",
+        {
+            "query": "windows escape",
+            "as_of_date": "2025-01-01",
+            "fixture_path": r"..\outside\corpus.json",
+            "force_fixture": True,
+        },
+    )
+    assert result["status"] == "UNAVAILABLE"
+    assert result["error"] == "invalid_fixture_path"
+
+
 def test_extract_dcf_render_pipeline():
     from tools.registry import PROJECT_ROOT
 
@@ -126,6 +171,24 @@ def test_extract_dcf_render_pipeline():
     assert "FCF TTM" in md
     assert "DOC-CICC-2023-AR" in md or "中金" in md
     assert "Stub content for" not in md
+
+
+def test_render_report_identifier_cannot_escape_artifact_root(tmp_path, monkeypatch):
+    from tools.fundamental.render_report import RenderReportArgs, render_report_execute
+    import tools.fundamental.render_report as render_module
+
+    monkeypatch.setattr(render_module, "PROJECT_ROOT", tmp_path)
+    result = render_report_execute(
+        RenderReportArgs(
+            target_identifier=r"..\\outside/secret",
+            as_of_date="2025-01-01",
+            use_typst=False,
+        ),
+        {},
+    )
+    artifact = tmp_path / result["markdown_path"]
+    assert artifact.is_file()
+    assert artifact.resolve().is_relative_to((tmp_path / "artifacts" / "research").resolve())
 
 
 def test_load_fundamental_compose_skill():

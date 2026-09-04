@@ -1,8 +1,8 @@
 # QuantCode 用户手册
 
 > **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员
-> **版本**：v5
-> **最后更新**：2026-09-04
+> **版本**：v5.1
+> **最后更新**：2026-09-05
 
 ---
 
@@ -28,6 +28,7 @@
 - QuantCode桌面端已安装并运行
 - 本机已有 SSH agent 或密钥链身份
 - 服务器 roster 已登记你的公钥指纹
+- 生产工具的路径参数必须指向 QuantCode 仓库内文件；仓库外 fixture 仅在显式开发/测试环境可用
 
 ### 启动QuantCode
 
@@ -403,6 +404,9 @@ A: Tool/Flow 由维护员后端注册、审核和发布。用户和 Agent 只能
 
 **Q: 生成的artifact在哪里？**
 A: `artifacts/{你的组}/` 目录下（如 factor 报告在 `artifacts/factor/{name}-report.json`、fundamental 研报在 `artifacts/research/`）
+
+**Q: 为什么工具拒绝了我的文件路径？**
+A: 生产会话只接受仓库内路径，并会解析 `..`、符号链接和 NUL 字符，防止读取或写入仓库外文件。开发/测试 fixture 请显式设置 `QUANTCODE_ENV=development` 或 `test`。
 
 **Q: 如何查看最近运行情况？**
 A: 会话内打开桌面端 Monitor 面板，或让 Agent 调用只读 `list_runs` 工具（数据源 `.quantcode/metrics.jsonl`）。

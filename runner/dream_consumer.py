@@ -63,6 +63,9 @@ def scan_completed_runs(
     Returns:
         [{"run_id", "events": [AuditEvent dict, ...]}, ...]，按 run_id 排序。
     """
+    # ``seen_run_ids`` is an input cursor, not an output accumulator.  The
+    # consumer marks ids only after downstream distillation/judging succeeds;
+    # otherwise a transient parser or filesystem failure would lose a run.
     seen = seen_run_ids if seen_run_ids is not None else set()
     root = Path(evidence_dir)
     if not root.is_dir():
@@ -98,7 +101,6 @@ def scan_completed_runs(
             ):
                 completed = True
         if completed:
-            seen.add(run_id)
             out.append({"run_id": run_id, "events": events})
     return out
 
@@ -300,6 +302,9 @@ def consume_once(
         if consumed_run_ids is not None:
             consumed_run_ids.difference_update(run["run_id"] for run in scanned)
         raise
+
+    if consumed_run_ids is not None:
+        consumed_run_ids.update(run["run_id"] for run in scanned)
 
     Path(candidates_dir).mkdir(parents=True, exist_ok=True)
     (Path(candidates_dir) / ".last_consumed").write_text(

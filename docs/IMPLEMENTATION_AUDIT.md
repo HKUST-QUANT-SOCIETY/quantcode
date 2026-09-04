@@ -67,6 +67,7 @@
 - Capability visibility、strict YAML 写配置、`pyarrow` 依赖、MCP UTF-8 stdio 和 tiktoken 缓存异常已补齐。
 - Lens QuantCode UI 已通过 OpenCode `/experimental/quantcode/tool` 受限 API 读取 `list_skills`、`list_algorithms`、`ssh_status`、`search_memory`、`session_context`；任意 MCP tool 名和参数不会被公开。
 - UI 指标精度、共享标签、算法列表渲染和 `lens-field` 动态导入错误态已修复。
+- 输入路径边界已统一：PR/实验/期权数据、曲面和 PIT fixture 经过仓库 containment 校验；生产拒绝仓库外路径，显式 dev/test 才允许外部 fixture。
 - P-07 已有候选生成、显式能力卡蒸馏和 approver/admin 晋升/拒绝/supersede 审计；生产运行时 strict reuse 默认开启，`scripts/dream_consume.py --interval` 提供定时消费入口，生产 timer 启用仍需部署环境确认。ReturnsDataset、真实 SSH gateway、生产队列仍是外部依赖。
 
 ## 6. 测试报告
@@ -81,4 +82,4 @@ test_scope: full pytest + v5 contract suite
 known_legacy_tests: migrated or deleted
 ```
 
-此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1025 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `114 passed`，session-ui 回归 `57 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。
+此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1049 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `114 passed`，session-ui 回归 `57 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。

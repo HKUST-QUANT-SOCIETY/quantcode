@@ -14,6 +14,7 @@ from schemas.fundamental import PITResult, ResearchResult
 from schemas.options import GreeksProfile, OptionsBacktestReport, VolSurfaceResult
 from schemas.strategy import StrategyReport
 from tools.registry import PROJECT_ROOT, registry
+from tools.utils.paths import safe_filename_component
 
 import tools.fundamental._register  # noqa: F401
 import tools.options._register  # noqa: F401
@@ -65,7 +66,7 @@ def run_strategy_demo(
     )
 
     artifact_path = _write_artifact(
-        f"artifacts/strategy/{report.strategy_name}/strategy_report.json",
+        f"artifacts/strategy/{safe_filename_component(report.strategy_name)}/strategy_report.json",
         report.model_dump(mode="json"),
     )
     return {
@@ -171,7 +172,7 @@ def run_fundamental_demo(
         "markdown_filled": report_raw.get("markdown_filled", False),
     }
     artifact_path = _write_artifact(
-        f"artifacts/research/{target_identifier.replace('.', '_')}-{as_of_date}/fundamental_bundle.json",
+        f"artifacts/research/{safe_filename_component(target_identifier)}-{as_of_date}/fundamental_bundle.json",
         bundle,
     )
     return {
@@ -260,7 +261,7 @@ def run_options_demo(
         "notes": "OptionsRisk bundle = VolSurface + GreeksProfile + OptionsBacktestReport",
     }
     artifact_path = _write_artifact(
-        f"artifacts/options/{strategy_name}/options_risk.json",
+        f"artifacts/options/{safe_filename_component(strategy_name)}/options_risk.json",
         options_risk,
     )
     return {

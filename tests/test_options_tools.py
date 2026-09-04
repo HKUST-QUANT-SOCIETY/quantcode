@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib
-from datetime import date
 
 import pytest
 
@@ -49,6 +48,42 @@ def test_build_vol_surface_from_sample_csv():
     assert result["interpolation_method"] == "black_scholes_iv_bisection"
     assert result.get("artifact_path")
     assert result["data_quality"] in {"sample_bs_iv", "sample", "mock"}
+
+
+def test_option_artifact_strategy_name_cannot_escape_root(tmp_path, monkeypatch):
+    import tools.options.build_vol_surface as surface
+
+    monkeypatch.setattr(surface, "PROJECT_ROOT", tmp_path)
+    result = surface.build_vol_surface_execute(
+        surface.BuildVolSurfaceArgs(
+            strategy_name=r"..\\outside/strategy",
+            underlying="GC",
+            as_of_date="2026-06-27",
+            data_path=str(tmp_path / "missing.csv"),
+            write_artifact=True,
+        ),
+        {},
+    )
+    artifact = tmp_path / result["artifact_path"]
+    assert artifact.is_file()
+    assert artifact.resolve().is_relative_to((tmp_path / "artifacts" / "options").resolve())
+
+
+def test_build_vol_surface_rejects_external_data_path_in_production(tmp_path, monkeypatch):
+    import tools.options.build_vol_surface as surface
+
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    with pytest.raises(ValueError, match="inside the approved"):
+        surface.build_vol_surface_execute(
+            surface.BuildVolSurfaceArgs(
+                strategy_name="gc_vol_carry",
+                underlying="GC",
+                as_of_date="2026-06-27",
+                data_path=str(tmp_path / "quotes.csv"),
+                write_artifact=False,
+            ),
+            {},
+        )
 
 
 def test_calc_greeks_returns_profile():

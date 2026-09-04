@@ -12,7 +12,7 @@
 
 ## Server A：qs-data-ingest（开发 / CI + qs-data 只读数据服务规划）
 
-- **角色**：CI 跑 pytest（当前基线 1025 passed，4 skipped）；qs-cold staging 勘察副本宿主（`/srv/quant/data/migration-staging/...`，见 `specs/data/SPEC.md` §2.1）；Q2 D2a 起加挂 qs-data 只读服务（group 粒度 key，LLM/L1 沙箱只经 market tool 访问）。
+- **角色**：CI 跑 pytest（当前基线 1049 passed，4 skipped）；qs-cold staging 勘察副本宿主（`/srv/quant/data/migration-staging/...`，见 `specs/data/SPEC.md` §2.1）；Q2 D2a 起加挂 qs-data 只读服务（group 粒度 key，LLM/L1 沙箱只经 market tool 访问）。
 - **服务**：CI runner；qs-data 只读 HTTP 服务（D2a，未落地，占位）；不跑对外服务、不放凭据。
 - **端口**：CI 无对外常驻端口；D2a 落地时仅内网段开放只读端口（规划，端口号定案时回填）。
 - **凭据注入面**：CI secret 侧注入 runner 环境；机器上不落明文文件。

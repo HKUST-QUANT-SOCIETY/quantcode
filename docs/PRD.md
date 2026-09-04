@@ -1,11 +1,11 @@
 # QuantCode 产品需求文档（PRD）
 
-> **版本**：v5（2026-09-04，QuantCode v5 顶层设计同步）
+> **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
 > **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD 与 Day1-5 任务表是历史材料；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。
 
-> **2026-09-05 实现核验摘要**：`session_context` 是组/角色唯一来源；普通 UI 不提供自由切组、私钥文本输入或 `/deploy` 命令；Memory 通过只读 `search_memory` 接入，空库和未连接明确返回状态。P-07 已有候选评审审计，生产运行时 strict reuse 默认启用，消费脚本支持定时消费；生产 timer 启用、真实 SSH gateway、ReturnsDataset/生产部署队列仍未完成，见 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md`。
+> **2026-09-05 实现核验摘要**：`session_context` 是组/角色唯一来源；普通 UI 不提供自由切组、私钥文本输入或 `/deploy` 命令；Memory 通过只读 `search_memory` 接入，空库和未连接明确返回状态。PR、实验和领域数据输入统一经过仓库路径边界校验，生产拒绝仓库外路径。P-07 已有候选评审审计，生产运行时 strict reuse 默认启用，消费脚本支持定时消费；生产 timer 启用、真实 SSH gateway、ReturnsDataset/生产部署队列仍未完成，见 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md`。
 
 ## 0. 产品定义
 
@@ -318,4 +318,4 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 | 2026-09-01 | v2：平台红线、HumanGate 收窄、P-07/P-08/P-09/P-10 定版 |
 | 2026-09-03 | v3：根据组长会议与组件指南重建运营模型、组件边界、SSH/生产边界、Admin 权限和 GitGraph 目标 |
 | 2026-09-03 | v4：补齐 OpenCode/MimoCode Agent 底座，明确动态工具目录、个人工作环境、生产服务账号和 Admin 专属部署 |
-| 2026-09-05 | v5.1：同步实现核验；Session Context 唯一身份来源、只读 Memory API、普通 UI 移除自由切组/私钥文本/部署命令；明确 P-07、SSH gateway、ReturnsDataset 和生产队列的未完成边界 |
+| 2026-09-05 | v5.1：同步实现核验；Session Context 唯一身份来源、只读 Memory API、输入路径 containment、普通 UI 移除自由切组/私钥文本/部署命令；明确 P-07、SSH gateway、ReturnsDataset 和生产队列的未完成边界 |

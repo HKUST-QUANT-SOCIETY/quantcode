@@ -21,6 +21,7 @@ from tools.risk.risk_tools import (
     risk_verdict,
     write_pr_comment,
 )
+from tools.utils.paths import safe_filename_component
 
 
 class RiskCIState(TypedDict, total=False):
@@ -49,7 +50,7 @@ def evaluate_risk(state: RiskCIState) -> dict[str, Any]:
     profile = generate_risk_profile(model_spec, metrics, pr_url=input_data.get("pr_url"))
     profile_data = profile.model_dump(mode="json")
 
-    artifact_path = Path("artifacts") / "risk" / f"{profile.strategy_id}-profile.json"
+    artifact_path = Path("artifacts") / "risk" / f"{safe_filename_component(profile.strategy_id)}-profile.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(
         json.dumps(profile_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

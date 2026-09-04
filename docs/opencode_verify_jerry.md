@@ -1,4 +1,7 @@
-# OpenCode 落地检验 — 刘炽（strategy / fundamental / options）
+# OpenCode 落地检验 — QuantCode v5
+
+> 本文已按 v5 更新。组身份来自 SSH roster Session Context；不要通过选择
+> 不同 MCP server 或传入 `QUANTCODE_GROUP` 在生产环境切组。
 
 > 目标：在 **OpenCode TUI** 里能发现 MCP tools，Agent 能调用并产出合法 artifact。  
 > 协议层可先跑 `python3 scripts/test_mcp_groups.py`（不依赖 OpenCode UI）。
@@ -12,7 +15,7 @@
 cd ~/Projects/quantcode-workspace/quantcode
 
 # 2) 安装 Python 依赖（若未装）
-pip install -e .
+uv sync --extra dev
 
 # 3) MCP 多组烟测（必须先绿）
 python3 scripts/test_mcp_groups.py
@@ -39,22 +42,25 @@ bun run dev
 
 ## 3. MCP 配置说明
 
-`opencode.jsonc` 已注册 4 个 MCP server（按组隔离）：
+`opencode.jsonc` 只注册一个 `quantcode` MCP server。生产会话必须由桌面
+SSH Agent/Keychain bridge 注入 `QUANTCODE_SSH_KEY_FINGERPRINT`，服务端再从
+`.opencode/authorized_groups.yaml` roster 签发 actor、组、角色和工作目录。
+未命中 roster 时服务端按 v5 规则 fail-closed。
 
-| MCP 名 | `QUANTCODE_GROUP` | 用途 |
-|--------|-------------------|------|
-| `quantcode-model` | model | 读 PR / ModelSpec（陈镇鸿主） |
-| `quantcode-strategy` | strategy | 你 Day4 strategy 四件套 |
-| `quantcode-fundamental` | fundamental | 你 Day4 fundamental 四件套 |
-| `quantcode-options` | options | 你 Day3/4 options 三件套 |
+本地离线协议烟测可以显式使用：
 
-OpenCode 启动后日志里应能看到 MCP server 连接成功。
+```bash
+QUANTCODE_ENV=development QUANTCODE_GROUP=factor \
+  python3 scripts/test_mcp_client.py
+```
 
 ---
 
 ## 4. Compose 任务示例（在 OpenCode 输入）
 
 ### options 组
+
+以下任务在已认证的 options Session Context 中执行；任务文本不负责切组。
 
 ```
 /compose 为 GC 黄金期权构建波动率曲面：读取 data/sample_options/gc_options_merged_sample.csv，调用 build_vol_surface，再 calc_greeks
@@ -78,9 +84,9 @@ OpenCode 启动后日志里应能看到 MCP server 连接成功。
 
 ## 5. 验收 checklist
 
-- [ ] `python3 scripts/test_mcp_groups.py` 全绿
+- [ ] `python3 scripts/test_mcp_client.py` 全绿（协议层）
 - [ ] OpenCode 启动无 MCP 报错
-- [ ] Agent 能调用至少 1 个 quantcode-* MCP tool（日志有 tool_call）
+- [ ] Agent 能调用至少 1 个 `quantcode` MCP tool（日志有 tool_call）
 - [ ] 返回 JSON 通过 schema（StrategyReport / ResearchResult / VolSurfaceResult）
 - [ ] （可选）截图或录屏给 Lead
 
@@ -90,7 +96,7 @@ OpenCode 启动后日志里应能看到 MCP server 连接成功。
 
 | 现象 | 处理 |
 |------|------|
-| OpenCode 找不到 tool | 确认 cwd 是 quantcode；`python3 -m quantcode.mcp_server` 能手动跑 |
+| OpenCode 找不到 tool | 确认 `QUANTCODE_ROOT` 指向 QuantCode；`python3 -m quantcode.mcp_server` 能手动跑 |
 | `python` not found | `opencode.jsonc` 已改为 `python3` |
-| 调错组的 tool | 确认用的是 `quantcode-strategy` 等对应 MCP |
+| 组身份不对 | 检查 SSH roster 指纹和当前 Session Context；不要用任务参数切组 |
 | tool 报错 schema | 看 tool description，按 Pydantic 字段传参 |

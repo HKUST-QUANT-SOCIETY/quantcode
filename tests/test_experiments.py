@@ -295,6 +295,12 @@ def test_get_experiment_roundtrip_and_missing(tmp_path, monkeypatch):
         registry.call("get_experiment", {"exp_id": "no_such_exp"}, {})
 
 
+def test_get_experiment_rejects_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(KeyError, match=r"\.\./secret"):
+        registry.call("get_experiment", {"exp_id": "../secret"}, {})
+
+
 # ---------------------------------------------------------------------------
 # 错误路径 + 注册
 # ---------------------------------------------------------------------------

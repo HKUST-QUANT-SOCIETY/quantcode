@@ -22,11 +22,11 @@
 |---|---:|---|
 | 当前确认的真实缺陷/缺口 | 2 + 1 部分 | SSH 实际连通性探测、ReturnsDataset 外部数据源；P-07 生产 timer 启用和候选人工转正仍待外部流程 |
 | 当前确认的工程维护债 | 1 | UI 根节点全量重建，主要是性能/焦点风险 |
-| 本轮已修复 | 12 | 服务端方案门禁、LLM adapter/权限/配置/跨平台，以及 UI 目录、指标、算法和加载错误态 |
+| 本轮已修复 | 13 | 服务端方案门禁、LLM adapter/权限/配置/跨平台、输入路径边界，以及 UI 目录、指标、算法和加载错误态 |
 | 外部环境或旧附件无法确认 | 6 | Windows 锁、Desktop resume、外部 fixture、真实服务等 |
 | 不是缺陷或不符合当前 v5 契约 | 7 | 闭包、局部状态、显式 token 错误、旧名称等 |
 
-本轮已经落地的修复包括：L2/L3 任务服务端强制方案阶段；`match_main` 统一 callable/invoke 协议并在失败时返回 `UNAVAILABLE`；能力卡 visibility 服务端过滤；声明 `pyarrow` 并严格阻断坏 YAML 写路径；MCP stdio UTF-8 与 tiktoken 缓存异常降级；QuantCode UI 接入受限的 OpenCode 只读 API（`list_skills`、`ssh_status`、`list_capabilities`、`list_algorithms`、`search_memory`、`session_context`），修复指标精度、共享指标标签、算法列表、动态模块错误反馈，并补充对应回归测试。
+本轮已经落地的修复包括：L2/L3 任务服务端强制方案阶段；`match_main` 统一 callable/invoke 协议并在失败时返回 `UNAVAILABLE`；能力卡 visibility 服务端过滤；声明 `pyarrow` 并严格阻断坏 YAML 写路径；MCP stdio UTF-8 与 tiktoken 缓存异常降级；PR/实验/期权/PIT 输入路径 containment；QuantCode UI 接入受限的 OpenCode 只读 API（`list_skills`、`ssh_status`、`list_capabilities`、`list_algorithms`、`search_memory`、`session_context`），修复指标精度、共享指标标签、算法列表、动态模块错误反馈，并补充对应回归测试。
 
 ## 2. 当前确认的真实缺陷
 
@@ -52,6 +52,7 @@
 | B-18 | evidence 中等待态/不完整 run 被 Dream 消费 | **已修复** | consumer 仅接受 `output_data.status=completed`，并要求每个 `tool_call_id` 有唯一对应 `tool_result`；瞬时消费失败会回滚增量 seen 集合。 | 继续保留 evidence 完整性校验。 |
 | B-19 | merge 审批 evidence 无法生成 DecisionRecord | **已修复** | merge approve/reject 现在写入带 `gate_id`、`decision.action`、`decided_by` 的 HumanGate 环，`build_report()` 可重放审批署名。 | 外部审计消费仍需接入。 |
 | B-20 | AgentRunner resume 没有恢复阶段 trace | **已修复** | resume 现在复用 `stream(Command(resume=...))`，恢复后的 tool/update/agent_end 写入 execution_trace、metrics 和 evidence；新增 resume trace 回归。 | 真实 Desktop Activity E2E 仍待验。 |
+| B-21 | PR/实验/期权/PIT 路径参数可绕过仓库边界 | **已修复** | 统一 `resolve_input_path()` 做 NUL、`..`、symlink 和仓库 containment 校验；生产拒绝仓库外路径，显式 dev/test 才允许外部 fixture；实验 `exp_id` 采用安全标识符校验。 | 继续在 Windows 矩阵验证盘符和反斜杠输入。 |
 
 ## 3. 已由 v5 修复或语义已改变
 
@@ -64,7 +65,7 @@
 | `check_factor_gate` 缺失 | **已过时/改名** | 当前由 `validate_factor_contract` + acceptance 契约承担，不再保留旧 Gate 名称。 |
 | P-09 必须走普通 HumanGate resume | **不是当前 v5 契约** | v5 将部署移到 Admin management plane；`submit_deploy()` 只返回 `STAGING` 并要求 Admin/evidence。普通 Catalog 不注册部署工具。真实生产队列仍未接入，但不是“普通 Agent resume 失败”。 |
 | pit-screen 首次范围条静态定位 | **已修复** | `pit-screen.tsx:180` 在有 FCF 时同步调用 `paint(compute())`；UI pit 测试通过。 |
-| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1025 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
+| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1049 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
 
 ## 4. 无法在当前环境确认的事项
 
@@ -108,7 +109,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 98 passed, 1 warning
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1025 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1049 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
 
 当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
 

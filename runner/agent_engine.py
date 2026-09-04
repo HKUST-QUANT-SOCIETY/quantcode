@@ -118,6 +118,24 @@ def _run_status(final_state: dict) -> str:
         return "completed"
     return "stopped"
 
+
+def _requires_solution(task: str, explicit: bool) -> bool:
+    """Apply the server-side P-10 classifier at every public AgentRunner entry.
+
+    ``run_agent`` already classifies requests, but direct library callers must
+    not be able to bypass L2/L3 phase limiting simply by omitting the optional
+    flag.  Classification is deliberately best-effort for malformed local
+    callers; an explicit ``True`` always wins.
+    """
+    if explicit:
+        return True
+    try:
+        from runner.task_classifier import classify_task
+
+        return bool(classify_task(str(task or "")).solution_required)
+    except Exception:
+        return False
+
 # ---------------------------------------------------------------------------
 # AgentRunner
 # ---------------------------------------------------------------------------
@@ -455,6 +473,7 @@ class AgentRunner:
             如果 caller 显式传 ``thread_id``，则原样使用，不追加。
         """
         thread_id = self._generate_thread_id(thread_id, flow_name)
+        solution_required = _requires_solution(task, solution_required)
         if system_prompt is None and skill_name is not None:
             if ":" in skill_name or self._is_meta_skill(skill_name):
                 system_prompt = load_skill(skill_name, meta_skills=meta_skills)
@@ -510,6 +529,11 @@ class AgentRunner:
                 error=f"{type(exc).__name__}: {exc}",
                 trace_events=None, context_chars=None,
             )
+            _append_evidence_safe(
+                thread_id,
+                "output_data",
+                {"status": "error", "flow_name": flow_name},
+            )
             raise
         _record_run_safe(
             actor_id=self.actor_id, role=self.role,
@@ -544,6 +568,7 @@ class AgentRunner:
         thought/tool_call/tool_result/risk_metrics/human_gate/output_data/artifact.
         """
         thread_id = self._generate_thread_id(thread_id, flow_name)
+        solution_required = _requires_solution(task, solution_required)
         meta_skills = meta_skills or []
 
         # Resolve prompt once to avoid double-loading skill.

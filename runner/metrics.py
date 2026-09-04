@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -92,19 +91,36 @@ def record_run(
 
 
 def read_recent(limit: int = 50) -> list[dict]:
-    """读最近 ``limit`` 条 run 记录（按文件顺序，旧→新）；损坏行静默跳过。"""
+    """读最近 ``limit`` 条 run 记录（按文件顺序，旧→新）。
+
+    Read from the end of the JSONL file so a long-lived metrics file does not
+    require scanning every historical byte on each Monitor refresh.  Invalid
+    UTF-8/JSON lines remain best-effort and are skipped.
+    """
     if limit <= 0:
         return []
     try:
-        with METRICS_PATH.open("r", encoding="utf-8") as f:
-            lines = deque(f, maxlen=limit)
+        with METRICS_PATH.open("rb") as f:
+            f.seek(0, 2)
+            position = f.tell()
+            chunks: list[bytes] = []
+            newline_count = 0
+            chunk_size = 64 * 1024
+            while position > 0 and newline_count <= limit:
+                size = min(chunk_size, position)
+                position -= size
+                f.seek(position)
+                chunk = f.read(size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+            lines = b"".join(reversed(chunks)).splitlines()[-limit:]
     except OSError:
         return []
     out: list[dict] = []
     for line in lines:
         try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+            obj = json.loads(line.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeError, ValueError):
             continue
         if isinstance(obj, dict):
             out.append(obj)

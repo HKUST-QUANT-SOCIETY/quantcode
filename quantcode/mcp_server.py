@@ -362,6 +362,10 @@ def _parse_skill_frontmatter(md_text: str) -> dict:
 def _list_skills_execute(args: ListSkillsArgs, ctx: dict) -> dict:
     """扫描 .opencode/groups/<group>/skills/*/SKILL.md，返回目录（只读）。"""
     group = args.group.strip()
+    if not group or any(part in {"", ".", ".."} for part in group.replace("\\", "/").split("/")):
+        return {"error": f"invalid group '{group}'"}
+    if not all(ch.isalnum() or ch in "_.-" for ch in group):
+        return {"error": f"invalid group '{group}'"}
     session_group = str((ctx or {}).get("group") or "").strip()
     if session_group and group != session_group and not _is_admin_session(session_group):
         return {

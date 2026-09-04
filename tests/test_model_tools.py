@@ -193,6 +193,13 @@ def test_extract_metadata_requires_source():
         registry.call("extract_metadata", {})
 
 
+def test_extract_metadata_rejects_paths_outside_checkout(tmp_path):
+    outside = tmp_path / "private-pr.md"
+    outside.write_text("## ModelSpec\n{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the approved"):
+        registry.call("extract_metadata", {"pr_path": str(outside)})
+
+
 # ---------------------------------------------------------------------------
 # generate_model_spec
 # ---------------------------------------------------------------------------

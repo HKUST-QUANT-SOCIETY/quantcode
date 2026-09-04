@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _REGISTRY_NAME = "experiments"
 _DEFAULTS = {"enforce_oos": True, "leaderboard_k": 20}
+_SAFE_EXPERIMENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
 def experiments_config() -> dict[str, Any]:
@@ -224,6 +226,8 @@ def _append_index(artifact_path: Path, ab: dict[str, Any]) -> None:
 
 
 def _load_experiment(exp_id: str) -> dict[str, Any]:
+    if not _SAFE_EXPERIMENT_ID.fullmatch(exp_id) or exp_id in {".", ".."}:
+        raise KeyError(f"experiment not found: {exp_id}")
     path = experiments_dir() / f"{exp_id}.json"
     if not path.is_file():
         raise KeyError(f"experiment not found: {exp_id}")

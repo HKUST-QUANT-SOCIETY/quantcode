@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 
 from schemas.factor import FactorVerdict
+from tools.utils.paths import safe_filename_component
 
 TRADING_DAYS_PER_MONTH = 21
 ENGINE = "panel_real_v1"
@@ -296,7 +297,7 @@ def _write_artifact(
     factor_name: str, report: dict[str, Any], acceptance: dict[str, Any]
 ) -> str:
     out = {"report": report, "acceptance": acceptance}
-    path = Path("artifacts") / "factor" / f"{factor_name}-report-real.json"
+    path = Path("artifacts") / "factor" / f"{safe_filename_component(factor_name)}-report-real.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(out, ensure_ascii=False, indent=2, default=str) + "\n",

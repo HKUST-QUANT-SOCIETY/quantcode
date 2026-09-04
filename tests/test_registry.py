@@ -313,15 +313,19 @@ def test_call_executes_with_provided_ctx():
 
 
 def test_project_root_points_to_quantcode():
-    # tools/registry.py → tools/ → quantcode/（仓库根）
-    # 大小写不敏感：仓库可被克隆进任意大小写的目录名（如 QUANTcode/quantcode），
-    # 关键是根目录含 tools/ 与 runner/。
-    assert PROJECT_ROOT.name.lower() == "quantcode"
+    # Worktrees and editable installs may use arbitrary directory names.  The
+    # repository root is identified by its source layout, not by its basename.
     assert (PROJECT_ROOT / "tools").is_dir()
     assert (PROJECT_ROOT / "runner").is_dir()
+    assert (PROJECT_ROOT / "schemas").is_dir()
+    assert (PROJECT_ROOT / "pyproject.toml").is_file()
 
 
 def test_groups_dir_under_project_root():
     # GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
     assert GROUPS_DIR.parent == PROJECT_ROOT / ".opencode"
     assert GROUPS_DIR.name == "groups"
+
+
+def test_group_allowlist_rejects_path_like_group():
+    assert load_group_config("../outside") == {"allowlist": []}

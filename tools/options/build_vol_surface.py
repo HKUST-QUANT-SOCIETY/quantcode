@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from schemas.options import OptionSide, VolSurfacePoint, VolSurfaceResult
 from tools.registry import PROJECT_ROOT, ToolDef
+from tools.utils.paths import resolve_input_path, safe_filename_component
 
 
 class BuildVolSurfaceArgs(BaseModel):
@@ -173,9 +174,7 @@ def _load_points(
 
 
 def build_vol_surface_execute(args: BuildVolSurfaceArgs, ctx: dict) -> dict:
-    data_path = Path(args.data_path)
-    if not data_path.is_absolute():
-        data_path = PROJECT_ROOT / data_path
+    data_path = resolve_input_path(args.data_path, root=PROJECT_ROOT)
 
     points, forward, quality = _load_points(
         data_path,
@@ -197,7 +196,7 @@ def build_vol_surface_execute(args: BuildVolSurfaceArgs, ctx: dict) -> dict:
     payload["risk_free_rate"] = args.risk_free_rate
 
     if args.write_artifact:
-        art_dir = PROJECT_ROOT / "artifacts" / "options" / args.strategy_name
+        art_dir = PROJECT_ROOT / "artifacts" / "options" / safe_filename_component(args.strategy_name)
         art_dir.mkdir(parents=True, exist_ok=True)
         art_path = art_dir / "vol_surface.json"
         art_path.write_text(

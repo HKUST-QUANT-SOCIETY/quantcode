@@ -20,7 +20,9 @@ _DEDUPE_SECONDS = 300
 _DEDUPED_WRITERS: dict[str, Callable[..., dict[str, Any]]] = {}
 
 
-def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
+def read_blackboard(
+    input_data: dict[str, Any], *, ctx: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """读取 ModelSpec。
 
     生产路径：通过 BlackboardService 从 PROJECT scope 读取（PR #18 接口）。
@@ -51,12 +53,26 @@ def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
                 return {"model_spec": value["model_spec"]}
             return {"model_spec": value}
 
-    # test/demo fallback — not the production path
+    # test/demo fallback — not the production path.  The registry wrapper and
+    # direct callers share this guard so a production Agent cannot smuggle a
+    # caller-provided ModelSpec past the canonical Blackboard handoff.
     if "model_spec" in input_data:
+        environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+        if environment not in {"dev", "development", "test"}:
+            raise PermissionError(
+                "production risk evaluation requires ModelSpec from Blackboard; "
+                "inline model_spec fallback is limited to explicit development/test"
+            )
         return {"model_spec": input_data["model_spec"]}
 
     blackboard = input_data.get("blackboard")
     if isinstance(blackboard, dict) and "model_spec" in blackboard:
+        environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+        if environment not in {"dev", "development", "test"}:
+            raise PermissionError(
+                "production risk evaluation requires ModelSpec from Blackboard; "
+                "inline blackboard fallback is limited to explicit development/test"
+            )
         return {"model_spec": blackboard["model_spec"]}
 
     raise KeyError(

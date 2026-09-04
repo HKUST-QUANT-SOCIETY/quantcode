@@ -51,27 +51,39 @@ else
     git pull
 fi
 
-# 3. Clone OpenCode载体
+# 3. Locate OpenCode载体（QuantCode v5 uses one identity-bound MCP server）
 info "Clone OpenCode桌面端..."
-if [ ! -d "../opencode" ]; then
+OPENCODE_DIR="${QUANTCODE_OPENCODE_DIR:-}"
+if [ -z "$OPENCODE_DIR" ] && [ -d "../opencode-lens" ]; then
+    OPENCODE_DIR="../opencode-lens"
+fi
+if [ -z "$OPENCODE_DIR" ] && [ -d "../opencode" ]; then
+    OPENCODE_DIR="../opencode"
+fi
+if [ -z "$OPENCODE_DIR" ]; then
     cd ..
-    git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
-    cd opencode
+    git clone https://github.com/HKUST-QUANT-SOCIETY/opencode-lens.git opencode-lens
+    OPENCODE_DIR="../opencode-lens"
+    cd opencode-lens
     bun install
     cd ../QUANTcode
 else
-    info "✓ OpenCode已存在"
+    info "✓ OpenCode已存在: $OPENCODE_DIR"
 fi
 
 # 4. 安装Python包
 info "安装QuantCode Python包..."
-pip install -e .
+if command -v uv &> /dev/null; then
+    uv sync --extra dev
+else
+    python3 -m pip install -e ".[dev]"
+fi
 
 # 5. 创建配置文件
 info "创建配置文件..."
 if [ ! -f "config.json" ]; then
     cp config.example.json config.json
-    warn "⚠️ 请编辑 config.json 填入你的API keys"
+    warn "⚠️ 请配置 QUANTCODE_API_KEY（MCP 只读环境变量，不从 config.json 读取）"
 fi
 
 # 6. 完成

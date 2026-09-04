@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from schemas.fundamental import ResearchResult, SectionType
 from tools.registry import PROJECT_ROOT, ToolDef
+from tools.utils.paths import safe_filename_component
 
 
 class RenderReportArgs(BaseModel):
@@ -268,7 +269,7 @@ def _try_typst(pdf_path: Path, args: RenderReportArgs) -> bool:
 
 def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:
     t0 = time.perf_counter()
-    safe_id = args.target_identifier.replace("/", "_").replace(".", "")
+    safe_id = safe_filename_component(args.target_identifier)
     out_dir = PROJECT_ROOT / "artifacts" / "research"
     md_path = out_dir / f"{safe_id}-{args.as_of_date.isoformat()}.md"
     pdf_path = out_dir / f"{safe_id}-{args.as_of_date.isoformat()}.pdf"
@@ -317,7 +318,6 @@ render_report_tool = ToolDef(
     ),
     schema=RenderReportArgs,
     execute=render_report_execute,
-    permission="ask",  # G4-A1：研报发布前需人审；执行策略由 configs/permissions.yaml 决定
 )
 
 __all__ = ["render_report_tool", "RenderReportArgs", "render_report_execute"]

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
 from tools.registry import registry
+from tools.utils.paths import safe_filename_component
 
 # 触发 options 组 tool 注册（幂等）
 import tools.options._register  # noqa: F401
@@ -163,7 +164,7 @@ def options_verdict_node(state: OptionsComposeFlowState) -> dict[str, Any]:
     }
 
     artifact_path = (
-        Path("artifacts") / "options" / f"{backtest['strategy_name']}-stub-report.json"
+        Path("artifacts") / "options" / f"{safe_filename_component(backtest['strategy_name'])}-stub-report.json"
     )
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(

@@ -34,7 +34,7 @@ OpenCode 提供 Desktop/TUI、session、Prompt/Context、MCP、Provider、Worksp
 
 UI 只消费服务端 session、工具目录、结构化 artifact 和外部平台链接。QuantCode 面板不复制 OpenCode 的会话逻辑，也不重算业务指标。
 
-当前实现核验：`session_context` 是 group/role/actor 的唯一数据源；普通会话已移除自由切组、私钥文本输入和 `/deploy` 命令。`search_memory`、`list_capabilities`、`list_skills`、`list_algorithms`、`ssh_status` 通过受限只读 OpenCode API 接入；未连接、空库、STAGING 和外部未验状态必须显式显示。P-07 候选评审由 Admin/approver 管理面处理。真实本地 SSH Agent/Keychain bridge、SSH gateway 和 Admin 完整管理面仍待外部环境接入。
+当前实现核验：`session_context` 是 group/role/actor 的唯一数据源；普通会话已移除自由切组、私钥文本输入和 `/deploy` 命令。`search_memory`、`list_capabilities`、`list_skills`、`list_algorithms`、`ssh_status` 通过受限只读 OpenCode API 接入；未连接、空库、STAGING 和外部未验状态必须显式显示。后端对 PR、实验、期权数据和 PIT fixture 做统一路径 containment，UI 只展示服务端返回的安全 artifact 引用。P-07 候选评审由 Admin/approver 管理面处理。真实本地 SSH Agent/Keychain bridge、SSH gateway 和 Admin 完整管理面仍待外部环境接入。
 
 ### 1.3 交互原则
 
@@ -295,4 +295,4 @@ UI 测试必须覆盖 analyst、approver 和 admin 三类 session，并用服务
 | 2026-09-01 | v1：F/P UI 清单、方案面板、Admin/GitGraph/Pop 初版 |
 | 2026-09-03 | v2：按业务组登录、组内 Memory、Admin 全权限、GitHub 权限边界、本地 SSH 身份、生产隔离、完整 GitGraph/Pop 和按复杂度方案先行 |
 | 2026-09-03 | v3：补齐 OpenCode/MimoCode 底座映射、面板契约、组件落位、本地化和 U1~U9 验收；Admin 部署与普通 Agent Gate 分离 |
-| 2026-09-05 | v4.1：同步 Session Context 唯一身份来源、只读 Memory/能力 API、移除普通会话 `/deploy` 与自由切组；明确 SSH bridge、P-07 晋升和外部生产依赖状态 |
+| 2026-09-05 | v4.1：同步 Session Context 唯一身份来源、只读 Memory/能力 API、artifact 路径 containment、移除普通会话 `/deploy` 与自由切组；明确 SSH bridge、P-07 晋升和外部生产依赖状态 |

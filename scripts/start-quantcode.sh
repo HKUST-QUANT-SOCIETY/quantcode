@@ -5,7 +5,12 @@
 # 作者：HKUST QUANT SOCIETY Agent Group
 # 版本：v1.0
 
-set -e  # 遇到错误立即退出
+set -euo pipefail  # 遇到错误立即退出
+
+# Resolve paths from the script location so the launcher works from any cwd.
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+export QUANTCODE_ROOT="$PROJECT_ROOT"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -27,7 +32,7 @@ error() {
 }
 
 # 检查当前目录
-if [ ! -f "README.md" ] || [ ! -d "quantcode" ]; then
+if [ ! -f "$PROJECT_ROOT/README.md" ] || [ ! -d "$PROJECT_ROOT/quantcode" ]; then
     error "请在QuantCode项目根目录运行此脚本"
 fi
 
@@ -45,9 +50,13 @@ info "Python版本: $PYTHON_VERSION"
 
 # 2. 检查Python包
 info "检查QuantCode Python包..."
-if ! python3 -c "import runner" &> /dev/null; then
+if ! PYTHONPATH="$PROJECT_ROOT" python3 -c "import runner" &> /dev/null; then
     warn "QuantCode包未安装，正在安装..."
-    pip install -e . || error "安装失败"
+    if command -v uv &> /dev/null; then
+        uv sync --extra dev || error "安装失败"
+    else
+        python3 -m pip install -e ".[dev]" || error "安装失败"
+    fi
     info "✓ Python包安装完成"
 else
     info "✓ QuantCode包已安装"
@@ -76,15 +85,17 @@ fi
 
 # 4. 检查OpenCode桌面端
 info "检查OpenCode桌面端..."
-if [ ! -d "../opencode" ] && [ ! -d "opencode" ]; then
-    error "OpenCode桌面端未找到。请先clone: gh repo clone HKUST-QUANT-SOCIETY/opencode"
+OPENCODE_DIR="${QUANTCODE_OPENCODE_DIR:-}"
+if [ -z "$OPENCODE_DIR" ]; then
+    for candidate in "$PROJECT_ROOT/../opencode-lens" "$PROJECT_ROOT/../opencode" "$PROJECT_ROOT/opencode"; do
+        if [ -d "$candidate" ]; then
+            OPENCODE_DIR="$candidate"
+            break
+        fi
+    done
 fi
-
-# 确定opencode路径
-if [ -d "../opencode" ]; then
-    OPENCODE_DIR="../opencode"
-elif [ -d "opencode" ]; then
-    OPENCODE_DIR="opencode"
+if [ -z "$OPENCODE_DIR" ] || [ ! -d "$OPENCODE_DIR" ]; then
+    error "OpenCode桌面端未找到。请设置 QUANTCODE_OPENCODE_DIR，或在 QuantCode 同级目录放置 opencode-lens"
 fi
 
 # 5. 检查Bun
@@ -107,16 +118,15 @@ fi
 
 # 7. 检查opencode.local.jsonc
 info "检查OpenCode配置..."
-if [ ! -f "opencode.local.jsonc" ]; then
-    if [ -f "opencode.jsonc" ]; then
-        warn "opencode.local.jsonc不存在，从opencode.jsonc复制..."
-        cp opencode.jsonc opencode.local.jsonc
-        info "✓ 已创建opencode.local.jsonc"
-    else
-        error "opencode.jsonc不存在"
-    fi
-else
+if [ ! -f "opencode.local.jsonc" ] && [ -f "opencode.jsonc" ]; then
+    warn "opencode.local.jsonc不存在；使用仓库默认配置，不复制覆盖本地配置"
+elif [ -f "opencode.local.jsonc" ]; then
     info "✓ opencode.local.jsonc已配置"
+fi
+
+if [ -z "${QUANTCODE_SSH_KEY_FINGERPRINT:-}" ] && [ ! -f "$PROJECT_ROOT/.opencode/authorized_groups.yaml" ]; then
+    warn "未检测到 SSH roster 身份；MCP 将按 v5 规则保持 fail-closed。"
+    warn "请由桌面 SSH Agent/Keychain bridge 注入 QUANTCODE_SSH_KEY_FINGERPRINT。"
 fi
 
 # 8. 启动桌面端

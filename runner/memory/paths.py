@@ -181,11 +181,17 @@ def assert_safe_component(value: str) -> None:
     Raises:
         ValueError: 含 ``..`` segment 或前导 ``/``。
     """
-    for seg in value.split("/"):
+    value = str(value)
+    if "\x00" in value:
+        raise ValueError(f"buildPath: invalid path component: {value!r}")
+    # Normalize Windows separators before checking segments.  Checking only
+    # ``/`` lets ``..\\escape`` become ``../escape`` after the final join.
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized):
+        raise ValueError(f"buildPath: invalid path component: {value!r}")
+    for seg in normalized.split("/"):
         if seg == "..":
             raise ValueError(f"buildPath: invalid path component: {value!r}")
-    if value.startswith("/"):
-        raise ValueError(f"buildPath: invalid path component: {value!r}")
 
 
 def build_path(

@@ -149,10 +149,13 @@ def _validate_or_patch(spec: dict[str, Any], args: GenSchemaArgs) -> dict[str, A
     return _rule_based_spec(args)
 
 
-def _llm_spec(args: GenSchemaArgs, api_key: str, base_url: str, model: str) -> dict[str, Any]:
+def _llm_spec(
+    args: GenSchemaArgs,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> dict[str, Any]:
     """真 LLM 路径：调用 API 并返回 FactorSpec 契约合法的 dict。"""
-    import requests
-
     prompt = f"""根据因子想法和字段建议，生成 FactorSpec 配置。
 
 因子想法：{args.idea}
@@ -182,6 +185,8 @@ match_main分析结果：
   "forward_return_horizon": 5
 }}"""
 
+    import requests
+
     response = requests.post(
         f"{base_url}/chat/completions",
         headers={
@@ -197,7 +202,7 @@ match_main分析结果：
     )
     response.raise_for_status()
     result = response.json()
-    content = result['choices'][0]['message']['content']
+    content = str(result["choices"][0]["message"]["content"])
 
     if "```json" in content:
         json_str = content.split("```json")[1].split("```")[0].strip()
@@ -216,28 +221,25 @@ match_main分析结果：
 
 def _gen_schema_execute(args: GenSchemaArgs, ctx: dict) -> dict[str, Any]:
     """真LLM实现：根据因子idea和match结果生成FactorSpec（契约合法 dict）。"""
-    import json
     import os
 
     try:
-        api_key = os.environ.get('DEEPSEEK_API_KEY')
-        base_url = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1')
-        model = os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')
-
-        if not api_key:
-            # 尝试从config.json读取
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-            config_path = os.path.join(project_root, 'config.json')
-
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                api_key = config['llm']['api_key']
-                base_url = config['llm'].get('base_url', base_url)
-                model = config['llm'].get('model', model)
-
-        if not api_key or api_key.startswith('sk-your-'):
-            raise ValueError("DeepSeek API key not configured. Set DEEPSEEK_API_KEY env var or create config.json")
+        # Tool-level fallback is environment-only, matching the MCP model
+        # factory.  Do not read config.json from an MCP child tool.
+        api_key = (
+            os.environ.get("QUANTCODE_API_KEY", "").strip()
+            or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        )
+        base_url = (
+            os.environ.get("QUANTCODE_MODEL_BASE_URL", "").strip()
+            or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        )
+        model = (
+            os.environ.get("QUANTCODE_MODEL_NAME", "").strip()
+            or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        )
+        if not api_key or api_key.startswith("sk-your-"):
+            raise ValueError("DeepSeek API key not configured. Set QUANTCODE_API_KEY or DEEPSEEK_API_KEY")
 
         return _llm_spec(args, api_key, base_url, model)
 

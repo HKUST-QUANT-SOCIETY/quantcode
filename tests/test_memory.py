@@ -297,6 +297,21 @@ class TestPathsBuildPath:
         )
         assert p == "/data/memory/.quantcode/memory/groups/factor/spec.md"
 
+    def test_windows_separator_cannot_escape(self):
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(root="/x", scope="global", key="..\\escape")
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(
+                root="/x",
+                scope="sessions",
+                scope_id="S1",
+                key="nested\\..\\escape",
+            )
+
+    def test_windows_drive_path_is_rejected(self):
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(root="/x", scope="global", key="C:\\secret")
+
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -534,6 +549,39 @@ class TestMemoryReconcile:
         rows = list(ws["svc"]._conn().execute("SELECT body FROM memory_fts"))
         assert len(rows) == 1 and rows[0]["body"] == "v2"
 
+    def test_group_reconcile_does_not_prune_other_group_rows(self, tmp_path: Path):
+        root = tmp_path / ".quantcode"
+        db = root / "memory.db"
+        model = root / "memory" / "groups" / "model" / "kept.md"
+        model.parent.mkdir(parents=True)
+        model.write_text("model knowledge", encoding="utf-8")
+        model_svc = MemoryService(
+            db, root=root, requester_group="model", auto_reconcile=False
+        )
+        model_svc.reconcile()
+        model.unlink()
+
+        factor_svc = MemoryService(
+            db, root=root, requester_group="factor", auto_reconcile=False
+        )
+        factor_svc.reconcile()
+        with factor_svc._conn() as conn:
+            row = conn.execute(
+                "SELECT path FROM memory_fts WHERE path LIKE '%kept.md'"
+            ).fetchone()
+        assert row is not None
+
+    def test_root_can_be_project_or_quantcode_directory(self, tmp_path: Path):
+        project_svc = MemoryService(tmp_path / ".quantcode" / "memory.db", root=tmp_path)
+        quantcode_svc = MemoryService(
+            tmp_path / ".quantcode" / "memory.db", root=tmp_path / ".quantcode"
+        )
+        project_path = project_svc.write(scope="global", key="root-form", body="project")
+        quantcode_path = quantcode_svc.write(scope="global", key="root-form-2", body="quantcode")
+        assert "/.quantcode/memory/global/" in project_path.replace("\\", "/")
+        assert "/.quantcode/memory/global/" in quantcode_path.replace("\\", "/")
+        assert "/.quantcode/.quantcode/" not in quantcode_path.replace("\\", "/")
+
 
 # ===========================================================================
 # QuantCode 扩展：GROUP 隔离
@@ -586,3 +634,16 @@ class TestGroupIsolation:
         paths = {r.path for r in results}
         assert any(f"model{sep}public.md" in p for p in paths), f"model/public.md 不在结果: {paths}"
         assert not any(f"factor{sep}secret.md" in p for p in paths), f"factor/secret.md 越权: {paths}"
+
+    def test_bound_service_cannot_switch_requester_group(self, mem_workspace):
+        svc = mem_workspace["model_svc"]
+        with pytest.raises(MemoryPermissionError, match="override"):
+            svc.search(query="secret", requester_group="factor")
+        with pytest.raises(MemoryPermissionError, match="override"):
+            svc.write(
+                scope="groups",
+                scope_id="factor",
+                key="secret",
+                body="secret",
+                requester_group="factor",
+            )

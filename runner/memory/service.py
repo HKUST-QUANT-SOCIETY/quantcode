@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .fts import LEGAL_SCOPES, file_exists_and_initialized, get_connection
+from .fts import LEGAL_SCOPES, LEGAL_TYPES, file_exists_and_initialized, get_connection
 from .paths import parse_path
 from .query import build_fts_query
 from .reconcile import reconcile_once
@@ -128,6 +128,12 @@ class MemoryService:
             from .fts import init_db
             init_db(self.db_path)
         self.root = Path(root) if root is not None else self.db_path.parent
+        # ``build_path`` accepts the project root and adds ``.quantcode``.
+        # Callers historically passed either form, though, and the latter
+        # otherwise created ``.quantcode/.quantcode`` on disk.  Normalize the
+        # shorthand here while keeping the public path builder deterministic.
+        if self.root.name == ".quantcode":
+            self.root = self.root.parent
         self.floor_ratio = floor_ratio
         self.requester_group = requester_group
         self.auto_reconcile = auto_reconcile
@@ -138,6 +144,17 @@ class MemoryService:
         conn = get_connection(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _requester_group(self, override: str | None) -> str | None:
+        """Resolve a request group without allowing a bound service to switch identity."""
+        bound = self.requester_group
+        if bound and override and override != bound:
+            raise MemoryPermissionError(
+                "requester_group cannot override the service's bound group",
+                requester=bound,
+                target_scope_id=override,
+            )
+        return override if override is not None else bound
 
     # ---------------- search（与 service.ts:52 严格对齐） ----------------
 
@@ -177,7 +194,7 @@ class MemoryService:
         Returns:
             :class:`MemoryHit` 列表，按 score 降序（高 = 好）。
         """
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
 
         # QuantCode 扩展：显式 scope=groups 提前校验
         if scope == "groups":
@@ -333,13 +350,15 @@ class MemoryService:
             raise ValueError("write: global scope 不应传 scope_id")
 
         # QuantCode 扩展：groups scope 写权限
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
         if scope == "groups":
             if not scope_id:
                 raise ValueError("write: groups scope 需要 scope_id")
             _check_group_read_allowed(scope, scope_id, rgroup)
 
         resolved_type = type or detect_type(key)
+        if resolved_type not in LEGAL_TYPES:
+            raise ValueError(f"write: type {resolved_type!r} 不在 {LEGAL_TYPES}")
         path_str = build_path(root=str(self.root), scope=scope, key=key, scope_id=scope_id)
         path = Path(path_str)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -401,7 +420,7 @@ class MemoryService:
         from .paths import build_path
 
         # P0-2：get() 此前绕过了 GROUP 读权限校验（search/write/delete 都有）。
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
         if scope == "groups":
             if not scope_id:
                 raise ValueError("get: scope=groups 必须传 scope_id")
@@ -429,7 +448,7 @@ class MemoryService:
         from .paths import build_path
 
         # 写权限
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
         if scope == "groups":
             if not scope_id:
                 raise ValueError("delete: groups scope 需要 scope_id")

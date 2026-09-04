@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-987%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-1049%20passed-brightgreen.svg)](tests/)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 
 [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
@@ -223,7 +223,7 @@ curl -fsSL https://raw.githubusercontent.com/HKUST-QUANT-SOCIETY/quantcode/main/
 ```bash
 # 1. Clone repos
 git clone https://github.com/HKUST-QUANT-SOCIETY/quantcode.git
-git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
+git clone https://github.com/HKUST-QUANT-SOCIETY/opencode-lens.git
 
 # 2. Install QuantCode
 cd quantcode
@@ -243,7 +243,7 @@ export QUANTCODE_MODEL_BASE_URL="https://api.deepseek.com/v1"  # optional, provi
 # into your own config.json (gitignored), or set QUANTCODE_SSH_MAINLINE env (JSON string)
 
 # 4. Install OpenCode desktop
-cd ../opencode
+cd ../opencode-lens
 bun install
 
 # 5. Start desktop
@@ -323,7 +323,7 @@ pytest tests/test_model_risk_handoff_e2e.py -v
 QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 ```
 
-**Test status**: 1025 passed, 4 skipped (2026-09-05). The skipped tests require explicit real-LLM access.
+**Test status**: 1049 passed, 4 skipped (2026-09-05). The skipped tests require explicit real-LLM access.
 
 **Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM plus deterministic local fixtures), risk metrics (real returns + explicit stub marking), metrics/monitor read path.
 
@@ -352,7 +352,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 **Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
 
-**Current stage**: Beta — 987 tests pass and four real-LLM tests are skipped. Remaining production dependencies are the desktop identity/Admin UI, organization GitHub background sync, canonical component connections, the production deploy queue/service account, and packaging. Staging, proxy and unavailable states remain explicit.
+**Current stage**: Beta — 1049 tests pass and four real-LLM tests are skipped. Remaining production dependencies are the desktop identity/Admin UI, organization GitHub background sync, canonical component connections, the production deploy queue/service account, and packaging. Staging, proxy and unavailable states remain explicit.
 
 **Production readiness estimate**: 4-6 weeks to GA per [product evaluation](https://github.com/HKUST-QUANT-SOCIETY/quantcode/issues/X).
 

@@ -2,12 +2,12 @@
 
 > **项目定位 · 架构 · 功能清单 · 工程落位**
 >
-> **版本**：v5（2026-09-04，QuantCode v5 顶层设计同步）
+> **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **上位文档**：specs/FUNCTIONAL_SPEC.md 定义功能契约，docs/PRD.md 定义产品目标，docs/UI_DESIGN_SPEC.md 定义桌面端体验。
 > **修订原则**：本版本保留原有 Agent 基础能力和工程设计，并把 OpenCode/MimoCode 的原生能力明确列为底座；只根据组长会议修正运营模式、职责边界和权限语义。不得把“领域产品不由 QuantCode 负责”误读为“QuantCode 删除 Agent 和 Compose 基础设施”。
 
-> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
+> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；PR、实验、期权数据和 PIT fixture 经过统一路径 containment 校验，生产拒绝仓库外输入；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
 
 ---
 
@@ -1209,6 +1209,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六组 flow
 | 2026-09-03 | 个人工作环境与生产服务账号分离 | 研究员可 SSH 写服务器个人目录；生产由独立服务账号运行，研究 Agent 不进入生产 shell |
 | 2026-09-03 | /deploy 归 Admin 管理面 | 普通研究 Agent 不看到或调用部署工具；Admin 通过受控接口提交生产部署并保留审计 |
 | 2026-09-03 | v4 文档校审 | 恢复原有 Agent/Compose 基础设计，补齐动态工具目录、任务契约、事件、组件卡和跨文档验收；收敛旧 Gate、自由切组和研究员生产访问语义 |
+| 2026-09-05 | v5.1 实现核验同步 | 增加输入路径 containment 边界；同步 Session Context、只读 Memory、P-07、SSH gateway、ReturnsDataset 和生产队列状态 |
 
 ---
 

@@ -133,6 +133,13 @@ def test_list_skills_invalid_group_returns_error_object():
     assert "nonexistent" in payload["error"]
 
 
+def test_list_skills_rejects_path_like_group():
+    result = mcp_server.call_tool("list_skills", {"group": "../outside"})
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["error"] == "invalid group '../outside'"
+
+
 def test_list_skills_handles_real_repo_groups():
     """真实仓库 .opencode：六组各有 2-4 个 SKILL.md，结构可解析。"""
     GROUPS = ("model", "risk", "factor", "fundamental", "options", "strategy")

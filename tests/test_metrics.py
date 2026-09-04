@@ -285,7 +285,13 @@ def test_agent_engine_stream_records_metrics(tmp_path, monkeypatch):
     row = rows[0]
     assert row["group"] == "model"
     assert row["thread_id"] == "t-stream"
-    assert row["status"] in ("completed", "stopped", "waiting_for_human")
+    assert row["status"] in (
+        "completed",
+        "stopped",
+        "stopped_budget",
+        "stopped_loop",
+        "waiting_for_human",
+    )
     assert row["tool_calls"] == 0
     # MockLLM 每轮回一句 no-tool 响应，LLM 会迭代到 max_iterations → 多条 thought
     assert row["llm_thoughts"] >= 1

@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage
 
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import clear_checkpointer_cache
-from tools.registry import ToolDef, register_tool
+from tools.registry import ToolDef, ToolRegistry, register_tool
 from tools.registry import registry as global_registry
 from pydantic import BaseModel
 
@@ -273,6 +273,41 @@ def test_agent_filters_tools_by_group(tmp_db, clean_registry):
     tool_ids = [t.id for t in tools_for_model]
     assert "read_pr" in tool_ids
     assert "risk_only_tool" not in tool_ids
+
+
+def test_direct_agent_runner_classifies_l2_before_exposing_tools(tmp_db):
+    """P-10 cannot be bypassed by omitting the optional solution flag."""
+    class _CaptureLLM:
+        def __init__(self):
+            self.tools = []
+
+        def __call__(self, messages, tools=None):
+            self.tools = list(tools or [])
+            return AIMessage(content="done")
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDef(
+            id="write_side_effect",
+            description="write",
+            schema=BaseModel,
+            execute=lambda args, ctx: {"ok": True},
+        )
+    )
+    llm = _CaptureLLM()
+    runner = AgentRunner(
+        group="model",
+        model=llm,
+        registry=registry,
+        checkpoint_db=tmp_db,
+    )
+    state = runner.stream(
+        task="跨文件修改模型适配层",
+        system_prompt="x",
+        thread_id="p10-direct-classification",
+    )
+    assert state["solution_required"] is True
+    assert all(tool.id != "write_side_effect" for tool in llm.tools)
 
 
 def test_agent_resume_from_checkpoint(tmp_db, clean_registry):

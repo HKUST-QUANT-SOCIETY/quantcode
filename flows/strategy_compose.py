@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
 from tools.registry import registry
+from tools.utils.paths import safe_filename_component
 
 # 触发 strategy 组 tool 注册（幂等）
 import tools.strategy._register  # noqa: F401
@@ -132,7 +133,7 @@ def strategy_verdict_node(state: StrategyComposeFlowState) -> dict[str, Any]:
     }
 
     artifact_path = (
-        Path("artifacts") / "strategy" / f"{report['strategy_name']}-report.json"
+        Path("artifacts") / "strategy" / f"{safe_filename_component(report['strategy_name'])}-report.json"
     )
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(

@@ -308,3 +308,36 @@ def test_consume_rolls_back_seen_ids_when_processing_fails(evidence_dir, candida
         )
 
     assert consumed == set()
+
+
+def test_consume_marks_seen_only_after_successful_processing(evidence_dir, candidates_dir):
+    """A completed but malformed run remains retryable until processing succeeds."""
+    events = _ok_run(["read_blackboard"])
+    # Keep the terminal marker but remove the matching result, making the run
+    # non-distillable while still satisfying the scanner's completion marker.
+    events = [event for event in events if not (
+        event.get("kind") == "tool_result"
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("tool_call_id") == "c1"
+    )]
+    _write_evidence(evidence_dir, "malformed-complete", events)
+    consumed: set[str] = set()
+
+    first = consume_once(
+        evidence_dir=evidence_dir,
+        candidates_dir=candidates_dir,
+        consumed_run_ids=consumed,
+    )
+    assert first["scanned_runs"] == 1 and first["new_runs"] == 0
+    assert consumed == {"malformed-complete"}
+
+    # A caller can clear/reprocess the id after repairing evidence; the
+    # consumer itself does not mark it before downstream work.
+    consumed.clear()
+    _write_evidence(evidence_dir, "malformed-complete", _ok_run(["read_blackboard"]))
+    repaired = consume_once(
+        evidence_dir=evidence_dir,
+        candidates_dir=candidates_dir,
+        consumed_run_ids=consumed,
+    )
+    assert repaired["new_runs"] == 1

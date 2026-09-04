@@ -108,8 +108,6 @@ def _format_mainline_block(extra: dict[str, Any]) -> str:
 
 def _match_main_execute(args: MatchMainArgs, ctx: dict) -> dict[str, Any]:
     """真LLM实现：分析因子idea，推断需要的字段和兼容性。"""
-    from runner.llm_provider import create_deepseek_llm
-
     # P0-7：先尝试经 SSH 补充主线代码片段（失败静默，extra_context 原样保留）
     extra = _enrich_with_mainline(args.extra_context, args.idea)
     mainline_block = _format_mainline_block(extra)
@@ -141,6 +139,8 @@ def _match_main_execute(args: MatchMainArgs, ctx: dict) -> dict[str, Any]:
 }}"""
 
     try:
+        from runner.llm_provider import create_deepseek_llm
+
         llm = create_deepseek_llm()
         # 调用LLM
         from langchain_core.messages import HumanMessage

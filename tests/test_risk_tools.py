@@ -48,6 +48,23 @@ def test_read_blackboard_raises_when_missing():
         read_blackboard({"pr_number": "42"})
 
 
+def test_inline_model_spec_fallback_is_dev_only(monkeypatch):
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    with pytest.raises(PermissionError, match="requires ModelSpec from Blackboard"):
+        read_blackboard({"model_spec": _sample_model_spec()})
+
+
+def test_registry_read_blackboard_uses_same_production_guard(monkeypatch):
+    from tools.risk._register import ReadBlackboardArgs, _read_blackboard_execute
+
+    monkeypatch.delenv("QUANTCODE_ENV", raising=False)
+    with pytest.raises(PermissionError, match="requires ModelSpec from Blackboard"):
+        _read_blackboard_execute(
+            ReadBlackboardArgs(input_data={"model_spec": _sample_model_spec()}),
+            {"source": "mcp", "group": "risk"},
+        )
+
+
 def test_calc_risk_normal_scenario():
     model_spec = _sample_model_spec()
     metrics = calc_risk(model_spec, scenario="normal")
