@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # This entry point is intentionally a deterministic fixture-backed CI
+    # compatibility run. Mark that boundary explicitly so the risk adapter's
+    # production fail-closed rule cannot be bypassed by ordinary callers.
+    os.environ.setdefault("QUANTCODE_ENV", "test")
     thread_id = args.thread_id or make_thread_id("risk", "risk:ci")
     app = build_risk_ci_flow(PROJECT_ROOT / ".quantcode" / "ci-checkpoints.db")
     register_flow("risk", "risk:ci", app, overwrite=True)
