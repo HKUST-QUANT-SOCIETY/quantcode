@@ -59,7 +59,7 @@
 | `check_factor_gate` 缺失 | **已过时/改名** | 当前由 `validate_factor_contract` + acceptance 契约承担，不再保留旧 Gate 名称。 |
 | P-09 必须走普通 HumanGate resume | **不是当前 v5 契约** | v5 将部署移到 Admin management plane；`submit_deploy()` 只返回 `STAGING` 并要求 Admin/evidence。普通 Catalog 不注册部署工具。真实生产队列仍未接入，但不是“普通 Agent resume 失败”。 |
 | pit-screen 首次范围条静态定位 | **已修复** | `pit-screen.tsx:180` 在有 FCF 时同步调用 `paint(compute())`；UI pit 测试通过。 |
-| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1009 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
+| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1010 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
 
 ## 4. 无法在当前环境确认的事项
 
@@ -103,7 +103,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 98 passed, 1 warning
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1009 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1010 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
 
 当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
 
