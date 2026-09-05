@@ -6,7 +6,7 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import struct
 import subprocess
@@ -109,7 +109,7 @@ def compile_records(records: list[dict], workspace_root: str) -> dict:
         for fingerprint, key in keys.items():
             candidates.append({"fingerprint": fingerprint, "public_key": key, "actor_id": actor,
                                "group": group, "role": "analyst", "workspace_id": actor,
-                               "workspace_path": str(Path(workspace_root) / actor),
+                               "workspace_path": str(PurePosixPath(workspace_root) / actor),
                                "resource_scopes": [f"memory:{group}"], "source_rows": review["rows"]})
     conflicted = {key for key, owners in key_owners.items() if len(owners) > 1}
     conflicted_actors = {"member-" + hashlib.sha256(email.encode()).hexdigest()[:20]

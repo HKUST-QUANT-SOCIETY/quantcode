@@ -143,7 +143,9 @@ def review_candidate(
             marker = published.parent / ".governance.json"
             _atomic_write(marker, {"index_path": str(index_path), "candidate": candidate_name})
             if published.exists():
-                if hashlib.sha256(published.read_bytes()).hexdigest() != published_digest:
+                if hashlib.sha256(
+                    published.read_text(encoding="utf-8").encode()
+                ).hexdigest() != published_digest:
                     raise ValueError("pending publication content differs; refusing to overwrite")
             else:
                 fd, temporary = tempfile.mkstemp(prefix=".publish-", dir=published.parent)
@@ -200,7 +202,9 @@ def read_governed_skill(path: str | Path) -> str:
     if hashlib.sha256(content.encode()).hexdigest() != item.get("published_sha256"):
         raise PermissionError("published skill changed since approval")
     source = Path(item["skill_md_path"])
-    if hashlib.sha256(source.read_bytes()).hexdigest() != item.get("draft_sha256"):
+    if hashlib.sha256(
+        source.read_text(encoding="utf-8").encode()
+    ).hexdigest() != item.get("draft_sha256"):
         raise PermissionError("candidate source changed since approval")
     if item.get("expires_at"):
         expiry = datetime.fromisoformat(str(item["expires_at"]).replace("Z", "+00:00"))

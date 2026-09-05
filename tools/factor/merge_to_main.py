@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -63,6 +62,7 @@ def validate_factor_contract_impl(
     """FactorReport dict → {eligible, reasons, verdict}。不写任何状态。
 
     缺失字段（factor_name / ic_metrics.* / turnover.monthly）→ reasons；
+    评估证据必须来自成功的 canonical QuantEvaluator 调用并带哈希 artifact；
     数值判定复用 runner.acceptance.run_acceptance("factor:evaluation") 与
     验收 yaml 单源；verdict 必须 == "pass"（marginal 也不放行）。
     """
@@ -71,6 +71,23 @@ def validate_factor_contract_impl(
 
     verdict = report.get("verdict")
     reasons: list[str] = []
+
+    component = report.get("component_result")
+    if not isinstance(component, dict):
+        reasons.append("missing canonical component_result evidence")
+    else:
+        if component.get("component_id") != "quant-evaluator":
+            reasons.append("component_result must come from quant-evaluator")
+        if component.get("result_status") != "SUCCEEDED":
+            reasons.append("component_result status must be SUCCEEDED")
+        artifacts = component.get("artifacts")
+        if not isinstance(artifacts, list) or not any(
+            isinstance(item, dict)
+            and isinstance(item.get("sha256"), str)
+            and len(item["sha256"]) == 64
+            for item in artifacts
+        ):
+            reasons.append("component_result requires a sha256-addressed evaluation artifact")
 
     for key in ("factor_name", "ic_metrics", "turnover"):
         if report.get(key) in (None, {}, []):
@@ -285,7 +302,10 @@ class ValidateFactorContractArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     report: dict[str, Any] = Field(
-        description="FactorReport dict (quant_evaluator / eval_from_panel summary output)."
+        description=(
+            "FactorReport dict with a successful quant-evaluator ComponentCallResult and "
+            "sha256-addressed artifact. Proxy eval_from_panel output is not eligible."
+        )
     )
 
 

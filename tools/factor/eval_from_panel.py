@@ -1,13 +1,10 @@
-"""eval_from_panel 工具 — 真实数据因子评估（FactorPanel → 真实 IC 报告）。
+"""eval_from_panel 工具 — 仅供开发诊断的代理因子评估。
 
 封装 flows.factor_eval_real.evaluate_factor_panel：从 Blackboard
 ``shared.datasets.panel/{factor_id}`` 读 FactorPanel 契约 JSON（读出方
 model_validate，背书走 tools/market/backing.read_panel_from_blackboard），
-算真实 rank IC / 换手率 / 5 分层 / 多空差，写
-artifacts/factor/{name}-report-real.json，返回 summary（不含大矩阵）。
-
-配 panel 数据时优先本工具而非 quant_evaluator（quant_evaluator 走外部 AutoEval 服务或
-mock 降级）。
+计算截面统计，但收益标签来自次日因子值变化，不是真实 forward return。
+结果只能用于开发诊断，不能作为入池、生产验收或 QuantEvaluator 的替代证据。
 """
 from __future__ import annotations
 
@@ -47,11 +44,12 @@ class EvalFromPanelArgs(BaseModel):
 
 
 _EVAL_NOTES = (
-    "Evaluate a FactorPanel from Blackboard shared.datasets.panel/* with REAL "
+    "Development-only proxy evaluation for a FactorPanel from Blackboard. Computes "
     "statistics (spearman rank IC / turnover / 5-quantile layers / long-short). "
     "Proxy returns are next-day factor-value changes (factor momentum) — qs-cold "
     "has no returns table yet, so results carry a proxy_return_warning and are "
-    "not for pool admission. Prefer this over quant_evaluator when panel data exists. "
+    "not for pool admission or canonical acceptance. Use quant_evaluator with an explicit "
+    "LabelBundle for formal evidence. "
     "Writes artifacts/factor/{name}-report-real.json."
 )
 
@@ -287,13 +285,14 @@ def _eval_factor_panel_execute(args: EvalFactorPanelArgs, ctx: dict) -> dict[str
 eval_factor_panel_tool = ToolDef(
     id="eval_factor_panel",
     description=(
-        "Evaluate a FactorPanel dataset (Blackboard shared.datasets.panel/*) with "
-        "real cross-sectional statistics: spearman rank IC series -> IC mean/IR, "
+        "Development-only proxy evaluation of a FactorPanel dataset with "
+        "cross-sectional statistics: spearman rank IC series -> IC mean/IR, "
         "monthly turnover (top-decile Jaccard), 5-quantile layered proxy returns. "
         "Acceptance = configs/acceptance.factor.yaml thresholds re-checked against "
         "the caller-supplied ic_abs_threshold (default 0.03). Proxy returns are "
         "next-day factor-value changes (momentum), NOT real PnL — flagged in every "
-        "result via proxy_return_warning. Writes artifacts/factor/{name}-report-real.json."
+        "result via proxy_return_warning. Never use this result as canonical QuantEvaluator "
+        "evidence or production admission proof."
     ),
     schema=EvalFactorPanelArgs,
     execute=_eval_factor_panel_execute,

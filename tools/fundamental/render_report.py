@@ -269,9 +269,9 @@ def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:
 
     def _rel(p: Path) -> str:
         try:
-            return str(p.relative_to(PROJECT_ROOT))
+            return p.relative_to(PROJECT_ROOT).as_posix()
         except ValueError:
-            return str(p)
+            return p.as_posix()
 
     sections: list[SectionType] = []
     for s in args.sections:

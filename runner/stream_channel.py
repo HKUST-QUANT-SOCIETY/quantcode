@@ -53,21 +53,21 @@ class StreamChannel:
 
     def emit_required(self, event: dict) -> None:
         """Durable task history: storage failure must stop further execution."""
-        import fcntl
+        from runner.execution_lock import execution_lock
 
         payload = (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode("utf-8")
-        with self.path.open("a+b") as target:
-            fcntl.flock(target, fcntl.LOCK_EX)
-            target.seek(0, os.SEEK_END)
-            if target.tell():
-                target.seek(-1, os.SEEK_END)
-                if target.read(1) != b"\n":
-                    # Preserve a crash-truncated line as evidence; terminate it
-                    # so it cannot swallow every event of the recovery attempt.
-                    target.write(b"\n")
-            target.write(payload)
-            target.flush()
-            os.fsync(target.fileno())
+        with execution_lock(self.path, f"stream:{self.run_id}", blocking=True):
+            with self.path.open("a+b") as target:
+                target.seek(0, os.SEEK_END)
+                if target.tell():
+                    target.seek(-1, os.SEEK_END)
+                    if target.read(1) != b"\n":
+                        # Preserve a crash-truncated line as evidence; terminate it
+                        # so it cannot swallow every event of the recovery attempt.
+                        target.write(b"\n")
+                target.write(payload)
+                target.flush()
+                os.fsync(target.fileno())
 
 
 def open_stream(run_id: str) -> StreamChannel:

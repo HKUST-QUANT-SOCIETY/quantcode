@@ -14,6 +14,11 @@ import yaml
 from quantcode.gateway import IdentityGateway
 from quantcode.identity import fingerprint_of_public_key
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="isolated Unix-domain ssh-agent fixture is not available on Windows",
+)
+
 
 @pytest.fixture
 def gateway_login(tmp_path):

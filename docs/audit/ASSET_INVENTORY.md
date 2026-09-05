@@ -222,9 +222,9 @@ multiagent_review_ci_standalone / factor-research-db / quant_benchmark_qinkailin
 | 卡 id | type | 来源 | source_commit（Step 0 实测 HEAD） |
 |---|---|---|---|
 | target-return-view-v1 | contract | 本仓 `schemas/data_contracts.py::TargetReturnView/v1`（AG-B 已落） | （in-repo，空串+分支标注） |
-| quant-evaluator | asset | quant_evaluator | `73223a4` |
-| factor-engine | asset | factor_engine | `c374cbd` |
-| data-access | asset | data_access | `b55656a` |
+| quant-evaluator | asset | quant_evaluator | `39f0256888a0a1997c108e534e3b6ad9d89158ec` |
+| factor-engine | asset | factor_engine | `e49e9971357afd8b0cbd9f07e04234be69a09fed` |
+| data-access | asset | data_access | `54475369f53a01cbd105067483f582599d496d5b` |
 | quant-platform | asset | quant_platform | `45a8cc7` |
 | alpha-flow | asset | alpha_flow | `5ea62c4` |
 

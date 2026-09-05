@@ -4,16 +4,13 @@
 1. gate 判定：pass+达标 → eligible；marginal/fail → false+reasons；阈值覆盖生效
 2. merge 流：gate_rejected → waiting_for_human（interrupt kind=merge）→ approve → 登记
 3. 登记幂等（同 code_hash → already）；dry_run 不落盘；mainline 索引结构
-4. ScriptedLLM 集成一条：eval_from_panel 产出 → merge_to_main → waiting_for_human
-   → resume approve → 登记成功
+4. ScriptedLLM 集成一条：eval_from_panel 代理产出 → merge_to_main 拒绝，且不进入 HumanGate
 """
 from __future__ import annotations
 
 import importlib
 import json
 from datetime import date, timedelta
-from pathlib import Path
-
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -46,6 +43,11 @@ def _good_report(**overrides) -> dict:
         "turnover": {"monthly": 0.3},
         "formula": "roe_ttm / pb",
         "eval_run_id": "pb_roe-panel_real_v1",
+        "component_result": {
+            "component_id": "quant-evaluator",
+            "result_status": "SUCCEEDED",
+            "artifacts": [{"path": "fixture.json", "sha256": "a" * 64}],
+        },
     }
     report.update(overrides)
     return report
@@ -88,6 +90,20 @@ def test_gate_missing_fields_fail_closed():
     assert out["eligible"] is False
     assert any("ic_metrics" in r for r in out["reasons"])
     assert any("turnover" in r for r in out["reasons"])
+
+
+def test_gate_rejects_proxy_component_even_when_metrics_pass():
+    report = _good_report(
+        component_result={
+            "component_id": "factor-proxy-evaluator",
+            "result_status": "PROXY",
+            "artifacts": [{"path": "proxy.json", "sha256": "b" * 64}],
+        }
+    )
+    out = validate_factor_contract_impl(report)
+    assert out["eligible"] is False
+    assert any("quant-evaluator" in reason for reason in out["reasons"])
+    assert any("SUCCEEDED" in reason for reason in out["reasons"])
 
 
 def test_gate_thresholds_override_via_tmp_yaml(tmp_path, monkeypatch):
@@ -289,9 +305,8 @@ def _perfect_panel_values() -> list[list[float]]:
     return values.tolist()
 
 
-def test_agent_flow_eval_then_merge_pause_then_approve(tmp_path, monkeypatch):
-    """AgentRunner 集成：eval_from_panel → merge_to_main（HumanGate 暂停）
-    → resume approve → 登记成功。human_approved 由 graph resume 注入。"""
+def test_agent_flow_rejects_proxy_before_human_gate(tmp_path, monkeypatch):
+    """AgentRunner 集成：代理报告即使数值 pass 也不能进入 HumanGate。"""
     from runner.agent_engine import AgentRunner
     from runner.config_loader import load_yaml
     from runner.langgraph_base import clear_checkpointer_cache
@@ -377,33 +392,13 @@ def test_agent_flow_eval_then_merge_pause_then_approve(tmp_path, monkeypatch):
         flow_name="merge_e2e",
     )
     try:
-        assert paused.get("status") == "waiting_for_human" or "__interrupt__" in paused
-        # interrupt 是 kind=merge 的 gate
-        from runner.human_gate import extract_interrupt_payload
-
-        payload = extract_interrupt_payload(paused)
-        assert payload is not None and payload.get("kind") == "merge", payload
-        assert (payload.get("evidence") or {}).get("factor_id") == "pb_roe_lead"
-        assert not idx_path.exists(), "人审前不落盘"
-
-        resumed = runner.resume(
-            thread_id="merge-e2e-1", decision="approve", flow_name="merge_e2e",
-        )
-        assert "__interrupt__" not in resumed
-        assert idx_path.exists(), "approve 后登记落盘"
-        entries = json.loads(idx_path.read_text(encoding="utf-8"))
-        assert entries and entries[0]["factor_id"] == "pb_roe_lead"
-        # 登记后的 tool 结果含 merged 状态
+        assert paused.get("status") == "completed"
+        assert "__interrupt__" not in paused
+        assert not idx_path.exists(), "代理证据不得进入人工审批或主线登记"
         assert any(
-            "merged" in str(getattr(m, "content", "")) for m in resumed["messages"]
+            "gate_rejected" in str(getattr(m, "content", ""))
+            for m in paused["messages"]
         )
-        from runner.evidence import build_report
-
-        evidence_report = build_report("merge-e2e-1", evidence_target)
-        assert evidence_report.decision is not None
-        assert evidence_report.decision.action.value == "approve"
-        assert evidence_report.decision.decided_by == "approver"
-        assert any(event.kind.value == "tool_call" for event in evidence_report.chain)
     finally:
         clear_checkpointer_cache()
         load_yaml.cache_clear()

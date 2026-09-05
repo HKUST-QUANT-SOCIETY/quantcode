@@ -550,9 +550,13 @@ def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
                                            limit=args.limit, long_term_only=True, strict_errors=True))
         selected.sort(key=lambda hit: hit.score, reverse=True)
         selected = selected[:args.limit]
+    serialized_hits = [hit.to_dict() for hit in selected]
+    for hit in serialized_hits:
+        if isinstance(hit.get("path"), str):
+            hit["path"] = hit["path"].replace("\\", "/")
     result = {
         "status": "CONNECTED" if selected else "EMPTY",
-        "hits": [hit.to_dict() for hit in selected],
+        "hits": serialized_hits,
     }
     if role == "admin":
         from runner.admin_scope import audited_read_result

@@ -1,0 +1,13 @@
+{
+  "observed_at": "2026-09-05T14:37:51Z",
+  "request_context": {
+    "actor_id": "accountless-audit",
+    "role": "analyst",
+    "group": "factor",
+    "github_subject": "accountless-audit"
+  },
+  "repos": [],
+  "visibility_source": "github-team:unverified",
+  "sync_status": "PERMISSION_DENIED",
+  "errors": ["GitHub identity token is not connected"]
+}

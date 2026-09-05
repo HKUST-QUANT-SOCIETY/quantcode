@@ -54,7 +54,7 @@ from .human_gate import (
     HumanGateStatus,
 )
 from .component_call_result import ComponentCallResult, ComponentResultStatus
-from .gitgraph import GitGraph, GitSyncStatus
+from .gitgraph import GitGraph, GitGraphSyncResult, GitSyncStatus
 from .pop import Pop, PopType
 from .session_context import SessionContext
 from .admin_deploy import AdminDeployRequest, AdminDeployResult, AdminDeployStatus
@@ -122,6 +122,7 @@ __all__ = [
     "ComponentCallResult",
     "ComponentResultStatus",
     "GitGraph",
+    "GitGraphSyncResult",
     "GitSyncStatus",
     "Pop",
     "PopType",

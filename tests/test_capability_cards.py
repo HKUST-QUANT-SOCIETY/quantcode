@@ -168,10 +168,10 @@ def test_contract_card_references_target_return_view(six_cards):
 
 
 def test_quant_evaluator_card_metric_count_from_step0(six_cards):
-    """Step 0 实测口径：注册指标 60（CSV 实测），spec v0.2 的 51 为旧口径——卡片须登记差异。"""
+    """当前组件 README 区分 51 个已注册指标与 27 个可立即计算指标。"""
     card = next(c for c in six_cards if c.id == "quant-evaluator")
     blob = json.dumps(card.api_surface + [card.when_to_use], ensure_ascii=False)
-    assert "60" in blob
+    assert "51" in blob and "27" in blob
 
 
 def test_yaml_strict_reuse_flag_present():
