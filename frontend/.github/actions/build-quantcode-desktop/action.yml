@@ -1,0 +1,566 @@
+name: "Build QuantCode Desktop"
+description: "Build, package, smoke test, and verify one QuantCode desktop target"
+inputs:
+  release_version:
+    description: "SemVer version written into the desktop package"
+    required: true
+  rust_target:
+    description: "Rust target used for the embedded sidecar"
+    required: true
+  platform:
+    description: "electron-builder platform arguments"
+    required: true
+  install_flags:
+    description: "Platform-specific bun install arguments"
+    required: true
+  signing_mode:
+    description: "unsigned for artifact QA, signed for a platform-signed release, none for Linux with updater trust disabled"
+    required: true
+  update_feed:
+    description: "public only when the installed app can anonymously reach its update feed"
+    required: false
+    default: "disabled"
+  apple_certificate:
+    required: false
+    default: ""
+  apple_certificate_password:
+    required: false
+    default: ""
+  apple_api_key_content:
+    required: false
+    default: ""
+  apple_api_key_id:
+    required: false
+    default: ""
+  apple_api_issuer:
+    required: false
+    default: ""
+  azure_client_id:
+    required: false
+    default: ""
+  azure_tenant_id:
+    required: false
+    default: ""
+  azure_subscription_id:
+    required: false
+    default: ""
+  azure_trusted_signing_account_name:
+    required: false
+    default: ""
+  azure_trusted_signing_certificate_profile:
+    required: false
+    default: ""
+  azure_trusted_signing_endpoint:
+    required: false
+    default: ""
+  azure_trusted_signing_publisher_name:
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Configure QuantCode packaging environment
+      working-directory: frontend
+      shell: bash
+      env:
+        INPUT_RELEASE_VERSION: ${{ inputs.release_version }}
+        INPUT_RUST_TARGET: ${{ inputs.rust_target }}
+        INPUT_PLATFORM: ${{ inputs.platform }}
+        INPUT_INSTALL_FLAGS: ${{ inputs.install_flags }}
+        INPUT_SIGNING_MODE: ${{ inputs.signing_mode }}
+        INPUT_UPDATE_FEED: ${{ inputs.update_feed }}
+      run: |
+        if [[ "$INPUT_SIGNING_MODE" != "signed" && "$INPUT_SIGNING_MODE" != "unsigned" && "$INPUT_SIGNING_MODE" != "none" ]]; then
+          echo "signing_mode must be signed, unsigned, or none" >&2
+          exit 1
+        fi
+
+        if [[ "$INPUT_UPDATE_FEED" != "public" && "$INPUT_UPDATE_FEED" != "disabled" ]]; then
+          echo "update_feed must be public or disabled" >&2
+          exit 1
+        fi
+
+        if [[ "$INPUT_UPDATE_FEED" == "public" && "$INPUT_SIGNING_MODE" != "signed" ]]; then
+          echo "public update feeds require signed QuantCode packages" >&2
+          exit 1
+        fi
+
+        node -e 'const value=process.env.INPUT_RELEASE_VERSION;const semver=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;if(!semver.test(value)){console.error(`Invalid SemVer release version: ${value}`);process.exit(1)}'
+
+        case "$RUNNER_OS|$INPUT_RUST_TARGET|$INPUT_PLATFORM|$INPUT_INSTALL_FLAGS" in
+          "macOS|x86_64-apple-darwin|--mac --x64|--os=darwin --cpu=x64" | \
+          "macOS|aarch64-apple-darwin|--mac --arm64|--os=darwin --cpu=arm64" | \
+          "Windows|x86_64-pc-windows-msvc|--win --x64|--os=win32 --cpu=x64" | \
+          "Linux|x86_64-unknown-linux-gnu|--linux --x64|--os=linux --cpu=x64" | \
+          "Linux|aarch64-unknown-linux-gnu|--linux --arm64|--os=linux --cpu=arm64") ;;
+          *)
+            echo "Unsupported QuantCode runner, target, platform, or install flag combination" >&2
+            exit 1
+            ;;
+        esac
+
+        if [[ "$RUNNER_OS" == "Linux" && "$INPUT_SIGNING_MODE" == "signed" ]]; then
+          echo "Linux has no authenticated updater trust or platform signing in this workflow; use signing_mode=none" >&2
+          exit 1
+        fi
+
+        if [[ "$RUNNER_OS" != "Linux" && "$INPUT_SIGNING_MODE" == "none" ]]; then
+          echo "signing_mode=none is only valid for Linux packaging; publication approval belongs in the caller workflow" >&2
+          exit 1
+        fi
+
+        {
+          echo "OPENCODE_CHANNEL=quantcode"
+          printf 'QUANTCODE_UPDATE_FEED=%s\n' "$INPUT_UPDATE_FEED"
+          printf 'OPENCODE_VERSION=%s\n' "$INPUT_RELEASE_VERSION"
+          printf 'RUST_TARGET=%s\n' "$INPUT_RUST_TARGET"
+          echo "MODELS_DEV_API_JSON=$GITHUB_WORKSPACE/frontend/packages/opencode/test/tool/fixtures/models-api.json"
+          if [[ "$INPUT_SIGNING_MODE" == "signed" ]]; then
+            echo "QUANTCODE_SIGNED_RELEASE=true"
+          elif [[ "$INPUT_SIGNING_MODE" == "unsigned" ]]; then
+            echo "QUANTCODE_UNSIGNED_BUILD=true"
+          fi
+        } >> "$GITHUB_ENV"
+
+    - uses: ./frontend/.github/actions/setup-bun
+      with:
+        install-flags: ${{ inputs.install_flags }}
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: "24"
+
+    - name: Install Linux packaging tools
+      if: runner.os == 'Linux'
+      working-directory: frontend
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends fakeroot rpm xauth xvfb
+
+    - name: Require Apple signing credentials
+      if: inputs.signing_mode == 'signed' && runner.os == 'macOS'
+      working-directory: frontend
+      shell: bash
+      env:
+        APPLE_CERTIFICATE: ${{ inputs.apple_certificate }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ inputs.apple_certificate_password }}
+        APPLE_API_KEY_CONTENT: ${{ inputs.apple_api_key_content }}
+        APPLE_API_KEY_ID: ${{ inputs.apple_api_key_id }}
+        APPLE_API_ISSUER: ${{ inputs.apple_api_issuer }}
+      run: |
+        missing=()
+        for name in \
+          APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_KEY_CONTENT APPLE_API_KEY_ID APPLE_API_ISSUER; do
+          if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+        done
+        if (( ${#missing[@]} > 0 )); then
+          printf 'Signed QuantCode package is missing: %s\n' "${missing[*]}" >&2
+          exit 1
+        fi
+
+    - name: Require Windows signing credentials
+      if: inputs.signing_mode == 'signed' && runner.os == 'Windows'
+      working-directory: frontend
+      shell: bash
+      env:
+        AZURE_CLIENT_ID: ${{ inputs.azure_client_id }}
+        AZURE_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
+        AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ inputs.azure_trusted_signing_account_name }}
+        AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ inputs.azure_trusted_signing_certificate_profile }}
+        AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ inputs.azure_trusted_signing_endpoint }}
+        AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ inputs.azure_trusted_signing_publisher_name }}
+      run: |
+        missing=()
+        for name in \
+          AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE \
+          AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_PUBLISHER_NAME; do
+          if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+        done
+        if (( ${#missing[@]} > 0 )); then
+          printf 'Signed QuantCode package is missing: %s\n' "${missing[*]}" >&2
+          exit 1
+        fi
+
+    - name: Import Apple signing certificate
+      if: inputs.signing_mode == 'signed' && runner.os == 'macOS'
+      uses: apple-actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93 # v2.0.0
+      with:
+        keychain: build
+        p12-file-base64: ${{ inputs.apple_certificate }}
+        p12-password: ${{ inputs.apple_certificate_password }}
+
+    - name: Prepare Apple notarization key
+      if: inputs.signing_mode == 'signed' && runner.os == 'macOS'
+      working-directory: frontend
+      shell: bash
+      env:
+        APPLE_API_KEY_CONTENT: ${{ inputs.apple_api_key_content }}
+      run: printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/quantcode-apple-api-key.p8"
+
+    - name: Login for Windows Trusted Signing
+      if: inputs.signing_mode == 'signed' && runner.os == 'Windows'
+      uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+      with:
+        client-id: ${{ inputs.azure_client_id }}
+        tenant-id: ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
+
+    - name: Set desktop version
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: |
+        bun -e 'const path="package.json"; const pkg=await Bun.file(path).json(); pkg.version=process.env.OPENCODE_VERSION; await Bun.write(path, JSON.stringify(pkg, null, 2)+"\n")'
+
+    - name: Build QuantCode desktop
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: bun run build
+      env:
+        NODE_OPTIONS: --max-old-space-size=4096
+
+    - name: Package installers
+      working-directory: frontend/packages/desktop
+      shell: bash
+      env:
+        QUANTCODE_PLATFORM_ARGS: ${{ inputs.platform }}
+        CSC_IDENTITY_AUTO_DISCOVERY: ${{ inputs.signing_mode == 'unsigned' && 'false' || '' }}
+        CSC_LINK: ${{ inputs.signing_mode == 'signed' && runner.os == 'macOS' && inputs.apple_certificate || '' }}
+        CSC_KEY_PASSWORD: ${{ inputs.signing_mode == 'signed' && runner.os == 'macOS' && inputs.apple_certificate_password || '' }}
+        APPLE_API_KEY: ${{ inputs.signing_mode == 'signed' && runner.os == 'macOS' && format('{0}/quantcode-apple-api-key.p8', runner.temp) || '' }}
+        APPLE_API_KEY_ID: ${{ inputs.signing_mode == 'signed' && runner.os == 'macOS' && inputs.apple_api_key_id || '' }}
+        APPLE_API_ISSUER: ${{ inputs.signing_mode == 'signed' && runner.os == 'macOS' && inputs.apple_api_issuer || '' }}
+        AZURE_CLIENT_ID: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_client_id || '' }}
+        AZURE_TENANT_ID: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_tenant_id || '' }}
+        AZURE_SUBSCRIPTION_ID: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_subscription_id || '' }}
+        AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_account_name || '' }}
+        AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_certificate_profile || '' }}
+        AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_endpoint || '' }}
+        AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_publisher_name || '' }}
+      run: |
+        read -r -a platform_args <<< "$QUANTCODE_PLATFORM_ARGS"
+        bunx electron-builder "${platform_args[@]}" --publish never --config electron-builder.config.ts
+
+    - name: Smoke test packaged app (macOS)
+      if: runner.os == 'macOS'
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: |
+        dmg="$(find dist -maxdepth 1 -name "quantcode-$OPENCODE_VERSION-*.dmg" -type f -print -quit)"
+        zip="$(find dist -maxdepth 1 -name "quantcode-$OPENCODE_VERSION-*.zip" -type f -print -quit)"
+        if [[ -z "$dmg" || -z "$zip" ]]; then
+          echo "Packaged QuantCode DMG or ZIP was not found" >&2
+          exit 1
+        fi
+        unzip -tq "$zip"
+
+        mount_dir="$RUNNER_TEMP/quantcode-dmg"
+        mkdir -p "$mount_dir"
+        hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg" >/dev/null
+        executable="$mount_dir/QuantCode.app/Contents/MacOS/QuantCode"
+        if [[ ! -x "$executable" ]]; then
+          echo "QuantCode executable was not found inside the DMG" >&2
+          hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
+          exit 1
+        fi
+
+        log="$RUNNER_TEMP/quantcode-packaged-smoke.log"
+        port="$(node -e 'const net=require("node:net");const server=net.createServer();server.listen(0,"127.0.0.1",()=>{console.log(server.address().port);server.close()})')"
+        set -m
+        env OPENCODE_TEST_ONBOARDING=1 "$executable" \
+          --remote-debugging-address=127.0.0.1 --remote-debugging-port="$port" > "$log" 2>&1 &
+        pid=$!
+        set +m
+        cleanup() {
+          kill -TERM -- "-$pid" 2>/dev/null || true
+          for _ in {1..20}; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.25
+          done
+          kill -KILL -- "-$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
+          cat "$log"
+        }
+        trap cleanup EXIT
+        QUANTCODE_SMOKE_DEBUG_URL="http://127.0.0.1:$port/json/list" QUANTCODE_SMOKE_PID="$pid" \
+          bun scripts/verify-packaged-launch.ts
+
+    - name: Smoke test packaged app (Windows)
+      if: runner.os == 'Windows'
+      working-directory: frontend/packages/desktop
+      shell: pwsh
+      run: |
+        $installer = Get-ChildItem "dist\quantcode-$env:OPENCODE_VERSION-win-x64.exe" | Select-Object -First 1
+        if (-not $installer) {
+          throw "Packaged QuantCode NSIS installer was not found"
+        }
+        $installRoot = Join-Path $env:RUNNER_TEMP "quantcode-installed"
+        $install = Start-Process -FilePath $installer.FullName -ArgumentList @("/S", "/D=$installRoot") -Wait -PassThru
+        if ($install.ExitCode -ne 0) { throw "QuantCode NSIS installer failed with exit code $($install.ExitCode)" }
+        $executable = Get-Item (Join-Path $installRoot "QuantCode.exe") -ErrorAction SilentlyContinue
+        if (-not $executable) { throw "QuantCode.exe was not installed by the NSIS package" }
+
+        $stdout = Join-Path $env:RUNNER_TEMP "quantcode-packaged-smoke.stdout.log"
+        $stderr = Join-Path $env:RUNNER_TEMP "quantcode-packaged-smoke.stderr.log"
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $listener.Start()
+        $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+        $listener.Stop()
+        $process = Start-Process -FilePath $executable.FullName -ArgumentList @(
+          "--remote-debugging-address=127.0.0.1",
+          "--remote-debugging-port=$port"
+        ) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Environment @{
+          OPENCODE_TEST_ONBOARDING = "1"
+        }
+        try {
+          $env:QUANTCODE_SMOKE_DEBUG_URL = "http://127.0.0.1:$port/json/list"
+          $env:QUANTCODE_SMOKE_PID = "$($process.Id)"
+          bun scripts/verify-packaged-launch.ts
+        } finally {
+          taskkill /PID $process.Id /T /F 2>$null | Out-Null
+          Wait-Process -Id $process.Id -Timeout 15 -ErrorAction SilentlyContinue
+          $uninstaller = Get-ChildItem $installRoot -Filter "Uninstall*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($uninstaller) {
+            Start-Process -FilePath $uninstaller.FullName -ArgumentList "/S" -Wait | Out-Null
+          }
+          if (Test-Path $stdout) { Get-Content $stdout }
+          if (Test-Path $stderr) { Get-Content $stderr }
+        }
+
+    - name: Smoke test packaged app (Linux)
+      if: runner.os == 'Linux'
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: |
+        appimage="$(find dist -maxdepth 1 -name "quantcode-$OPENCODE_VERSION-*.AppImage" -type f -print -quit)"
+        if [[ -z "$appimage" ]]; then
+          echo "Packaged QuantCode AppImage was not found" >&2
+          exit 1
+        fi
+        appimage="$(realpath "$appimage")"
+        extract_root="$RUNNER_TEMP/quantcode-appimage"
+        mkdir -p "$extract_root"
+        (cd "$extract_root" && "$appimage" --appimage-extract >/dev/null)
+        executable="$extract_root/squashfs-root/AppRun"
+        sandbox="$extract_root/squashfs-root/chrome-sandbox"
+        if [[ ! -x "$executable" ]]; then
+          echo "AppRun was not found inside the QuantCode AppImage" >&2
+          exit 1
+        fi
+        if [[ ! -f "$sandbox" ]]; then
+          echo "Packaged Chromium sandbox helper was not found inside the AppImage" >&2
+          exit 1
+        fi
+        # The unpacked tree is produced as the runner user. Electron refuses to
+        # launch with an incorrectly owned SUID helper, so restore the same
+        # root-owned mode expected from a system installation before smoke.
+        sudo chown root:root "$sandbox"
+        sudo chmod 4755 "$sandbox"
+        if [[ "$(stat -c '%U:%G:%a' "$sandbox")" != "root:root:4755" ]]; then
+          echo "Packaged Chromium sandbox helper has an unsafe owner or mode" >&2
+          exit 1
+        fi
+
+        log="$RUNNER_TEMP/quantcode-packaged-smoke.log"
+        port="$(node -e 'const net=require("node:net");const server=net.createServer();server.listen(0,"127.0.0.1",()=>{console.log(server.address().port);server.close()})')"
+        set -m
+        xvfb-run -a env OPENCODE_TEST_ONBOARDING=1 \
+          "$executable" --remote-debugging-address=127.0.0.1 \
+          --remote-debugging-port="$port" > "$log" 2>&1 &
+        pid=$!
+        set +m
+        cleanup() {
+          kill -TERM -- "-$pid" 2>/dev/null || true
+          for _ in {1..20}; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.25
+          done
+          kill -KILL -- "-$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat "$log"
+        }
+        trap cleanup EXIT
+        QUANTCODE_SMOKE_DEBUG_URL="http://127.0.0.1:$port/json/list" QUANTCODE_SMOKE_PID="$pid" \
+          bun scripts/verify-packaged-launch.ts
+
+    - name: Verify Linux package contents
+      if: runner.os == 'Linux'
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: |
+        deb="$(find dist -maxdepth 1 -name "quantcode-$OPENCODE_VERSION-*.deb" -type f -print -quit)"
+        rpm_package="$(find dist -maxdepth 1 -name "quantcode-$OPENCODE_VERSION-*.rpm" -type f -print -quit)"
+        [[ -n "$deb" && -n "$rpm_package" ]]
+        dpkg-deb --info "$deb" >/dev/null
+        deb_files="$(dpkg-deb --contents "$deb")"
+        grep -q 'usr/share/applications/org.hkust.quantcode.desktop' <<< "$deb_files"
+        grep -q 'usr/share/metainfo/org.hkust.quantcode.metainfo.xml' <<< "$deb_files"
+        grep -q 'opt/QuantCode/quantcode' <<< "$deb_files"
+        desktop="$(dpkg-deb --fsys-tarfile "$deb" | tar -xOf - ./usr/share/applications/org.hkust.quantcode.desktop)"
+        grep -q '^Exec=/opt/QuantCode/quantcode %U$' <<< "$desktop"
+        grep -q '^Icon=quantcode$' <<< "$desktop"
+        grep -q '^StartupWMClass=org.hkust.quantcode$' <<< "$desktop"
+        rpm -qip "$rpm_package" >/dev/null
+        rpm_files="$(rpm -qlp "$rpm_package")"
+        grep -q '/usr/share/applications/org.hkust.quantcode.desktop' <<< "$rpm_files"
+        grep -q '/usr/share/metainfo/org.hkust.quantcode.metainfo.xml' <<< "$rpm_files"
+        grep -q '/opt/QuantCode/quantcode' <<< "$rpm_files"
+
+    - name: Verify installer set
+      working-directory: frontend/packages/desktop
+      shell: bash
+      run: |
+        # electron-builder currently emits latest-linux.yml for both Linux
+        # architectures. Keep the ARM feed distinct so electron-updater can
+        # select it by architecture in the merged GitHub Release.
+        if [[ "$RUST_TARGET" == "aarch64-unknown-linux-gnu" && -s dist/latest-linux.yml && ! -e dist/latest-linux-arm64.yml ]]; then
+          mv dist/latest-linux.yml dist/latest-linux-arm64.yml
+        fi
+
+        case "$RUST_TARGET" in
+          aarch64-apple-darwin)
+            suffix="mac-arm64"
+            expected=(
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.dmg"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.dmg.blockmap"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.zip"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.zip.blockmap"
+              "dist/latest-mac.yml"
+            )
+            ;;
+          x86_64-apple-darwin)
+            suffix="mac-x64"
+            expected=(
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.dmg"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.dmg.blockmap"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.zip"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.zip.blockmap"
+              "dist/latest-mac.yml"
+            )
+            ;;
+          x86_64-pc-windows-msvc)
+            suffix="win-x64"
+            expected=(
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.exe"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.exe.blockmap"
+              "dist/latest.yml"
+            )
+            ;;
+          x86_64-unknown-linux-gnu)
+            # electron-builder uses Linux-specific architecture spellings:
+            # x86_64 for AppImage/RPM and amd64 for Debian.
+            suffix="linux-x86_64"
+            expected=(
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.AppImage"
+              "dist/quantcode-$OPENCODE_VERSION-linux-amd64.deb"
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.rpm"
+              "dist/latest-linux.yml"
+            )
+            ;;
+          aarch64-unknown-linux-gnu)
+            suffix="linux-arm64"
+            expected=(
+              "dist/quantcode-$OPENCODE_VERSION-$suffix.AppImage"
+              "dist/quantcode-$OPENCODE_VERSION-linux-arm64.deb"
+              "dist/quantcode-$OPENCODE_VERSION-linux-aarch64.rpm"
+              "dist/latest-linux-arm64.yml"
+            )
+            ;;
+          *)
+            echo "Unknown release target: $RUST_TARGET" >&2
+            exit 1
+            ;;
+        esac
+
+        for file in "${expected[@]}"; do
+          if [[ ! -s "$file" ]]; then
+            echo "Missing or empty release output: $file" >&2
+            exit 1
+          fi
+        done
+
+    - name: Verify macOS signature
+      if: inputs.signing_mode == 'signed' && runner.os == 'macOS'
+      working-directory: frontend
+      shell: bash
+      run: |
+        found=false
+        while IFS= read -r -d '' app; do
+          found=true
+          codesign --verify --deep --strict --verbose=2 "$app"
+          details="$(codesign --display --verbose=4 "$app" 2>&1)"
+          grep -q '^Authority=Developer ID Application:' <<< "$details"
+          grep -Eq '^TeamIdentifier=.+$' <<< "$details"
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
+        done < <(find packages/desktop/dist -maxdepth 2 -name '*.app' -type d -print0)
+
+        if [[ "$found" != "true" ]]; then
+          echo "No packaged macOS application was found" >&2
+          exit 1
+        fi
+
+    - name: Verify Windows signature
+      if: inputs.signing_mode == 'signed' && runner.os == 'Windows'
+      working-directory: frontend
+      shell: pwsh
+      env:
+        AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ inputs.azure_trusted_signing_publisher_name }}
+      run: |
+        $expectedPublisher = $env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME
+        $files = @(
+          Get-ChildItem "packages\desktop\dist\quantcode-*-win-x64.exe"
+          Get-ChildItem "packages\desktop\dist\*-unpacked\QuantCode.exe"
+        )
+        if ($files.Count -lt 2) {
+          throw "Expected the signed NSIS installer and unpacked QuantCode.exe"
+        }
+
+        $files | ForEach-Object {
+          $signature = Get-AuthenticodeSignature $_.FullName
+          if ($signature.Status -ne "Valid") {
+            throw "Invalid signature for $($_.FullName): $($signature.Status)"
+          }
+          if ($signature.SignerCertificate.Subject -ne $expectedPublisher) {
+            throw "Unexpected publisher for $($_.FullName): $($signature.SignerCertificate.Subject)"
+          }
+        }
+
+        $updateConfig = Get-ChildItem "packages\desktop\dist\*-unpacked\resources\app-update.yml" | Select-Object -First 1
+        if (-not $updateConfig) {
+          throw "Packaged app-update.yml was not found"
+        }
+        $publisherLine = Get-Content $updateConfig.FullName | Where-Object { $_ -match '^publisherName:' } | Select-Object -First 1
+        if (-not $publisherLine) {
+          throw "app-update.yml does not contain publisherName"
+        }
+        $configuredPublisher = $publisherLine.Substring($publisherLine.IndexOf(':') + 1).Trim().Trim("'`\"")
+        if ($configuredPublisher -ne $expectedPublisher) {
+          throw "app-update.yml publisherName does not match the signing certificate subject"
+        }
+
+    - name: Upload installers
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: quantcode-${{ inputs.rust_target }}
+        if-no-files-found: error
+        path: |
+          frontend/packages/desktop/dist/*.dmg
+          frontend/packages/desktop/dist/*.zip
+          frontend/packages/desktop/dist/*.exe
+          frontend/packages/desktop/dist/*.AppImage
+          frontend/packages/desktop/dist/*.deb
+          frontend/packages/desktop/dist/*.rpm
+          frontend/packages/desktop/dist/*.blockmap
+
+    # Keep each target's updater metadata isolated. Both macOS jobs emit
+    # latest-mac.yml and finalization must merge them rather than overwrite one.
+    - name: Upload updater metadata
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: latest-yml-${{ inputs.rust_target }}
+        if-no-files-found: error
+        path: frontend/packages/desktop/dist/latest*.yml

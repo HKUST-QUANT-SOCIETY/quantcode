@@ -85,17 +85,9 @@ fi
 
 # 4. 检查OpenCode桌面端
 info "检查OpenCode桌面端..."
-OPENCODE_DIR="${QUANTCODE_OPENCODE_DIR:-}"
-if [ -z "$OPENCODE_DIR" ]; then
-    for candidate in "$PROJECT_ROOT/../opencode-lens" "$PROJECT_ROOT/../opencode" "$PROJECT_ROOT/opencode"; do
-        if [ -d "$candidate" ]; then
-            OPENCODE_DIR="$candidate"
-            break
-        fi
-    done
-fi
-if [ -z "$OPENCODE_DIR" ] || [ ! -d "$OPENCODE_DIR" ]; then
-    error "OpenCode桌面端未找到。请设置 QUANTCODE_OPENCODE_DIR，或在 QuantCode 同级目录放置 opencode-lens"
+OPENCODE_DIR="$PROJECT_ROOT/frontend"
+if [ ! -f "$OPENCODE_DIR/package.json" ]; then
+    error "缺少 frontend 工作区，请拉取完整的 quantcode 仓库"
 fi
 
 # 5. 检查Bun

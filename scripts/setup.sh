@@ -51,25 +51,9 @@ else
     git pull
 fi
 
-# 3. Locate OpenCode载体（QuantCode v5 uses one identity-bound MCP server）
-info "Clone OpenCode桌面端..."
-OPENCODE_DIR="${QUANTCODE_OPENCODE_DIR:-}"
-if [ -z "$OPENCODE_DIR" ] && [ -d "../opencode-lens" ]; then
-    OPENCODE_DIR="../opencode-lens"
-fi
-if [ -z "$OPENCODE_DIR" ] && [ -d "../opencode" ]; then
-    OPENCODE_DIR="../opencode"
-fi
-if [ -z "$OPENCODE_DIR" ]; then
-    cd ..
-    git clone https://github.com/HKUST-QUANT-SOCIETY/opencode-lens.git opencode-lens
-    OPENCODE_DIR="../opencode-lens"
-    cd opencode-lens
-    bun install
-    cd ../QUANTcode
-else
-    info "✓ OpenCode已存在: $OPENCODE_DIR"
-fi
+# 3. Install the frontend workspace from this same checkout.
+info "安装 QuantCode 前端与桌面依赖..."
+bun run install:frontend
 
 # 4. 安装Python包
 info "安装QuantCode Python包..."

@@ -220,7 +220,7 @@ See [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) for the cu
 
 ### Install the research engine from source
 
-The source workflow below is for QuantCode engine and desktop contributors.
+The source workflow below is for QuantCode engine and desktop contributors. All product source now lives in this repository: Python at the root, UI in `frontend/packages/app`, and Electron in `frontend/packages/desktop`. See [repository layout](docs/REPOSITORY_LAYOUT.md).
 
 #### Prerequisites
 
@@ -237,9 +237,8 @@ curl -fsSL https://raw.githubusercontent.com/HKUST-QUANT-SOCIETY/quantcode/main/
 **Or manual development setup:**
 
 ```bash
-# 1. Clone repos
+# 1. Clone the single product repository
 git clone https://github.com/HKUST-QUANT-SOCIETY/quantcode.git
-git clone https://github.com/HKUST-QUANT-SOCIETY/opencode-lens.git
 
 # 2. Install QuantCode
 cd quantcode
@@ -258,13 +257,11 @@ export QUANTCODE_MODEL_BASE_URL="https://api.deepseek.com/v1"  # optional, provi
 # Optional: SSH mainline reading — copy config.example.json's ssh_mainline section
 # into your own config.json (gitignored), or set QUANTCODE_SSH_MAINLINE env (JSON string)
 
-# 4. Install OpenCode desktop
-cd ../opencode-lens
-bun install
+# 4. Install the in-repository frontend/desktop workspace
+bun run install:frontend
 
-# 5. Start desktop
-cd ../quantcode
-./scripts/start-quantcode.sh
+# 5. Start local web development (desktop: bun run dev:desktop)
+bun run dev:quantcode
 ```
 
 > **Config file note**: the MCP mainline (`quantcode.mcp_server` / `run_agent` tool) reads **only environment variables** — it never reads `config.json`. The `llm` section of `config.json` is consumed only by runner-direct scripts (`runner/llm_config.py`). `config.example.json` documents this split.
@@ -368,9 +365,7 @@ QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
 
 **Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
 
-**Current stage**: Beta — 1060 tests pass and four real-LLM tests are skipped. Remaining production dependencies are the desktop identity/Admin UI, organization GitHub background sync, canonical component connections, the production deploy queue/service account, and packaging. Staging, proxy and unavailable states remain explicit.
-
-**Production readiness estimate**: 4-6 weeks to GA per [product evaluation](https://github.com/HKUST-QUANT-SOCIETY/quantcode/issues/X).
+**Current stage**: Development acceptance in progress. See the [current functional audit](docs/audit/FULL_PRODUCT_AUDIT_2026-09-05.md) for verified results and open integration requirements. Source consolidation does not establish production connectivity or installer readiness.
 
 ---
 

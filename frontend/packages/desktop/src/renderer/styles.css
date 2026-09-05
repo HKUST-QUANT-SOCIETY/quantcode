@@ -1,0 +1,24 @@
+@keyframes qc-desktop-splash-pulse {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scale(1);
+  }
+}
+
+.qc-desktop-splash-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  animation: qc-desktop-splash-pulse 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qc-desktop-splash-icon {
+    animation: none;
+  }
+}

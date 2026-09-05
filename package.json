@@ -1,5 +1,19 @@
 {
   "dependencies": {
     "@dietrichgebert/ponytail": "4.9.0"
+  },
+  "name": "quantcode",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "dev": "bun run --cwd frontend dev:quantcode",
+    "dev:quantcode": "bun run --cwd frontend dev:quantcode",
+    "dev:web": "bun run --cwd frontend dev:web",
+    "dev:desktop": "bun run --cwd frontend dev:desktop",
+    "install:frontend": "bun install --cwd frontend --frozen-lockfile",
+    "build:web": "OPENCODE_CHANNEL=quantcode bun run --cwd frontend/packages/app build",
+    "build:desktop": "bun run --cwd frontend/packages/desktop build",
+    "package:desktop": "bun run --cwd frontend/packages/desktop package",
+    "check:product": "bash scripts/verify_product_audit.sh"
   }
 }

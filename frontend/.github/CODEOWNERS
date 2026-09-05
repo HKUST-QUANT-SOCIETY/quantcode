@@ -1,0 +1,10 @@
+# web + desktop packages
+packages/app/      @Hona @Brendonovich
+packages/desktop/  @Hona @Brendonovich
+
+# QuantCode release authority and signing boundaries
+.github/workflows/quantcode-desktop.yml              @chenyuanheng0127-netizen
+.github/actions/build-quantcode-desktop/action.yml    @chenyuanheng0127-netizen
+.github/actions/setup-bun/action.yml                  @chenyuanheng0127-netizen
+script/sign-windows.ps1                               @chenyuanheng0127-netizen
+packages/desktop/scripts/finalize-latest-yml.ts       @chenyuanheng0127-netizen

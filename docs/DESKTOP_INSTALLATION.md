@@ -15,6 +15,10 @@ QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 
 | Linux x64 | `quantcode-<version>-linux-amd64.deb` | Debian/Ubuntu 手动安装 |
 | Linux x64 | `quantcode-<version>-linux-x86_64.rpm` | Fedora/RHEL 系手动安装 |
 
+## 源码与构建入口
+
+前端、Electron 桌面壳和后端现统一在 quantcode 仓库。源码位于 `frontend/packages/app`、`frontend/packages/desktop`；根目录提供 `bun run dev:quantcode`、`bun run dev:desktop` 与 `bun run package:desktop`。构建工作流在本仓库 `.github/workflows/quantcode-desktop.yml`，仅手动触发；当前不执行 Mac/Windows 安装包验收。迁移指南见 [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md)。
+
 ## 安装前准备
 
 组员需要：
@@ -49,11 +53,10 @@ QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会�
 
 ## 首次启动
 
-1. 选择所属研究组。
-2. 选择 `Server B`。
-3. 选择或确认本机 SSH 私钥。
-4. 等待右上角状态变为“已连接”。
-5. 新建研究任务，确认 Skill、Memory 和 HumanGate 状态可用。
+1. 连接已配置的研究服务器。
+2. 在设置页选择宿主提供的公钥身份，由本机 SSH agent 签名。私钥不输入界面。
+3. 服务端 roster 自动绑定人员、组、角色与工作区。
+4. 确认身份认证及 MCP 会话均已就绪，再新建研究任务。
 
 应用数据与 OpenCode 隔离保存：
 

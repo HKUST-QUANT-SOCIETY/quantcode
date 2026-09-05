@@ -4,11 +4,11 @@
   "workspaces": {
     "": {
       "dependencies": {
-        "@dietrichgebert/ponytail": "^4.8.4",
+        "@dietrichgebert/ponytail": "4.9.0",
       },
     },
   },
   "packages": {
-    "@dietrichgebert/ponytail": ["@dietrichgebert/ponytail@4.8.4", "", {}, "sha512-MALDTmDxKa2SJ8zKVekuOwWvo6+PvypNf5xeV2AtLO5OBtkt1U7DLWOeUbb9Th3H9lV80EkWoRI05yK0/dnekA=="],
+    "@dietrichgebert/ponytail": ["@dietrichgebert/ponytail@4.9.0", "", {}, "sha512-OSdybtBZ3uDd5m/+zyz4h8/+BVBR9nGFhqTDmQkQb1v7k4Vfc1qql78naY64UjocdBPqR94htZEkKu2wpKTJaw=="],
   }
 }
