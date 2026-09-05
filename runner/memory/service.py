@@ -168,6 +168,8 @@ class MemoryService:
         limit: int = DEFAULT_LIMIT,
         floor_ratio: float | None = None,
         requester_group: str | None = None,
+        long_term_only: bool = False,
+        strict_errors: bool = False,
     ) -> list[MemoryHit]:
         """MimoCode service.ts search() 的 Python 版。
 
@@ -190,6 +192,8 @@ class MemoryService:
             limit: 上限，默认 10。
             floor_ratio: 覆盖实例默认 floor；None 时用实例设置。
             requester_group: 覆盖实例默认 requester。
+            long_term_only: 在 SQL 排序和 limit 前排除 sessions/checkpoint/progress。
+            strict_errors: 产品查询启用；索引异常向调用层传播，不当作零命中。
 
         Returns:
             :class:`MemoryHit` 列表，按 score 降序（高 = 好）。
@@ -226,6 +230,11 @@ class MemoryService:
         if type:
             conditions.append("memory_fts.type = ?")
             params.append(type)
+        # Filter runtime rows before ranking/LIMIT so checkpoints cannot crowd
+        # confirmed knowledge out of the product's Memory results.
+        if long_term_only:
+            conditions.append("memory_fts.scope != 'sessions'")
+            conditions.append("memory_fts.type NOT IN ('checkpoint', 'progress')")
         # Apply the group ACL before SQLite's LIMIT.  Filtering only after an
         # over-fetch can still hide an authorized hit when another group has a
         # large number of equally relevant rows.
@@ -259,6 +268,8 @@ class MemoryService:
             try:
                 rows = conn.execute(sql, (fts_query, *params, fetch_limit)).fetchall()
             except sqlite3.OperationalError as exc:
+                if strict_errors:
+                    raise
                 logger.warning("FTS5 MATCH 失败: %s", exc)
                 return []
 

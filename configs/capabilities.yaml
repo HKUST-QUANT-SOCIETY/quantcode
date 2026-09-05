@@ -1,3 +1,5 @@
+# Contract descriptions refreshed from docs/references/HKUST_QUANT_COMPONENTS_GUIDE.md
+# (user-supplied 2026-09-05). This is not a live GitHub/API verification.
 # configs/capabilities.yaml — P-07 组织资产蒸馏：能力卡片单源（不走 db）。
 #
 # 来源纪律：**禁止凭会议记忆手写卡片**——每张卡的内容以 docs/audit/ASSET_INVENTORY.md
@@ -18,7 +20,7 @@ strict_reuse: false
 
 # 常驻摘要注入开关与限长（runner/distill/inject.py）。
 inject_enabled: true
-digest_max_chars: 2000
+digest_max_chars: 4000
 
 cards:
   # ── 契约卡（contract）：全组织可见（含游客组）──────────────────────────────
@@ -56,6 +58,11 @@ cards:
       - "quant_evaluator.api：EvaluationRequest / EvaluationBundle / evaluate()（评估唯一入口）"
       - "quant_evaluator.contracts.label_bundle.LabelBundle — 显式前向标签，硬口径 price_convention='vwap_to_vwap'"
       - "指标注册表：docs/METRIC_REGISTRY_COVERAGE.csv 实测 60 个注册指标（spec v0.2 的 51 为旧口径）"
+    inputs: ["FactorBatch", "LabelBundle", "EvaluationContext"]
+    outputs: ["EvaluationArtifact / MetricArtifact"]
+    depends_on: ["data-access", "factor-engine"]
+    consumed_by: ["factor-optimizer", "factor-assets", "modeling", "quant-platform"]
+    deprecated_aliases: ["AutoFactorEvaluation", "auto_factor_evaluation"]
     when_to_use: "因子批量评估需要 IC / 分位数 / 回撤 / 换手 / 置信区间等指标时（F-06 组织评估能力登记）"
     when_not_to_reinvent: "别自写 rank_ic / quantile_spread / block_bootstrap_ci 等指标——注册表已覆盖；别自算 LabelBundle 的时序标签"
     owner_group: factor
@@ -72,11 +79,16 @@ cards:
     integration_status: PARTIAL
     observed_at: "2026-09-04"
     api_surface:
-      - "factor_engine.api：col / rank / ts_mean / Factor / parse_expr（DSL，460+ 注册算子）"
+      - "factor_engine.api：col / rank / ts_mean / Factor / parse_expr（DSL；算子覆盖以对应版本注册表为准）"
       - "factor_engine.runtime.engine.FactorEngine + backend.factory.build_backend('auto')（SQL 下推→Polars→Pandas）"
       - "storage.factory.build_data_source(type='data_access') 直连数据层；FactorEngine.run_from_config(yaml)；service/ HTTP（factor-engine-serve）"
+    inputs: ["Factor DSL / FactorDefinition", "DataAccess"]
+    outputs: ["FactorValue / factor lake"]
+    depends_on: ["data-access"]
+    consumed_by: ["quant-evaluator", "factor-assets"]
+    deprecated_aliases: ["quant-factor-engine"]
     when_to_use: "把因子公式（DSL）算成 (日期×标的) 因子值并落因子湖；批量算子表达式计算"
-    when_not_to_reinvent: "别手写向量化因子计算管线、别再造算子库——DSL 已有 460+ 算子；它不做数据清洗/评估/回测（各归其库）"
+    when_not_to_reinvent: "别手写向量化因子计算管线、别再造算子库——DSL 已有统一算子注册表；它不做数据清洗/评估/回测（各归其库）"
     owner_group: factor
     source_commit: "c374cbd"
     distilled_at: "2026-09-01"
@@ -94,6 +106,10 @@ cards:
       - "data_access.get_store() → read / read_frame / read_uri / read_factors / read_joined / read_asof（读写唯一入口）"
       - "写：write_arrow / upsert / publish_from_staging；HTTP：data-access-server + DataAccessClient"
       - "注册表 73 数据集 + 56 语义字段（字段清单本体为 Mask 细节，不进卡片）"
+    inputs: ["dataset / fields / date / universe"]
+    outputs: ["Arrow / DataFrame / ReadHandle / Snapshot"]
+    depends_on: []
+    consumed_by: ["factor-engine", "factor-preprocess", "modeling", "barra-engine"]
     when_to_use: "一切行情 / 因子值 / parquet 的读写——读数据的第一入口"
     when_not_to_reinvent: "禁止直接 pd.read_parquet 裸读；禁止绕过 PIT 语义自取时点数据；禁止自建第二套数据集注册表"
     owner_group: factor
@@ -112,6 +128,11 @@ cards:
     api_surface:
       - "app/contracts/*：纯 stdlib frozen DTO（23 模块：artifact_ref/jobs/workflow/lifecycle/rbac/backtest/factor_library...）"
       - "app/adapters/data_access_storage.py（DataAccessStorageAdapter）；app/worker + orchestrator（candidate→evaluation→admission 骨架）"
+    inputs: ["domain artifacts"]
+    outputs: ["API / metadata / workflow / artifact references"]
+    depends_on: []
+    consumed_by: ["platform-web"]
+    deprecated_aliases: ["quant-platform"]
     when_to_use: "平台服务间集成契约、跨包 DTO 翻译（Platform DTO ↔ Domain Native Contract）——QuantCode 对接平台服务的正门"
     when_not_to_reinvent: "域包不得 import 平台层；平台不重算量化逻辑、不落第二套因子湖/元数据注册表；注意 DRAFT 态未 V1_FROZEN，契约以 reconcile 后版本为准"
     owner_group: model
@@ -144,6 +165,10 @@ cards:
     visibility: group
     maturity_status: STAGING
     integration_status: UNVERIFIED
+    inputs: ["candidate / treatment recipe", "QuantEvaluator evidence"]
+    outputs: ["optimized treatment / TrialLedger"]
+    depends_on: ["factor-engine", "quant-evaluator", "factor-preprocess"]
+    consumed_by: ["factor-assets", "factor-preprocess"]
     when_to_use: "需要搜索因子结构、窗口或处理方案时"
     when_not_to_reinvent: "不要在 QuantCode 内自建参数或结构搜索器"
     owner_group: factor
@@ -159,6 +184,10 @@ cards:
     visibility: group
     maturity_status: STAGING
     integration_status: UNVERIFIED
+    inputs: ["factor definition / values", "QuantEvaluator evidence"]
+    outputs: ["FactorAsset / Library / Cluster / FeatureSet references"]
+    depends_on: ["factor-engine", "quant-evaluator"]
+    consumed_by: ["factor-preprocess", "quant-platform"]
     when_to_use: "因子身份、去重、聚类、生命周期或入库"
     when_not_to_reinvent: "不要维护第二套因子事实源"
     owner_group: factor
@@ -174,6 +203,10 @@ cards:
     visibility: group
     maturity_status: STAGING
     integration_status: UNVERIFIED
+    inputs: ["selected factor values", "TreatmentRecipe"]
+    outputs: ["FeatureBundle / TreatmentRecipe"]
+    depends_on: ["data-access", "factor-assets"]
+    consumed_by: ["modeling", "factor-optimizer"]
     when_to_use: "winsor、rank、zscore、中性化和 FeatureBundle"
     when_not_to_reinvent: "模型仓不要重复实现公共预处理逻辑"
     owner_group: model
@@ -189,6 +222,10 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: UNVERIFIED
+    inputs: ["FeatureBundle", "LabelContract"]
+    outputs: ["ModelArtifact / PredictionBatch / OOS"]
+    depends_on: ["factor-preprocess"]
+    consumed_by: ["riskfolio-qs", "quant-platform"]
     when_to_use: "walk-forward、purge/embargo、训练与 OOS"
     when_not_to_reinvent: "不要由 Agent 自行决定或重算时序切分口径"
     owner_group: model
@@ -204,6 +241,10 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: UNVERIFIED
+    inputs: ["A-share PIT data"]
+    outputs: ["B / F / D / factor returns"]
+    depends_on: ["data-access"]
+    consumed_by: ["riskfolio-qs"]
     when_to_use: "需要风险暴露或协方差输入时"
     when_not_to_reinvent: "不要在平台层重算风险模型"
     owner_group: risk
@@ -219,6 +260,10 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: UNVERIFIED
+    inputs: ["alpha / risk / benchmark / previous positions / tradability / cost"]
+    outputs: ["target_positions / trades"]
+    depends_on: ["modeling", "barra-engine"]
+    consumed_by: ["vectorbt-qs"]
     when_to_use: "组合约束和目标仓位优化"
     when_not_to_reinvent: "不要在 QuantCode 内建设第二套组合优化器"
     owner_group: strategy
@@ -234,6 +279,10 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: UNVERIFIED
+    inputs: ["target positions", "market data / trading constraints"]
+    outputs: ["trades / NAV / report"]
+    depends_on: ["data-access", "riskfolio-qs"]
+    consumed_by: ["quant-platform"]
     when_to_use: "真实成交、成本和公司行动回放"
     when_not_to_reinvent: "不要在 QuantCode 内重建回测引擎"
     owner_group: strategy
@@ -249,6 +298,10 @@ cards:
     visibility: group
     maturity_status: STAGING
     integration_status: UNVERIFIED
+    inputs: ["QuantPlatform API"]
+    outputs: ["read-only research views"]
+    depends_on: ["quant-platform"]
+    consumed_by: []
     when_to_use: "需要跳转组织研究门户和外部展示时"
     when_not_to_reinvent: "QuantCode 不复制报告与领域业务页面"
     owner_group: fundamental

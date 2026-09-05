@@ -491,9 +491,6 @@ def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
 
     group = str((ctx or {}).get("group") or "").strip() or None
     role = str((ctx or {}).get("role") or "").strip()
-    def long_term(hit: Any) -> bool:
-        return hit.scope != "sessions" and hit.type not in {"checkpoint", "progress"}
-
     if role == "admin":
         hits = []
         # Admin may inspect all group scopes, while the service still applies
@@ -502,28 +499,36 @@ def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
             service = MemoryService(db_path, root=memory_root, requester_group=scope_id)
             hits.extend(
                 hit
-                for hit in service.search(query=args.query, scope="groups", scope_id=scope_id, limit=args.limit)
-                if long_term(hit)
+                for hit in service.search(query=args.query, scope="groups", scope_id=scope_id, limit=args.limit,
+                                          long_term_only=True, strict_errors=True)
             )
         service = MemoryService(db_path, root=memory_root)
-        hits.extend(
-            hit
-            for hit in service.search(query=args.query, scope="global", limit=args.limit, requester_group=None)
-            if long_term(hit)
-        )
+        for scope in ("global", "projects"):
+            hits.extend(service.search(query=args.query, scope=scope, limit=args.limit,
+                                       long_term_only=True, strict_errors=True))
         hits.sort(key=lambda hit: hit.score, reverse=True)
         selected = hits[: args.limit]
     else:
         service = MemoryService(db_path, root=memory_root, requester_group=group)
-        selected = [
-            hit
-            for hit in service.search(query=args.query, limit=args.limit, requester_group=group)
-            if long_term(hit)
-        ][: args.limit]
-    return {
+        # A group membership is not project authorization. This product surface
+        # exposes only global contracts and the bound group's knowledge until
+        # project grants are explicitly resolved from the session.
+        selected = service.search(query=args.query, scope="global", limit=args.limit,
+                                  long_term_only=True, strict_errors=True)
+        if group in _VALID_GROUPS:
+            selected.extend(service.search(query=args.query, scope="groups", scope_id=group,
+                                           limit=args.limit, long_term_only=True, strict_errors=True))
+        selected.sort(key=lambda hit: hit.score, reverse=True)
+        selected = selected[:args.limit]
+    result = {
         "status": "CONNECTED" if selected else "EMPTY",
         "hits": [hit.to_dict() for hit in selected],
     }
+    if role == "admin":
+        from runner.admin_scope import audited_read_result
+
+        return audited_read_result("search_memory", ctx, result)
+    return result
 
 
 search_memory_tool = ToolDef(

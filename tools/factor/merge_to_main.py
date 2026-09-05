@@ -340,6 +340,10 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
     from runner.human_gate import normalize_external_decision, parse_resume_decision
 
     resume_value = interrupt(result["interrupt_payload"])
+    decision_actor = str((resume_value.get("decided_by") if isinstance(resume_value, dict) else None)
+                         or ctx.get("actor_id") or "approver")
+    decision_gate = str((resume_value.get("gate_id") if isinstance(resume_value, dict) else None)
+                        or result.get("gate_id") or "")
     if normalize_external_decision(parse_resume_decision(resume_value) or "") == "approve":
         return merge_to_main_impl(
             args.factor_id,
@@ -351,8 +355,8 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
             report_path=ctx.get("report_path"),
             thread_id=str(ctx.get("thread_id") or ""),
             evidence_dir=ctx.get("evidence_dir"),
-            actor_id=str(ctx.get("actor_id") or "approver"),
-            gate_id=str(result.get("gate_id") or "") or None,
+            actor_id=decision_actor,
+            gate_id=decision_gate or None,
         )
     from runner.evidence import append_event
     decision_evidence_dir = ctx.get("evidence_dir")
@@ -363,7 +367,7 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
         str(ctx.get("thread_id") or f"factor-merge-{args.factor_id}"),
         "human_gate",
         {
-            "gate_id": result.get("gate_id"),
+            "gate_id": decision_gate,
             "kind": "merge",
             "status": "rejected",
             "actor": str(ctx.get("actor_id") or "approver"),
@@ -371,7 +375,7 @@ def _merge_execute(args: MergeMainArgs, ctx: dict) -> dict[str, Any]:
             "evidence": result.get("gate", {}).get("evidence", {}),
             "decision": {
                 "action": "reject",
-                "decided_by": str(ctx.get("actor_id") or "approver"),
+                "decided_by": decision_actor,
                 "reason": "rejected by human gate",
             },
         },

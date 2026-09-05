@@ -247,7 +247,7 @@ def test_admin_errors_admin_empty_state_then_digest(monkeypatch):
     """Admin：无错误 → 诚实空态；有错误 → 按组汇总。"""
     monkeypatch.setenv("QUANTCODE_ADMIN", "1")
     empty = global_registry.call("admin_errors", {}, ctx={})
-    assert empty == {"total_errors": 0, "by_group": {}}  # 空态（不伪造）
+    assert empty == {"total_errors": 0, "by_group": {}, "errors": []}
 
     metrics.record_run(group="options", flow="f", thread_id="t1",
                        started_at=0.0, ended_at=1.0, status="error", error="bad strike")

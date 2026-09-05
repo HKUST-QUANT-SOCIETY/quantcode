@@ -842,6 +842,7 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
             return _Snapshot()
 
         def stream(self, init, config):
+            assert init.resume["decided_by"] == "actor-b"
             yield {"llm": {"task_status": "done", "messages": []}}
 
     runner = AgentRunner(

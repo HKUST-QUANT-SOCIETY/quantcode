@@ -1,5 +1,7 @@
 # QuantCode v5 实现审计
 
+> 后续跨仓库复核：[完整功能/UI 台账与新修复](audit/FULL_PRODUCT_AUDIT_2026-09-05.md)、[组件复用交叉表](audit/COMPONENT_REUSE_MAP.md)。下述早期“通过”不表示所有桌面流程或真实服务已验收。
+
 > 日期：2026-09-05
 > 规范：FUNCTIONAL_SPEC v0.5.1 / PRD v5.1 / Design v5.1 / UI Spec v4.1
 > 测试环境：macOS、Python 3.12、本地 Mock/fixture；外部生产服务未连接

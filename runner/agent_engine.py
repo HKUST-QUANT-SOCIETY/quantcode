@@ -630,7 +630,18 @@ class AgentRunner:
             from runner.human_gate import to_react_resume_payload
 
             self._validate_resume_checkpoint(app, thread_id, decision=True)
-            init_state: Any = Command(resume=to_react_resume_payload(resume_decision))
+            resume_payload = to_react_resume_payload(resume_decision)
+            if self.actor_id:
+                resume_payload["decided_by"] = self.actor_id
+            # Replayed tool nodes recreate local payloads. Carry the original
+            # checkpoint Gate ID so the decision refers to the gate displayed.
+            snapshot = app.get_state(config)
+            for pending in getattr(snapshot, "tasks", ()):
+                for item in getattr(pending, "interrupts", ()):
+                    value = getattr(item, "value", None)
+                    if isinstance(value, dict) and value.get("gate_id"):
+                        resume_payload["gate_id"] = str(value["gate_id"])
+            init_state: Any = Command(resume=resume_payload)
         elif resume:
             self._validate_resume_checkpoint(app, thread_id, decision=False)
             init_state: dict | None = None

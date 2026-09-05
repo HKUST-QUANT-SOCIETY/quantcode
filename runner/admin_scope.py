@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 import yaml
 
@@ -79,4 +81,20 @@ def is_admin(identity: str | None, group: str | None = None) -> bool:
         return False
 
 
-__all__ = ["ADMIN_ENV_VAR", "ADMIN_ROLE", "admin_fingerprints", "is_admin"]
+def audited_read_result(tool: str, ctx: dict, result: dict[str, Any]) -> dict[str, Any]:
+    """Audit cross-group disclosure before returning it, without copying contents."""
+    from runner.evidence import EVIDENCE_DIR, append_event
+
+    append_event(
+        f"admin-read-{uuid4().hex}",
+        "tool_result",
+        {"tool": tool, "actor_id": ctx.get("actor_id"), "session_id": ctx.get("session_id"),
+         "group": ctx.get("group"), "role": ctx.get("role"), "status": "completed",
+         "resource": "organization", "result_fields": sorted(result)},
+        ctx.get("evidence_dir") or EVIDENCE_DIR,
+        required=True,
+    )
+    return result
+
+
+__all__ = ["ADMIN_ENV_VAR", "ADMIN_ROLE", "admin_fingerprints", "is_admin", "audited_read_result"]

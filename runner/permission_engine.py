@@ -139,7 +139,12 @@ def enforce(tool_id: str, group: str = "", ctx: dict | None = None) -> dict[str,
     append_event(
         str((ctx or {}).get("thread_id") or f"permission-{tool_id}"),
         "human_gate",
-        {"kind": "permission", "decision": decision, "resource": tool_id,
+        {"kind": "permission",
+         "gate_id": (resume_value.get("gate_id") if isinstance(resume_value, dict) else None) or payload["gate_id"],
+         "decision": {"action": decision,
+                      "decided_by": (resume_value.get("decided_by") if isinstance(resume_value, dict) else None)
+                      or (ctx or {}).get("actor_id") or "approver"},
+         "resource": tool_id,
          "actor_id": (ctx or {}).get("actor_id"), "group": group},
         (ctx or {}).get("evidence_dir") or EVIDENCE_DIR,
         required=True,

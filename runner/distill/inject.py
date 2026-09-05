@@ -42,7 +42,8 @@ def _format_card_line(card: Any) -> str:
     when = card.when_to_use
     if len(when) > _LINE_WHEN_MAX:
         when = when[: _LINE_WHEN_MAX - 1] + "…"
-    return f"- {card.id} | {card.name} | {when}"
+    return (f"- {card.id} | {card.name} | {when} | "
+            f"{card.maturity_status}/{card.integration_status} | {card.when_not_to_reinvent}")
 
 
 def capability_digest(

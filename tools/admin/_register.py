@@ -31,11 +31,13 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, Field
 
 from tools.registry import ToolDef, registry
+from runner.admin_scope import audited_read_result
 
 # GitHub org（P-08 定版）。repo 名来自 GitHub API 响应，插 URL 前过 _NAME_RE 校验。
 GH_ORG = "HKUST-QUANT-SOCIETY"
@@ -137,6 +139,19 @@ def _safe_repo(name: Any) -> str | None:
     return s if _NAME_RE.fullmatch(s) else None
 
 
+def _list_org_repos(token: str) -> list[dict[str, Any]]:
+    """Read every page; never advertise a truncated first page as the full graph."""
+    result: list[dict[str, Any]] = []
+    for page in range(1, 101):
+        rows = _gh_get(f"/orgs/{GH_ORG}/repos?per_page=100&sort=pushed&page={page}", token)
+        if not isinstance(rows, list):
+            raise ValueError("unexpected GitHub repository response")
+        result.extend(row for row in rows if isinstance(row, dict))
+        if len(rows) < 100:
+            return result
+    raise ValueError("GitHub repository pagination limit reached; listing is incomplete")
+
+
 def _iso_date(value: Any) -> datetime | None:
     """GitHub ISO8601 时间戳 → aware datetime；解析失败 → None。"""
     try:
@@ -177,9 +192,17 @@ def _admin_list_runs_execute(args: AdminListRunsArgs, ctx: dict) -> dict[str, An
     from runner import metrics
 
     runs = metrics.read_recent(args.limit)
-    return metrics.aggregate_runs(
+    result = metrics.aggregate_runs(
         runs, status_filter=args.status_filter, group_filter=args.group_filter
     )
+    # Keep the summary contract while supplying the actual per-actor rows
+    # consumed by the desktop console. Aggregates cannot reconstruct actors.
+    result["runs"] = [
+        row for row in runs
+        if (not (args.status_filter or "").strip() or row.get("status") == args.status_filter.strip())
+        and (not (args.group_filter or "").strip() or row.get("group") == args.group_filter.strip())
+    ]
+    return audited_read_result("admin_list_runs", ctx, result)
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +255,13 @@ def _admin_errors_execute(args: AdminErrorsArgs, ctx: dict) -> dict[str, Any]:
         return denied
     from runner import metrics
 
-    return metrics.error_digest(metrics.read_recent(args.window))
+    runs = metrics.read_recent(args.window)
+    result = metrics.error_digest(runs)
+    result["errors"] = [
+        {**row, "message": row.get("error") or "(status=error, no message)"}
+        for row in runs if row.get("error") or row.get("status") == "error"
+    ]
+    return audited_read_result("admin_errors", ctx, result)
 
 
 # ---------------------------------------------------------------------------
@@ -285,12 +314,13 @@ def _admin_blackboard_read_execute(args: AdminBlackboardReadArgs, ctx: dict) -> 
             found = svc.get_entry(BlackboardScope.GROUP, g, k, requester_group=g)
             if found is not None:
                 entries.append(found)
-    return {
+    result = {
         "ok": True,
         "key": key_norm,
         "found": bool(entries),
         "entries": [e.model_dump(mode="json") for e in entries],
     }
+    return audited_read_result("admin_blackboard_read", ctx, result)
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +350,7 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
-        repos = _gh_get(f"/orgs/{GH_ORG}/repos?per_page=100&sort=pushed", token)
+        repos = _list_org_repos(token)
     except Exception as e:
         return {"ok": False, "error": f"GitHub API failed: {e}", "org": GH_ORG, "repos": []}
     if not isinstance(repos, list):
@@ -343,9 +373,12 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
             "name": name,
             "pushed_at": r.get("pushed_at"),
             "default_branch": branch,
+            "language": r.get("language"),
+            "archived": bool(r.get("archived")),
+            "html_url": r.get("html_url"),
         }
         try:
-            commit = _gh_get(f"/repos/{GH_ORG}/{name}/commits/{branch}?per_page=1", token)
+            commit = _gh_get(f"/repos/{GH_ORG}/{name}/commits/{quote(branch, safe='')}?per_page=1", token)
             info = commit.get("commit") if isinstance(commit, dict) else {}
             author = info.get("author") if isinstance(info, dict) else {}
             item["latest_commit"] = {
@@ -416,7 +449,7 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
-        repos = _gh_get(f"/orgs/{GH_ORG}/repos?per_page=100", token)
+        repos = _list_org_repos(token)
     except Exception as e:
         return {"ok": False, "error": f"GitHub API failed: {e}", "org": GH_ORG, "updates": []}
     if not isinstance(repos, list):
@@ -430,6 +463,7 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.since_days)
     updates: list[dict[str, Any]] = []
     checked = 0
+    errors: list[str] = []
     for r in repos:
         if not isinstance(r, dict):
             continue
@@ -439,7 +473,8 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
         try:
             dep_files = _dep_files_of(_gh_get(f"/repos/{GH_ORG}/{name}/contents", token))
         except Exception:
-            continue  # 空 repo / contents 不可读 → 跳过该 repo（诚实：不进清单）
+            errors.append(f"{name}: dependency files unavailable")
+            continue
         checked += 1
         files: list[dict[str, Any]] = []
         last_change: datetime | None = None
@@ -449,6 +484,7 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
                     f"/repos/{GH_ORG}/{name}/commits?path={dep}&per_page=1", token
                 )
             except Exception:
+                errors.append(f"{name}/{dep}: commit history unavailable")
                 continue
             if not isinstance(commits, list) or not commits:
                 continue
@@ -476,7 +512,8 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
         "window_days": args.since_days,
         "repos_checked": checked,
         "updates": updates,
-        "sync_status": "CONNECTED",
+        "sync_status": "PARTIAL" if errors else "CONNECTED",
+        "errors": errors,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
 
