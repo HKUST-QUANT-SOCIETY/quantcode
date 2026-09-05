@@ -1,18 +1,21 @@
 """run_id → JSONL 事件通道 — attach_stream（控制器中途读执行轨迹）。
 
-架构一句话：**文件即通道** — 每次 attach_stream=true 的 start run 把
+文件即通道：认证任务的启动与恢复始终把
 ``AgentRunner.stream()`` 的 execution_trace 事件逐条 append 到
 ``.quantcode/streams/<run_id>.jsonl``（run_id = thread_id，与 evidence.jsonl
 同款命名），控制器用 ``read_from(run_id, cursor)`` 按行偏移增量消费。
 
 - 游标 = 行偏移（0 起）；读不重复不丢，``next_cursor`` 直接回传即可续读。
-- 文件缺失（未 attach / run 已清理）→ ``exists=False`` 空返回，不抛错。
+- 文件缺失（旧任务 / run 已归档移走）→ ``exists=False`` 空返回，不抛错。
+- 认证任务使用 emit_required：加锁、fsync，写入失败停止后续执行。
+- 旧的未认证嵌入调用仍可通过 attach_stream 使用 best-effort emit。
 - 进程内 registry（dict + threading.Lock，parallel_registry 同款）记
   StreamChannel 单例，复用同 run_id 的通道。
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -48,6 +51,24 @@ class StreamChannel:
         except Exception:
             pass
 
+    def emit_required(self, event: dict) -> None:
+        """Durable task history: storage failure must stop further execution."""
+        import fcntl
+
+        payload = (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode("utf-8")
+        with self.path.open("a+b") as target:
+            fcntl.flock(target, fcntl.LOCK_EX)
+            target.seek(0, os.SEEK_END)
+            if target.tell():
+                target.seek(-1, os.SEEK_END)
+                if target.read(1) != b"\n":
+                    # Preserve a crash-truncated line as evidence; terminate it
+                    # so it cannot swallow every event of the recovery attempt.
+                    target.write(b"\n")
+            target.write(payload)
+            target.flush()
+            os.fsync(target.fileno())
+
 
 def open_stream(run_id: str) -> StreamChannel:
     """创建/重开 ``.quantcode/streams/<run_id>.jsonl``，返回通道（幂等）。"""
@@ -58,7 +79,7 @@ def open_stream(run_id: str) -> StreamChannel:
     return StreamChannel(run_id, path)
 
 
-def read_from(run_id: str, cursor: int = 0) -> dict:
+def read_from(run_id: str, cursor: int = 0, *, limit: int | None = None) -> dict:
     """读 ``.quantcode/streams/<run_id>.jsonl`` 第 cursor 行起的全部事件。
 
     Returns:
@@ -69,25 +90,35 @@ def read_from(run_id: str, cursor: int = 0) -> dict:
     run_id = _validate_run_id(run_id)
     if cursor < 0:
         raise ValueError("cursor must be non-negative")
+    if limit is not None and not 1 <= limit <= 1000:
+        raise ValueError("limit must be between 1 and 1000")
     path = STREAMS_DIR / f"{run_id}.jsonl"
     if not path.is_file():
-        return {"events": [], "next_cursor": int(cursor), "exists": False}
+        return {"events": [], "next_cursor": int(cursor), "exists": False, "has_more": False, "damaged_lines": 0}
     events = []
     next_cursor = 0
+    more = False
+    damaged = 0
     # Consume complete lines only: an in-flight append must remain readable on
     # the next poll rather than advancing the cursor past an incomplete event.
     with path.open("rb") as source:
         for index, line in enumerate(source):
             if not line.endswith(b"\n"):
                 break
-            next_cursor = index + 1
             if index < cursor:
+                next_cursor = index + 1
                 continue
+            if limit is not None and len(events) >= limit:
+                more = True
+                break
+            next_cursor = index + 1
             try:
                 events.append(json.loads(line))
             except (json.JSONDecodeError, UnicodeDecodeError):
+                damaged += 1
                 continue
-    return {"events": events, "next_cursor": max(cursor, next_cursor), "exists": True}
+    return {"events": events, "next_cursor": max(cursor, next_cursor), "exists": True,
+            "has_more": more, "damaged_lines": damaged}
 
 
 

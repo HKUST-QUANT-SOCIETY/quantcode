@@ -168,6 +168,8 @@ def test_admin_deploy_is_management_plane_and_truthfully_staging(tmp_path: Path)
     request = AdminDeployRequest(artifact_ref="artifact://factor/demo", target="production")
     with pytest.raises(PermissionError):
         submit_deploy(request, session_role="analyst", evidence_dir=tmp_path)
-    result = submit_deploy(request, session_role="admin", evidence_dir=tmp_path)
+    with pytest.raises(PermissionError):
+        submit_deploy(request, session_role="admin", evidence_dir=tmp_path)
+    result = submit_deploy(request, session_role="admin", actor_id="admin-1", evidence_dir=tmp_path, database=tmp_path / "deployments.db")
     assert result.status == "STAGING"
     assert result.record_hash

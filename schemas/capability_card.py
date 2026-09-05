@@ -25,9 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # 卡片类型：asset=资产卡（repo 蒸馏）；contract=口径契约卡（数据/工程契约）。
 CardType = Literal["asset", "contract"]
 
-# owner_group 取值：六研究组之一（与 .opencode/groups/ 枚举同源）；
+# owner_group 取值：八个业务与工程组之一（与 .opencode/groups/ 枚举同源）；
 # "all" 仅用于 contract 卡（口径契约全组织统一）与 asset 卡的属组展示。
-# asset 卡落 Memory 时 owner_group 必须是六组之一（groups scope 需要具体组 id）。
+# asset 卡落 Memory 时 owner_group 必须是八组之一（groups scope 需要具体组 id）。
 OWNER_GROUPS: tuple[str, ...] = (
     "factor",
     "fundamental",
@@ -92,7 +92,7 @@ class CapabilityCard(BaseModel):
     )
     owner_group: OwnerGroup = Field(
         description="属组（Git repo 权限 = Memory 权限同源）；"
-        "contract 卡用 'all'；asset 卡为六组之一（Memory groups scope 落点）",
+        "contract 卡用 'all'；asset 卡为八组之一（Memory groups scope 落点）",
     )
     source_commit: str = Field(
         default="",

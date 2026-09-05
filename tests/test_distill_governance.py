@@ -21,7 +21,7 @@ def test_candidate_promotion_requires_review_and_writes_audit(tmp_path):
     _candidate(tmp_path)
     result = review_candidate(
         "factor-flow", "promote", reviewer_id="factor-lead", reviewer_role="approver",
-        reviewer_group="factor", candidates_dir=tmp_path,
+        reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
     )
     assert result["status"] == "promoted"
     published = Path(result["published_skill_path"])
@@ -36,7 +36,7 @@ def test_candidate_promotion_rejects_unfinished_draft(tmp_path):
     with pytest.raises(ValueError, match="unfinished"):
         review_candidate(
             "factor-flow", "promote", reviewer_id="factor-lead", reviewer_role="approver",
-            reviewer_group="factor", candidates_dir=tmp_path,
+            reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
 
 
@@ -45,17 +45,17 @@ def test_candidate_review_enforces_group_and_role(tmp_path):
     with pytest.raises(PermissionError):
         review_candidate(
             "factor-flow", "reject", reviewer_id="model-lead", reviewer_role="approver",
-            reviewer_group="model", candidates_dir=tmp_path,
+            reviewer_group="model", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
     with pytest.raises(PermissionError):
         review_candidate(
             "factor-flow", "reject", reviewer_id="factor-user", reviewer_role="analyst",
-            reviewer_group="factor", candidates_dir=tmp_path,
+            reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
     with pytest.raises(ValueError, match="superseded_by"):
         review_candidate(
             "factor-flow", "supersede", reviewer_id="factor-lead", reviewer_role="approver",
-            reviewer_group="factor", candidates_dir=tmp_path,
+            reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
 
 
@@ -83,7 +83,7 @@ def test_candidate_supersede_cannot_target_another_group(tmp_path):
             reviewer_role="approver",
             reviewer_group="factor",
             superseded_by="model-flow",
-            candidates_dir=tmp_path,
+            candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
 
 
@@ -97,5 +97,5 @@ def test_candidate_promotion_rejects_out_of_tree_draft(tmp_path):
     with pytest.raises(ValueError, match="inside candidates_dir"):
         review_candidate(
             "factor-flow", "promote", reviewer_id="factor-lead", reviewer_role="approver",
-            reviewer_group="factor", candidates_dir=tmp_path,
+            reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )

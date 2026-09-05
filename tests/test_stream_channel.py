@@ -140,7 +140,7 @@ def test_cursor_midway_read(streams_dir):
 def test_read_missing_file_returns_exists_false(streams_dir):
     """文件缺失 → exists=False 空返回（不抛错）。"""
     r = sc.read_from("never-opened", 0)
-    assert r == {"events": [], "next_cursor": 0, "exists": False}
+    assert r == {"events": [], "next_cursor": 0, "exists": False, "has_more": False, "damaged_lines": 0}
 
 
 @pytest.mark.parametrize("run_id", ["../secret", "/tmp/secret", "nested/path", ""])
@@ -215,7 +215,7 @@ def test_check_tool_stream_execute_reads_channel(streams_dir):
     out = reg_mod.check_tool_stream_tool.execute(
         reg_mod.CheckToolStreamArgs(run_id="exec-1", cursor=0), ctx={}
     )
-    assert out == {"events": [{"x": 1}], "next_cursor": 1, "exists": True}
+    assert out == {"events": [{"x": 1}], "next_cursor": 1, "exists": True, "has_more": False, "damaged_lines": 0}
 
     out0 = reg_mod.check_tool_stream_tool.execute(
         reg_mod.CheckToolStreamArgs(run_id="ghost", cursor=0), ctx={}
@@ -402,7 +402,7 @@ def test_partial_append_is_not_consumed(streams_dir):
     with channel.path.open("ab") as output:
         output.write(b'{"second":')
     result = sc.read_from("partial")
-    assert result == {"events": [{"first": 1}], "next_cursor": 1, "exists": True}
+    assert result == {"events": [{"first": 1}], "next_cursor": 1, "exists": True, "has_more": False, "damaged_lines": 0}
     with channel.path.open("ab") as output:
         output.write(b'2}\n')
     assert sc.read_from("partial", result["next_cursor"])["events"] == [{"second": 2}]

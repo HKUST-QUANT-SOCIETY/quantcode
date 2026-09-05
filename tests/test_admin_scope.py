@@ -424,6 +424,8 @@ def test_admin_tools_meta_visible_via_mcp_tools_list(monkeypatch):
 
 
 def test_distill_candidate_review_requires_approver_and_records_decision(tmp_path):
+    tmp_path = tmp_path / ".quantcode" / "distill_candidates"
+    tmp_path.mkdir(parents=True)
     from tools.admin._register import _review_distill_candidate_execute, ReviewDistillCandidateArgs
 
     draft = tmp_path / "candidate-factor-flow.md"

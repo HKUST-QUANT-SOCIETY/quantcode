@@ -858,6 +858,9 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
     )
     monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
 
+    import quantcode.identity as identity_module
+    monkeypatch.delenv("QUANTCODE_IDENTITY_SESSION_FILE", raising=False)
+    monkeypatch.setattr(identity_module, "_load_entries", lambda: [dict(_Snapshot.values)])
     resumed = runner.resume(thread_id="factor-gate-1", decision="approve")
     assert resumed["task_status"] == "done"
     assert resumed["execution_trace"][-1]["type"] == "agent_end"

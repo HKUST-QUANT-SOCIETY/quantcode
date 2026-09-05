@@ -1,0 +1,5 @@
+# Current project ACL. No grants are inferred from a research group.
+# Activation also requires memory:project:<project_id>:read in the actor's roster.
+# Each grant: project_id, actor_id, enabled: true, expires_at (ISO8601 with timezone).
+# Revocation/expiry takes effect on the next search without restarting a session.
+grants: []

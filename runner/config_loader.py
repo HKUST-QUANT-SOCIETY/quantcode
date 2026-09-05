@@ -48,6 +48,20 @@ def load_yaml(
     Returns:
         顶层 dict；文件缺失 / YAMLError / 非 dict → ``{}``。
     """
+    return read_yaml(name, _required, strict=strict)
+
+
+def read_yaml(
+    name: str,
+    _required: tuple[str, ...] = (),
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Read mutable catalogs without retaining a process-lifetime snapshot.
+
+    Startup configuration continues to use ``load_yaml``. Callers that enforce
+    live catalog/policy changes use this uncached reader explicitly.
+    """
     path = config_dir() / f"{name}.yaml"
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -81,4 +95,4 @@ def load_yaml_checked(name: str, required: tuple[str, ...]) -> dict[str, Any]:
     return load_yaml(name, _required=tuple(required))
 
 
-__all__ = ["PROJECT_ROOT", "config_dir", "load_yaml", "load_yaml_checked"]
+__all__ = ["PROJECT_ROOT", "config_dir", "load_yaml", "load_yaml_checked", "read_yaml"]

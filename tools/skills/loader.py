@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from pathlib import Path
 
 # 项目根目录（loader.py → skills/ → tools/ → quantcode/）
@@ -119,7 +120,8 @@ def load_skill(
                 f"Business skill '{skill_name}' not found for group '{group}' "
                 f"(expected at {path})"
             )
-        body = _strip_frontmatter(path.read_text(encoding="utf-8"))
+        from runner.distill.governance import read_governed_skill
+        body = _strip_frontmatter(read_governed_skill(path))
         parts.append(f"# 主工作流：{skill_name}\n\n{body}")
     else:
         # 元 skill
@@ -145,6 +147,51 @@ def load_skill(
     # ★ Day 4 俞高磊：追加简短 tool-call 指令
     _call_hint = "\n\n## RULES\n- Call tools. Do not describe them.\n"
     return text + _call_hint
+
+
+def load_skill_snapshot(skill_name: str, *, group: str | None = None, meta_skills: list[str] | None = None) -> tuple[str, dict]:
+    text = load_skill(skill_name, group=group, meta_skills=meta_skills)
+    return text, {"name": skill_name, "group": group, "meta_skills": list(meta_skills or []),
+                  "digest": hashlib.sha256(text.encode()).hexdigest()}
+
+
+def bind_skill(skill_name: str, *, group: str | None = None, meta_skills: list[str] | None = None) -> dict:
+    return load_skill_snapshot(skill_name, group=group, meta_skills=meta_skills)[1]
+
+
+def validate_skill_binding(binding: dict | None) -> None:
+    if binding is None:
+        return
+    current = bind_skill(binding["name"], group=binding.get("group"), meta_skills=binding.get("meta_skills"))
+    if current["digest"] != binding.get("digest"):
+        raise PermissionError("Skill source changed; start a new task with the current approved skill")
+
+
+def validate_execution_skill(state: dict) -> None:
+    """Validate saved bindings, or prove an old prompt matches a current source.
+
+    Legacy recovery never writes a fabricated historical digest into a checkpoint.
+    An exact full-source prefix is necessary because the runner appends its
+    capability catalog after the loaded workflow text.
+    """
+    if "skill_binding" in state:
+        binding = state.get("skill_binding")
+        if binding and binding.get("group") not in {None, state.get("group")}:
+            raise PermissionError("Skill binding group does not match the task")
+        validate_skill_binding(binding)
+        return
+    if state.get("role") is None:
+        return  # Existing unauthenticated embedded callers have no source contract.
+    prompt = state.get("system_prompt") or ""
+    if not prompt:
+        return
+    match = re.match(r"^# (主工作流|方法论)：([A-Za-z0-9][A-Za-z0-9._-]*)\n", prompt)
+    if not match:
+        raise PermissionError("旧任务缺少可核验的 Skill 来源，请查看历史后用当前方案新建任务")
+    meta = re.findall(r"^# 方法论补充：([A-Za-z0-9][A-Za-z0-9._-]*)$", prompt, re.MULTILINE)
+    current = load_skill(match[2], group=state.get("group") if match[1] == "主工作流" else None, meta_skills=meta)
+    if not prompt.startswith(current):
+        raise PermissionError("旧任务提示词与当前有效 Skill 不一致，不能自动恢复执行")
 
 
 __all__ = [

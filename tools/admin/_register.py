@@ -61,8 +61,10 @@ def _admin_gate(ctx: dict) -> dict[str, Any] | None:
     """Admin 门禁：Admin → None（放行）；非 Admin → 领域拒绝 payload（不抛）。"""
     from runner.admin_scope import is_admin
 
+    if ctx.get("role") is not None:
+        return None if ctx["role"] == "admin" else {"ok": False, "error": "admin only"}
     ident = ctx.get("identity") or ctx.get("ssh_fingerprint")
-    if ctx.get("role") == "admin" or is_admin(
+    if is_admin(
         ident if isinstance(ident, str) else None, ctx.get("group")
     ):
         return None
@@ -86,7 +88,9 @@ def _resolve_github_token(ctx: dict) -> str | None:
     普通用户必须通过 ``ctx["github_token"]`` 提供用户范围 token；中心
     ``GITHUB_TOKEN`` 只允许 Admin 管理进程使用。缺失 → None（调用方返回诚实
     空态，绝不使用中心 token 放大普通用户的 GitHub 可见性）。"""
-    token = ctx.get("github_token")
+    from quantcode.github_credentials import subject_token
+
+    token = ctx.get("github_token") or subject_token(ctx)
     if not token:
         from runner.admin_scope import is_admin
 
@@ -98,9 +102,9 @@ def _resolve_github_token(ctx: dict) -> str | None:
                 ident = _get_ssh_fingerprint()
             except Exception:
                 ident = None
-        if ctx.get("role") == "admin" or is_admin(
+        if ctx.get("role") == "admin" or (ctx.get("role") is None and is_admin(
             ident if isinstance(ident, str) else None, ctx.get("group")
-        ):
+        )):
             token = os.environ.get("GITHUB_TOKEN")
     return str(token) if token else None
 
@@ -228,8 +232,9 @@ class ReviewDistillCandidateArgs(BaseModel):
     """P-07 candidate decision; promotion never occurs without this tool."""
 
     candidate_name: str = Field(min_length=1, max_length=128)
-    action: Literal["promote", "reject", "supersede"]
+    action: Literal["promote", "reject", "supersede", "revoke"]
     superseded_by: str | None = Field(default=None, max_length=128)
+    expected_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 def _review_distill_candidate_execute(
@@ -248,6 +253,7 @@ def _review_distill_candidate_execute(
             reviewer_role=str(ctx.get("role") or ""),
             reviewer_group=str(ctx.get("group") or "") or None,
             superseded_by=args.superseded_by,
+            expected_digest=args.expected_digest,
             candidates_dir=Path(ctx.get("candidates_dir") or (Path(__file__).resolve().parents[2] / ".quantcode" / "distill_candidates")),
         )
     except (KeyError, PermissionError, ValueError, FileNotFoundError) as exc:
@@ -633,3 +639,17 @@ _register_admin_tools()
 
 
 __all__ = ["GH_ORG", "GROUP_SCAN", "_register_admin_tools"]
+
+
+class ListDistillCandidatesArgs(BaseModel):
+    pass
+
+
+def _list_distill_candidates(args: ListDistillCandidatesArgs, ctx: dict) -> dict:
+    from runner.distill.governance import list_candidates
+    return list_candidates(ctx, candidates_dir=Path(__file__).resolve().parents[2] / ".quantcode" / "distill_candidates")
+
+
+tool = ToolDef(id="list_distill_candidates", description="Approver/admin review queue with draft content and digest; same-group scope unless Admin, whose read is audited.", schema=ListDistillCandidatesArgs, execute=_list_distill_candidates)
+tool._meta = True
+registry._tools[tool.id] = tool

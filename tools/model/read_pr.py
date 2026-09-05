@@ -44,9 +44,15 @@ def _resolve_repo(args: ReadPRArgs, ctx: dict) -> str:
 
 
 def _resolve_token(ctx: dict) -> str:
-    token = ctx.get("github_token") or os.environ.get("GITHUB_TOKEN")
+    if ctx.get("role") is not None:
+        from tools.admin._register import _resolve_github_token
+        token = _resolve_github_token(ctx)
+    else:
+        # Trusted CI callers without a user Session Context retain the service
+        # credential path; authenticated researchers never inherit it.
+        token = ctx.get("github_token") or os.environ.get("GITHUB_TOKEN")
     if not token:
-        raise ValueError("GITHUB_TOKEN is required for GitHub PR reads")
+        raise ValueError("GitHub identity credential is not configured")
     return str(token)
 
 
@@ -110,17 +116,26 @@ def _read_github_pr(args: ReadPRArgs, ctx: dict) -> dict:
 
     repo = _resolve_repo(args, ctx)
     token = _resolve_token(ctx)
+    if ctx.get("role") is not None:
+        from tools.admin._register import _visible_repos
+        visible, _ = _visible_repos(ctx, token)
+        if repo.lower() not in {str(item.get("full_name") or "").lower() for item in visible}:
+            raise PermissionError("repository is outside the current GitHub scope")
     pr = github_request("GET", repo, f"/pulls/{args.pr_number}", token)
-    files_payload = github_request(
-        "GET",
-        repo,
-        f"/pulls/{args.pr_number}/files?per_page=100",
-        token,
-    )
     if not isinstance(pr, dict):
         raise ValueError("GitHub pull request response must be an object")
-    if not isinstance(files_payload, list):
-        raise ValueError("GitHub pull request files response must be a list")
+    files_payload = []
+    for page in range(1, 31):
+        suffix = "" if page == 1 else f"&page={page}"
+        batch = github_request("GET", repo, f"/pulls/{args.pr_number}/files?per_page=100{suffix}", token)
+        if not isinstance(batch, list):
+            raise ValueError("GitHub pull request files response must be a list")
+        files_payload.extend(batch)
+        if len(batch) < 100:
+            break
+    changed_files = pr.get("changed_files")
+    if isinstance(changed_files, int) and changed_files > len(files_payload):
+        raise ValueError("GitHub PR file listing is incomplete; refusing to evaluate a partial diff")
 
     files = [_normalize_file(file_info) for file_info in files_payload]
     head = pr.get("head") if isinstance(pr.get("head"), dict) else {}

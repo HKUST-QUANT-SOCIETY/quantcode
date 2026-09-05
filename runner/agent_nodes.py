@@ -232,6 +232,7 @@ class AgentState(BaseFlowState, total=False):
     # "superseded"）。draft 态由 make_tool_node/make_llm_node 做阶段限流
     # （tool 过滤，非 interrupt——不新增 HumanGate 触发点）。
     solution_phase: str | None
+    skill_binding: dict | None
     # P-10 方案先行：当前 run 激活的 SolutionDoc id（solution 工具输出经
     # _extract_state_fields 注入；tool_node 据此从 Blackboard 回源 solution_phase）。
     solution_id: str | None
@@ -281,6 +282,8 @@ def make_llm_node(
     """
 
     def llm_node(state: AgentState) -> dict:
+        from tools.skills.loader import validate_execution_skill
+        validate_execution_skill(state)
         # 构造消息序列：system_prompt + 已有的 messages
         history = list(state.get("messages", []))
         if state.get("system_prompt"):
@@ -336,6 +339,7 @@ def make_llm_node(
 def make_tool_node(
     registry: ToolRegistry,
     allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    receipt_db=None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
 
@@ -410,6 +414,8 @@ def make_tool_node(
             strict_reuse = True
 
         for call in tool_calls:
+            from tools.skills.loader import validate_execution_skill
+            validate_execution_skill(state)
             c = _to_tool_call_dict(call)
             try:
                 if allowed_tool_ids is not None and c["name"] not in allowed_tool_ids:
@@ -450,7 +456,14 @@ def make_tool_node(
                 # P-10 阶段限流（tool 过滤，非 interrupt——不新增 HumanGate 触发点）：
                 # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
                 # permission/enforce 链（避免无谓 interrupt 冒泡）。
-                # phase 非 draft（None/frozen/superseded）时恒放行，行为不变。
+                # 废弃或无法回源验证的方案与 draft 一样限制写操作。
+                solution_phase = sync_phase_from_blackboard(
+                    state_updates.get("solution_phase", solution_phase),
+                    state_updates.get("solution_id", state.get("solution_id")),
+                    ctx.get("blackboard_db_path"),
+                )
+                if solution_phase is not None:
+                    state_updates["solution_phase"] = solution_phase
                 if not tool_allowed_in_phase(
                     c["name"],
                     solution_phase,
@@ -469,13 +482,30 @@ def make_tool_node(
                 # resume）。未配置 permission 的 tool → allow，行为与改动前一致。
                 from runner.permission_engine import enforce
 
+                # Preserve LangGraph's interrupt replay order even when a
+                # completed side effect is served from its durable receipt.
                 enforce(c["name"], ctx.get("group", ""), ctx)
-                output = registry.call(c["name"], c["args"], ctx=ctx)
+                def execute():
+                    return registry.call(c["name"], c["args"], ctx=ctx)
+
+                # merge_to_main owns an internal interrupt and already uses its
+                # domain code_hash for idempotency. Do not skip that protocol.
+                if receipt_db is not None and ctx.get("role") is not None and c["name"] != "merge_to_main" and not is_readonly_tool(c["name"]):
+                    from runner.tool_receipts import execute_once
+                    # Invalid arguments have no side effect; reject them before
+                    # reserving a durable receipt.
+                    registry.get(c["name"]).schema(**c["args"])
+                    output = execute_once(receipt_db, c, ctx, execute)
+                else:
+                    output = execute()
                 content = output if isinstance(output, str) else str(output)
                 # 注入逻辑：非 str 的 dict 输出 → 根据 tool name 写入 state
                 if isinstance(output, dict):
                     state_updates.update(_extract_state_fields(c["name"], output))
             except Exception as e:
+                from runner.tool_receipts import ToolOutcomeUnknown
+                if isinstance(e, ToolOutcomeUnknown):
+                    raise
                 # Pattern 5: request_human_review 内 interrupt() 会抛 GraphInterrupt。
                 # 必须向上冒泡，否则人审 gate 会被吞成普通 tool error。
                 try:
@@ -995,6 +1025,7 @@ def init_agent_state(
     workspace_path: str | None = None,
     github_subject: str | None = None,
     resource_scopes: list[str] | None = None,
+    skill_binding: dict | None = None,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -1011,6 +1042,7 @@ def init_agent_state(
         iterations=0,
         tools=tools,
         system_prompt=system_prompt,
+        skill_binding=skill_binding,
         task_goal=user_msg,
         output_data=None,
         artifacts=[],

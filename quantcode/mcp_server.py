@@ -77,9 +77,9 @@ _VALID_GROUPS = frozenset(GROUP_IDS)
 # 普通用户；跨组运行、错误和 Blackboard 查询只给 Admin。该集合同时用于
 # tools/list 和 tools/call，避免出现“列表看不到但仍可直接调用”的旁路。
 _ADMIN_ONLY_META_TOOLS = frozenset(
-    {"admin_list_runs", "admin_errors", "admin_blackboard_read"}
+    {"admin_list_runs", "admin_errors", "admin_blackboard_read", "admin_task_history", "admin_report_history", "admin_get_task_history"}
 )
-_APPROVER_META_TOOLS = frozenset({"review_distill_candidate"})
+_APPROVER_META_TOOLS = frozenset({"review_distill_candidate", "list_distill_candidates", "list_pending_gates"})
 
 
 def _get_ssh_fingerprint() -> str | None:
@@ -108,6 +108,23 @@ def _development_mode() -> bool:
     }
 
 
+def _gateway_context() -> dict | None:
+    global _SESSION_CONTEXT, _SESSION_GROUP
+    session_file = os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE", "").strip()
+    if not session_file:
+        return None
+    from quantcode.identity_login import read_session_file
+    try:
+        context = read_session_file(Path(session_file))
+    except Exception as exc:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: gateway identity is unavailable") from exc
+    if _SESSION_CONTEXT is not None and _SESSION_CONTEXT != context:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: identity changed; reconnect the MCP session")
+    _SESSION_CONTEXT = dict(context)
+    _SESSION_GROUP = context["group"]
+    return context
+
+
 def _get_mcp_group() -> str | None:
     """解析当前活跃组（P0-7 三级，见模块头注释）。
 
@@ -119,12 +136,16 @@ def _get_mcp_group() -> str | None:
     3. 有绑定配置但无指纹：fail-closed，或显式 ``QUANTCODE_ALLOW_UNAUTH=1`` 降级
     """
     global _SESSION_GROUP, _SESSION_CONTEXT
+    gateway_context = _gateway_context()
+    if gateway_context is not None:
+        return gateway_context["group"]
     # Tests and explicit process restarts clear the legacy group sentinel.  Do
     # the same for the full context cache; a real session stores an empty group
     # as ``""`` so the no-group development fallback remains immutable too.
     if _SESSION_GROUP is None and _SESSION_CONTEXT is not None:
         _SESSION_CONTEXT = None
     if _SESSION_CONTEXT is not None:
+        _validate_cached_roster_context(_SESSION_CONTEXT)
         return str(_SESSION_CONTEXT.get("group") or "") or None
     if _SESSION_GROUP is not None:
         # 会话内已通过指纹解析 → 不可变，直接返回
@@ -385,19 +406,26 @@ def _list_skills_execute(args: ListSkillsArgs, ctx: dict) -> dict:
         ) if groups_root.is_dir() else []
         return {"error": f"invalid group '{group}', valid: {', '.join(available) or '(none)'}"}
     skills: list[dict] = []
+    unavailable: list[dict] = []
     if skills_dir.is_dir():
         for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
             md = d / "SKILL.md"
             if not md.is_file():
                 continue
-            fm = _parse_skill_frontmatter(md.read_text(encoding="utf-8", errors="replace"))
+            from runner.distill.governance import read_governed_skill
+            try:
+                content = read_governed_skill(md)
+            except (OSError, ValueError, PermissionError) as exc:
+                unavailable.append({"id": d.name, "error": str(exc)})
+                continue
+            fm = _parse_skill_frontmatter(content)
             skills.append({
                 "id": d.name,               # 目录名（load_skill 的 skill_name 参数）
                 "name": fm["name"] or d.name,
                 "description": fm["description"],
                 "pattern": fm["pattern"],
             })
-    return {"group": group, "skills": skills}
+    return {"group": group, "skills": skills, "unavailable": unavailable}
 
 
 list_skills_tool = ToolDef(
@@ -511,13 +539,14 @@ def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
         selected = hits[: args.limit]
     else:
         service = MemoryService(db_path, root=memory_root, requester_group=group)
-        # A group membership is not project authorization. This product surface
-        # exposes only global contracts and the bound group's knowledge until
-        # project grants are explicitly resolved from the session.
         selected = service.search(query=args.query, scope="global", limit=args.limit,
                                   long_term_only=True, strict_errors=True)
         if group in _VALID_GROUPS:
             selected.extend(service.search(query=args.query, scope="groups", scope_id=group,
+                                           limit=args.limit, long_term_only=True, strict_errors=True))
+        from runner.memory.grants import project_read_grants
+        for project_id in project_read_grants(ctx):
+            selected.extend(service.search(query=args.query, scope="projects", scope_id=project_id,
                                            limit=args.limit, long_term_only=True, strict_errors=True))
         selected.sort(key=lambda hit: hit.score, reverse=True)
         selected = selected[:args.limit]
@@ -586,6 +615,8 @@ registry._tools[consume_status_tool.id] = consume_status_tool
 # 工具，不进各组 tool_allowlist，经统一 _meta 通道向控制器（OpenCode compose /
 # monitor）暴露——与 list_runs / list_skills 同路。
 import tools.subagent._register  # noqa: F401,E402  触发 subagent tool 注册（P-04）
+import tools.pop._register  # noqa: F401,E402
+import tools.history._register  # noqa: F401,E402
 import tools.stream._register  # noqa: F401,E402  触发 check_tool_stream 注册（_meta 通道）
 import tools.portfolio._register  # noqa: F401,E402  触发 portfolio 三工具注册（_meta 通道，确定性数值）
 
@@ -732,6 +763,26 @@ def _session_role(group: str | None = None) -> str:
     return str(context.get("role") or "analyst")
 
 
+def _validate_cached_roster_context(context: dict[str, Any]) -> None:
+    """Freeze session privileges without freezing revoked roster authorization."""
+    if context.get("identity_source") != "ssh_roster":
+        return
+    fingerprint = context.get("ssh_fingerprint")
+    if not fingerprint or fingerprint != _get_ssh_fingerprint():
+        raise RuntimeError("AUTHENTICATION_REQUIRED: SSH identity changed; reconnect")
+    try:
+        entry = identity.resolve_identity(fingerprint)
+    except Exception as exc:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: roster unavailable") from exc
+    if not entry:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: SSH identity revoked")
+    fields = ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject")
+    if any(entry.get(field) != context.get(field) for field in fields):
+        raise RuntimeError("AUTHENTICATION_REQUIRED: roster authorization changed; reconnect")
+    if set(entry.get("resource_scopes") or []) != set(context.get("resource_scopes") or []):
+        raise RuntimeError("AUTHENTICATION_REQUIRED: resource permissions changed; reconnect")
+
+
 def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
     """Resolve and freeze the complete non-secret MCP session context.
 
@@ -741,8 +792,15 @@ def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
     """
     global _SESSION_CONTEXT
 
+    gateway_context = _gateway_context()
+    if gateway_context is not None:
+        if group is not None and gateway_context["group"] != group:
+            raise RuntimeError("AUTHENTICATION_REQUIRED: gateway group mismatch")
+        return gateway_context
+
     mcp_group = group if group is not None else _get_mcp_group()
     if _SESSION_CONTEXT is not None:
+        _validate_cached_roster_context(_SESSION_CONTEXT)
         cached_group = str(_SESSION_CONTEXT.get("group") or "") or None
         if cached_group != mcp_group:
             raise RuntimeError("AUTHENTICATION_REQUIRED: session group changed")
@@ -860,7 +918,7 @@ def call_tool(name: str, arguments: dict) -> dict:
             )
         ctx: dict[str, Any] = {
             **session_context,
-            "session_id": _SESSION_ID,
+            "session_id": session_context.get("session_id") or _SESSION_ID,
             "_model": _get_model(),
             "_allowed_tool_ids": allowed_tools,
         }

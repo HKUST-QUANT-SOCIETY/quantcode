@@ -119,12 +119,10 @@ def tool_allowed_in_phase(
 ) -> bool:
     """阶段限流判定：仅 draft 态收窄为「方案类工具 + 只读工具」白名单。
 
-    phase 为 None（未启动工作流）或 "frozen"/"superseded" → 默认全放行；
-    但服务端已判定 ``solution_required`` 的 L2/L3 任务在方案冻结前仍收窄。
+    只有有效 frozen 方案，或未要求方案且未启动工作流时放行写操作。
+    已废弃、丢失或无法验证的方案不能作为继续执行的依据。
     """
-    if phase is None and solution_required:
-        return tool_id in SOLUTION_TOOLS or is_readonly_tool(tool_id)
-    if phase != "draft":
+    if phase == "frozen" or (phase is None and not solution_required):
         return True
     return tool_id in SOLUTION_TOOLS or is_readonly_tool(tool_id)
 
@@ -132,7 +130,7 @@ def tool_allowed_in_phase(
 def tool_denied_message(tool_id: str) -> str:
     """draft 态写类工具的拒绝信息（进 ToolMessage，给 LLM 可读的纠偏指引）。"""
     return (
-        f"{PHASE_DENY_MESSAGE}（P-10 方案先行：draft 态仅放行方案类工具 "
+        f"{PHASE_DENY_MESSAGE}（P-10 方案先行：当前方案未冻结、已失效或无法验证，仅放行方案类工具 "
         f"{list(SOLUTION_TOOLS)} 与只读工具）。被拒工具：{tool_id}。"
         "请先用 draft_solution 产出完整方案、经讨论轮次后 freeze_solution。"
     )
@@ -149,8 +147,6 @@ def filter_tools_for_phase(
     元素为 ToolDef（取 .id）或裸 str 均可。未要求方案且 phase != "draft" 时
     原样返回；L2/L3 的 phase=None 按 draft 白名单处理。
     """
-    if phase != "draft" and not (phase is None and solution_required):
-        return list(tools)
     return [
         t for t in tools
         if tool_allowed_in_phase(
@@ -260,7 +256,6 @@ class SolutionStore:
     ) -> None:
         self.db_path = Path(blackboard_db_path) if blackboard_db_path else None
         self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else SOLUTIONS_DIR
-        self._cache: dict[str, SolutionDoc] = {}
 
     # ----- blackboard -----
     def _service(self) -> BlackboardService:
@@ -278,7 +273,6 @@ class SolutionStore:
 
     def _persist(self, doc: SolutionDoc) -> SolutionDoc:
         doc = doc.model_copy(update={"updated_at": _utc_now_iso()})
-        self._cache[str(doc.id)] = doc
         payload = doc.model_dump(mode="json")
         self._service().write_value(
             scope=BlackboardScope.PROJECT,
@@ -301,8 +295,6 @@ class SolutionStore:
         return self._persist(doc)
 
     def get(self, doc_id: str) -> SolutionDoc | None:
-        if doc_id in self._cache:
-            return self._cache[doc_id]
         entry = self._service().get_entry(BlackboardScope.PROJECT, None, self.blackboard_key(doc_id))
         if entry is None or not isinstance(entry.value, dict):
             return None
@@ -310,7 +302,8 @@ class SolutionStore:
             doc = SolutionDoc.model_validate(entry.value)
         except Exception:
             return None
-        self._cache[doc_id] = doc
+        if not doc.doc_hash or doc.doc_hash != compute_doc_hash(doc):
+            raise SolutionWorkflowError(f"方案 {doc_id} 内容摘要不匹配，请恢复有效版本")
         return doc
 
 
@@ -337,16 +330,17 @@ def sync_phase_from_blackboard(
     跨进程语义：/solution 面板（AG-G）在同一 blackboard db 上冻结文档后，
     run 侧下一次 tool 执行即可读到 frozen、解除限流。
 
-    - phase 为 None（本 run 未启动工作流）→ 原样返回 None（不读 db，
-      既有非 P-10 run 零开销、零 db 副作用）；
-    - doc_id 缺失 → 原样返回 phase；
-    - 文档读不到（异常/被删）→ 保留 state 现值（不因回源失败放大故障）。
+    无工作流时不读库；已关联的方案每次读当前版本。
+    文档丢失、读取失败或摘要不符时返回 invalid，限制为只读与方案修复工具。
     """
-    if not phase or not doc_id:
-        return phase
-    doc = (store or SolutionStore(blackboard_db_path=blackboard_db_path)).get(str(doc_id))
+    if not doc_id:
+        return "invalid" if phase else None
+    try:
+        doc = (store or SolutionStore(blackboard_db_path=blackboard_db_path)).get(str(doc_id))
+    except Exception:
+        return "invalid"
     if doc is None:
-        return phase
+        return "invalid"
     return str(doc.status.value)
 
 
@@ -477,7 +471,7 @@ def supersede_solution(doc_id: str, *, store: SolutionStore | None = None) -> So
 
 
 def get_solution(doc_id: str, *, store: SolutionStore | None = None) -> SolutionDoc | None:
-    """按 id 读方案（memory → blackboard 回源）。"""
+    """按 id 读取 Blackboard 当前方案并校验摘要。"""
     return (store or get_store()).get(doc_id)
 
 

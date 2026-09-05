@@ -20,6 +20,7 @@ class Pop(BaseModel):
     pop_id: str = Field(min_length=1)
     type: PopType
     repo_or_package: str = Field(min_length=1)
+    repository: str | None = None
     change_summary: str = Field(min_length=1)
     old_value: Any = None
     new_value: Any = None

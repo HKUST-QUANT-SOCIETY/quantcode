@@ -50,7 +50,7 @@ from runner.routing.guards import MAX_ITERATIONS
 from runner.distill.inject import append_capability_digest  # P-07: 常驻能力目录摘要（best-effort）
 from tools.loop_detector import LoopDetector
 from tools.registry import ToolRegistry, registry as default_registry
-from tools.skills.loader import load_skill
+from tools.skills.loader import load_skill, load_skill_snapshot, validate_execution_skill
 
 _ORCHESTRATOR_ONLY_TOOLS = frozenset(
     {
@@ -60,7 +60,17 @@ _ORCHESTRATOR_ONLY_TOOLS = frozenset(
         "kill_subagent",
         "list_subagents",
         "check_tool_stream",
+        "list_run_history",
+        "get_run_history",
+        "list_pending_gates",
+        "admin_task_history",
+        "admin_report_history",
+        "admin_get_task_history",
+        "list_pops",
+        "get_gitgraph",
+        "update_pop_status",
         "review_distill_candidate",
+        "list_distill_candidates",
     }
 )
 
@@ -302,6 +312,7 @@ class AgentRunner:
             # 防止 LLM 伪造不在 tools/list 中的 tool call；未显式传入时
             # 使用本次 build 的本组工具集合，兼容直接库调用和测试 registry。
             allowed_tool_ids={tool.id for tool in tools},
+            receipt_db=Path(self.checkpoint_db).with_suffix(".tool-receipts.db"),
         )
         # fingerprint_history 在 build 作用域内声明，tool_routing_edge 和
         # rlhf_collect_node 共享同一列表引用，确保路由重算与原始决策一致。
@@ -478,16 +489,23 @@ class AgentRunner:
             确保同秒同 group+flow_name 不碰撞（避免 checkpoint 互相覆盖）。
             如果 caller 显式传 ``thread_id``，则原样使用，不追加。
         """
+        if self.role is not None:
+            # Authenticated callers share the same durable trace path whether
+            # they use the synchronous API, MCP, or a recovery operation.
+            return self.stream(
+                task=task, skill_name=skill_name, meta_skills=meta_skills,
+                system_prompt=system_prompt, thread_id=thread_id, flow_name=flow_name,
+                resume=resume, solution_required=solution_required,
+            )
         thread_id = self._generate_thread_id(thread_id, flow_name)
         solution_required = _requires_solution(task, solution_required)
-        if system_prompt is None and skill_name is not None:
-            if ":" in skill_name or self._is_meta_skill(skill_name):
-                system_prompt = load_skill(skill_name, meta_skills=meta_skills)
-            else:
-                system_prompt = load_skill(
-                    skill_name, group=self.group, meta_skills=meta_skills
-                )
-        elif system_prompt is None:
+        skill_binding = None
+        if skill_name is not None:
+            skill_group = None if ":" in skill_name or self._is_meta_skill(skill_name) else self.group
+            skill_text, skill_binding = load_skill_snapshot(skill_name, group=skill_group, meta_skills=meta_skills)
+            if system_prompt is None:
+                system_prompt = skill_text
+        if system_prompt is None:
             system_prompt = ""
 
         # P-07：能力目录常驻摘要（configs/capabilities.yaml 单源；best-effort，缺席不砸 run）。
@@ -530,6 +548,7 @@ class AgentRunner:
                     workspace_path=self.workspace_path,
                     github_subject=self.github_subject,
                     resource_scopes=self.resource_scopes,
+                    skill_binding=skill_binding,
                 )
                 final = app.invoke(init_state, config=config)
         except Exception as exc:
@@ -586,17 +605,20 @@ class AgentRunner:
         meta_skills = meta_skills or []
 
         # Resolve prompt once to avoid double-loading skill.
-        if system_prompt is None and skill_name is not None:
-            if ":" in skill_name or self._is_meta_skill(skill_name):
-                system_prompt = load_skill(skill_name, meta_skills=meta_skills)
-            else:
-                system_prompt = load_skill(skill_name, group=self.group, meta_skills=meta_skills)
-        elif system_prompt is None:
+        skill_binding = None
+        if skill_name is not None:
+            skill_group = None if ":" in skill_name or self._is_meta_skill(skill_name) else self.group
+            skill_text, skill_binding = load_skill_snapshot(skill_name, group=skill_group, meta_skills=meta_skills)
+            if system_prompt is None:
+                system_prompt = skill_text
+        if system_prompt is None:
             system_prompt = ""
 
         # P-07：能力目录常驻摘要（与 run() 同款注入；stream 路径同样每次 run 可见）。
         system_prompt = append_capability_digest(system_prompt, group=self.group)
 
+        from uuid import uuid4
+        attempt_id = uuid4().hex
         trace: list[dict] = []
         seq = 0
 
@@ -605,6 +627,8 @@ class AgentRunner:
             seq += 1
             event = {
                 "schema_version": "agent_trace.v1",
+                "event_id": f"{attempt_id}:{seq}",
+                "timestamp": time.time(),
                 "seq": seq,
                 "type": event_type,
                 "node": node,
@@ -614,6 +638,9 @@ class AgentRunner:
                 "iteration": iteration,
                 "data": data or {},
             }
+            if self.role is not None:
+                from runner.stream_channel import get_or_open
+                get_or_open(thread_id).emit_required(event)
             trace.append(event)
             if trace_sink is not None:
                 trace_sink(event)
@@ -663,6 +690,7 @@ class AgentRunner:
                 workspace_path=self.workspace_path,
                 github_subject=self.github_subject,
                 resource_scopes=self.resource_scopes,
+                skill_binding=skill_binding,
             )
 
         emit("agent_start", data={"task": task})
@@ -926,6 +954,7 @@ class AgentRunner:
         values = getattr(snapshot, "values", None)
         if not isinstance(values, dict) or not values:
             raise ValueError(f"checkpoint not found for thread_id={thread_id!r}")
+        validate_execution_skill(values)
 
         checkpoint_group = str(values.get("group") or "")
         if (self.role is not None or checkpoint_group) and checkpoint_group != self.group:
@@ -967,13 +996,39 @@ class AgentRunner:
                 raise PermissionError(
                     "checkpoint missing creator Session Context fields: " + ", ".join(missing)
                 )
-        if self.role is not None and not decision:
+        if self.role is not None and (not decision or values.get("actor_id") == self.actor_id):
+            if not decision and values.get("task_status") == "done":
+                raise ValueError("completed task cannot be resumed; inspect its history")
             if not self.actor_id or values.get("actor_id") != self.actor_id:
                 raise PermissionError("checkpoint belongs to another actor")
             for field in ("workspace_id", "workspace_path"):
                 expected = getattr(self, field, None)
                 if values.get(field) != expected:
                     raise PermissionError(f"checkpoint {field} does not match session")
+            # Tool execution reconstructs context from the checkpoint. Never
+            # restore privileges that have since changed in the live session.
+            for field in ("role", "github_subject"):
+                if values.get(field) != getattr(self, field, None):
+                    raise PermissionError(f"checkpoint {field} changed; start a new task")
+            if set(values.get("resource_scopes") or []) != set(self.resource_scopes):
+                raise PermissionError("checkpoint resource scopes changed; start a new task")
+        elif self.role is not None and decision:
+            session_file = os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE", "").strip()
+            if session_file:
+                from quantcode.identity_login import validate_checkpoint_identity
+                validate_checkpoint_identity(Path(session_file), values)
+            else:
+                # Legacy trusted SSH hosts keep the roster locally. A reviewer
+                # cannot resurrect a removed creator's checkpoint privileges.
+                from quantcode.identity import _load_entries
+                fields = ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject")
+                if not any(all(entry.get(field) == values.get(field) for field in fields)
+                           and set(entry.get("resource_scopes") or []) == set(values.get("resource_scopes") or [])
+                           for entry in _load_entries()):
+                    raise PermissionError("task creator authorization changed or cannot be verified")
+        from runner.tool_receipts import unresolved_receipts, ToolOutcomeUnknown
+        if unresolved_receipts(Path(self.checkpoint_db).with_suffix(".tool-receipts.db"), thread_id):
+            raise ToolOutcomeUnknown("任务存在未确认的工具执行结果；核对完成前不能自动恢复。")
         return values
 
     @staticmethod

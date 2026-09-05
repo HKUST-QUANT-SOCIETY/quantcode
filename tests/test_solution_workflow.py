@@ -448,11 +448,11 @@ def test_sync_phase_from_blackboard(sol_env, std_config):
     doc = _frozen_doc(store)
     # 激活态 + 文档存在 → 回源真实状态
     assert sync_phase_from_blackboard("draft", doc.id, str(db)) == "frozen"
-    # 未激活 → 原样返回，不读 db
-    assert sync_phase_from_blackboard(None, doc.id, str(db)) is None
-    # doc_id 缺失 / 文档不存在 → 保留现值
-    assert sync_phase_from_blackboard("draft", None, str(db)) == "draft"
-    assert sync_phase_from_blackboard("draft", "sol-nope", str(db)) == "draft"
+    # 有绑定文档时，即使缓存阶段缺失也回源真实状态
+    assert sync_phase_from_blackboard(None, doc.id, str(db)) == "frozen"
+    # 已激活但文档缺失时禁止继续写操作
+    assert sync_phase_from_blackboard("draft", None, str(db)) == "invalid"
+    assert sync_phase_from_blackboard("draft", "sol-nope", str(db)) == "invalid"
 
 
 # ---------------------------------------------------------------------------

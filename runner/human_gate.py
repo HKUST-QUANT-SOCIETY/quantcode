@@ -164,3 +164,15 @@ def format_waiting_for_human(
         "thread_id": thread_id,
         "gate": gate,
     }
+
+
+def pending_gate_from_writes(writes) -> dict | None:
+    """Read persisted LangGraph interrupts without executing the graph."""
+    for _, channel, value in writes or []:
+        if channel != "__interrupt__":
+            continue
+        for interrupt in value if isinstance(value, (tuple, list)) else [value]:
+            payload = getattr(interrupt, "value", interrupt)
+            if isinstance(payload, dict) and payload.get("kind") in {"merge", "permission"} and payload.get("gate_id"):
+                return payload
+    return None

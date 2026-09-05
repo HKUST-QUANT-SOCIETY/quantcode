@@ -1,7 +1,7 @@
 """能力卡片：加载（yaml 单源）/ group 可见过滤（Mask）/ Memory scope 映射 / list_capabilities 元工具。
 
 权限 Mask（F-04 / P-07，fail-closed）：
-- **游客组**（未认证 / ``guest`` / 不在六组枚举内的未知组）→ **仅 contract 卡可见**；
+- **游客组**（未认证 / ``guest`` / 不在八组枚举内的未知组）→ **仅 contract 卡可见**；
 - 已认证研究组 → contract 卡 + 全部 asset 卡可见（Git repo 权限同源：org 成员可见核心仓）；
 - 数据字段清单类**细节**对无权限组 Mask 的实现 = 两层投放分工：
   (a) 常驻摘要只有 id+name+when_to_use 一行（api_surface 本就不在摘要里）；
@@ -10,7 +10,7 @@
       ``MemoryService`` GROUP 隔离 fail-closed 拦截（零 service.py 改动）。
 
 list_capabilities 元工具：与 list_runs / list_skills 同走 **_meta 通道**
-（不进各组 tool_allowlist，六组 MCP server 的 tools/list 都能列出，只读无副作用）。
+（不进各组 tool_allowlist，八组 MCP server 的 tools/list 都能列出，只读无副作用）。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from runner.config_loader import load_yaml
+from runner.config_loader import read_yaml
 from schemas.groups import GROUP_IDS
 from schemas.capability_card import CapabilityCard
 
@@ -32,7 +32,7 @@ CAPABILITIES_CONFIG = "capabilities"
 # 游客组语义：未认证 / 显式 guest / 未知组一律按游客处理（fail-closed）。
 GUEST_GROUP = "guest"
 
-# 六研究组枚举（与 .opencode/groups/ 同源；identity/permission 权威源对齐由主 Agent 裁决）。
+# 八个业务与工程组枚举（与 .opencode/groups/ 同源；identity/permission 权威源对齐由主 Agent 裁决）。
 RESEARCH_GROUPS: frozenset[str] = frozenset(GROUP_IDS)
 
 
@@ -50,16 +50,21 @@ def load_cards(config_name: str = CAPABILITIES_CONFIG) -> list[CapabilityCard]:
         ValueError: 某张卡不符合 :class:`CapabilityCard` 契约（契约完整性 fail-fast；
             常驻摘要注入侧会兜底 catch，不让坏卡砸 run）。
     """
-    data = load_yaml(config_name)
+    data = read_yaml(config_name, strict=True)
     raw_cards = data.get("cards") or []
     if not isinstance(raw_cards, list):
         raise ValueError(f"capabilities.yaml 顶层 cards 必须是列表（got {type(raw_cards).__name__}）")
     cards: list[CapabilityCard] = []
+    seen: set[str] = set()
     for i, item in enumerate(raw_cards):
         try:
-            cards.append(CapabilityCard.model_validate(item))
+            card = CapabilityCard.model_validate(item)
         except ValidationError as e:
             raise ValueError(f"capabilities.yaml 第 {i} 张卡校验失败: {e}") from e
+        if card.id in seen:
+            raise ValueError(f"capabilities.yaml 重复卡片 id: {card.id}")
+        seen.add(card.id)
+        cards.append(card)
     return cards
 
 
@@ -72,7 +77,7 @@ def strict_reuse_enabled(config_name: str = CAPABILITIES_CONFIG) -> bool:
     the catalog-before-side-effect boundary during configuration drift.
     """
     try:
-        configured = load_yaml(config_name, strict=True).get("strict_reuse")
+        configured = read_yaml(config_name, strict=True).get("strict_reuse")
     except ValueError:
         # A malformed policy file must never silently disable the boundary.
         return True
@@ -106,7 +111,7 @@ def visible_cards(
     - Admin role → 全部卡片。
     """
     if _is_guest(requester_group):
-        return [c for c in cards if c.type == "contract"]
+        return [c for c in cards if c.type == "contract" and c.visibility != "admin"]
     if requester_role == "admin":
         return list(cards)
     return [c for c in cards if c.visibility != "admin"]
@@ -117,7 +122,7 @@ def card_memory_location(card: CapabilityCard) -> tuple[str, str | None]:
 
     - contract 卡 → ``("global", None)``：全组织统一口径（含游客可检索）；
     - asset 卡 → ``("groups", owner_group)``：细节仅属组可检索（跨组/游客被
-      GROUP 隔离 fail-closed 拦截）——因此 asset 卡 owner_group 必须是六组之一。
+      GROUP 隔离 fail-closed 拦截）——因此 asset 卡 owner_group 必须是八组之一。
     """
     if card.type == "contract":
         return ("global", None)
@@ -210,6 +215,14 @@ def _list_capabilities_execute(args: Any, ctx: dict) -> dict:
                 "when_not_to_reinvent": c.when_not_to_reinvent,
                 "owner_group": c.owner_group,
                 "canonical_repo": c.canonical_repo,
+                "domain_authority": c.domain_authority,
+                "inputs": c.inputs,
+                "outputs": c.outputs,
+                "depends_on": c.depends_on,
+                "consumed_by": c.consumed_by,
+                "deprecated_aliases": c.deprecated_aliases,
+                "source_commit": c.source_commit,
+                "distilled_at": c.distilled_at,
                 "maturity_status": c.maturity_status,
                 "integration_status": c.integration_status,
                 "observed_at": c.observed_at,

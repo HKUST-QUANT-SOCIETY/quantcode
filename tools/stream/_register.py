@@ -54,6 +54,9 @@ def _check_tool_stream_execute(args: CheckToolStreamArgs, ctx: dict) -> dict:
         result = read_from(args.run_id, args.cursor)
         has_new = bool(result.get("events")) or result.get("exists") is False
         if has_new or waited >= deadline:
+            if ctx.get("role") == "admin":
+                from runner.admin_scope import audited_read_result
+                return audited_read_result("check_tool_stream", ctx, result)
             return result
         _time.sleep(interval)
         waited += interval
@@ -62,11 +65,11 @@ def _check_tool_stream_execute(args: CheckToolStreamArgs, ctx: dict) -> dict:
 check_tool_stream_tool = ToolDef(
     id="check_tool_stream",
     description=(
-        "Incremental read of an agent run's event stream (attach_stream=true runs "
-        "append execution_trace events to .quantcode/streams/<run_id>.jsonl). "
+        "Incremental read of an agent run's durable event stream. Authenticated runs "
+        "always append execution_trace events to .quantcode/streams/<run_id>.jsonl. "
         "Returns {events, next_cursor, exists}: pass next_cursor back as cursor "
         "for the next poll; exists=false means no stream for this run_id "
-        "(run wasn't started with attach_stream). wait_s>0 blocks until new "
+        "(legacy run or removed archive). wait_s>0 blocks until new "
         "events appear or timeout."
     ),
     schema=CheckToolStreamArgs,

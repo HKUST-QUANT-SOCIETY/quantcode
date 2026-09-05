@@ -169,13 +169,16 @@ def test_mcp_session_context_freezes_identity_across_env_changes(monkeypatch):
 
     first = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
     monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:second")
-    second = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+    denied = mcp_server.call_tool("session_context", {})
+    assert denied["isError"] is True
+    assert "SSH identity changed; reconnect" in denied["content"][0]["text"]
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:first")
+    restored = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+    assert restored == first
+    entries["SHA256:first"]["role"] = "analyst"
+    revoked = mcp_server.call_tool("session_context", {})
+    assert revoked["isError"] is True
 
-    assert first["actor_id"] == second["actor_id"] == "actor-first"
-    assert first["role"] == second["role"] == "approver"
-    assert first["workspace_id"] == second["workspace_id"] == "workspace-first"
-    assert second["github_subject"] == "github-first"
-    assert second["identity_source"] == "ssh_roster"
 
 
 def test_search_memory_uses_group_acl_and_reports_empty_store(monkeypatch, tmp_path):

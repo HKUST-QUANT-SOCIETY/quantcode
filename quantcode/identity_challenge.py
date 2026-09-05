@@ -25,6 +25,10 @@ class ChallengeStore:
         self._items: dict[str, tuple[str, str, float]] = {}
 
     def issue(self, fingerprint: str) -> dict[str, str | int]:
+        now = time.monotonic()
+        self._items = {key: value for key, value in self._items.items() if value[2] > now}
+        if len(self._items) >= 1000:
+            raise IdentityChallengeError("too many outstanding challenges")
         challenge_id = uuid.uuid4().hex
         nonce = secrets.token_urlsafe(32)
         self._items[challenge_id] = (fingerprint, nonce, time.monotonic() + self.ttl_seconds)

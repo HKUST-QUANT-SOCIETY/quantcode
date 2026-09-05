@@ -117,7 +117,7 @@ def test_list_skills_missing_skills_dir(fake_repo):
     (fake_repo / ".opencode" / "groups" / "risk").mkdir(parents=True)
     result = mcp_server.call_tool("list_skills", {"group": "risk"})
     payload = json.loads(result["content"][0]["text"])
-    assert payload == {"group": "risk", "skills": []}
+    assert payload == {"group": "risk", "skills": [], "unavailable": []}
 
 
 # ---------------------------------------------------------------------------

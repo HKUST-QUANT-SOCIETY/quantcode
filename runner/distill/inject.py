@@ -63,7 +63,7 @@ def capability_digest(
         摘要块字符串（含首尾换行分隔的前导 ``\\n\\n`` 由
         :func:`append_capability_digest` 处理）；无可显示卡片时返回空串。
     """
-    from runner.config_loader import load_yaml
+    from runner.config_loader import read_yaml
     from runner.distill.cards import load_cards
 
     try:
@@ -77,7 +77,7 @@ def capability_digest(
         return ""
 
     if max_chars is None:
-        cfg_max = load_yaml(config_name).get("digest_max_chars")
+        cfg_max = read_yaml(config_name).get("digest_max_chars")
         max_chars = int(cfg_max) if cfg_max else DEFAULT_DIGEST_MAX_CHARS
 
     header = [_DIGEST_HEADER, _REUSE_DISCIPLINE]
@@ -104,9 +104,9 @@ def append_capability_digest(system_prompt: str, *, group: str | None = None) ->
     摘要为空（无卡 / 注入关闭）时也原样返回。
     """
     try:
-        from runner.config_loader import load_yaml
+        from runner.config_loader import read_yaml
 
-        if not load_yaml(CAPABILITIES_CONFIG).get("inject_enabled", True):
+        if not read_yaml(CAPABILITIES_CONFIG).get("inject_enabled", True):
             return system_prompt
         block = capability_digest(group)
         if not block:

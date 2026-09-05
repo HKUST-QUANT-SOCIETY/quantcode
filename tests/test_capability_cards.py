@@ -77,6 +77,36 @@ def test_card_minimal_valid():
     assert card.source_commit == ""        # in-repo 契约卡允许留空
 
 
+def test_catalog_and_policy_refresh_without_restarting_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
+    path = tmp_path / "capabilities.yaml"
+    path.write_text(yaml.safe_dump({"strict_reuse": False, "cards": [_VALID_MINIMAL]}))
+    assert load_cards()[0].integration_status == "UNVERIFIED"
+    assert strict_reuse_enabled() is False
+    path.write_text(yaml.safe_dump({"strict_reuse": True, "cards": [{**_VALID_MINIMAL, "integration_status": "UNAVAILABLE"}]}))
+    assert load_cards()[0].integration_status == "UNAVAILABLE"
+    assert strict_reuse_enabled() is True
+    path.write_text("cards: [broken")
+    with pytest.raises(ValueError):
+        load_cards()
+    assert strict_reuse_enabled() is True
+
+
+def test_duplicate_catalog_ids_are_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "capabilities.yaml").write_text(yaml.safe_dump({"cards": [_VALID_MINIMAL, _VALID_MINIMAL]}))
+    with pytest.raises(ValueError, match="重复"):
+        load_cards()
+
+
+def test_admin_contract_is_not_visible_to_guests():
+    card = CapabilityCard.model_validate({**_VALID_MINIMAL, "type": "contract", "visibility": "admin"})
+    assert visible_cards([card], None) == []
+    assert visible_cards([card], "factor", "analyst") == []
+    assert visible_cards([card], "factor", "admin") == [card]
+
+
 def test_card_type_enum_enforced():
     bad = dict(_VALID_MINIMAL, type="meeting-notes")  # 会议记忆不是合法蒸馏物
     with pytest.raises(ValidationError):

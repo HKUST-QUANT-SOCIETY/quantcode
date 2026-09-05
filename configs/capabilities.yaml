@@ -9,11 +9,11 @@
 # 不进卡片正文——细节走属组 scope Memory（弱保证），常驻摘要只有 id+name+when_to_use（强保证）。
 #
 # schema：schemas/capability_card.py::CapabilityCard（extra=forbid）+ schemas/capability-card.schema.json。
-# 加载：runner/distill/cards.py（经 runner/config_loader.load_yaml，QUANTCODE_CONFIG_DIR 可覆盖）。
+# 加载：runner/distill/cards.py（经 runner/config_loader.read_yaml，QUANTCODE_CONFIG_DIR 可覆盖）。
 #
 # 复用纪律（运行时指令，runner/distill/inject.py 注入）：需求识别到已有能力覆盖不全
 # → 先向人征询，不许直接跳自造方案。strict_reuse=true 时进一步禁止引入外部自造实现
-# （仅允许已登记能力）——默认 false（P0 只注入纪律提示，不做硬拦截，收窄由主 Agent 裁决）。
+# （仅允许已登记能力）。生产环境强制开启；下方 false 仅供显式 dev/test 使用。
 # Local dev/test may opt out for fixture-only runs. Production runtime forces
 # this policy on even if a stale config still contains false.
 strict_reuse: false

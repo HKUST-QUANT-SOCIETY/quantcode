@@ -48,7 +48,17 @@ _INNER_AGENT_EXCLUDED_TOOLS = frozenset(
         "kill_subagent",
         "list_subagents",
         "check_tool_stream",
+        "list_run_history",
+        "get_run_history",
+        "list_pending_gates",
+        "admin_task_history",
+        "admin_report_history",
+        "admin_get_task_history",
+        "list_pops",
+        "get_gitgraph",
+        "update_pop_status",
         "review_distill_candidate",
+        "list_distill_candidates",
     }
 )
 
@@ -110,6 +120,9 @@ class RunAgentArgs(BaseModel):
         description="resume 模式时必传：要恢复的已暂停 thread_id。"
         "start 模式可选：指定则用该值作为 thread_id。",
     )
+    expected_gate_id: str | None = Field(default=None, max_length=256, description="Exact HumanGate ID shown to the reviewer; required with decision.")
+    expected_checkpoint_id: str | None = Field(default=None, max_length=128, description="Checkpoint shown in the recovery preview; reject recovery if the task advanced.")
+    resume: bool = Field(default=False, description="Resume an interrupted ordinary task from its latest checkpoint. Requires thread_id and the original actor/workspace; never supplies a HumanGate decision.")
     decision: Literal["approve", "reject", "proceed", "abort"] | None = Field(  # type: ignore[valid-type]
         default=None,
         description="Human gate 决策。有值 → resume 模式；无值 → start 模式。"
@@ -119,9 +132,8 @@ class RunAgentArgs(BaseModel):
     # ── attach_stream：start run 执行轨迹旁落到 JSONL 通道 ──
     attach_stream: bool = Field(
         default=False,
-        description="start 模式可选：True 时把 execution_trace 事件逐条 append 到 "
-        ".quantcode/streams/<thread_id>.jsonl，控制器用 check_tool_stream 按游标"
-        "中途增量读取。False（默认）不建文件，行为不变。",
+        description="兼容旧的未认证本地调用：True 时附加事件流。已认证任务始终持久保存"
+        "执行事件（包括普通恢复和 Gate 恢复），不受此开关影响；check_tool_stream 可增量读取。",
     )
 
 
@@ -186,6 +198,21 @@ def _mcp_checkpoint_db() -> Path:
 
 
 def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
+    from uuid import uuid4
+    from runner.execution_lock import execution_lock
+
+    if not args.thread_id and not args.resume and args.decision is None:
+        args = args.model_copy(update={"thread_id": f"run-{uuid4().hex}"})
+    if not args.thread_id:
+        return {"status": "error", "error": "thread_id is required for resume mode."}
+    try:
+        with execution_lock(_mcp_checkpoint_db(), args.thread_id):
+            return _run_agent_execute_locked(args, ctx)
+    except (OSError, RuntimeError) as exc:
+        return {"status": "error", "thread_id": args.thread_id, "error": str(exc)}
+
+
+def _run_agent_execute_locked(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     """执行 run_agent — start 或 resume。
 
     **start mode** (``decision is None``):
@@ -227,7 +254,17 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
 
     # start mode 缺 task 是请求错误，与 model 是否配置无关 —— 必须在 model gate 前校验，
     # 否则无 API key 环境下会误报 "No LLM model configured"（PR25 遗留的环境依赖）。
-    if args.decision is None and not args.task:
+    if args.decision is not None and (ctx or {}).get("role") not in {None, "approver", "admin"}:
+        return {"status": "error", "error": "PERMISSION_DENIED: only an approver or admin may resume a HumanGate"}
+    if args.decision is not None and not args.expected_gate_id:
+        return {"status": "error", "error": "expected_gate_id is required for HumanGate decision"}
+    if args.resume and not args.expected_checkpoint_id:
+        return {"status": "error", "error": "expected_checkpoint_id is required; load the latest history before recovery"}
+    if args.resume and args.decision is not None:
+        return {"status": "error", "error": "resume and HumanGate decision are mutually exclusive"}
+    if (args.resume or args.decision is not None) and not args.thread_id:
+        return {"status": "error", "error": "thread_id is required for resume mode."}
+    if args.decision is None and not args.resume and not args.task:
         return {
             "status": "error",
             "error": "task is required for start mode (no decision provided).",
@@ -254,7 +291,7 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     resolved_skill = _resolve_skill_name(args.skill_name, group, args.task or "")
 
     # ── resume mode ──
-    if args.decision is not None:
+    if args.decision is not None or args.resume:
         return _resume_mode(
             args, group, model, checkpoint_db, resolved_skill,
             allowed_tool_ids=_inner_agent_tool_ids(ctx.get("_allowed_tool_ids")),
@@ -392,7 +429,7 @@ def _start_mode(
     try:
         # 优先用 stream()；回退到 run()
         if hasattr(runner, "stream"):
-            if args.attach_stream:
+            if args.attach_stream and role is None:
                 final_state = _stream_call()
             else:
                 final_state = runner.stream(
@@ -492,14 +529,14 @@ def _resume_mode(
             "error": "thread_id is required for resume mode.",
         }
 
-    if role not in {"approver", "admin"}:
+    if not args.resume and role not in {"approver", "admin"}:
         return {
             "status": "error",
             "error": "PERMISSION_DENIED: only an approver or admin may resume a HumanGate",
         }
 
-    decision = args.decision or "reject"
-    normalized = normalize_external_decision(decision)
+    decision = args.decision
+    normalized = normalize_external_decision(decision) if decision else None
 
     runner = AgentRunner(
         group=group,
@@ -518,19 +555,40 @@ def _resume_mode(
     )
 
     try:
-        # 优先用 stream() + resume() 组合：无 stream 则用 resume()
-        # AgentRunner.resume() 内部用 Command(resume=...) 恢复中断点
-        final_state = runner.resume(
-            thread_id=args.thread_id,
-            decision=decision,
-            skill_name=resolved_skill,
-            flow_name="mcp_compose",
-        )
+        if args.resume:
+            if role not in {"analyst", "approver", "admin"}:
+                raise PermissionError("authenticated Session Context is required for recovery")
+            from runner.stream_channel import get_or_open
+            if args.expected_checkpoint_id:
+                from runner.langgraph_base import get_checkpointer
+                latest = get_checkpointer(checkpoint_db).get_tuple({"configurable": {"thread_id": args.thread_id}})
+                if latest is None or latest.config["configurable"].get("checkpoint_id") != args.expected_checkpoint_id:
+                    raise ValueError("checkpoint changed since preview; reload history before recovery")
+
+            final_state = runner.stream(
+                task="", thread_id=args.thread_id, resume=True,
+                skill_name=resolved_skill, flow_name="mcp_compose",
+                trace_sink=get_or_open(args.thread_id).emit if args.attach_stream and role is None else None,
+            )
+        else:
+            from runner.langgraph_base import get_checkpointer
+            from runner.human_gate import pending_gate_from_writes
+            latest = get_checkpointer(checkpoint_db).get_tuple({"configurable": {"thread_id": args.thread_id}})
+            pending = pending_gate_from_writes(latest.pending_writes) if latest else None
+            if not pending or pending["gate_id"] != args.expected_gate_id:
+                raise ValueError("Gate changed or resolved; reload the approval queue")
+            if args.expected_checkpoint_id and latest.config["configurable"].get("checkpoint_id") != args.expected_checkpoint_id:
+                raise ValueError("checkpoint changed; reload the approval queue")
+            final_state = runner.resume(
+                thread_id=args.thread_id, decision=decision,
+                skill_name=resolved_skill, flow_name="mcp_compose",
+            )
 
         result = _format_result(final_state, group, actor_id=actor_id, role=role)
 
         # 将 human_decision 注入结果
-        result["human_decision"] = normalized
+        if normalized is not None:
+            result["human_decision"] = normalized
         result["thread_id"] = args.thread_id
 
         # 检查状态：如果 human_gate routing 判为 abort → 显示 rejected
@@ -648,10 +706,11 @@ run_agent_tool = ToolDef(
         "quant tools (read_pr, calc_risk, write_blackboard, etc.), and produces "
         "structured results. Use this for complex multi-step workflows that "
         "require tool orchestration across groups.\n\n"
-        "Two-phase protocol: first call without decision to start a task. "
+        "Start with task; use resume=true and thread_id for explicit ordinary checkpoint recovery by its owner. "
+        "HumanGate protocol: first call without decision to start a task. "
         "If the result status is 'waiting_for_human', display the gate info "
         "to the user, collect approve/reject, then call again with the same "
-        "thread_id and decision='approve' or 'reject'."
+        "thread_id, expected_gate_id from the displayed Gate, and decision='approve' or 'reject'."
     ),
     schema=RunAgentArgs,
     execute=_run_agent_execute,
