@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from runner.distill.governance import review_candidate
+from runner.distill.governance import read_governed_skill
+import runner.distill.governance as governance
 
 
 def _candidate(root: Path, *, content: str = "---\nstatus: draft\n---\n\n# reviewed\n") -> None:
@@ -99,3 +101,67 @@ def test_candidate_promotion_rejects_out_of_tree_draft(tmp_path):
             "factor-flow", "promote", reviewer_id="factor-lead", reviewer_role="approver",
             reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published",
         )
+
+
+@pytest.mark.parametrize("stage", ["install", "decision_audit", "activation"])
+def test_interrupted_publication_stays_inactive_and_can_resume(tmp_path, monkeypatch, stage):
+    _candidate(tmp_path)
+    options = dict(reviewer_id="lead", reviewer_role="approver", reviewer_group="factor",
+                   candidates_dir=tmp_path, publish_root=tmp_path / "published")
+    original_link = governance.os.link
+    original_audit = governance._audit
+    original_write = governance._atomic_write
+
+    def link(*args, **kwargs):
+        if stage == "install":
+            raise OSError("simulated interruption during installation")
+        return original_link(*args, **kwargs)
+
+    def audit(path, event):
+        if stage == "decision_audit" and event["action"] == "promote":
+            raise OSError("simulated audit disk failure")
+        return original_audit(path, event)
+
+    def write(path, value):
+        if stage == "activation" and any(item.get("status") == "promoted" for item in value.get("candidates", [])):
+            raise OSError("simulated interruption before activation")
+        return original_write(path, value)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(governance.os, "link", link)
+        fault.setattr(governance, "_audit", audit)
+        fault.setattr(governance, "_atomic_write", write)
+        with pytest.raises(OSError, match="simulated"):
+            review_candidate("factor-flow", "promote", **options)
+    saved = json.loads((tmp_path / "index.json").read_text())["candidates"][0]
+    assert saved["status"] == "publishing"
+    published = Path(saved["published_skill_path"])
+    if published.exists():
+        with pytest.raises(PermissionError, match="not active"):
+            read_governed_skill(published)
+    resumed = review_candidate("factor-flow", "promote", **options)
+    assert resumed["status"] == "promoted"
+    assert "status: accepted" in read_governed_skill(published)
+    review_candidate("factor-flow", "revoke", **options)
+    assert published.exists()  # Preserve the evidence; revoke via authority.
+    with pytest.raises(PermissionError, match="not active"):
+        read_governed_skill(published)
+
+
+@pytest.mark.parametrize("change", ["source", "published", "expired", "naive_expiry"])
+def test_changed_or_expired_skill_is_rejected_on_next_read(tmp_path, change):
+    _candidate(tmp_path)
+    item = review_candidate("factor-flow", "promote", reviewer_id="lead", reviewer_role="approver",
+                            reviewer_group="factor", candidates_dir=tmp_path, publish_root=tmp_path / "published")
+    published = Path(item["published_skill_path"])
+    assert read_governed_skill(published)
+    if change == "source":
+        Path(item["skill_md_path"]).write_text("changed source")
+    elif change == "published":
+        published.write_text("changed published skill")
+    else:
+        index = json.loads((tmp_path / "index.json").read_text())
+        index["candidates"][0]["expires_at"] = "2000-01-01T00:00:00+00:00" if change == "expired" else "2999-01-01T00:00:00"
+        (tmp_path / "index.json").write_text(json.dumps(index))
+    with pytest.raises(PermissionError):
+        read_governed_skill(published)

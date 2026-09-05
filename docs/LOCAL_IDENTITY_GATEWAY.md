@@ -32,7 +32,7 @@ python -m quantcode.gateway --roster /absolute/approved-roster.yaml --database /
 
 ## 验收证据与剩余接入
 
-`tests/test_identity_gateway.py` 已用独立临时 SSH agent 和临时密钥执行真实签名，验证一次性 challenge、会话哈希持久化、退出/过期、角色/组/权限/工作区变更撤销，以及待审核 roster 拒绝签入。全量 pytest 为 1,132 passed / 4 skipped。没有修改或加载用户实际密钥。
+`tests/test_identity_gateway.py` 已用独立临时 SSH agent 和临时密钥执行真实签名，验证一次性 challenge、会话哈希持久化、退出/过期、角色/组/权限/工作区变更撤销，以及待审核 roster 拒绝签入。当前全量结果见 [功能验收台账](audit/FULL_PRODUCT_AUDIT_2026-09-05.md)，避免在接入指南重复维护滚动数字。没有修改或加载用户实际密钥。
 
 宿主错误配置、并发登录与 MCP 会话一致性的完整链路，以及浏览器身份选择→签入→工作区更新仍待专项验收。现有 4096 进程未加载新增身份接口，MCP 未连接；正式人员授权及外部研发 SSH 环境也仍需正确配置。
 
