@@ -1,0 +1,5 @@
+# Canonical private components audited on 2026-09-05. Every dependency is
+# commit-pinned; installing requires GitHub read access to the private repos.
+data-access[service] @ git+https://github.com/HKUST-QUANT-SOCIETY/data_access.git@54475369f53a01cbd105067483f582599d496d5b
+factor-engine[service] @ git+https://github.com/HKUST-QUANT-SOCIETY/factor_engine.git@e49e9971357afd8b0cbd9f07e04234be69a09fed
+quant_evaluator @ git+https://github.com/HKUST-QUANT-SOCIETY/quant_evaluator.git@39f0256888a0a1997c108e534e3b6ad9d89158ec

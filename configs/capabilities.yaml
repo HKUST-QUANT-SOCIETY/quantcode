@@ -32,7 +32,7 @@ cards:
     visibility: global_shared
     maturity_status: PRODUCTION
     integration_status: PARTIAL
-    observed_at: "2026-09-04"
+    observed_at: "2026-09-05"
     api_surface:
       - "schemas/data_contracts.py::TargetReturnView/v1 — horizon∈{1,5,10,20}、adjusted=hfq（后复权）、alignment=t+1→t+2"
       - "唯一取值源 = 数据仓目标收益表（后复权表）；本契约只登记口径，不定义计算"
@@ -57,7 +57,8 @@ cards:
     api_surface:
       - "quant_evaluator.api：EvaluationRequest / EvaluationBundle / evaluate()（评估唯一入口）"
       - "quant_evaluator.contracts.label_bundle.LabelBundle — 显式前向标签，硬口径 price_convention='vwap_to_vwap'"
-      - "指标注册表：docs/METRIC_REGISTRY_COVERAGE.csv 实测 60 个注册指标（spec v0.2 的 51 为旧口径）"
+      - "当前 README：51 个已注册指标，其中 27 个可立即计算；其余占位或 metadata-only 必须按版本校验"
+      - "QuantCode 通过已安装 Python 包调用 evaluate(FactorBatch, LabelBundle)；该仓 DataAccess/FactorEngine adapters 仍为 stub"
     inputs: ["FactorBatch", "LabelBundle", "EvaluationContext"]
     outputs: ["EvaluationArtifact / MetricArtifact"]
     depends_on: ["data-access", "factor-engine"]
@@ -66,8 +67,8 @@ cards:
     when_to_use: "因子批量评估需要 IC / 分位数 / 回撤 / 换手 / 置信区间等指标时（F-06 组织评估能力登记）"
     when_not_to_reinvent: "别自写 rank_ic / quantile_spread / block_bootstrap_ci 等指标——注册表已覆盖；别自算 LabelBundle 的时序标签"
     owner_group: factor
-    source_commit: "73223a4"
-    distilled_at: "2026-09-01"
+    source_commit: "39f0256888a0a1997c108e534e3b6ad9d89158ec"
+    distilled_at: "2026-09-05"
 
   - id: factor-engine
     name: Factor Engine DSL 因子计算引擎
@@ -77,7 +78,7 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: PARTIAL
-    observed_at: "2026-09-04"
+    observed_at: "2026-09-05"
     api_surface:
       - "factor_engine.api：col / rank / ts_mean / Factor / parse_expr（DSL；算子覆盖以对应版本注册表为准）"
       - "factor_engine.runtime.engine.FactorEngine + backend.factory.build_backend('auto')（SQL 下推→Polars→Pandas）"
@@ -90,8 +91,8 @@ cards:
     when_to_use: "把因子公式（DSL）算成 (日期×标的) 因子值并落因子湖；批量算子表达式计算"
     when_not_to_reinvent: "别手写向量化因子计算管线、别再造算子库——DSL 已有统一算子注册表；它不做数据清洗/评估/回测（各归其库）"
     owner_group: factor
-    source_commit: "c374cbd"
-    distilled_at: "2026-09-01"
+    source_commit: "e49e9971357afd8b0cbd9f07e04234be69a09fed"
+    distilled_at: "2026-09-05"
 
   - id: data-access
     name: Data Access PIT 数据层
@@ -101,10 +102,11 @@ cards:
     visibility: group
     maturity_status: PRODUCTION
     integration_status: PARTIAL
-    observed_at: "2026-09-04"
+    observed_at: "2026-09-05"
     api_surface:
       - "data_access.get_store() → read / read_frame / read_uri / read_factors / read_joined / read_asof（读写唯一入口）"
-      - "写：write_arrow / upsert / publish_from_staging；HTTP：data-access-server + DataAccessClient"
+      - "写：write_arrow / upsert / publish_from_staging；HTTP：python -m data_access.service + DataAccessClient"
+      - "0.10.2 wheel 未发布 data-access-server console entry point；服务模块本身可由 uvicorn/python -m 启动"
       - "注册表 73 数据集 + 56 语义字段（字段清单本体为 Mask 细节，不进卡片）"
     inputs: ["dataset / fields / date / universe"]
     outputs: ["Arrow / DataFrame / ReadHandle / Snapshot"]
@@ -113,8 +115,8 @@ cards:
     when_to_use: "一切行情 / 因子值 / parquet 的读写——读数据的第一入口"
     when_not_to_reinvent: "禁止直接 pd.read_parquet 裸读；禁止绕过 PIT 语义自取时点数据；禁止自建第二套数据集注册表"
     owner_group: factor
-    source_commit: "b55656a"
-    distilled_at: "2026-09-01"
+    source_commit: "54475369f53a01cbd105067483f582599d496d5b"
+    distilled_at: "2026-09-05"
 
   - id: quant-platform
     name: Quant Platform DTO 集成契约层

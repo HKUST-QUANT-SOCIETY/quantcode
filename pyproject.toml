@@ -36,6 +36,9 @@ dev = [
 ssh = [
   "paramiko>=3.4",
 ]
+github = [
+  "keyring>=25.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

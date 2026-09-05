@@ -13,6 +13,7 @@ from runner.pop_service import PopService
 from runner.dependency_versions import PARSER_REVISION, is_dependency_file, parse_versions
 from runner.github_tree import repository_files
 from schemas.pop import Pop, PopType
+from schemas.gitgraph import GitGraph, GitGraphSyncResult
 
 
 def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
@@ -25,7 +26,8 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
     if not token:
         raise PermissionError("GitHub identity token is not connected")
     repos, visibility = _visible_repos(ctx, token)
-    get = lambda path: _gh_get(path, token)
+    def get(path: str):
+        return _gh_get(path, token)
     store = PopService(db_path or PROJECT_ROOT / ".quantcode" / "pops.db")
     scope = hashlib.sha256(json.dumps([
         ctx.get("actor_id"), ctx.get("group"), ctx.get("role"), ctx.get("workspace_id"),
@@ -182,8 +184,16 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
                          "ON CONFLICT(scope,repo) DO UPDATE SET payload=excluded.payload",
                          (scope, full_name, json.dumps(graph)))
         output.append(graph)
-    result = {"repos": output, "visibility_source": visibility,
-              "sync_status": "PARTIAL" if any(repo["sync_status"] == "PARTIAL" for repo in output) else "CONNECTED"}
+    validated = [GitGraph.model_validate(repo).model_dump(mode="json") for repo in output]
+    result = GitGraphSyncResult(
+        repos=validated,
+        visibility_source=visibility,
+        sync_status=(
+            "PARTIAL" if any(repo["sync_status"] == "PARTIAL" for repo in validated)
+            else "CONNECTED"
+        ),
+        observed_at=datetime.now(timezone.utc),
+    ).model_dump(mode="json")
     if ctx.get("role") == "admin":
         from runner.admin_scope import audited_read_result
         return audited_read_result("get_gitgraph", ctx, result)

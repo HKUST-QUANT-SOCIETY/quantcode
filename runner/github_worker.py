@@ -59,6 +59,8 @@ def sync_once(gateway, *, sync=None, stop=None) -> None:
         try:
             result = sync(context)
             attempt.update(last_attempt_status=result["sync_status"], repositories=len(result.get("repos", [])))
+        except PermissionError as exc:
+            attempt.update(last_attempt_status="PERMISSION_DENIED", error_type=type(exc).__name__)
         except Exception as exc:
             # Raw transport exceptions can contain request credentials. Persist
             # only the class; detailed repo errors remain in the scoped graph API.

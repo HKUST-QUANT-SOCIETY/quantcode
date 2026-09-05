@@ -228,6 +228,11 @@ def _eligible_factor_report() -> dict:
         "turnover": {"monthly": 0.3},
         "formula": "rank(close)",
         "eval_run_id": "run-narrowing-1",
+        "component_result": {
+            "component_id": "quant-evaluator",
+            "result_status": "SUCCEEDED",
+            "artifacts": [{"path": "fixture.json", "sha256": "a" * 64}],
+        },
     }
 
 

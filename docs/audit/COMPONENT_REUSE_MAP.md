@@ -1,6 +1,6 @@
 # HKUST 组件复用交叉表
 
-依据：用户提供的 [HKUST_QUANT_COMPONENTS_GUIDE.md](../references/HKUST_QUANT_COMPONENTS_GUIDE.md)，接收于 2026-09-05；主功能基线仍为三份顶层设计。未访问 GitHub 验证最新提交/API/部署状态。以下 integration 为本地 `configs/capabilities.yaml` 登记值，不是本轮新建立的连接。
+依据：用户提供的 [HKUST_QUANT_COMPONENTS_GUIDE.md](../references/HKUST_QUANT_COMPONENTS_GUIDE.md)，接收于 2026-09-05；主功能基线仍为三份顶层设计。2026-09-05 已只读核验 DataAccess、FactorEngine、QuantEvaluator 的私有仓 HEAD、打包声明和公开接口，详见 [F-06/F-08/F-09 台账增量](F06_F08_F09_LEDGER_2026-09-05.md)。以下 integration 为本地登记值；真实数据和真实授权尚缺，因此未升级为 CONNECTED。
 
 | Canonical repo | 唯一职责 / 契约 | QuantCode 应复用的方式 | 本地 integration |
 |---|---|---|---|

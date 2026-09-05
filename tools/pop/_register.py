@@ -1,4 +1,6 @@
 """Persisted notifications, authorized against current GitHub repository access."""
+from datetime import datetime, timezone
+
 from pydantic import BaseModel, Field
 
 from runner.langgraph_base import PROJECT_ROOT
@@ -60,7 +62,24 @@ class GraphArgs(BaseModel):
 
 def _graph(args: GraphArgs, ctx: dict) -> dict:
     from runner.github_sync import sync_graph
-    return sync_graph(ctx)
+    from schemas.gitgraph import GitGraphSyncResult
+
+    try:
+        return sync_graph(ctx)
+    except PermissionError as exc:
+        return GitGraphSyncResult(
+            visibility_source="github-team:unverified",
+            sync_status="PERMISSION_DENIED",
+            observed_at=datetime.now(timezone.utc),
+            errors=[str(exc)],
+        ).model_dump(mode="json")
+    except Exception as exc:
+        return GitGraphSyncResult(
+            visibility_source="github-team:unverified",
+            sync_status="ERROR",
+            observed_at=datetime.now(timezone.utc),
+            errors=[f"GitHub synchronization failed: {type(exc).__name__}"],
+        ).model_dump(mode="json")
 
 
 tool = ToolDef(id="get_gitgraph", description="Read all currently authorized repositories and branches, HEADs, recent commit DAG, dependency-file changes and sync status. Maintains a local baseline and notification cache; does not write GitHub.", schema=GraphArgs, execute=_graph)

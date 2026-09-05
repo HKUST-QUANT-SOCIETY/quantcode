@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 from langchain_core.messages import AIMessage
+from pydantic import ValidationError
 
 from tools.registry import register_tool
 from tools.registry import registry as global_registry
@@ -219,13 +220,10 @@ def test_gen_schema_llm_response_missing_contract_fields_gets_patched(monkeypatc
 
 
 def test_quant_evaluator_unavailable_never_returns_mock_metrics(monkeypatch):
-    monkeypatch.delenv("QUANT_EVALUATOR_API_URL", raising=False)
-    monkeypatch.delenv("QUANT_EVALUATOR_API_KEY", raising=False)
+    """FactorSpec must not be accepted as a substitute for QE's typed inputs."""
     t = global_registry.get("quant_evaluator")
-    out = t.execute(t.schema(spec={"name": "pb_roe"}), ctx={})
-    assert out["result_status"] == "UNAVAILABLE"
-    assert out["output_data"] is None
-    assert "_is_mock" not in out
+    with pytest.raises(ValidationError):
+        t.schema(spec={"name": "pb_roe"})
 
 
 # ---------------------------------------------------------------------------

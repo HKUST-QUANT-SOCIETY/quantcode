@@ -1,0 +1,31 @@
+{
+  "observed_at": "2026-09-05T15:45:03Z",
+  "evidence_class": "synthetic-component-smoke",
+  "production_evidence": false,
+  "environment": "hkust-quant",
+  "versions": {
+    "data-access": "0.10.2",
+    "factor-engine": null,
+    "quant_evaluator": "0.0.1a1"
+  },
+  "data_access": {
+    "call": "FastAPI TestClient(create_app())",
+    "health_status": 200,
+    "health_body": {"status": "ok", "version": "0.10.2"},
+    "ready_status": 503,
+    "ready_body": {"detail": "Service not ready (startup checks failed)"}
+  },
+  "quant_evaluator": {
+    "call": "quant_evaluator.evaluate(FactorBatch, LabelBundle, metrics=('rank_ic','coverage'))",
+    "result_status": "SUCCEEDED",
+    "factor_id": "synthetic_f06_smoke",
+    "data_snapshot_id": "synthetic-not-production",
+    "label_source_ref": "synthetic://explicit-label-fixture",
+    "rank_ic": 1.0,
+    "rank_ic_observations": 30,
+    "coverage": 1.0,
+    "coverage_observations": 1800,
+    "artifact_sha256": "2201dc37ebfe9ec579f4ee27cacb07a79c258f3baa5ccb752658bcc5c799322c",
+    "artifact_size_bytes": 3524
+  }
+}

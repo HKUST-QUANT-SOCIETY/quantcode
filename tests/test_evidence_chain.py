@@ -106,7 +106,9 @@ def test_report_replay_deterministic(evidence_dir: Path):
     report1 = ev.build_report(run_id, evidence_dir)
     report2 = ev.build_report(run_id, evidence_dir)
     assert report1.report_hash == report2.report_hash
-    assert report1.generated_at != report2.generated_at  # 时间不同但指纹一致
+    # Windows wall-clock resolution may return the same microsecond for adjacent
+    # calls; hash determinism must not rely on timestamps being distinct.
+    assert report1.generated_at.tzinfo is not None
 
     # 与审计日志重算链一致：报告里的链逐环哈希与磁盘 JSONL 重放相等
     events = ev.verify_chain(run_id, evidence_dir)
