@@ -292,3 +292,20 @@ def test_wrapper_empty_period_zero_report():
     assert raw["total_pnl"] == 0.0
     assert raw["engine"] == "options_v1"
     assert "empty period" in str(raw["notes"])
+
+
+def test_options_backtest_rejects_non_finite_and_invalid_expiry_inputs():
+    with pytest.raises(ValueError, match=r"underlying_prices\[1\]"):
+        run_options_backtest([100.0, float("nan")], [[], []])
+
+    with pytest.raises(ValueError, match="expiry_offset_days"):
+        run_options_backtest(
+            [100.0],
+            [[{"leg_type": "call", "strike": 100.0, "expiry_offset_days": -1, "quantity": 1}]],
+        )
+
+    with pytest.raises(ValueError, match="quantity"):
+        run_options_backtest(
+            [100.0],
+            [[{"leg_type": "call", "strike": 100.0, "expiry_offset_days": 1, "quantity": 1.5}]],
+        )

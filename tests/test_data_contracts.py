@@ -82,6 +82,18 @@ def test_returns_dataset_nan_whitelist_and_inf_rejected():
             dates=[date(2024, 1, 2), date(2024, 1, 3)],
             returns={"600519.SH": [0.01, float("inf")]},
         )
+
+
+def test_matrix_contracts_reject_ragged_rows():
+    with pytest.raises(ValidationError, match="columns"):
+        FactorPanel(**_panel_kwargs(values=[[1.0, 2.0], [3.0]]))
+
+    with pytest.raises(ValidationError, match="columns"):
+        ReturnsDataset(
+            name="ragged",
+            dates=[date(2024, 1, 2), date(2024, 1, 3)],
+            returns=[[0.01, 0.02], [0.03]],
+        )
     with pytest.raises(ValidationError):
         ReturnsDataset(
             name="bad",

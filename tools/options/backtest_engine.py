@@ -17,6 +17,7 @@ engine: "options_v1"。
 """
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 from typing import Any
 
@@ -51,13 +52,30 @@ def load_params() -> dict[str, float]:
 
 
 def _validate_leg(leg: dict, t: int) -> None:
+    if not isinstance(leg, dict):
+        raise ValueError(f"positions day {t}: each leg must be an object")
     lt = str(leg.get("leg_type", "")).lower()
     if lt not in ("call", "put"):
         raise ValueError(f"positions day {t}: leg_type must be call|put, got {leg.get('leg_type')!r}")
-    if float(leg.get("strike", 0.0)) <= 0:
+    try:
+        strike = float(leg.get("strike", 0.0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"positions day {t}: strike must be a finite number") from exc
+    if not math.isfinite(strike) or strike <= 0:
         raise ValueError(f"positions day {t}: strike must be > 0")
-    if int(leg.get("quantity", 0)) == 0:
+    try:
+        quantity = float(leg.get("quantity", 0))
+        expiry_offset = float(leg.get("expiry_offset_days"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"positions day {t}: quantity and expiry_offset_days must be finite numbers"
+        ) from exc
+    if not math.isfinite(quantity) or not quantity.is_integer() or int(quantity) == 0:
         raise ValueError(f"positions day {t}: quantity must be non-zero")
+    if not math.isfinite(expiry_offset) or not expiry_offset.is_integer() or expiry_offset < 0:
+        raise ValueError(
+            f"positions day {t}: expiry_offset_days must be a non-negative integer"
+        )
 
 
 def run_options_backtest(
@@ -72,13 +90,15 @@ def run_options_backtest(
         raise ValueError("underlying_prices must be non-empty")
     if len(positions) != n:
         raise ValueError(f"positions length {len(positions)} != prices length {n}")
-    if underlying_prices[0] <= 0:
+    if not math.isfinite(float(underlying_prices[0])) or underlying_prices[0] <= 0:
         raise ValueError("underlying_prices[0] must be > 0")
 
     for t in range(1, n):  # t0 建仓不盯当日价格变动，仅校验可定价
-        if underlying_prices[t] <= 0:
+        if not math.isfinite(float(underlying_prices[t])) or underlying_prices[t] <= 0:
             raise ValueError(f"underlying_prices[{t}] must be > 0")
     for t, legs in enumerate(positions):
+        if not isinstance(legs, list):
+            raise ValueError(f"positions day {t}: legs must be a list")
         for leg in legs:
             _validate_leg(leg, t)
 

@@ -32,10 +32,12 @@ D0 = date(2026, 7, 6)
 
 
 @pytest.fixture(autouse=True)
-def _ensure_registered():
+def _ensure_registered(tmp_path, monkeypatch):
     # 全量 pytest 时其他测试文件会 registry._tools.clear() 清空全局单例；
     # register_tool 覆盖式幂等，reload 即恢复。
     importlib.reload(_exp_register)
+    monkeypatch.setattr(_exp_register, "PROJECT_ROOT", tmp_path)
+    monkeypatch.chdir(tmp_path)
     yield
 
 

@@ -95,9 +95,13 @@ class BlackboardService:
         return conn
 
     def _effective_group(self, requester_group: GroupName | str | None) -> GroupName | None:
-        if requester_group is None:
-            return self.requester_group
-        return _coerce_group(requester_group)
+        bound = self.requester_group
+        override = _coerce_group(requester_group)
+        if bound is not None and override is not None and override != bound:
+            raise BlackboardPermissionError(
+                "requester_group cannot override the service's bound group"
+            )
+        return override if override is not None else bound
 
     @staticmethod
     def _entry_key(scope: BlackboardScope, group: GroupName | None, key: str) -> str:
@@ -265,13 +269,14 @@ class BlackboardService:
     ) -> BlackboardEntry | None:
         """Return a visible entry or ``None`` when absent or permission-blocked."""
 
+        effective_group = self._effective_group(requester_group)
         resolved_scope = _coerce_scope(scope)
         resolved_group = _coerce_group(group)
         entry_key = self._entry_key(resolved_scope, resolved_group, key)
         entry = self._load_by_entry_key(entry_key)
         if entry is None:
             return None
-        if not self._read_allowed(entry, self._effective_group(requester_group)):
+        if not self._read_allowed(entry, effective_group):
             return None
         return entry
 

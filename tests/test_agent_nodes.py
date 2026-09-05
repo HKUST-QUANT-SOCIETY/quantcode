@@ -365,6 +365,7 @@ def test_tool_node_sanitizes_api_key_in_exception(registry_with_echo):
     assert "RuntimeError" in content
     # 工具名应保留（让 LLM 知道是哪个 tool 失败）
     assert "api_client" in content
+    assert out["errors"] == [content]
 
 
 def test_tool_node_preserves_detail_for_read_like_tools(registry_with_echo):

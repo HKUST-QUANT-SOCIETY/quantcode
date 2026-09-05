@@ -116,6 +116,12 @@ def _run_status(final_state: dict) -> str:
         return str(explicit)
     if final_state.get("task_status") == "done":
         return "completed"
+    messages = final_state.get("messages") or []
+    if messages:
+        last = messages[-1]
+        if isinstance(last, AIMessage) and str(getattr(last, "content", "")).strip():
+            if not getattr(last, "tool_calls", None):
+                return "completed"
     return "stopped"
 
 
@@ -495,6 +501,9 @@ class AgentRunner:
 
         config = {"configurable": {"thread_id": thread_id}}
 
+        if resume:
+            self._validate_resume_checkpoint(app, thread_id, decision=False)
+
         # Metrics hook (best-effort): record run duration/status on all paths.
         _started_at = time.time()
         try:
@@ -535,15 +544,17 @@ class AgentRunner:
                 {"status": "error", "flow_name": flow_name},
             )
             raise
+        status = _run_status(final)
+        final["status"] = status
         _record_run_safe(
             actor_id=self.actor_id, role=self.role,
             group=self.group, flow=flow_name, thread_id=thread_id,
             started_at=_started_at, ended_at=time.time(),
-            status=_run_status(final), error=None,
+            status=status, error=None,
             trace_events=None, context_chars=None,
         )
         _append_evidence_safe(thread_id, "output_data", {
-            "status": _run_status(final), "flow_name": flow_name,
+            "status": status, "flow_name": flow_name,
         })
         return final
 
@@ -618,8 +629,10 @@ class AgentRunner:
         if resume_decision is not None:
             from runner.human_gate import to_react_resume_payload
 
+            self._validate_resume_checkpoint(app, thread_id, decision=True)
             init_state: Any = Command(resume=to_react_resume_payload(resume_decision))
         elif resume:
+            self._validate_resume_checkpoint(app, thread_id, decision=False)
             init_state: dict | None = None
         else:
             init_state = init_agent_state(
@@ -826,6 +839,7 @@ class AgentRunner:
             thread_id, "output_data", {"status": status}, evidence_dir=_evidence_dir
         )
 
+        final_state["status"] = status
         final_state["thread_id"] = thread_id
         final_state["execution_trace"] = trace
         return final_state
@@ -865,34 +879,7 @@ class AgentRunner:
             meta_skills=meta_skills,
             system_prompt=system_prompt or "",
         )
-        config = {"configurable": {"thread_id": thread_id}}
-        snapshot = app.get_state(config)
-        values = getattr(snapshot, "values", None)
-        if not isinstance(values, dict) or not values:
-            raise ValueError(f"checkpoint not found for thread_id={thread_id!r}")
-        checkpoint_group = str(values.get("group") or "")
-        if checkpoint_group and checkpoint_group != self.group:
-            raise PermissionError(
-                f"resume group mismatch: checkpoint is '{checkpoint_group}', "
-                f"session is '{self.group}'"
-            )
-        # The checkpoint keeps the creator's Session Context for audit.  The
-        # resumer is intentionally a different actor in the normal approval
-        # flow, so identity values are not compared for equality.  Instead,
-        # privileged resume requires a complete, valid creator context; the
-        # current approver/admin identity is recorded separately by metrics and
-        # evidence.  Legacy embedded runs without a context remain resumable
-        # only when the caller did not supply an authenticated role.
-        if self.role in {"approver", "admin"}:
-            checkpoint_role = str(values.get("role") or "")
-            if checkpoint_role not in {"analyst", "approver", "admin"}:
-                raise PermissionError("checkpoint has no valid creator Session Context role")
-            required_context = ("actor_id", "session_id")
-            missing = [field for field in required_context if not values.get(field)]
-            if missing:
-                raise PermissionError(
-                    "checkpoint missing creator Session Context fields: " + ", ".join(missing)
-                )
+        values = self._validate_resume_checkpoint(app, thread_id, decision=True)
         task = str(values.get("task_goal") or values.get("input_data", {}).get("task") or "")
         return self.stream(
             task=task,
@@ -903,6 +890,51 @@ class AgentRunner:
             flow_name=flow_name,
             resume_decision=decision,
         )
+
+    def _validate_resume_checkpoint(
+        self, app: Any, thread_id: str, *, decision: bool
+    ) -> dict[str, Any]:
+        """Re-authorize every checkpoint resume at the shared execution boundary."""
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = app.get_state(config)
+        values = getattr(snapshot, "values", None)
+        if not isinstance(values, dict) or not values:
+            raise ValueError(f"checkpoint not found for thread_id={thread_id!r}")
+
+        checkpoint_group = str(values.get("group") or "")
+        if checkpoint_group and checkpoint_group != self.group:
+            raise PermissionError(
+                f"resume group mismatch: checkpoint is '{checkpoint_group}', "
+                f"session is '{self.group}'"
+            )
+
+        from runner.human_gate import extract_interrupt_payload
+
+        pending_gate = extract_interrupt_payload(values)
+        # ``role=None`` is kept for embedded/local callers that predate the
+        # authenticated session context.  Once a role is present, approval is
+        # restricted to the privileged roles just like ``resume()``.
+        if decision and self.role is not None and self.role not in {"approver", "admin"}:
+            raise PermissionError("only an approver or admin may resume a HumanGate")
+        if pending_gate and not decision:
+            if self.role is not None and self.role not in {"approver", "admin"}:
+                raise PermissionError("only an approver or admin may resume a HumanGate")
+            raise PermissionError(
+                "pending HumanGate requires an explicit decision via resume()"
+            )
+
+        # The checkpoint keeps the creator's context for audit.  A privileged
+        # resumer may be a different actor, but the creator context must exist.
+        if self.role in {"approver", "admin"}:
+            checkpoint_role = str(values.get("role") or "")
+            if checkpoint_role not in {"analyst", "approver", "admin"}:
+                raise PermissionError("checkpoint has no valid creator Session Context role")
+            missing = [field for field in ("actor_id", "session_id") if not values.get(field)]
+            if missing:
+                raise PermissionError(
+                    "checkpoint missing creator Session Context fields: " + ", ".join(missing)
+                )
+        return values
 
     @staticmethod
     def _append_trace_from_update(

@@ -136,6 +136,15 @@ class FactorPanel(BaseModel):
         elif isinstance(self.values, (list, tuple)):
             if len(self.values) != rows:
                 raise ValueError(f"values has {len(self.values)} rows, expected {rows}")
+            bad_rows = [
+                len(row) if isinstance(row, (list, tuple)) else None
+                for row in self.values
+                if not isinstance(row, (list, tuple)) or len(row) != cols
+            ]
+            if bad_rows:
+                raise ValueError(
+                    f"values rows must each have {cols} columns; got {bad_rows[:3]}"
+                )
         else:
             raise ValueError("values must be an ndarray or nested list")
         return self
@@ -268,6 +277,16 @@ class ReturnsDataset(BaseModel):
             if len(self.returns) != rows:
                 raise ValueError(
                     f"returns has {len(self.returns)} rows, expected {rows}"
+                )
+            row_lengths = [
+                len(row) if isinstance(row, (list, tuple)) else None
+                for row in self.returns
+            ]
+            if any(length is None for length in row_lengths):
+                raise ValueError("returns rows must be nested sequences")
+            if len(set(row_lengths)) != 1:
+                raise ValueError(
+                    f"returns rows must have a consistent number of columns; got {row_lengths}"
                 )
         return self
 

@@ -1,7 +1,7 @@
 # QuantCode 中长期总计划（对标 Z code，迈向工业级组合研究平台）
 
 > 版本：v3（2026-09-04，随 QuantCode v5 顶层设计同步）。v1/v2 的规划方法与会议裁决保留为历史背景；当前路线以 `docs/IMPLEMENTATION_AUDIT.md` 的模块审计和外部依赖清单为准。
-> 现状基线：后端 v5 回归 `1049 passed, 4 skipped`；AgentRunner、MCP 身份/组锁定、Memory/能力目录、Blackboard、Evidence、Risk CI、Admin staging、GitGraph/Pop 本地契约和六组适配器均有代码证据。桌面身份/Admin UI、GitHub 后台同步、canonical 组件连接、生产部署队列和模拟盘/实盘接口仍是外部或后续接入项。
+> 现状基线：后端 v5 回归 `1060 passed, 4 skipped`；AgentRunner、MCP 身份/组锁定、Memory/能力目录、Blackboard、Evidence、Risk CI、Admin staging、GitGraph/Pop 本地契约和六组适配器均有代码证据。桌面身份/Admin UI、GitHub 后台同步、canonical 组件连接、生产部署队列和模拟盘/实盘接口仍是外部或后续接入项。
 
 ---
 

@@ -420,6 +420,7 @@ def make_tool_node(
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
                     )
+                    tool_errors.append(content)
                     executed_tools.append(c["name"])
                     executed_args.append(c["args"])
                     continue
@@ -442,6 +443,7 @@ def make_tool_node(
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
                     )
+                    tool_errors.append(content)
                     executed_tools.append(c["name"])
                     executed_args.append(c["args"])
                     continue
@@ -458,6 +460,7 @@ def make_tool_node(
                     results.append(
                         ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
                     )
+                    tool_errors.append(content)
                     executed_tools.append(c["name"])
                     executed_args.append(c["args"])
                     continue
@@ -498,6 +501,7 @@ def make_tool_node(
                         f"Tool '{c['name']}' failed: {type(e).__name__}. "
                         "请改用其他方案或向用户报告。"
                     )
+                tool_errors.append(content)
             executed_tools.append(c["name"])
             executed_args.append(c["args"])
             results.append(
@@ -684,11 +688,7 @@ def make_routing_edge(
             return "end"
 
         if not getattr(last, "tool_calls", None):
-            task_status = state.get("task_status")
-            # print(f"[DEBUG routing_edge] no tool_calls, task_status={task_status!r}")
-            if task_status == "done":
-                return "end"
-            return "continue"
+            return "end"
 
         return "continue"
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 import csv
 import json
 import math
+import re
 from datetime import date, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from schemas.options import OptionSide, VolSurfacePoint, VolSurfaceResult
 from tools.registry import PROJECT_ROOT, ToolDef
@@ -32,6 +33,14 @@ class BuildVolSurfaceArgs(BaseModel):
         default=True,
         description="写入 artifacts/options/<strategy>/vol_surface.json",
     )
+
+    @field_validator("underlying")
+    @classmethod
+    def _normalize_underlying(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("underlying must not be blank")
+        return value
 
 
 def _parse_expiry(raw: str) -> date:
@@ -100,10 +109,23 @@ def _year_fraction(as_of: date, expiry: date) -> float:
 def _load_rows(data_path: Path, underlying: str) -> list[dict]:
     if not data_path.exists():
         return []
+    target = underlying.strip().upper()
+
+    def matches(row_underlying: str) -> bool:
+        value = row_underlying.strip().upper()
+        if not value:
+            return False
+        if value == target:
+            return True
+        # Futures option roots may append a contract month/year (e.g. GCZ6),
+        # but arbitrary substring matches (G matching GCZ6) are unsafe.
+        suffix = value[len(target) :] if value.startswith(target) else ""
+        return bool(suffix and re.fullmatch(r"[A-Z]\d{1,4}", suffix))
+
     rows: list[dict] = []
     with data_path.open(encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
-            if row.get("underlying", "").strip() and underlying not in row["underlying"]:
+            if not matches(row.get("underlying", "")):
                 continue
             rows.append(row)
     return rows

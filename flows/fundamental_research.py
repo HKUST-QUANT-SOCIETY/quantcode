@@ -13,8 +13,8 @@
 input_data 约定（对齐 schemas.fundamental.ResearchSpec 字段）：
     - target_identifier / as_of_date / research_questions（list[str]）
     - target_name / growth_rate / wacc / top_k 可选
-    - force_fixture 可选（True 跳过 Chroma 仅读 fixture，测试稳定）；本流默认 True，
-      复现 agent 侧用法可控语义
+    - force_fixture 可选（True 跳过 Chroma 仅读 fixture，测试稳定）；默认遵循工具层
+      的真实 Chroma 优先策略，测试/离线调用方需显式传 True
 
 import flows.fundamental_research 即注册 ("fundamental", "fundamental:research")
 到 FLOW_REGISTRY（注册语句在 runner/compose_executor.py 底部统一 import）。
@@ -63,7 +63,6 @@ def pit_rag_search_node(state: FundamentalResearchFlowState) -> dict[str, Any]:
     args: dict[str, Any] = {
         "query": _default_query(input_data),
         "as_of_date": input_data["as_of_date"],
-        "force_fixture": True,  # 流内默认 fixture，保证 deterministic；显式覆盖走工具层
     }
     if input_data.get("top_k") is not None:
         args["top_k"] = input_data["top_k"]

@@ -862,6 +862,70 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
     assert resumed["execution_trace"][-1]["type"] == "agent_end"
 
 
+def test_stream_resume_decision_requires_approver_or_admin(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def stream(self, init, config):
+            yield {"llm": {"task_status": "done", "messages": []}}
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="analyst",
+        session_id="session-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="approver or admin"):
+        runner.stream(
+            task="resume",
+            system_prompt="x",
+            thread_id="factor-gate-stream",
+            resume_decision="approve",
+        )
+
+
+def test_run_resume_cannot_bypass_pending_gate(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+            "__interrupt__": [{"kind": "permission", "gate_id": "hg-1"}],
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def invoke(self, init, config):
+            raise AssertionError("pending gate must not be invoked without a decision")
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="analyst",
+        session_id="session-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="approver or admin"):
+        runner.run(task="resume", thread_id="factor-gate-run", resume=True)
+
+
 def test_resume_rejects_checkpoint_without_creator_context(monkeypatch, tmp_path):
     class _Snapshot:
         values = {"group": "factor", "role": "analyst"}

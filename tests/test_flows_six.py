@@ -360,6 +360,29 @@ def test_fundamental_research_flow_state(tmp_path, monkeypatch):
     assert state["output_data"]["citations_count"] >= 1
 
 
+def test_fundamental_flow_does_not_force_fixture_backend(monkeypatch):
+    from flows import fundamental_research
+
+    captured: dict = {}
+
+    def _call(tool_id, args, ctx):
+        captured.update(args)
+        return {"documents": [], "filtered_count": 0, "status": "UNAVAILABLE"}
+
+    monkeypatch.setattr(fundamental_research.registry, "call", _call)
+    fundamental_research.pit_rag_search_node(
+        {
+            "group": "fundamental",
+            "thread_id": "t-fundamental-backend",
+            "input_data": {
+                "target_identifier": "2097.HK",
+                "as_of_date": "2025-01-01",
+            },
+        }
+    )
+    assert "force_fixture" not in captured
+
+
 def test_fundamental_research_langgraph_invoke(tmp_path, monkeypatch):
     """fundamental:research 全图 smoke；acceptance 复用 research-pdf 规则。"""
     from runner.compose_executor import execute_compose_flow  # noqa: F401

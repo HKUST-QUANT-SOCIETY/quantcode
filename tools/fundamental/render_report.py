@@ -238,6 +238,8 @@ def _try_typst(pdf_path: Path, args: RenderReportArgs) -> bool:
     if not typst:
         return False
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    # Never report a stale or template-only PDF as the filled research report.
+    pdf_path.unlink(missing_ok=True)
     typ_path = pdf_path.with_suffix(".typ")
     try:
         _write_filled_typst(typ_path, args)
@@ -250,21 +252,7 @@ def _try_typst(pdf_path: Path, args: RenderReportArgs) -> bool:
         )
         return pdf_path.exists()
     except (subprocess.SubprocessError, OSError):
-        # fallback: compile layout stub so typst_used can still be true for env check
-        template = PROJECT_ROOT / "templates" / "typst" / "research-report.typ"
-        if not template.exists():
-            return False
-        try:
-            subprocess.run(
-                [typst, "compile", str(template), str(pdf_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            return pdf_path.exists()
-        except (subprocess.SubprocessError, OSError):
-            return False
+        return False
 
 
 def render_report_execute(args: RenderReportArgs, ctx: dict) -> dict:

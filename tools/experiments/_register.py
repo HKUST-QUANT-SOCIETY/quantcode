@@ -25,7 +25,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from runner.config_loader import load_yaml
-from tools.registry import ToolDef, register_tool
+from tools.registry import PROJECT_ROOT, ToolDef, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def experiments_config() -> dict[str, Any]:
 
 
 def experiments_dir() -> Path:
-    return Path("artifacts") / "experiments"
+    return PROJECT_ROOT / "artifacts" / "experiments"
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,8 @@ def run_ab_experiment(
     out_dir = experiments_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{exp_id}.json"
-    ab["artifacts"] = [path.as_posix()]
+    artifact_ref = path.relative_to(PROJECT_ROOT).as_posix()
+    ab["artifacts"] = [artifact_ref]
     path.write_text(
         json.dumps(ab, ensure_ascii=False, indent=2, default=str) + "\n",
         encoding="utf-8",
@@ -197,7 +198,7 @@ def _append_index(artifact_path: Path, ab: dict[str, Any]) -> None:
     """读-改-写 experiments/index.json：排行榜条目 = 归档文件相对路径。"""
     from tools.experiments.ab import snapshot_hash
 
-    idx_path = Path("artifacts") / "experiments" / "index.json"
+    idx_path = experiments_dir() / "index.json"
     ranking: list[dict[str, Any]] = []
     if idx_path.is_file():
         try:
@@ -208,7 +209,7 @@ def _append_index(artifact_path: Path, ab: dict[str, Any]) -> None:
         ranking = []
     ranking.append({
         "exp_id": ab["exp_id"],
-        "artifact": artifact_path.as_posix(),
+        "artifact": artifact_path.relative_to(PROJECT_ROOT).as_posix(),
         "baseline_id": ab["baseline_id"],
         "challenger_id": ab["challenger_id"],
         "verdict": ab["verdict"],
@@ -236,7 +237,7 @@ def _load_experiment(exp_id: str) -> dict[str, Any]:
 
 def list_experiments_impl(limit: int | None = None) -> dict[str, Any]:
     """排行榜（最近 K 条，K=configs/leaderboard_k 或调用方传入）。缺 index → 空榜。"""
-    idx_path = Path("artifacts") / "experiments" / "index.json"
+    idx_path = experiments_dir() / "index.json"
     if not idx_path.is_file():
         return {"experiments": [], "total": 0}
     try:

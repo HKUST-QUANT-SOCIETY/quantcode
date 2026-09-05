@@ -65,7 +65,7 @@
 | `check_factor_gate` 缺失 | **已过时/改名** | 当前由 `validate_factor_contract` + acceptance 契约承担，不再保留旧 Gate 名称。 |
 | P-09 必须走普通 HumanGate resume | **不是当前 v5 契约** | v5 将部署移到 Admin management plane；`submit_deploy()` 只返回 `STAGING` 并要求 Admin/evidence。普通 Catalog 不注册部署工具。真实生产队列仍未接入，但不是“普通 Agent resume 失败”。 |
 | pit-screen 首次范围条静态定位 | **已修复** | `pit-screen.tsx:180` 在有 FCF 时同步调用 `paint(compute())`；UI pit 测试通过。 |
-| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1049 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
+| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1060 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
 
 ## 4. 无法在当前环境确认的事项
 
@@ -109,7 +109,7 @@ PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
 98 passed, 1 warning
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1049 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1060 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
 
 当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
 
@@ -146,3 +146,20 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 - 四份顶层文档新增一致的 F/P 状态台账和外部待验边界；本台账仍不把真实 SSH gateway、ReturnsDataset 或生产部署队列视为完成。
 
 本轮已修改后端与外部 `opencode-lens` UI，并为已修复项补充回归测试；未把外部服务依赖（SSH gateway、ReturnsDataset、生产队列）伪装成完成。
+
+## 9. 本轮追加核验（2026-09-05）
+
+| 候选问题 | 判定 | 修复与证据 |
+|---|---|---|
+| Blackboard 绑定组可被显式 `requester_group` 覆盖 | **已修复** | `BlackboardService` 现在拒绝与实例绑定组不同的 per-call 身份；写、读和空结果路径均有回归测试。 |
+| `stream(resume_decision=...)` / `run(resume=True)` 可绕过恢复边界 | **已修复** | 所有 AgentRunner checkpoint 恢复统一经过组、HumanGate 和 Session Context 校验；带角色的恢复只允许 approver/admin，待处理 Gate 必须显式调用 `resume(decision=...)`。 |
+| FactorPanel / ReturnsDataset 接受嵌套坏矩阵 | **已修复** | list/tuple 行现在要求列数一致；ragged rows 在 Pydantic 构造阶段失败，不再延迟到 `to_records()`。 |
+| `calc_greeks` 忽略合约数量或静默回退坏曲面 | **已修复** | Portfolio Greeks 按腿数量缩放；显式曲面路径不存在、损坏或契约不符时返回错误，不使用默认 Greeks 冒充曲面结果。 |
+| Typst 填充编译失败仍生成模板 PDF | **已修复** | 删除模板 fallback，编译失败只返回 `pdf_filled=false`；清理旧 PDF，避免 stale artifact 被报告为成功。 |
+| fundamental flow 默认强制 fixture | **已修复** | 未显式传 `force_fixture` 时遵循 Chroma 优先；fixture 仅由测试/离线调用方显式启用。 |
+| 期权标的 substring 过滤及腿输入 NaN/范围不足 | **已修复** | 标的按精确代码或期货合约后缀匹配；价格、数量、到期偏移、标的序列做 finite/range 校验。 |
+| 实验 artifact 依赖当前 cwd | **已修复** | 归档与排行榜固定写入项目根 `artifacts/experiments`，对外返回仓库相对 artifact 引用。 |
+| Agent 正常最终回答状态、工具错误链不完整 | **已修复** | 无 tool-call 的最终 AIMessage 返回 `completed`；run/stream 均回写 status，工具失败内容累计到 `errors`。 |
+| Admin GitHub repo/package 查询权限描述不一致 | **不是实现缺陷** | 当前 v5 明确定义 org/package 元数据为全员只读发现面；GitHub token 仍按用户 ctx 或 Admin 中心 token 规则解析，缺失时返回 `UNAVAILABLE`。 |
+
+追加回归后后端全量为 `1060 passed, 4 skipped, 1 warning`。仍未验证真实 Windows 文件锁、Desktop E2E、SSH gateway、canonical ReturnsDataset 和生产部署队列。

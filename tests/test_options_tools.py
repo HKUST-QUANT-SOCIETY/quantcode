@@ -50,6 +50,30 @@ def test_build_vol_surface_from_sample_csv():
     assert result["data_quality"] in {"sample_bs_iv", "sample", "mock"}
 
 
+def test_build_vol_surface_does_not_use_substring_underlying_match(tmp_path, monkeypatch):
+    import tools.options.build_vol_surface as surface
+
+    data = tmp_path / "quotes.csv"
+    data.write_text(
+        "underlying,strike_price,mid_px,instrument_class,expiration\n"
+        "GCZ6,3400,40,call,2026-12-25\n"
+        "GOLD,3400,40,call,2026-12-25\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(surface, "PROJECT_ROOT", tmp_path)
+    result = surface.build_vol_surface_execute(
+        surface.BuildVolSurfaceArgs(
+            strategy_name="s",
+            underlying="G",
+            as_of_date="2026-06-27",
+            data_path=str(data),
+            write_artifact=False,
+        ),
+        {},
+    )
+    assert result["data_quality"] == "mock"
+
+
 def test_option_artifact_strategy_name_cannot_escape_root(tmp_path, monkeypatch):
     import tools.options.build_vol_surface as surface
 
@@ -98,6 +122,47 @@ def test_calc_greeks_returns_profile():
     )
     greeks = result["portfolio_greeks"]
     assert all(k in greeks for k in ("delta", "gamma", "vega", "theta"))
+
+
+def test_calc_greeks_scales_portfolio_by_contract_quantity():
+    from tools.options.calc_greeks import CalcGreeksArgs, calc_greeks_execute
+
+    one = calc_greeks_execute(
+        CalcGreeksArgs(
+            underlying="GC",
+            as_of_date="2026-06-27",
+            spot_price=3400.0,
+            call_quantity=1,
+        ),
+        {},
+    )
+    ten = calc_greeks_execute(
+        CalcGreeksArgs(
+            underlying="GC",
+            as_of_date="2026-06-27",
+            spot_price=3400.0,
+            call_quantity=10,
+        ),
+        {},
+    )
+    for key in ("delta", "gamma", "vega", "theta"):
+        assert ten["portfolio_greeks"][key] == pytest.approx(
+            10 * one["portfolio_greeks"][key]
+        )
+
+
+def test_calc_greeks_rejects_missing_surface_artifact(tmp_path):
+    from tools.options.calc_greeks import CalcGreeksArgs, calc_greeks_execute
+
+    with pytest.raises(ValueError, match="surface artifact"):
+        calc_greeks_execute(
+            CalcGreeksArgs(
+                underlying="GC",
+                as_of_date="2026-06-27",
+                surface_artifact_path=str(tmp_path / "missing.json"),
+            ),
+            {},
+        )
 
 
 def test_run_options_backtest_stub():

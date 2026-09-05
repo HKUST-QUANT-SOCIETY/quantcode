@@ -143,6 +143,21 @@ def test_stream_trace_contains_tool_call_and_result(tmp_db, clean_registry):
     assert tool_result["data"]["tool"] == "echo_tool"
 
 
+def test_stream_plain_final_answer_is_completed(tmp_db, clean_registry):
+    runner = AgentRunner(
+        group="model",
+        model=ScriptedLLM([AIMessage(content="final answer")]),
+        checkpoint_db=tmp_db,
+    )
+    result = runner.stream(
+        task="trace final",
+        system_prompt="x",
+        thread_id="trace-stream-final",
+        flow_name="trace_test",
+    )
+    assert result["status"] == "completed"
+
+
 def test_stream_trace_includes_output_data_and_artifacts(tmp_db, clean_registry):
     register_tool(PRODUCE_OUTPUT)
 

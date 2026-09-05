@@ -40,8 +40,11 @@ def _load_surface(path: str | None) -> VolSurfaceResult | None:
         return None
     p = resolve_input_path(path, root=PROJECT_ROOT)
     if not p.exists():
-        return None
-    data = json.loads(p.read_text(encoding="utf-8"))
+        raise ValueError(f"surface artifact not found: {path}")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"invalid surface artifact: {path}") from exc
     # strip extra keys from build_vol_surface payload
     keep = {
         k: data[k]
@@ -55,7 +58,10 @@ def _load_surface(path: str | None) -> VolSurfaceResult | None:
         )
         if k in data
     }
-    return VolSurfaceResult.model_validate(keep)
+    try:
+        return VolSurfaceResult.model_validate(keep)
+    except ValueError as exc:
+        raise ValueError(f"invalid surface artifact: {path}") from exc
 
 
 def calc_greeks_execute(args: CalcGreeksArgs, ctx: dict) -> dict:
@@ -66,6 +72,7 @@ def calc_greeks_execute(args: CalcGreeksArgs, ctx: dict) -> dict:
 
     legs: list[OptionsPositionLeg] = []
     leg_greeks: list[GreeksSnapshot] = []
+    leg_quantities: list[int] = []
 
     if args.call_quantity:
         legs.append(
@@ -89,6 +96,7 @@ def calc_greeks_execute(args: CalcGreeksArgs, ctx: dict) -> dict:
                 theta=round(-0.8 - 0.2 * avg_iv, 2),
             )
         )
+        leg_quantities.append(args.call_quantity)
     if args.put_quantity:
         legs.append(
             OptionsPositionLeg(
@@ -102,6 +110,7 @@ def calc_greeks_execute(args: CalcGreeksArgs, ctx: dict) -> dict:
         leg_greeks.append(
             GreeksSnapshot(delta=-0.48, gamma=0.03, vega=13.5, theta=-0.85)
         )
+        leg_quantities.append(args.put_quantity)
 
     position = OptionsPosition(
         underlying=args.underlying,
@@ -111,10 +120,10 @@ def calc_greeks_execute(args: CalcGreeksArgs, ctx: dict) -> dict:
     )
 
     portfolio = GreeksSnapshot(
-        delta=sum(g.delta for g in leg_greeks),
-        gamma=sum(g.gamma for g in leg_greeks),
-        vega=sum(g.vega for g in leg_greeks),
-        theta=sum(g.theta for g in leg_greeks),
+        delta=sum(g.delta * q for g, q in zip(leg_greeks, leg_quantities)),
+        gamma=sum(g.gamma * abs(q) for g, q in zip(leg_greeks, leg_quantities)),
+        vega=sum(g.vega * q for g, q in zip(leg_greeks, leg_quantities)),
+        theta=sum(g.theta * q for g, q in zip(leg_greeks, leg_quantities)),
     )
     profile = GreeksProfile(
         underlying=position.underlying,

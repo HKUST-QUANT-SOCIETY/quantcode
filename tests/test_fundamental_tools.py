@@ -191,6 +191,31 @@ def test_render_report_identifier_cannot_escape_artifact_root(tmp_path, monkeypa
     assert artifact.resolve().is_relative_to((tmp_path / "artifacts" / "research").resolve())
 
 
+def test_render_report_typst_failure_does_not_compile_template(monkeypatch, tmp_path):
+    import tools.fundamental.render_report as render_module
+
+    monkeypatch.setattr(render_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: "/usr/bin/typst")
+    calls: list[list[str]] = []
+
+    def _fail_compile(cmd, **kwargs):
+        calls.append(cmd)
+        raise render_module.subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(render_module.subprocess, "run", _fail_compile)
+    result = render_module.render_report_execute(
+        render_module.RenderReportArgs(
+            target_identifier="2097.HK",
+            as_of_date="2025-01-01",
+            use_typst=True,
+        ),
+        {},
+    )
+    assert result["pdf_filled"] is False
+    assert result["pdf_path"] is None
+    assert len(calls) == 1
+
+
 def test_load_fundamental_compose_skill():
     from tools.skills.loader import load_skill
 

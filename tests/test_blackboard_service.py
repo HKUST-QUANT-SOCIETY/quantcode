@@ -93,6 +93,34 @@ def test_cross_group_write_to_group_scope_is_rejected(tmp_path):
         )
 
 
+def test_bound_group_cannot_be_overridden_by_per_call_requester(tmp_path):
+    """A service-bound identity must apply to every operation."""
+    board = BlackboardService(
+        tmp_path / "blackboard.db",
+        session_id=VALID_SESSION,
+        requester_group=GroupName.FACTOR,
+    )
+
+    with pytest.raises(BlackboardPermissionError, match="cannot override"):
+        board.write_value(
+            scope=BlackboardScope.GROUP,
+            group=GroupName.RISK,
+            key="risk.private",
+            value={"secret": True},
+            written_by_task_id="T1",
+            written_by_group=GroupName.RISK,
+            requester_group=GroupName.RISK,
+        )
+
+    with pytest.raises(BlackboardPermissionError, match="cannot override"):
+        board.get_entry(
+            BlackboardScope.GROUP,
+            GroupName.RISK,
+            "risk.private",
+            requester_group=GroupName.RISK,
+        )
+
+
 def test_blackboard_persists_across_service_instances(tmp_path):
     db_path = tmp_path / "blackboard.db"
     first = BlackboardService(
@@ -302,4 +330,3 @@ def test_group_append_non_list_payload_replaces_for_caller_merge(tmp_path):
 
     assert merged.value == {"reviews": {"r1": {}, "r2": {}}}
     assert merged.version == 2
-
