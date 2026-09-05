@@ -771,10 +771,13 @@ def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
                     "identity_source": "ssh_roster",
                 }
             )
-        except Exception:
-            # _get_mcp_group already fail-closes production roster failures;
-            # keep this helper defensive for trusted development callers.
-            pass
+        except Exception as exc:
+            if not _development_mode():
+                raise RuntimeError("AUTHENTICATION_REQUIRED: roster could not be loaded") from exc
+        if not _development_mode():
+            required = ("actor_id", "role", "workspace_id", "workspace_path")
+            if entry.get("group") != mcp_group or any(not entry.get(key) for key in required):
+                raise RuntimeError("AUTHENTICATION_REQUIRED: roster changed or is incomplete")
     if _is_admin_session(mcp_group):
         context["role"] = "admin"
     if context["role"] not in {"analyst", "approver", "admin"}:

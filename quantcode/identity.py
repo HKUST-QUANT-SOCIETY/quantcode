@@ -60,7 +60,10 @@ def _load_entries(path: Path | str | None = None) -> list[dict]:
     if not p.exists():
         return []
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    if data.get("status") == "REVIEW_REQUIRED":
+        raise ValueError("roster candidate requires review before activation")
     entries = []
+    fingerprints = {}
     for item in data.get("bindings") or []:
         if not isinstance(item, dict):
             continue
@@ -82,7 +85,12 @@ def _load_entries(path: Path | str | None = None) -> list[dict]:
             scopes = item.get("resource_scopes")
             if isinstance(scopes, list):
                 entry["resource_scopes"] = [str(scope) for scope in scopes]
-            entries.append(entry)
+            previous = fingerprints.get(fp)
+            if previous is not None and previous != entry:
+                raise ValueError("conflicting roster entries for one SSH fingerprint")
+            if previous is None:
+                entries.append(entry)
+                fingerprints[fp] = entry
     return entries
 
 
@@ -98,7 +106,7 @@ def _write_entries(entries: list[dict], path: Path | str | None = None) -> None:
 def load_bindings(path: Path | str | None = None) -> dict[str, str]:
     """读取 ``fingerprint -> group`` 映射。文件不存在或为空返回 ``{}``。
 
-    同一指纹出现多次时后写覆盖先写（去重）。
+    同指纹相同记录去重；身份/权限冲突拒绝加载，不按行顺序授予权限。
     """
     return {e["fingerprint"]: e["group"] for e in _load_entries(path)}
 

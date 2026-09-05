@@ -81,17 +81,21 @@ def test_load_bindings_reads_yaml(tmp_path):
     assert identity.load_bindings(p) == {TEST_FP: "factor"}
 
 
-def test_load_bindings_dedupes_same_fingerprint(tmp_path):
-    """同指纹多条 → 去重，后写覆盖先写。"""
-    p = _write_bindings(
-        tmp_path,
-        [
-            {"fingerprint": TEST_FP, "group": "model"},
-            {"fingerprint": TEST_FP, "group": "factor"},
-            {"fingerprint": "SHA256:AAAA", "group": "risk"},
-        ],
-    )
-    assert identity.load_bindings(p) == {TEST_FP: "factor", "SHA256:AAAA": "risk"}
+def test_load_bindings_rejects_conflicting_fingerprint(tmp_path):
+    p = _write_bindings(tmp_path, [
+        {"fingerprint": TEST_FP, "group": "model"},
+        {"fingerprint": TEST_FP, "group": "factor"},
+    ])
+    with pytest.raises(ValueError, match="conflicting roster"):
+        identity.load_bindings(p)
+    with pytest.raises(ValueError, match="conflicting roster"):
+        identity.resolve_identity(TEST_FP, p)
+
+
+def test_load_bindings_dedupes_identical_fingerprint(tmp_path):
+    entry = {"fingerprint": TEST_FP, "group": "factor"}
+    p = _write_bindings(tmp_path, [entry, entry])
+    assert identity.load_bindings(p) == {TEST_FP: "factor"}
 
 
 def test_resolve_group_hit_and_miss():
