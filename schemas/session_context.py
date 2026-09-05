@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from schemas.groups import GroupId
 
 
 class SessionContext(BaseModel):
@@ -12,7 +13,7 @@ class SessionContext(BaseModel):
 
     session_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
-    group: Literal["fundamental", "factor", "model", "risk", "strategy", "options"]
+    group: GroupId
     role: Literal["analyst", "approver", "admin"]
     workspace_id: str = Field(min_length=1)
     workspace_path: str = Field(min_length=1)

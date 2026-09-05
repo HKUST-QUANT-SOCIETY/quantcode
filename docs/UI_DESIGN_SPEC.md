@@ -1,5 +1,8 @@
 # QuantCode 桌面端设计规格（UI_DESIGN_SPEC）
 
+> **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
+
+
 > **版本**：v4.1（2026-09-05，实现核验同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **UI 仓库**：`opencode-lens`，组件根目录为 `packages/app/src/components/quantcode/`。

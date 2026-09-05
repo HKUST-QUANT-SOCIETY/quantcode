@@ -16,9 +16,14 @@ import yaml
 
 from quantcode.identity import fingerprint_of_public_key
 
-GROUP_ALIASES = {
+from schemas.groups import GROUP_IDS
+
+GROUP_ALIASES = {**{group: group for group in GROUP_IDS},
     "因子组": "factor", "因子挖掘组": "factor", "基本面": "fundamental",
     "基本面组": "fundamental", "模型组": "model", "风控组": "risk",
+    "基建组": "infra", "基础建设组": "infra", "infra组": "infra",
+    "ai agent": "agent", "ai agent组": "agent", "agent组": "agent", "agent开发": "agent",
+    "rl工程落地组": "factor", "模型 agent": "model",
     "项目风控组": "risk", "期权组": "options", "cta": "strategy", "cta组": "strategy",
 }
 
@@ -66,6 +71,17 @@ def compile_records(records: list[dict], workspace_root: str) -> dict:
     key_owners: dict[str, set[str]] = {}
     for email, entries in people.items():
         groups = {GROUP_ALIASES.get(str(row.get("group") or "").strip().lower()) for row in entries}
+        suggested_groups = set()
+        unknown_labels = set()
+        for row in entries:
+            label = str(row.get("group") or "").strip().lower()
+            labels = [label] if label in GROUP_ALIASES else re.split(r"[/、，,;；]|\s+(?=风控组)", label)
+            for label in labels:
+                mapped = GROUP_ALIASES.get(label.strip())
+                if mapped:
+                    suggested_groups.add(mapped)
+                elif label.strip():
+                    unknown_labels.add(label.strip())
         issues = []
         if None in groups or len(groups) != 1:
             issues.append("group_confirmation_required")
@@ -84,7 +100,8 @@ def compile_records(records: list[dict], workspace_root: str) -> dict:
         review = {"actor_id": actor, "name": sorted(names), "email": email,
                   "rows": [row["row"] for row in entries],
                   "submitted_groups": sorted({str(row.get("group") or "") for row in entries}),
-                  "issues": sorted(set(issues)), "key_count": len(keys)}
+                  "issues": sorted(set(issues)), "key_count": len(keys),
+                  "suggested_groups": sorted(suggested_groups), "unknown_group_labels": sorted(unknown_labels)}
         reviews.append(review)
         if issues:
             continue

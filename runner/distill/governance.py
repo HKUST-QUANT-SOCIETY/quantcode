@@ -14,11 +14,12 @@ import tempfile
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from schemas.groups import GROUP_IDS
 from typing import Any, Literal
 
 CandidateAction = Literal["promote", "reject", "supersede"]
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_VALID_GROUPS = frozenset({"fundamental", "factor", "model", "risk", "strategy", "options"})
+_VALID_GROUPS = frozenset(GROUP_IDS)
 _LOCK = threading.Lock()
 
 

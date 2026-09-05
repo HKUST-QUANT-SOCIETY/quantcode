@@ -1,5 +1,8 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
+> **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](../docs/audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
+
+
 > **版本**：v0.5.1（2026-09-05，QuantCode v5 实现核验同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **文档性质**：QuantCode 的活功能规格。`docs/PRD.md` 说明产品目标，`docs/QuantCode_Design.md` 说明技术设计，`docs/UI_DESIGN_SPEC.md` 说明桌面端体验；三者服从本文的运营边界。`docs/archive/pre-v5/` 下内容与旧版 PRD/Design 是历史材料。

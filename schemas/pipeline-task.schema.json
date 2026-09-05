@@ -28,13 +28,13 @@
         "name": { "type": "string" },
         "group": {
           "type": "string",
-          "enum": ["fundamental", "factor", "model", "risk", "strategy", "options", "agent"]
+          "enum": ["fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"]
         }
       }
     },
     "compose_flow": {
       "type": "string",
-      "description": "触发本 task 的 Compose 流",
+      "description": "触发本 task 的领域兼容 Compose 流；工程组使用通用 Agent 入口",
       "enum": ["fundamental", "factor", "model", "risk", "strategy", "options"]
     },
     "created_at": { "type": "string", "format": "date-time" },

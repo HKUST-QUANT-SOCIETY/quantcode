@@ -51,7 +51,7 @@ def test_dependency_failure_is_partial_not_connected(monkeypatch):
         raise OSError("offline")
 
     monkeypatch.setattr(admin, "_gh_get", unavailable)
-    result = admin._admin_package_updates_execute(admin.AdminPackageUpdatesArgs(), {})
+    result = admin._admin_package_updates_execute(admin.AdminPackageUpdatesArgs(), {"role": "admin"})
     assert result["sync_status"] == "PARTIAL"
     assert result["errors"] == ["restricted: dependency files unavailable"]
     assert result["updates"] == []

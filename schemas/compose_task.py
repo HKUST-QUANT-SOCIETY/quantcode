@@ -52,13 +52,15 @@ TaskIDStr = str  # matches TASK_ID_PATTERN
 # ---------------------------------------------------------------------------
 
 class GroupName(StrEnum):
-    """QuantCode's 6-group isolation boundary (Design §3.4)."""
+    """QuantCode's eight-group isolation boundary (Design §3.4)."""
     FUNDAMENTAL = "fundamental"
     FACTOR      = "factor"
     MODEL       = "model"
     RISK        = "risk"
     STRATEGY    = "strategy"
     OPTIONS     = "options"
+    INFRA       = "infra"
+    AGENT       = "agent"
 
 
 class TaskStatus(StrEnum):

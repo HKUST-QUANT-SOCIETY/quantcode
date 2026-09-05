@@ -48,6 +48,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tools.registry import registry, ToolDef
 from tools.schema_utils import pydantic_to_json_schema  # Day 4: 提取到公共模块
+from schemas.groups import GROUP_IDS
 from quantcode import identity  # P0-7: SSH key → group 绑定解析
 
 # MCP server 暴露的 tool 集合按会话身份和组 allowlist 过滤。
@@ -70,7 +71,7 @@ _SESSION_GROUP: str | None = None
 # workspace while retaining the same group.
 _SESSION_CONTEXT: dict[str, Any] | None = None
 _SESSION_ID = f"qc_{uuid.uuid4().hex}"
-_VALID_GROUPS = frozenset({"fundamental", "factor", "model", "risk", "strategy", "options"})
+_VALID_GROUPS = frozenset(GROUP_IDS)
 
 # 管理查询面分为两类：GitGraph/package 元数据按 GitHub 可见范围提供给
 # 普通用户；跨组运行、错误和 Blackboard 查询只给 Admin。该集合同时用于
@@ -331,7 +332,7 @@ class ListSkillsArgs(BaseModel):
     """list_skills 的输入参数 — 只读枚举某组的 SKILL.md 目录。"""
 
     group: str = Field(
-        description="组名（model / risk / factor / fundamental / options / strategy）。",
+        description="组名（model / risk / factor / fundamental / options / strategy / infra / agent）。",
     )
 
 

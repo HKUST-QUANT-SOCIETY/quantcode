@@ -85,7 +85,7 @@ class RunAgentArgs(BaseModel):
     )
     group: str | None = Field(
         default=None,
-        description="可选：要运行的组（model/risk/factor/fundamental/options/strategy）。"
+        description="可选：要运行的组（model/risk/factor/fundamental/options/strategy/infra/agent）。"
         "不传则从 QUANTCODE_GROUP 环境变量读取。",
     )
     skill_name: str | None = Field(

@@ -1,0 +1,5 @@
+allowlist:
+  - search_memory
+  - read_file
+  - write_file
+  - bash

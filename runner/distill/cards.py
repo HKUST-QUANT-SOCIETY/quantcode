@@ -21,6 +21,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from runner.config_loader import load_yaml
+from schemas.groups import GROUP_IDS
 from schemas.capability_card import CapabilityCard
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,7 @@ CAPABILITIES_CONFIG = "capabilities"
 GUEST_GROUP = "guest"
 
 # 六研究组枚举（与 .opencode/groups/ 同源；identity/permission 权威源对齐由主 Agent 裁决）。
-RESEARCH_GROUPS: frozenset[str] = frozenset(
-    {"factor", "fundamental", "model", "options", "risk", "strategy"}
-)
+RESEARCH_GROUPS: frozenset[str] = frozenset(GROUP_IDS)
 
 
 # ---------------------------------------------------------------------------

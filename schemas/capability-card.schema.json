@@ -159,6 +159,8 @@
         "options",
         "risk",
         "strategy",
+        "infra",
+        "agent",
         "all"
       ],
       "title": "Owner Group",

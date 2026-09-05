@@ -35,10 +35,12 @@ OWNER_GROUPS: tuple[str, ...] = (
     "options",
     "risk",
     "strategy",
+    "infra",
+    "agent",
     "all",
 )
 
-OwnerGroup = Literal["factor", "fundamental", "model", "options", "risk", "strategy", "all"]
+OwnerGroup = Literal["factor", "fundamental", "model", "options", "risk", "strategy", "infra", "agent", "all"]
 
 
 class CapabilityCard(BaseModel):

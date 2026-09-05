@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("group", ["factor", "model", "risk", "strategy", "options", "fundamental"])
+@pytest.mark.parametrize("group", ["factor", "model", "risk", "strategy", "options", "fundamental", "infra", "agent"])
 def test_mcp_stdio_catalog_and_deploy_boundary(group):
     env = {key: value for key, value in os.environ.items() if not key.startswith("QUANTCODE_")}
     env.update(PYTHONPATH=str(ROOT), QUANTCODE_ENV="test", QUANTCODE_GROUP=group)

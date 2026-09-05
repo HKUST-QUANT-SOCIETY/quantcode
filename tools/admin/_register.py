@@ -34,6 +34,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+from schemas.groups import GROUP_IDS
 from pydantic import BaseModel, Field
 
 from tools.registry import ToolDef, registry
@@ -47,9 +48,8 @@ _DEP_FILE_EXACT = ("pyproject.toml",)
 _DEP_FILE_GLOB = ("requirements*.txt",)
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
-# Blackboard GROUP scope 的可扫组集合（六研究组；与 tools/subagent.VALID_GROUPS
-# 同源口径。ponytail: 本地常量而非 import subagent 模块——避免注册副作用耦合）。
-GROUP_SCAN = ("model", "risk", "factor", "fundamental", "options", "strategy")
+# Shared group authority, without importing subagent registration side effects.
+GROUP_SCAN = GROUP_IDS
 
 
 # ---------------------------------------------------------------------------
@@ -77,9 +77,7 @@ def _candidate_review_gate(ctx: dict) -> dict[str, Any] | None:
 
 
 def _org_metadata_gate(ctx: dict) -> dict[str, Any] | None:
-    """org 只读元数据门禁：全员放行（2026-09-01 定版——双类 pop 需全组可见，
-    repo/package 元数据非敏感面；数据字段清单类敏感蒸馏仍由能力卡 Mask 承担）。
-    admin_repo_status / admin_package_updates 专用，其余 admin_* 仍走 _admin_gate。"""
+    """Shared entrypoint; _visible_repos enforces the role/subject/team boundary."""
     return None
 
 
@@ -152,6 +150,14 @@ def _list_org_repos(token: str) -> list[dict[str, Any]]:
     raise ValueError("GitHub repository pagination limit reached; listing is incomplete")
 
 
+def _visible_repos(ctx: dict, token: str) -> tuple[list[dict[str, Any]], str]:
+    if _admin_gate(ctx) is None:
+        return _list_org_repos(token), "organization-admin"
+    from quantcode.github_visibility import team_repositories
+
+    return team_repositories(ctx, lambda path: _gh_get(path, token))
+
+
 def _iso_date(value: Any) -> datetime | None:
     """GitHub ISO8601 时间戳 → aware datetime；解析失败 → None。"""
     try:
@@ -178,7 +184,7 @@ class AdminListRunsArgs(BaseModel):
     )
     group_filter: str | None = Field(
         default=None,
-        description="按组过滤（model/risk/factor/fundamental/options/strategy）；空=跨组全量。",
+        description="按组过滤（model/risk/factor/fundamental/options/strategy/infra/agent）；空=跨组全量。",
     )
     limit: int = Field(
         default=200, ge=1, le=2000, description="聚合窗口：最近 N 条 run 记录（metrics.jsonl）。"
@@ -350,7 +356,9 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
-        repos = _list_org_repos(token)
+        repos, visibility_source = _visible_repos(ctx, token)
+    except PermissionError as exc:
+        return {"ok": False, "error": str(exc), "sync_status": "FORBIDDEN", "repos": [], "updates": []}
     except Exception as e:
         return {"ok": False, "error": f"GitHub API failed: {e}", "org": GH_ORG, "repos": []}
     if not isinstance(repos, list):
@@ -371,6 +379,7 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
         branch = str(r.get("default_branch") or "main")
         item: dict[str, Any] = {
             "name": name,
+            "group": r.get("group"),
             "pushed_at": r.get("pushed_at"),
             "default_branch": branch,
             "language": r.get("language"),
@@ -398,7 +407,7 @@ def _admin_repo_status_execute(args: AdminRepoStatusArgs, ctx: dict) -> dict[str
         "repos": out,
         "sync_status": "PARTIAL" if partial else "CONNECTED",
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "visibility_source": ctx.get("github_subject") or "organization-admin",
+        "visibility_source": visibility_source,
     }
 
 
@@ -449,7 +458,9 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
     try:
-        repos = _list_org_repos(token)
+        repos, visibility_source = _visible_repos(ctx, token)
+    except PermissionError as exc:
+        return {"ok": False, "error": str(exc), "sync_status": "FORBIDDEN", "repos": [], "updates": []}
     except Exception as e:
         return {"ok": False, "error": f"GitHub API failed: {e}", "org": GH_ORG, "updates": []}
     if not isinstance(repos, list):
@@ -511,6 +522,7 @@ def _admin_package_updates_execute(args: AdminPackageUpdatesArgs, ctx: dict) -> 
         "org": GH_ORG,
         "window_days": args.since_days,
         "repos_checked": checked,
+        "visibility_source": visibility_source,
         "updates": updates,
         "sync_status": "PARTIAL" if errors else "CONNECTED",
         "errors": errors,

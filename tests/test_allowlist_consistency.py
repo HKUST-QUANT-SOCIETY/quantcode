@@ -30,7 +30,7 @@ from tools.registry import GROUPS_DIR, registry
 # 由 OpenCode 平台侧提供的内建 tool（registry 无此 tool，get_tools_for_group 静默跳过）
 PLATFORM_TOOLS = frozenset({"search_memory", "read_file", "write_file", "bash"})
 
-GROUPS = ("factor", "fundamental", "model", "options", "risk", "strategy")
+GROUPS = ("factor", "fundamental", "model", "options", "risk", "strategy", "infra", "agent")
 
 # 全量 pytest 时，其他测试文件会用 registry._tools.clear() 清空全局单例；
 # 本文件与它们同跑时必须先 reload 注册链（register_tool 幂等，与 test_day5_jerry_demos.py 同款防御）。

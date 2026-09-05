@@ -1,5 +1,8 @@
 # QuantCode 产品需求文档（PRD）
 
+> **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
+
+
 > **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
@@ -60,7 +63,7 @@ Model→Risk 的代码 PR 风控链继续作为 GitHub Actions 基建运行。�
 
 ### 2.1 业务组
 
-六个业务组使用同一个桌面入口，但登录后获得不同的 Skill、工具、Memory 详情和组件权限：
+六个研究组与 Infra、Agent 两个工程组使用同一个桌面入口，但登录后获得不同的 Skill、工具、Memory 详情和组件权限：
 
 | 组 | 主要使用 QuantCode 的方式 | 领域真相归属 |
 |---|---|---|
@@ -70,6 +73,8 @@ Model→Risk 的代码 PR 风控链继续作为 GitHub Actions 基建运行。�
 | 策略 | 使用组合/回测适配层和报告平台 | 策略、组合和绩效业务 |
 | 期权 | 使用期权组件和适配层 | 期权定价、对冲和回测业务 |
 | 基本面 | 使用 PIT 数据与研究资料能力 | 基本面研究和研报内容 |
+| Infra | 基础设施、研发环境、组件接入与可观测性 | 基础设施工程 |
+| Agent | Agent 工具、Skill、上下文和运行时集成 | Agent 平台工程 |
 
 ### 2.2 Admin 角色
 

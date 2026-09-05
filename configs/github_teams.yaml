@@ -1,0 +1,12 @@
+# Observed read-only from HKUST-QUANT-SOCIETY on 2026-09-05.
+# Mapping is not a grant: verify subject, current membership, and token access.
+organization: HKUST-QUANT-SOCIETY
+groups:
+  infra: [infra]
+  agent: [agent]
+  factor: [mining]
+  model: [factor-model]
+  risk: [risk]
+  fundamental: [fundamentals]
+  strategy: [strategy, cta]
+  options: [options-research]

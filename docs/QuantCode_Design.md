@@ -1,5 +1,8 @@
 # QuantCode 技术设计文档
 
+> **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
+
+
 > **项目定位 · 架构 · 功能清单 · 工程落位**
 >
 > **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
@@ -507,9 +510,9 @@ roster 按 fingerprint 匹配 actor_id / group / role
 
 ### 6.2 业务组与 Admin 角色
 
-GroupName 继续保留六个业务组：fundamental、factor、model、risk、strategy、options。
+GroupName 包含八组：fundamental、factor、model、risk、strategy、options、infra、agent。后两组为工程组，通过通用 Agent/宿主开发工具工作，不虚构领域 Compose 流。
 
-Admin 是组织级全权角色，业务组仍为六组。Admin 在 QuantCode 平台拥有无限权限，不受业务组的可见性、管理、审批和部署发起范围限制，可以查看和管理所有组的任务、运行、错误、Memory、Blackboard、能力卡、仓库状态和 Gate。Admin 的访问、管理、审批和部署发起仍写审计记录；领域负责人继续对研究结论和业务口径负责。
+Admin 是组织级全权角色，与八组身份独立；Infra/Agent 成员不会自动获得 Admin。Admin 在 QuantCode 平台拥有无限权限，不受业务组的可见性、管理、审批和部署发起范围限制，可以查看和管理所有组的任务、运行、错误、Memory、Blackboard、能力卡、仓库状态和 Gate。Admin 的访问、管理、审批和部署发起仍写审计记录；领域负责人继续对研究结论和业务口径负责。
 
 普通角色：
 

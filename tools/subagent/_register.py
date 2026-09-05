@@ -17,11 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from schemas.groups import GROUP_IDS
 from pydantic import BaseModel, Field
 
 from tools.registry import ToolDef, registry
 
-VALID_GROUPS = ("model", "risk", "factor", "fundamental", "options", "strategy")
+VALID_GROUPS = GROUP_IDS
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ class SpawnSubagentArgs(BaseModel):
     """spawn_subagent 入参（P-04 契约含 budget）。"""
 
     task: str = Field(min_length=1, description="子任务描述文本（自然语言）。")
-    group: str = Field(description="子任务运行组（model/risk/factor/fundamental/options/strategy）。")
+    group: str = Field(description="子任务运行组（model/risk/factor/fundamental/options/strategy/infra/agent）。")
     skill_name: str | None = Field(default=None, description="可选：子任务加载的 skill 名。")
     budget_tokens: int | None = Field(default=None, description="可选：子任务 token 预算（超限暂停待人审，不 kill）。")
 
