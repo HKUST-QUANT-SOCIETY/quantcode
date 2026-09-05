@@ -19,6 +19,8 @@ Day 7 新增 start/resume 两阶段协议：
 """
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,7 +29,46 @@ from pydantic import BaseModel, Field
 from tools.registry import ToolDef, registry
 
 
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# R2 token budget 默认值（RunAgentArgs.max_total_tokens 未传时用）
+DEFAULT_TOKEN_BUDGET = 200_000
+
+# These orchestration tools belong to the outer OpenCode controller. They may
+# be listed by MCP for that controller, but must never be handed to the inner
+# QuantCode Agent or a child Agent, which would allow recursive runs or
+# cross-task registry control.
+_INNER_AGENT_EXCLUDED_TOOLS = frozenset(
+    {
+        "run_agent",
+        "spawn_subagent",
+        "check_subagent",
+        "kill_subagent",
+        "list_subagents",
+        "check_tool_stream",
+        "review_distill_candidate",
+    }
+)
+
+
+def _inner_agent_tool_ids(tool_ids: set[str] | frozenset[str] | None):
+    if tool_ids is None:
+        return None
+    return frozenset(tool_ids) - _INNER_AGENT_EXCLUDED_TOOLS
+
+
+def _resolve_budget(max_total_tokens: int | None) -> int | None:
+    """args 显式值 > env QUANTCODE_TOKEN_BUDGET > DEFAULT_TOKEN_BUDGET。"""
+    if max_total_tokens is not None:
+        # 0 is the established test/CLI sentinel for disabling the optional
+        # budget gate; positive values remain hard limits.
+        return max_total_tokens if max_total_tokens > 0 else None
+    try:
+        return int(os.environ.get("QUANTCODE_TOKEN_BUDGET", DEFAULT_TOKEN_BUDGET))
+    except ValueError:
+        return DEFAULT_TOKEN_BUDGET
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +96,17 @@ class RunAgentArgs(BaseModel):
         default=50,
         description="最大 ReAct 迭代次数，超限后强制停止（默认 50）。",
     )
+    # R2 token budget：None → env QUANTCODE_TOKEN_BUDGET（缺省 200000）
+    max_total_tokens: int | None = Field(
+        default=None,
+        description="可选：本次 run 的总 token 预算。超限时返回 STOPPED_BUDGET（不创建 HumanGate）。"
+        "不传则读环境变量 QUANTCODE_TOKEN_BUDGET（缺省 200000）。",
+    )
 
     # ── Day 7: resume 协议字段 ──
     thread_id: str | None = Field(
         default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
         description="resume 模式时必传：要恢复的已暂停 thread_id。"
         "start 模式可选：指定则用该值作为 thread_id。",
     )
@@ -66,6 +114,14 @@ class RunAgentArgs(BaseModel):
         default=None,
         description="Human gate 决策。有值 → resume 模式；无值 → start 模式。"
         "推荐使用 approve/reject。proceed/abort 仅用于兼容内部路径。",
+    )
+
+    # ── attach_stream：start run 执行轨迹旁落到 JSONL 通道 ──
+    attach_stream: bool = Field(
+        default=False,
+        description="start 模式可选：True 时把 execution_trace 事件逐条 append 到 "
+        ".quantcode/streams/<thread_id>.jsonl，控制器用 check_tool_stream 按游标"
+        "中途增量读取。False（默认）不建文件，行为不变。",
     )
 
 
@@ -79,10 +135,10 @@ ORCHESTRATOR_DISPATCH: dict[str, list[tuple[tuple[str, ...], str]]] = {
         (("lit review", "literature review", "paper", "survey", "arxiv"), "model-lit-review"),
     ],
     "risk": [
-        (("pr", "risk", "gate", "review"), "risk-gate"),
+        (("pr", "risk", "verdict", "review"), "risk-ci"),
     ],
     "factor": [
-        (("factor", "autoeval", "ic", "ir"), "factor-autoeval"),
+        (("factor", "evaluation", "ic", "ir"), "factor-evaluation"),
     ],
     "options": [
         (("options", "vol", "greeks", "backtest", "gc", "期权"), "options-compose"),
@@ -114,12 +170,14 @@ def _resolve_skill_name(skill_name: str | None, group: str, task: str) -> str | 
 def _mcp_checkpoint_db() -> Path:
     """返回 MCP run_agent 专用的稳定 checkpoint DB 路径。
 
-    MCP run 与 OpenCode CLI 共用同一 DB，这样通过 CLI 暂停的 gate
-    也可以通过 MCP resume。
+    统一复用 runner.langgraph_base.CHECKPOINTS_DB，MCP run 与 OpenCode CLI
+    共用同一 DB，这样通过 CLI 暂停的 gate 也可以通过 MCP resume。
+    （原 .quantcode/opencode-checkpoints.db 硬编码已删除；旧 db 不迁移。）
     """
-    db_path = PROJECT_ROOT / ".quantcode" / "opencode-checkpoints.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return db_path
+    from runner.langgraph_base import CHECKPOINTS_DB
+
+    CHECKPOINTS_DB.parent.mkdir(parents=True, exist_ok=True)
+    return CHECKPOINTS_DB
 
 
 # ---------------------------------------------------------------------------
@@ -141,17 +199,31 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
     - 调用 ``AgentRunner.resume(thread_id=..., decision=...)``。
     - 返回 completed/rejected 结果。
     """
-    # 优先级：args.group > ctx["group"]（环境变量）> 报错
-    group = args.group or ctx.get("group") or ""
-    if not group:
+    # 认证 session 决定 group。请求参数只能重复声明同一组，不能覆盖
+    # roster 返回的 session group。没有认证 group 时，显式 group 只作为
+    # 本地开发降级路径，正式 MCP 会话由 mcp_server 在调用前 fail-closed。
+    session_group = str((ctx or {}).get("group") or "").strip()
+    requested_group = str(args.group or "").strip()
+    if session_group and requested_group and requested_group != session_group:
         return {
             "status": "error",
             "error": (
-                "No group configured. Either pass 'group' in run_agent args, or set "
-                "QUANTCODE_GROUP environment variable "
-                "(e.g., QUANTCODE_GROUP=model) in opencode.local.jsonc or your shell."
+                f"group mismatch: authenticated session is '{session_group}', "
+                f"request asked for '{requested_group}'"
             ),
         }
+    if not session_group:
+        # Production requests must carry a server-issued Session Context.
+        # Explicit group values are accepted only for local development tests.
+        dev_mode = bool((ctx or {}).get("_development_mode")) or (
+            os.environ.get("QUANTCODE_ENV", "").strip().lower() in {"dev", "development", "test"}
+            and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1"
+        )
+        if not dev_mode:
+            return {"status": "error", "error": "AUTHENTICATION_REQUIRED: Session Context is required"}
+    group = session_group or requested_group
+    if not group:
+        return {"status": "error", "error": "AUTHENTICATION_REQUIRED: Session Context is required (QUANTCODE_GROUP is only allowed in explicit development mode)"}
 
     # start mode 缺 task 是请求错误，与 model 是否配置无关 —— 必须在 model gate 前校验，
     # 否则无 API key 环境下会误报 "No LLM model configured"（PR25 遗留的环境依赖）。
@@ -173,22 +245,73 @@ def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
             "status": "error",
             "error": (
                 "No LLM model configured. Set QUANTCODE_API_KEY "
-                "(or STEPFUN_PLAN_API_KEY, or ANTHROPIC_API_KEY) "
+                "(and optionally QUANTCODE_MODEL_PROVIDER / QUANTCODE_MODEL_NAME) "
                 "environment variable."
             ),
         }
-
-    from runner.agent_engine import AgentRunner
 
     checkpoint_db = _mcp_checkpoint_db()
     resolved_skill = _resolve_skill_name(args.skill_name, group, args.task or "")
 
     # ── resume mode ──
     if args.decision is not None:
-        return _resume_mode(args, group, model, checkpoint_db, resolved_skill)
+        return _resume_mode(
+            args, group, model, checkpoint_db, resolved_skill,
+            allowed_tool_ids=_inner_agent_tool_ids(ctx.get("_allowed_tool_ids")),
+            actor_id=ctx.get("actor_id"), role=ctx.get("role"),
+            session_id=ctx.get("session_id"),
+            workspace_id=ctx.get("workspace_id"),
+            workspace_path=ctx.get("workspace_path"),
+            github_subject=ctx.get("github_subject"),
+            resource_scopes=ctx.get("resource_scopes"),
+        )
 
     # ── start mode ──
-    return _start_mode(args, group, model, checkpoint_db, resolved_skill)
+    return _start_mode(
+        args, group, model, checkpoint_db, resolved_skill,
+        allowed_tool_ids=ctx.get("_allowed_tool_ids"),
+        actor_id=ctx.get("actor_id"), role=ctx.get("role"),
+        session_id=ctx.get("session_id"),
+        workspace_id=ctx.get("workspace_id"),
+        workspace_path=ctx.get("workspace_path"),
+        github_subject=ctx.get("github_subject"),
+        resource_scopes=ctx.get("resource_scopes"),
+    )
+
+def _read_pending_risk_reviews(db_path: Path | None = None) -> int:
+    """risk 组启动时读取 PROJECT scope 的 ``shared.pending_risk_reviews`` 队列条数。
+
+    P0-2 修复：session/key 一律走 :mod:`runner.blackboard_keys` 归一层
+    （与 write_blackboard / trigger_risk_flow 写读两端一致），不再引用
+    不存在的 ``tools.blackboard.blackboard_service``；读取失败记 warning
+    并返回 0，不阻塞 risk 组正常流程。
+    """
+    try:
+        import sqlite3
+
+        from runner.blackboard import BlackboardService
+        from runner.blackboard_keys import KEY_PENDING_RISK_REVIEWS, PROJECT_SESSION_ID
+        from schemas import BlackboardScope, GroupName
+
+        service = BlackboardService(
+            db_path=db_path,
+            session_id=PROJECT_SESSION_ID,
+            requester_group=GroupName.RISK,
+        )
+        queue_entry = service.get_entry(
+            BlackboardScope.PROJECT,
+            None,
+            KEY_PENDING_RISK_REVIEWS,
+            requester_group=GroupName.RISK,
+        )
+        if queue_entry and isinstance(queue_entry.value, dict):
+            reviews = queue_entry.value.get("reviews", {})
+            if isinstance(reviews, dict):
+                return len(reviews)
+    except (ImportError, sqlite3.Error, ValueError) as exc:
+        # 不再静默吞掉——记 warning 便于排障。
+        logger.warning("risk 组读取 pending_risk_reviews 失败（忽略）: %s", exc)
+    return 0
 
 
 def _start_mode(
@@ -197,6 +320,15 @@ def _start_mode(
     model: Any,
     checkpoint_db: Path,
     resolved_skill: str | None,
+    *,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    actor_id: str | None = None,
+    role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> dict[str, Any]:
     """start 模式：启动 AgentRunner，捕获 interrupt → waiting_for_human。"""
     from runner.agent_engine import AgentRunner
@@ -208,6 +340,9 @@ def _start_mode(
             "status": "error",
             "error": "task is required for start mode (no decision provided).",
         }
+    from runner.task_classifier import classify_task
+
+    classification = classify_task(args.task).model_dump(mode="json")
 
     # ★ 提前生成 thread_id：interrupt() 抛异常时 final_state 不可达，
     # 但异常恢复需要知道 thread_id 才能构建 config。
@@ -218,46 +353,70 @@ def _start_mode(
     # Day 5 fix: risk 组启动时读取 pending_risk_reviews，接收 model→risk 跨组流触发
     task = args.task
     if group == "risk":
-        try:
-            from tools.blackboard.blackboard_service import get_blackboard_service, BlackboardScope
-            from schemas.groups import GroupName
-            service = get_blackboard_service()
-            queue_entry = service.get_entry(
-                BlackboardScope.PROJECT,
-                None,
-                "shared.pending_risk_reviews",
-                requester_group=GroupName.RISK,
-            )
-            if queue_entry and isinstance(queue_entry.value, dict):
-                reviews = queue_entry.value.get("reviews", {})
-                if reviews:
-                    task = f"{task}\n\n[Pending risk reviews from model group: {len(reviews)} items]"
-        except Exception:
-            pass  # 读取失败不影响正常流程
+        review_count = _read_pending_risk_reviews()
+        if review_count:
+            task = f"{task}\n\n[Pending risk reviews from model group: {review_count} items]"
 
     runner = AgentRunner(
         group=group,
         model=model,
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
+        budget_tokens=_resolve_budget(args.max_total_tokens),
+        allowed_tool_ids=_inner_agent_tool_ids(allowed_tool_ids),
+        actor_id=actor_id,
+        role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes,
     )
+
+    # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
+    def _stream_call() -> dict[str, Any]:
+        """包装 runner.stream()：拿到全量 trace 后逐条 emit 到通道。
+
+        # ponytail: emit 在 stream() 全量返回后补齐（终态结构 100% 不变）；
+        # 真·逐步中途可读需在 AgentRunner.stream() 循环内挂钩子（改 engine），
+        # 窗口秒级，需要更低延迟时再升级。
+        """
+        from runner import stream_channel
+
+        channel = stream_channel.get_or_open(thread_id)
+        final_state = runner.stream(
+            task=task,
+            skill_name=resolved_skill,
+            flow_name="mcp_compose",
+            thread_id=thread_id,
+            solution_required=bool(classification.get("solution_required")),
+        )
+        for ev in (final_state.get("execution_trace") or []):
+            if isinstance(ev, dict):
+                channel.emit(ev)
+        return final_state
 
     final_state: dict[str, Any] = {}
     try:
         # 优先用 stream()；回退到 run()
         if hasattr(runner, "stream"):
-            final_state = runner.stream(
-                task=task,
-                skill_name=resolved_skill,
-                flow_name="mcp_compose",
-                thread_id=thread_id,
-            )
+            if args.attach_stream:
+                final_state = _stream_call()
+            else:
+                final_state = runner.stream(
+                    task=task,
+                    skill_name=resolved_skill,
+                    flow_name="mcp_compose",
+                    thread_id=thread_id,
+                    solution_required=bool(classification.get("solution_required")),
+                )
         else:
             final_state = runner.run(
                 task=task,
                 skill_name=resolved_skill,
                 flow_name="mcp_compose",
                 thread_id=thread_id,
+                solution_required=bool(classification.get("solution_required")),
             )
 
         # ── 检查是否有 pending HumanGate interrupt ──
@@ -265,12 +424,16 @@ def _start_mode(
 
         interrupt = extract_interrupt_payload(final_state)
         if interrupt is not None:
-            return format_waiting_for_human(
+            waiting = format_waiting_for_human(
                 thread_id=final_state.get("thread_id", thread_id),
                 interrupt_payload=interrupt,
             )
+            waiting["task_classification"] = classification
+            return waiting
 
-        return _format_result(final_state, group)
+        result = _format_result(final_state, group, actor_id=actor_id, role=role)
+        result["task_classification"] = classification
+        return result
 
     except Exception as e:
         # interrupt() 会在 LangGraph 内部抛 GraphInterrupt 异常；
@@ -295,10 +458,12 @@ def _start_mode(
                         {"__interrupt__": list(snapshot.interrupts)}
                     )
                     if interrupt_val:
-                        return format_waiting_for_human(
+                        waiting = format_waiting_for_human(
                             thread_id=thread_id,
                             interrupt_payload=interrupt_val,
                         )
+                        waiting["task_classification"] = classification
+                        return waiting
             except Exception:
                 pass
 
@@ -309,247 +474,21 @@ def _start_mode(
         }
 
 
-def _start_risk_gate_mode(
-    args: RunAgentArgs,
-    checkpoint_db: Path,
-) -> dict[str, Any]:
-    """
-    DEPRECATED: risk-gate 专用 start 模式，已弃用。统一走 AgentRunner。
-
-    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径，走确定性
-    build_risk_agent pipeline 而非 ReAct。现已统一至 AgentRunner ReAct 路径。
-    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
-    """
-    if not args.task:
-        return {
-            "status": "error",
-            "error": "task is required for start mode (no decision provided).",
-        }
-
-    from runner.langgraph_base import make_thread_id
-    import uuid
-    thread_id = args.thread_id or (
-        f"{make_thread_id('risk', 'mcp_compose')}-{uuid.uuid4().hex[:8]}"
-    )
-
-    # 将自然语言 task 映射为 risk:gate 的最小 input_data。
-    task_lower = args.task.lower()
-    scenario = "high_risk" if any(k in task_lower for k in (
-        "high_risk", "high risk", "var99", "var 99", "max_drawdown", "position limit", "position_limit"
-    )) else "normal"
-
-    from scripts.run_risk_gate_tool import _fixture_model_spec
-    from runner.risk_agent import build_risk_agent
-    from runner.human_gate import extract_interrupt_payload, format_waiting_for_human
-
-    app = build_risk_agent(checkpoint_db=checkpoint_db)
-    input_data = {
-        "scenario": scenario,
-        "model_spec": _fixture_model_spec(),
-        "pr_number": "303",
-        "head_sha": f"mcp-{thread_id}",
-        "pr_url": f"https://github.com/hkust-quant-society/quantcode/pull/303",
-        "artifacts_root": str(PROJECT_ROOT / "artifacts" / "risk" / "opencode" / scenario),
-        "dedupe_db_path": str(PROJECT_ROOT / ".quantcode" / "opencode-dedupe.sqlite"),
-    }
-    init_state = {
-        "group": "risk",
-        "flow_name": "risk:gate",
-        "thread_id": thread_id,
-        "input_data": input_data,
-        "output_data": None,
-        "artifacts": [],
-        "errors": [],
-    }
-    final_state = app.invoke(init_state, config={"configurable": {"thread_id": thread_id}})
-    interrupt = extract_interrupt_payload(final_state)
-    if interrupt is not None:
-        waiting = format_waiting_for_human(thread_id=thread_id, interrupt_payload=interrupt)
-        waiting["execution_trace"] = [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "agent_start",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"task": args.task or ""},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "risk_metrics",
-                "node": "run_tool_pipeline",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"metrics": final_state.get("risk_metrics", {})},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 3,
-                "type": "human_gate",
-                "node": "human_review",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": "waiting_for_human", "gate": waiting.get("gate", {})},
-            },
-        ]
-        return waiting
-
-    output = final_state.get("output_data") or {}
-    return {
-        "status": output.get("status", "completed"),
-        "thread_id": thread_id,
-        "output_data": output,
-        "artifacts": final_state.get("artifacts", []),
-        "risk_metrics": final_state.get("risk_metrics", {}),
-        "execution_trace": [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "agent_start",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"task": args.task or ""},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "risk_metrics",
-                "node": "run_tool_pipeline",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"metrics": final_state.get("risk_metrics", {})},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 3,
-                "type": "output_data",
-                "node": "finalize_output",
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"output_data": output},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 4,
-                "type": "agent_end",
-                "node": None,
-                "thread_id": thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": output.get("status", "completed")},
-            },
-        ],
-    }
-
-
-def _resume_risk_gate_mode(
-    args: RunAgentArgs,
-    checkpoint_db: Path,
-) -> dict[str, Any]:
-    """
-    DEPRECATED: risk-gate 专用 resume 模式，已弃用。统一走 AgentRunner。
-
-    历史遗留：此函数为 Day4 demo 稳定性临时加的特判路径。
-    现已统一至 _resume_mode 的 AgentRunner 路径。
-    保留此函数仅为兼容性，实际已不再调用（agent_mcp_tool.py 已移除调用点）。
-    """
-    if not args.thread_id:
-        return {
-            "status": "error",
-            "error": "thread_id is required for resume mode.",
-        }
-
-    from runner.human_gate import normalize_external_decision
-    from runner.risk_agent import build_risk_agent, resume_risk_gate
-
-    decision = normalize_external_decision(args.decision or "reject")
-    risk_decision = "approve" if decision == "approve" else "reject"
-    app = build_risk_agent(checkpoint_db=checkpoint_db)
-    final_state = resume_risk_gate(app, args.thread_id, risk_decision)
-    output = final_state.get("output_data") or {}
-    status = output.get("status", "completed")
-    artifacts = final_state.get("artifacts", [])
-    return {
-        "status": status,
-        "thread_id": args.thread_id,
-        "human_decision": decision,
-        "output_data": output,
-        "artifacts": artifacts,
-        "risk_metrics": final_state.get("risk_metrics", {}),
-        "execution_trace": [
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 1,
-                "type": "human_gate",
-                "node": "human_review",
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"human_decision": decision, "status": status},
-            },
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": 2,
-                "type": "output_data",
-                "node": "finalize_output",
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"output_data": output},
-            },
-            *[
-                {
-                    "schema_version": "agent_trace.v1",
-                    "seq": i + 3,
-                    "type": "artifact",
-                    "node": "write_pr_comment",
-                    "thread_id": args.thread_id,
-                    "group": "risk",
-                    "flow_name": "risk:gate",
-                    "iteration": 0,
-                    "data": {"path": str(path)},
-                }
-                for i, path in enumerate(artifacts)
-            ],
-            {
-                "schema_version": "agent_trace.v1",
-                "seq": len(artifacts) + 3,
-                "type": "agent_end",
-                "node": None,
-                "thread_id": args.thread_id,
-                "group": "risk",
-                "flow_name": "risk:gate",
-                "iteration": 0,
-                "data": {"status": status},
-            },
-        ],
-    }
-
-
 def _resume_mode(
     args: RunAgentArgs,
     group: str,
     model: Any,
     checkpoint_db: Path,
     resolved_skill: str | None,
+    *,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
+    actor_id: str | None = None,
+    role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> dict[str, Any]:
     """resume 模式：用 Command(resume=...) 恢复已暂停的 gate。"""
     from runner.agent_engine import AgentRunner
@@ -561,6 +500,12 @@ def _resume_mode(
             "error": "thread_id is required for resume mode.",
         }
 
+    if role not in {"approver", "admin"}:
+        return {
+            "status": "error",
+            "error": "PERMISSION_DENIED: only an approver or admin may resume a HumanGate",
+        }
+
     decision = args.decision or "reject"
     normalized = normalize_external_decision(decision)
 
@@ -569,6 +514,15 @@ def _resume_mode(
         model=model,
         max_iterations=args.max_iterations,
         checkpoint_db=checkpoint_db,
+        budget_tokens=_resolve_budget(args.max_total_tokens),
+        allowed_tool_ids=_inner_agent_tool_ids(allowed_tool_ids),
+        actor_id=actor_id,
+        role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes,
     )
 
     try:
@@ -581,10 +535,9 @@ def _resume_mode(
             flow_name="mcp_compose",
         )
 
-        result = _format_result(final_state, group)
+        result = _format_result(final_state, group, actor_id=actor_id, role=role)
 
         # 将 human_decision 注入结果
-        from runner.human_gate import parse_resume_decision
         result["human_decision"] = normalized
         result["thread_id"] = args.thread_id
 
@@ -609,7 +562,13 @@ def _resume_mode(
         }
 
 
-def _format_result(state: dict, group: str) -> dict[str, Any]:
+def _format_result(
+    state: dict,
+    group: str,
+    *,
+    actor_id: str | None = None,
+    role: str | None = None,
+) -> dict[str, Any]:
     """从 AgentState 提取结构化输出。"""
     messages = state.get("messages", [])
 
@@ -645,10 +604,21 @@ def _format_result(state: dict, group: str) -> dict[str, Any]:
     if last_msg is not None:
         final_text = str(getattr(last_msg, "content", "")) if hasattr(last_msg, "content") else ""
 
+    explicit_status = state.get("status")
+    status = (
+        str(explicit_status)
+        if explicit_status in {"waiting_for_human", "stopped_budget", "stopped_loop", "failed", "error"}
+        else "completed" if state.get("task_status") == "done" else "stopped"
+    )
     result: dict[str, Any] = {
-        "status": "completed" if state.get("task_status") == "done" else "stopped",
+        "status": status,
         "iterations": state.get("iterations", 0),
         "thread_id": state.get("thread_id", ""),
+        "task_id": state.get("task_id") or state.get("thread_id", ""),
+        "group": group,
+        "actor_id": state.get("actor_id") or actor_id,
+        "role": state.get("role") or role,
+        "session_id": state.get("session_id"),
         "final_message": final_text,
         "tool_calls": tool_calls,
     }

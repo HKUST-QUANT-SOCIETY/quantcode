@@ -162,6 +162,17 @@ def reconcile_once(
         if delete_orphans:
             for p in list(indexed.keys()):
                 if p not in disk_paths:
+                    # A group-scoped reconciler must never delete another
+                    # group's index rows.  It may only maintain global,
+                    # project/session rows and its own group namespace.
+                    indexed_loc = parse_path(p)
+                    if (
+                        rgroup
+                        and indexed_loc is not None
+                        and indexed_loc.scope == "groups"
+                        and indexed_loc.scope_id != rgroup
+                    ):
+                        continue
                     try:
                         cur = conn.execute("DELETE FROM memory_fts WHERE path = ?", (p,))
                         if cur.rowcount > 0:

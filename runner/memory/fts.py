@@ -12,7 +12,7 @@ QuantCode 扩展：
 - :func:`init_db` —— 初始化（幂等）
 - :func:`file_exists_and_initialized`
 - :func:`get_connection`
-- :data:`LEGAL_SCOPES` —— 5 scope 白名单
+- :data:`LEGAL_SCOPES` —— storage scope whitelist
 - :data:`LEGAL_TYPES` —— 与 MimoCode 对齐
 - :data:`SCHEMA_VERSION`
 """
@@ -25,14 +25,13 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-# 5 scope：MimoCode 的 4（global/projects/sessions/cc） + QuantCode groups；
-#          以及把 MimoCode 的 "cc" 用 QuantCode 的 "groups" 替代
+# Four storage scopes. Task progress is Runtime State nested under sessions,
+# not a top-level Memory scope.
 LEGAL_SCOPES: tuple[str, ...] = (
     "global",
     "projects",
     "groups",     # QuantCode 扩展：6 组的隔离
     "sessions",
-    "tasks",      # QuantCode 扩展：顶层 task scope（MimoCode 是嵌套 key）
 )
 
 # 与 MimoCode `MemoryType` enum 1:1 对齐

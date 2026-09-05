@@ -56,6 +56,12 @@ class BacktestSummary(BaseModel):
     sharpe: float | None = None
     max_drawdown: float = Field(ge=0, le=1)
     turnover_monthly: float | None = Field(default=None, ge=0)
+    # ROADMAP D3b 扩展（可选，回测引擎 internal_v1 填充，旧 stub 调用方无需关心）
+    net_value: list[float] | None = None
+    turnover_total: float | None = Field(default=None, ge=0)
+    fee_total: float | None = Field(default=None, ge=0)
+    skipped_days: list[str] | None = None
+    gross_exposure_violations: int | None = Field(default=None, ge=0)
 
 
 class StrategyReport(BaseModel):
@@ -70,6 +76,8 @@ class StrategyReport(BaseModel):
     backtest: BacktestSummary
     verdict: StrategyVerdict = StrategyVerdict.PASS
     fail_reasons: list[str] = Field(default_factory=list)
+    # ROADMAP D3b：回测引擎标注（internal_v1）；旧 stub 调用方该字段为 None
+    engine: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def _weights_sum_reasonable(self) -> "StrategyReport":

@@ -1,0 +1,17 @@
+# SSH key → group 长期绑定样例（P0-7, docs/Architecture_Spec.md §2.1）。
+#
+# 真实文件为 .opencode/authorized_groups.yaml（已进 .gitignore，不入库）。
+# 生成方式：
+#   python -m quantcode.identity add --group factor \
+#       --public-key ~/.ssh/id_ed25519.pub --note "zhang@laptop"
+# 指纹来自 `ssh-keygen -lf <pubkey>` 输出（SHA256: + base64 无填充）。
+bindings:
+  - fingerprint: "SHA256:oVDaaoONrPL38IxAoGR14Do45YIKvDt5o7ASsv0jiaA"
+    actor_id: "zhang"
+    group: factor
+    role: analyst
+    workspace_id: "factor-zhang"
+    workspace_path: "/srv/quant/users/zhang"
+    github_subject: "zhang"
+    resource_scopes: ["repo:factor", "memory:factor"]
+    note: "zhang@laptop"

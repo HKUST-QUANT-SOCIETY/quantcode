@@ -8,7 +8,7 @@
     QUANTCODE_USE_REAL_LLM=1 pytest tests/test_real_llm_integration.py -v
 
 覆盖:
-1. risk AgentRunner 用真 LLM 自主决定调 check_gate + 后续 tool
+1. risk AgentRunner 用真 LLM 自主决定调 risk_verdict + 后续 tool
 2. factor AgentRunner 用真 LLM 跑 3 步自主推理
 3. Dream 原型用真 LLM 产出非 mock 的 memory
 """
@@ -27,14 +27,14 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 
 def test_agent_runner_risk_with_real_llm(require_real_llm, tmp_path):
-    """用真 DeepSeek LLM 跑 risk AgentRunner，验证"自主决策"调 check_gate。
+    """用真 DeepSeek LLM 跑 risk AgentRunner，验证"自主决策"调 risk_verdict。
 
     与 test_agent_runner_gate.py 的 mock 测试不同，这里的 LLM 是真实 DeepSeek API，
     Agent 必须自己看到 state 后决定下一步调什么 tool，不是预设 script。
 
     验证点:
     - Agent 至少调了 read_blackboard（说明 LLM 能正确使用 tool）
-    - 如果调了 check_gate 且 requires_human=True，验证 __interrupt__ 被触发
+    - 如果调了 risk_verdict 且 breached=True，验证结果仍以领域 verdict 返回，不触发 HumanGate
     - Agent 能正常结束（不崩溃、不无限循环）
     """
     import tools.risk._register  # noqa: F401
@@ -50,7 +50,7 @@ def test_agent_runner_risk_with_real_llm(require_real_llm, tmp_path):
     final = runner.run(
         task=(
             "你是一个风险控制 Agent。请读取 blackboard 中的模型 spec，"
-            "计算风险指标，检查 gate，如果风险过高需要人审。"
+            "计算风险指标并检查 risk verdict；风险结果以报告或 CI 状态表达，不进入人审 Gate。"
             "input_data 包含 pr_number=1, scenario=normal。"
         ),
         skill_name=None,
@@ -59,9 +59,9 @@ def test_agent_runner_risk_with_real_llm(require_real_llm, tmp_path):
             "1. Read the blackboard with read_blackboard(input_data)\n"
             "2. Calculate risk metrics with calc_risk(model_spec, scenario)\n"
             "3. Generate a risk profile with generate_risk_profile(model_spec, risk_metrics)\n"
-            "4. Check the gate with check_gate(risk_profile)\n"
-            "5. If gate requires human review, stop and wait\n"
-            "6. If approved, write a PR comment with write_pr_comment\n\n"
+            "4. Check the risk verdict with risk_verdict(risk_profile)\n"
+            "5. Keep breached results as a domain fail/warning, never a HumanGate\n"
+            "6. Write a CI report with write_pr_comment\n\n"
             "Always proceed step by step. Call tools in order."
         ),
         thread_id="t-real-risk",
@@ -84,7 +84,7 @@ def test_agent_runner_risk_with_real_llm(require_real_llm, tmp_path):
         f"真 LLM 应调 read_blackboard，实际调了: {tool_names}"
     )
 
-    # 如果有 __interrupt__，说明 check_gate 触发了人审
+    # 风险 verdict 不应生成 HumanGate；任何中断都必须来自其他受控写操作。
     if "__interrupt__" in final:
         interrupts = final["__interrupt__"]
         assert interrupts, "有 __interrupt__ 但为空"
@@ -122,7 +122,7 @@ def test_agent_runner_risk_normal_scenario_no_interrupt(require_real_llm, tmp_pa
             "You are a risk control agent. Read blackboard, calculate risk, "
             "check gate. If risk is normal (no human review needed), write PR comment. "
             "Call tools in order: read_blackboard -> calc_risk -> generate_risk_profile -> "
-            "check_gate -> write_pr_comment."
+            "risk_verdict -> write_pr_comment."
         ),
         thread_id="t-real-normal",
     )
@@ -150,11 +150,11 @@ def test_agent_runner_factor_with_real_llm(require_real_llm, tmp_path):
 
     与 test_factor_stub_tools.py 的 scripted mock 不同，这里 LLM 真实看到
     match_main 的返回结果后，自主决定下一步调 gen_schema，再看到 gen_schema
-    结果后自主决定调 autoeval。这是"自主推理"的真实验证。
+    结果后自主决定调 quant_evaluator。这是"自主推理"的真实验证。
 
     验证点:
     - Agent 至少调了 match_main（第一步）
-    - 如果调了 match_main，验证后续是否自主调了 gen_schema / autoeval
+    - 如果调了 match_main，验证后续是否自主调了 gen_schema / quant_evaluator
     - Agent 能正常结束
     """
     import tools.factor._register  # noqa: F401
@@ -172,7 +172,7 @@ def test_agent_runner_factor_with_real_llm(require_real_llm, tmp_path):
             "你是一个因子生成助手。请生成一个 PB-ROE 季度再平衡因子：\n"
             "1. 先用 match_main(idea='PB-ROE 季度再平衡因子') 检查兼容性\n"
             "2. 再用 gen_schema 生成 FactorSpec\n"
-            "3. 最后用 autoeval 提交回测\n"
+            "3. 最后用 quant_evaluator 提交回测\n"
             "请按顺序调用工具。"
         ),
         skill_name=None,
@@ -180,7 +180,7 @@ def test_agent_runner_factor_with_real_llm(require_real_llm, tmp_path):
             "You are a factor generation assistant. Follow the pipeline:\n"
             "1. match_main(idea) — check mainline compatibility\n"
             "2. gen_schema(idea, match_result) — generate FactorSpec\n"
-            "3. autoeval(spec) — submit to AutoEval\n"
+            "3. quant_evaluator(spec) — submit to AutoEval\n"
             "Call tools in order. Use the results from previous steps."
         ),
         thread_id="t-real-factor",
@@ -203,7 +203,7 @@ def test_agent_runner_factor_with_real_llm(require_real_llm, tmp_path):
     # 如果调了 ≥3 个 tool，说明自主推理链完整
     if len(tool_names) >= 3:
         # 验证 3 步都在
-        assert {"match_main", "gen_schema", "autoeval"} <= tool_names, (
+        assert {"match_main", "gen_schema", "quant_evaluator"} <= tool_names, (
             f"3 步 tool 应完整，实际: {tool_names}"
         )
 
@@ -247,12 +247,12 @@ def test_dream_with_real_llm(require_real_llm, tmp_path):
                 "thread_id": "real-llm-dream-test",
                 "state_fingerprint": "def456",
                 "action": {
-                    "tool_name": "check_gate",
+                    "tool_name": "risk_verdict",
                     "tool_args": {"risk_profile": {"var_99": 0.06}},
                 },
                 "observation": {
                     "success": True,
-                    "requires_human": True,
+                    "breached": True,
                     "summary": "Gate check: requires human review",
                 },
             }

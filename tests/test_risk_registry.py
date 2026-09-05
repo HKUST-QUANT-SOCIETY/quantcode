@@ -28,7 +28,7 @@ def test_risk_tools_registered():
         "read_blackboard",
         "calc_risk",
         "generate_risk_profile",
-        "check_gate",
+        "risk_verdict",
         "write_pr_comment",
     ):
         assert tool_id in ids
@@ -42,11 +42,23 @@ def test_risk_allowlist_filters_tools(monkeypatch):
     assert names == {
         "read_blackboard",
         "calc_risk",
-        "calc_risk_stub",
-        "check_gate",
+        "risk_verdict",
         "generate_risk_profile",
         "write_pr_comment",
-        "request_human_review",
+        "list_runs",  # meta tool：run_agent 同路，所有组的 MCP server 可见
+        "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+        "search_memory",  # F-04：组内长期 Memory 只读检索
+        "session_context",  # F-01/F-05：服务端签发的会话身份摘要
+        # A3（2026-09-01）：algorithms.yaml 注册表三件套同走 _meta 通道，六组可见
+        "list_algorithms",
+        "describe_algorithm",
+        "run_algorithm",
+        # A4 蒸馏闭环：consume_status 只读状态工具同走 _meta 通道，六组可见
+        "consume_status",
+        # A3/P-05（2026-09-01）：AB 实验三件套同走 _meta 通道，六组可见
+        "run_ab_experiment",
+        "list_experiments",
+        "get_experiment",
     }
 
 
@@ -57,7 +69,7 @@ def test_registry_call_read_blackboard():
     assert result["model_spec"]["model_name"] == "pb_roe_ranker"
 
 
-def test_registry_call_check_gate_high_risk():
+def test_registry_call_risk_verdict_high_risk():
     path = Path(__file__).resolve().parent / "fixtures/sample_model/model_spec.json"
     model_spec = json.loads(path.read_text(encoding="utf-8"))
     metrics = global_registry.call("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"})
@@ -65,8 +77,8 @@ def test_registry_call_check_gate_high_risk():
         "generate_risk_profile",
         {"model_spec": model_spec, "risk_metrics": metrics},
     )
-    gate = global_registry.call("check_gate", {"risk_profile": profile_wrap["risk_profile"]})
-    assert gate["requires_human"] is True
+    gate = global_registry.call("risk_verdict", {"risk_profile": profile_wrap["risk_profile"]})
+    assert gate["breached"] is True
 
 
 def test_mcp_call_tool_calc_risk():

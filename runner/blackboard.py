@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runner.blackboard_keys import PROJECT_SESSION_ID
 from schemas import (
     BlackboardEntry,
     BlackboardScope,
@@ -16,7 +17,8 @@ from schemas import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BLACKBOARD_DB = PROJECT_ROOT / ".quantcode" / "blackboard.db"
-DEFAULT_SESSION_ID = "S0000000000000001"
+# P0-2：跨组共享条目的 session 唯一真源在 runner/blackboard_keys.py。
+DEFAULT_SESSION_ID = PROJECT_SESSION_ID
 
 
 class BlackboardPermissionError(PermissionError):
@@ -93,9 +95,13 @@ class BlackboardService:
         return conn
 
     def _effective_group(self, requester_group: GroupName | str | None) -> GroupName | None:
-        if requester_group is None:
-            return self.requester_group
-        return _coerce_group(requester_group)
+        bound = self.requester_group
+        override = _coerce_group(requester_group)
+        if bound is not None and override is not None and override != bound:
+            raise BlackboardPermissionError(
+                "requester_group cannot override the service's bound group"
+            )
+        return override if override is not None else bound
 
     @staticmethod
     def _entry_key(scope: BlackboardScope, group: GroupName | None, key: str) -> str:
@@ -128,6 +134,32 @@ class BlackboardService:
                     "requester_group cannot write another group's entry"
                 )
 
+    @staticmethod
+    def _apply_write_policy(
+        existing: BlackboardEntry,
+        entry: BlackboardEntry,
+    ) -> BlackboardEntry:
+        """P0-2 实装 write_policy：覆盖既有条目时的权限与合并语义。
+
+        - ``OWNER``：仅原 task（同 written_by_task_id）可覆盖，值为整体替换；
+        - ``APPEND``：任何 task 仅可追加——已存 value 是 list 时把新值 append
+          进已存 list（非 list 载荷的 dict 合并由调用方自行 merge 后整体写入）；
+        - ``GROUP_APPEND``：同 APPEND，且明确允许非原写者组追加（跨组追加）。
+        """
+        policy = existing.write_policy
+        if policy == WritePolicy.OWNER:
+            if entry.written_by_task_id != existing.written_by_task_id:
+                raise BlackboardPermissionError(
+                    "OWNER policy: only the original task may overwrite "
+                    f"(existing task={existing.written_by_task_id!r}, "
+                    f"incoming task={entry.written_by_task_id!r})"
+                )
+            return entry
+        # APPEND / GROUP_APPEND：追加语义
+        if isinstance(existing.value, list):
+            return entry.model_copy(update={"value": [*existing.value, entry.value]})
+        return entry
+
     def _load_by_entry_key(self, entry_key: str) -> BlackboardEntry | None:
         with self._conn() as conn:
             row = conn.execute(
@@ -155,16 +187,22 @@ class BlackboardService:
         json.dumps(entry.value)
 
         entry_key = self._entry_key(entry.scope, entry.group, entry.key)
-        existing = self._load_by_entry_key(entry_key)
-        data = entry.model_dump()
-        now = _utc_now()
-        if existing is not None:
-            data["created_at"] = existing.created_at
-            data["version"] = existing.version + 1
-        data["updated_at"] = now
-        stored = BlackboardEntry(**data)
-
         with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT entry_json FROM blackboard_entries WHERE session_id=? AND entry_key=?",
+                (self.session_id, entry_key),
+            ).fetchone()
+            existing = BlackboardEntry.model_validate_json(row["entry_json"]) if row else None
+            data = entry.model_dump()
+            now = _utc_now()
+            if existing is not None:
+                merged = self._apply_write_policy(existing, entry)
+                data = merged.model_dump()
+                data["created_at"] = existing.created_at
+                data["version"] = existing.version + 1
+            data["updated_at"] = now
+            stored = BlackboardEntry(**data)
             conn.execute(
                 """
                 INSERT INTO blackboard_entries (
@@ -231,13 +269,14 @@ class BlackboardService:
     ) -> BlackboardEntry | None:
         """Return a visible entry or ``None`` when absent or permission-blocked."""
 
+        effective_group = self._effective_group(requester_group)
         resolved_scope = _coerce_scope(scope)
         resolved_group = _coerce_group(group)
         entry_key = self._entry_key(resolved_scope, resolved_group, key)
         entry = self._load_by_entry_key(entry_key)
         if entry is None:
             return None
-        if not self._read_allowed(entry, self._effective_group(requester_group)):
+        if not self._read_allowed(entry, effective_group):
             return None
         return entry
 

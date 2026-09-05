@@ -167,6 +167,13 @@ def test_read_pr_requires_source():
         registry.call("read_pr", {})
 
 
+def test_read_pr_rejects_paths_outside_checkout(tmp_path):
+    outside = tmp_path / "private.txt"
+    outside.write_text("PRIVATE-PROBE", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the approved"):
+        registry.call("read_pr", {"pr_path": str(outside)})
+
+
 # ---------------------------------------------------------------------------
 # extract_metadata
 # ---------------------------------------------------------------------------
@@ -184,6 +191,13 @@ def test_extract_metadata_reads_model_spec_json_from_fixture():
 def test_extract_metadata_requires_source():
     with pytest.raises(ValueError, match="Invalid arguments"):
         registry.call("extract_metadata", {})
+
+
+def test_extract_metadata_rejects_paths_outside_checkout(tmp_path):
+    outside = tmp_path / "private-pr.md"
+    outside.write_text("## ModelSpec\n{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the approved"):
+        registry.call("extract_metadata", {"pr_path": str(outside)})
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +251,12 @@ def test_write_blackboard_creates_project_entry(tmp_path):
     assert result["project_entry"]["value"] == {"model_id": "m1"}
     assert result["project_entry"]["version"] == 1
 
+    # P0-2：session 归一为 PROJECT_SESSION_ID（不再用 thread_id 当 session）
+    from runner.blackboard_keys import PROJECT_SESSION_ID
+
     risk_board = BlackboardService(
         db_path,
-        session_id="model-agent-1700000000",
+        session_id=PROJECT_SESSION_ID,
         requester_group=GroupName.RISK,
     )
     assert risk_board.get_entry(
@@ -305,12 +322,13 @@ def test_write_blackboard_requires_key():
 
 
 def test_synthesize_task_id_is_deterministic_and_distinct():
-    """🟢P2-8：_synthesize_task_id 单测。
+    """🟢P2-8 + audit #18：_synthesize_task_id 单测。
 
     验证：
     1. 稳定：相同 thread_id 两次调用返回相同 task_id
     2. 区分：不同 thread_id 返回不同 task_id
     3. 严格满足 TASK_ID_PATTERN (``^T\\d+(\\.\\d+){0,4}$``)
+    4. 诚实占位：缺失 ctx task_id 时写 T0 前缀（未分配任务），不冒充真实 task
     """
     from tools.model.write_blackboard import _synthesize_task_id
 
@@ -338,6 +356,12 @@ def test_synthesize_task_id_is_deterministic_and_distinct():
         tid_out = _synthesize_task_id(tid)
         assert re.match(TASK_ID_PATTERN, tid_out), (
             f"{tid!r} -> {tid_out!r} 不满足 TASK_ID_PATTERN"
+        )
+
+    # 4. 诚实占位（audit #18）：未分配任务一律 T0.*，不冒充 T1 起的真实 task
+    for tid in samples:
+        assert _synthesize_task_id(tid).startswith("T0."), (
+            f"{tid!r} 占位 task_id 必须以 T0. 开头（诚实缺失）"
         )
 
 
@@ -442,9 +466,12 @@ def test_trigger_risk_flow_writes_project_queue(tmp_path):
     assert result["review_id"] == "abcdef1"
     assert result["review"]["to_group"] == "risk"
 
+    # P0-2：session 归一为 PROJECT_SESSION_ID（写读两端一致）
+    from runner.blackboard_keys import PROJECT_SESSION_ID
+
     risk_board = BlackboardService(
         db_path,
-        session_id=VALID_SESSION,
+        session_id=PROJECT_SESSION_ID,
         requester_group=GroupName.RISK,
     )
     queue = risk_board.get_entry(
@@ -541,7 +568,7 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
     import tools.risk._register  # noqa: F401
     from runner.compose_executor import execute_compose_flow, unregister_flow
     from runner.langgraph_base import clear_checkpointer_cache
-    from runner.risk_agent import register_risk_gate_flow
+    from runner.risk_ci import register_risk_ci_flow
     from tools.model import trigger_risk_flow as rf_module
     from tools.model import write_blackboard as wb_module
     from tools.risk.risk_tools import clear_write_pr_comment_dedupe_cache
@@ -572,10 +599,10 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
     assert trigger_result["review"]["blackboard_key"] == blackboard_key
 
     try:
-        register_risk_gate_flow(checkpoint_db=tmp_path / "checkpoints.db")
+        register_risk_ci_flow(checkpoint_db=tmp_path / "checkpoints.db")
         result = execute_compose_flow(
             group="risk",
-            flow_name="risk:gate",
+            flow_name="risk:ci",
             input_data={
                 "scenario": "normal",
                 "project_id": VALID_SESSION,
@@ -590,7 +617,7 @@ def test_model_to_risk_cross_group_flow_end_to_end(tmp_path, monkeypatch):
             thread_id="risk-model-to-risk-test",
         )
     finally:
-        unregister_flow("risk", "risk:gate")
+        unregister_flow("risk", "risk:ci")
         clear_checkpointer_cache()
         clear_write_pr_comment_dedupe_cache()
 

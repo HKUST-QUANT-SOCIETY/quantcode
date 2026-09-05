@@ -1,0 +1,16 @@
+# permissions.yaml — G4-A1 权限三态（allow / ask / deny）
+# key: `<group>.<tool_id>`（组内精确）或裸 `<tool_id>`（全组生效）；缺省 → allow。
+# 执行点：agent tool_node 执行前（runner/permission_engine.enforce）。
+#   deny → tool_result error；ask → LangGraph interrupt（复用 HumanGate，
+#   resume approve 后放行）。缺失本文件 → 全部 allow（向后兼容）。
+#
+# 声明式示例（改注释为生效条目即启用；启用后相应组 e2e 需带 human_approved
+# 或走 HumanGate resume 流程）：
+#   strategy.deployment_candidate: ask
+permissions:
+  fundamental.publish: deny
+  # F-03 触发点② SSH 分级（governance SPEC §2.3 ②；分级判定
+  # runner/server_ssh.classify_ssh_action，判定来源见其 _prod_targets 注释）：
+  ssh.read: allow        # SSH 读（列目录/读文件）不 gate
+  ssh.dev.write: allow   # 开发环境写不 gate（push 等自动操作亦不 gate）
+  ssh.prod.write: ask    # 生产环境写由 permission_engine 拒绝；部署必须走 Admin 管理面

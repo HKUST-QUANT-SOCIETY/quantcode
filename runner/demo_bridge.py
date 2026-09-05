@@ -5,7 +5,7 @@
 
 两种用法：
 1. **人读模式**（默认）：彩色/带图标的流式渲染，demo 现场用。
-       python -m runner.demo_bridge --group risk --skill risk-gate \
+       python -m runner.demo_bridge --group risk --skill risk-ci \
            --task "run risk_stub high_risk"
    撞到 HumanGate 时提示输入 approve/reject，回车后 resume。
 

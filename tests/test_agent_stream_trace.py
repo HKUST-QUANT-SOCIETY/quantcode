@@ -143,6 +143,21 @@ def test_stream_trace_contains_tool_call_and_result(tmp_db, clean_registry):
     assert tool_result["data"]["tool"] == "echo_tool"
 
 
+def test_stream_plain_final_answer_is_completed(tmp_db, clean_registry):
+    runner = AgentRunner(
+        group="model",
+        model=ScriptedLLM([AIMessage(content="final answer")]),
+        checkpoint_db=tmp_db,
+    )
+    result = runner.stream(
+        task="trace final",
+        system_prompt="x",
+        thread_id="trace-stream-final",
+        flow_name="trace_test",
+    )
+    assert result["status"] == "completed"
+
+
 def test_stream_trace_includes_output_data_and_artifacts(tmp_db, clean_registry):
     register_tool(PRODUCE_OUTPUT)
 
@@ -166,13 +181,24 @@ def test_stream_trace_includes_output_data_and_artifacts(tmp_db, clean_registry)
     assert any(e["type"] == "artifact" for e in trace)
 
 
-def test_stream_trace_contains_human_gate(tmp_db, clean_registry):
-    from tools.risk_stub_tool import calc_risk_stub_tool
+def test_stream_trace_risk_verdict_has_no_human_gate(tmp_db, clean_registry):
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    register_tool(calc_risk_stub_tool)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
 
     llm = ScriptedLLM([
-        _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], "step1"),
+        _ai_with_tools(
+            [
+                ("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"}),
+                ("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics}),
+            ],
+            "step1",
+        ),
     ])
     runner = AgentRunner(group="risk", model=llm, checkpoint_db=tmp_db)
     result = runner.stream(
@@ -182,8 +208,8 @@ def test_stream_trace_contains_human_gate(tmp_db, clean_registry):
         flow_name="trace_test",
     )
 
-    assert result.get("status") == "waiting_for_human"
-    assert result.get("gate") is not None
+    assert result.get("status") != "waiting_for_human"
+    assert result.get("gate") is None
     trace = result["execution_trace"]
     assert any(e["type"] == "risk_metrics" for e in trace)
-    assert any(e["type"] == "human_gate" for e in trace)
+    assert not any(e["type"] == "human_gate" for e in trace)

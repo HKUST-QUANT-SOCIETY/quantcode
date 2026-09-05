@@ -209,15 +209,15 @@ def _summarize_with_llm(
         return _DreamSummary(
             repetitions=[
                 "Agent 连续调 read_blackboard ≥3 次(typical fetch pattern)",
-                "calc_risk 后立即 check_gate(typical gate flow)",
+                "calc_risk 后立即 risk_verdict(typical gate flow)",
             ],
             lessons=[
-                "high_risk scenario 必须先经 check_gate 再调 write_pr_comment",
+                "high_risk scenario 必须先经 risk_verdict 再调 write_pr_comment",
                 "rlhf collector 记录每次 tool 调用的 state_fingerprint,便于事后审计",
             ],
             hotspots=[
                 "calc_risk:high_risk",
-                "check_gate:requires_human",
+                "risk_verdict:breached",
                 "write_pr_comment:pr_url",
             ],
         )

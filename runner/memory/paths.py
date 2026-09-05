@@ -2,8 +2,8 @@
 
 严格移植自 MimoCode ``memory/paths.ts``，QuantCode 扩展：
 - 加 ``groups`` scope（QuantCode 6 组隔离；MimoCode 对应是 ``cc``）
-- 加 ``tasks`` 顶层 scope（MimoCode 的 tasks 是嵌套在 sessions 下的多段 key，
-  QuantCode 要求顶层以便"查全部 task"时不必指定 session）
+- Task progress remains nested under ``sessions`` Runtime State; it is not
+  exposed as long-term organizational Memory.
 
 API 与 MimoCode 对齐：
 - :class:`MemoryLocator` —— ``{scope, scope_id, type, key}``
@@ -14,9 +14,8 @@ API 与 MimoCode 对齐：
 
 注意与 MimoCode 的差异（QuantCode 扩展部分）：
 - ``groups`` 走 ``<root>/.quantcode/groups/<group>/memory/<key>.md`` 路径前缀
-- ``tasks`` 走 ``<root>/.quantcode/memory/sessions/<sid>/tasks/<tid>/<key>.md``，
-  返回 ``scope="tasks"`` + ``scope_id=<tid>``（MimoCode 同路径会返回
-  ``scope="sessions"`` +  ``key="tasks/<tid>/<key>"``，两者等价但 API 形状不同）
+- Session task files parse as ``scope="sessions"`` with key
+  ``tasks/<tid>/<key>``. They are Runtime State and stay out of Group Memory UI.
 """
 from __future__ import annotations
 
@@ -78,9 +77,9 @@ _RX_QUANTCODE_GROUPS = re.compile(
     r"/groups/(?P<group>[^/]+)/(?P<key>.+)\.md$"
 )
 
-# QuantCode tasks: `<root>/.quantcode/memory/sessions/<sid>/tasks/<tid>/<key>.md`
+# Runtime tasks: `<root>/.quantcode/memory/sessions/<sid>/tasks/<tid>/<key>.md`
 _RX_QUANTCODE_TASKS = re.compile(
-    r"/(?:[^/]+/)?memory/sessions/[^/]+/tasks/(?P<tid>[^/]+)/(?P<key>.+)\.md$"
+    r"/(?:[^/]+/)?memory/sessions/(?P<sid>[^/]+)/tasks/(?P<tid>[^/]+)/(?P<key>.+)\.md$"
 )
 
 # MimoCode-aligned: global / projects / sessions 走 `.quantcode/memory/<scope>/...`
@@ -121,7 +120,7 @@ def parse_path(abs_path: str) -> MemoryLocator | None:
         MemoryLocator(scope='sessions', scope_id='ses_abc', type='checkpoint', key='checkpoint')
 
         >>> parse_path("/data/memory/sessions/ses_abc/tasks/T1/progress.md")
-        MemoryLocator(scope='tasks', scope_id='T1', type='progress', key='progress')
+        MemoryLocator(scope='sessions', scope_id='ses_abc', type='progress', key='tasks/T1/progress')
 
         >>> parse_path("/quantcode/groups/factor/memory/foo.md")
         MemoryLocator(scope='groups', scope_id='factor', type='memory', key='foo')
@@ -138,10 +137,10 @@ def parse_path(abs_path: str) -> MemoryLocator | None:
     if m:
         key = m.group("key")
         return MemoryLocator(
-            scope="tasks",
-            scope_id=m.group("tid"),
+            scope="sessions",
+            scope_id=m.group("sid"),
             type=detect_type(f"tasks/{m.group('tid')}/{key}"),  # 沿用 MimoCode pattern
-            key=key,
+            key=f"tasks/{m.group('tid')}/{key}",
         )
 
     # 优先级 2：groups（QuantCode 扩展）
@@ -182,11 +181,17 @@ def assert_safe_component(value: str) -> None:
     Raises:
         ValueError: 含 ``..`` segment 或前导 ``/``。
     """
-    for seg in value.split("/"):
+    value = str(value)
+    if "\x00" in value:
+        raise ValueError(f"buildPath: invalid path component: {value!r}")
+    # Normalize Windows separators before checking segments.  Checking only
+    # ``/`` lets ``..\\escape`` become ``../escape`` after the final join.
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized):
+        raise ValueError(f"buildPath: invalid path component: {value!r}")
+    for seg in normalized.split("/"):
         if seg == "..":
             raise ValueError(f"buildPath: invalid path component: {value!r}")
-    if value.startswith("/"):
-        raise ValueError(f"buildPath: invalid path component: {value!r}")
 
 
 def build_path(
@@ -201,8 +206,6 @@ def build_path(
     QuantCode 调整：
     - global / projects / sessions：走 ``<root>/.quantcode/memory/<scope>/...``
     - groups：``<root>/.quantcode/memory/groups/<scope_id>/<key>.md``
-    - tasks：``<root>/.quantcode/memory/sessions/<sid>/tasks/<scope_id>/<key>.md``
-      （注意：tasks 需要传 caller 提供的 sid，暂不支持）
 
     Args:
         root: 项目根或 .quantcode 根。
@@ -238,13 +241,6 @@ def build_path(
         if not scope_id:
             raise ValueError("buildPath: sessions scope 需要 scope_id")
         parts = [root, ".quantcode", "memory", "sessions", scope_id, f"{key}.md"]
-    elif scope == "tasks":
-        # tasks 需要 sid，但 MimoCode API 只接 scope_id——QuantCode 暂用
-        # scope_id 直接当 task_id。session_id 嵌入 key 前缀里。
-        raise NotImplementedError(
-            "buildPath: tasks scope 在 QuantCode 暂不支持——"
-            "tasks 路径含 sid 嵌入，目前用 parse_path 单向解析即可。"
-        )
     elif scope == "projects":
         if not scope_id:
             raise ValueError("buildPath: projects scope 需要 scope_id")

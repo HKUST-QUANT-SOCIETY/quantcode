@@ -13,7 +13,7 @@
 Day 5 关键变更(相对 brief 假设):
 - ``RLHFCollector`` 在 Day 5 RLHF 重构时已删除,改用 ``log_rlhf_entry()`` + 新格式,
   配合 ``monkeypatch.setattr(rlogger_mod, "RLHF_PATH", tmp)`` 改写入路径。
-- ``AgentRunner.rlhf_collector`` 参数保留向后兼容但不再写日志,
+- ``AgentRunner`` 的 rlhf_collector 参数已随 audit 清理删除;
   实际写日志的是图内的 ``rlhf_collect_node``。
 """
 from __future__ import annotations

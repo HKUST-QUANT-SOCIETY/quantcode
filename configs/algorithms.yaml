@@ -1,0 +1,19 @@
+# signal_algorithms 算法注册表首例（ROADMAP A3 算法实验管理 + 架构决策 3「配置不喂 LLM」）。
+# 读取方：tools/algorithms/_register.py（list_algorithms / describe_algorithm / run_algorithm）。
+# entry 契约（极简 schema，缺键条目跳过并 warning）：
+#   id          — 唯一标识（run_algorithm / describe_algorithm 的参数值）
+#   entry_point — "模块路径:函数名"，run_algorithm 按 import 调用，函数签名 fn(panel, top_n) -> dict
+#   description — LLM 可见一句话说明
+signal_algorithms:
+  - id: equal_weight_composite_ranker
+    entry_point: "tools.algorithms.score_demo:run_score_demo"
+    description: >-
+      Demo scorer: reads the FactorPanel contract from a Blackboard shared.datasets.panel/*
+      key, ranks assets by the equal-weight composite of panel values on the latest date,
+      and returns the top_n asset table plus the full score list.
+  - id: pb_roe_ranker
+    entry_point: "tools.algorithms.score_demo:run_score_demo"
+    description: >-
+      PB-ROE composite placeholder — routed to the same equal-weight demo scorer until the
+      tools/factor PB-ROE line (match_main / gen_schema: formula "pb * roe", fields
+      ["pb", "roe"]) produces its own dedicated panel+scorer. Swap entry_point when it lands.

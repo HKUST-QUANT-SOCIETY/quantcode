@@ -1,0 +1,10 @@
+# AB 实验管理配置（ROADMAP A3 + FUNCTIONAL_SPEC P-05）。
+# 读取方：tools/experiments/_register.py（yaml 缺文件/缺键时代码默认兜底）。
+# 语义：
+#   enforce_oos    — OOS 纪律开关（ON）：给出 oos_range 时校验每次评估窗口 ⊆ OOS，
+#                    违规 → fail_reasons=["oos_discipline"]，不写排行榜
+#                    （ROADMAP 教训：不允许用全样本 IC 冒充 OOS 结论）。
+#   leaderboard_k — experiments/index.json 排行榜保留条数（最近 K 条）。
+experiments:
+  enforce_oos: true
+  leaderboard_k: 20

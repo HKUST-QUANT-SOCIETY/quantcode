@@ -72,7 +72,7 @@ SIX_GROUPS = [
     },
     {
         "group": "factor",
-        "tools": ["match_main", "gen_schema", "autoeval"],
+        "tools": ["match_main", "gen_schema", "quant_evaluator"],
         "min_iterations": 3,
         "artifact_key": "factor_report",
         "artifact_keywords": ["factor_report"],

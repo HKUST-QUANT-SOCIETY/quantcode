@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .fts import LEGAL_SCOPES, file_exists_and_initialized, get_connection
+from .fts import LEGAL_SCOPES, LEGAL_TYPES, file_exists_and_initialized, get_connection
 from .paths import parse_path
 from .query import build_fts_query
 from .reconcile import reconcile_once
@@ -113,20 +113,27 @@ class MemoryService:
         root: str | Path | None = None,
         floor_ratio: float = DEFAULT_FLOOR_RATIO,
         requester_group: str | None = None,
-        auto_reconcile: bool = True,
+        auto_reconcile: bool = False,
     ) -> None:
         """Args:
         db_path: sqlite 文件。
         root: ``.quantcode`` 根；为 None 时默指 db_path 父目录。reconcile 必需。
         floor_ratio: 相对 floor，默认 0.15；设 0 关闭过滤。
         requester_group: 当前 caller 所属 6 组之一；``groups`` scope 越权时拦截。
-        auto_reconcile: search() 进入时是否先 reconcile（默认 True，对齐 MimoCode）。
+        auto_reconcile: compatibility option. Defaults False so queries only read
+            the maintained index; call ``reconcile()`` explicitly for disk imports.
         """
         self.db_path = Path(db_path)
         if not file_exists_and_initialized(self.db_path):
             from .fts import init_db
             init_db(self.db_path)
         self.root = Path(root) if root is not None else self.db_path.parent
+        # ``build_path`` accepts the project root and adds ``.quantcode``.
+        # Callers historically passed either form, though, and the latter
+        # otherwise created ``.quantcode/.quantcode`` on disk.  Normalize the
+        # shorthand here while keeping the public path builder deterministic.
+        if self.root.name == ".quantcode":
+            self.root = self.root.parent
         self.floor_ratio = floor_ratio
         self.requester_group = requester_group
         self.auto_reconcile = auto_reconcile
@@ -137,6 +144,17 @@ class MemoryService:
         conn = get_connection(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _requester_group(self, override: str | None) -> str | None:
+        """Resolve a request group without allowing a bound service to switch identity."""
+        bound = self.requester_group
+        if bound and override and override != bound:
+            raise MemoryPermissionError(
+                "requester_group cannot override the service's bound group",
+                requester=bound,
+                target_scope_id=override,
+            )
+        return override if override is not None else bound
 
     # ---------------- search（与 service.ts:52 严格对齐） ----------------
 
@@ -176,7 +194,7 @@ class MemoryService:
         Returns:
             :class:`MemoryHit` 列表，按 score 降序（高 = 好）。
         """
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
 
         # QuantCode 扩展：显式 scope=groups 提前校验
         if scope == "groups":
@@ -208,6 +226,12 @@ class MemoryService:
         if type:
             conditions.append("memory_fts.type = ?")
             params.append(type)
+        # Apply the group ACL before SQLite's LIMIT.  Filtering only after an
+        # over-fetch can still hide an authorized hit when another group has a
+        # large number of equally relevant rows.
+        if rgroup:
+            conditions.append("(memory_fts.scope != 'groups' OR memory_fts.scope_id = ?)")
+            params.append(rgroup)
         where_clause = " AND ".join(conditions)                                      # noqa: F841
         if where_clause:
             where_sql = f"AND {where_clause}"
@@ -326,24 +350,15 @@ class MemoryService:
             raise ValueError("write: global scope 不应传 scope_id")
 
         # QuantCode 扩展：groups scope 写权限
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
         if scope == "groups":
             if not scope_id:
                 raise ValueError("write: groups scope 需要 scope_id")
             _check_group_read_allowed(scope, scope_id, rgroup)
 
         resolved_type = type or detect_type(key)
-        # tasks scope 用 key 推 type 时需要把 tasks/<tid>/<key> 整体传进去（与 parse_path 行为一致）
-        if resolved_type == "free" and scope == "tasks" and "/" in key:
-            resolved_type = detect_type(key)
-
-        # build_path 对 tasks 是 NotImplementedError —— caller 走 parse_path 路径即可
-        if scope == "tasks":
-            raise NotImplementedError(
-                "write(scope='tasks'): tasks 路径含 sid 嵌入，暂不支持；"
-                "请走 parse_path() 解析的路径直接调 index_from_disk。"
-            )
-
+        if resolved_type not in LEGAL_TYPES:
+            raise ValueError(f"write: type {resolved_type!r} 不在 {LEGAL_TYPES}")
         path_str = build_path(root=str(self.root), scope=scope, key=key, scope_id=scope_id)
         path = Path(path_str)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -387,16 +402,30 @@ class MemoryService:
         logger.debug("memory.write: %s type=%s (idx=%s)", path, final_type, scope_id)
         return str(path)
 
-    def get(self, *, scope: str, key: str, scope_id: str | None = None) -> str | None:
+    def get(
+        self,
+        *,
+        scope: str,
+        key: str,
+        scope_id: str | None = None,
+        requester_group: str | None = None,
+    ) -> str | None:
         """读单条 memory 的 body 内容（直接走磁盘）。文件不存在返 None。
 
         Args:
             scope, scope_id, key: 与 :meth:`write` 同。
+            requester_group: 覆盖实例默认 requester（P0-2：对齐 search()，
+                ``groups`` scope 跨组读一律拦截）。
         """
         from .paths import build_path
 
-        if scope == "tasks":
-            raise NotImplementedError("get(scope='tasks'): 暂不支持，见 write() 说明")
+        # P0-2：get() 此前绕过了 GROUP 读权限校验（search/write/delete 都有）。
+        rgroup = self._requester_group(requester_group)
+        if scope == "groups":
+            if not scope_id:
+                raise ValueError("get: scope=groups 必须传 scope_id")
+            _check_group_read_allowed(scope, scope_id, rgroup)
+
         path_str = build_path(root=str(self.root), scope=scope, key=key, scope_id=scope_id)
         path = Path(path_str)
         if not path.is_file():
@@ -418,11 +447,8 @@ class MemoryService:
         """
         from .paths import build_path
 
-        if scope == "tasks":
-            raise NotImplementedError("delete(scope='tasks'): 暂不支持")
-
         # 写权限
-        rgroup = requester_group if requester_group is not None else self.requester_group
+        rgroup = self._requester_group(requester_group)
         if scope == "groups":
             if not scope_id:
                 raise ValueError("delete: groups scope 需要 scope_id")

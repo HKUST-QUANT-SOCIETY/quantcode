@@ -311,7 +311,7 @@ def test_dream_aggregates_multiple_rlhf_records(tmp_path):
     rlhf = tmp_path / "rlhf.jsonl"
     lines = [
         {"thread_id": "t1", "group": "risk", "action": {"tool_name": "calc_risk"}},
-        {"thread_id": "t1", "group": "risk", "action": {"tool_name": "check_gate"}},
+        {"thread_id": "t1", "group": "risk", "action": {"tool_name": "risk_verdict"}},
         {"thread_id": "t2", "group": "risk", "action": {"tool_name": "calc_risk"}},
     ]
     rlhf.write_text(

@@ -1,4 +1,4 @@
-"""Day 1 sample factor fixture for factor:autoeval.
+"""Day 1 sample factor fixture for factor:evaluation.
 
 This fixture verifies the contract path only. It is not an investment claim.
 """

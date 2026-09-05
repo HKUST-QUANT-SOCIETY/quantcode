@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, model_validator
 from tools.github_comments import github_request
 from tools.registry import ToolDef
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class ReadPRArgs(BaseModel):
     pr_path: str | None = None
@@ -49,10 +51,30 @@ def _resolve_token(ctx: dict) -> str:
 
 
 def _read_local_pr(path_str: str) -> dict:
-    path = Path(path_str)
+    """Read a local fixture only from the approved QuantCode checkout."""
+    candidate = Path(path_str).expanduser()
+    source = str(candidate) if candidate.is_absolute() else None
+    path = (PROJECT_ROOT / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    # macOS workspaces may expose the same checkout through a case-variant
+    # alias (``QUANTcode`` vs ``quantcode``).  Accept only an ancestor proven
+    # to be the same directory inode; never broaden to an arbitrary path.
+    approved_root = PROJECT_ROOT
+    relative: Path | None = None
+    for ancestor in (path, *path.parents):
+        try:
+            if ancestor.is_dir() and approved_root.is_dir() and os.path.samefile(ancestor, approved_root):
+                relative = path.relative_to(ancestor)
+                break
+        except OSError:
+            continue
+    if relative is None:
+        raise ValueError("pr_path must remain inside the approved QuantCode checkout")
+    path = approved_root / relative
+    if not path.is_file():
+        raise ValueError("pr_path must reference a regular file inside the approved checkout")
     body = path.read_text(encoding="utf-8")
     return {
-        "source": str(path),
+        "source": source or str(path),
         "body": body,
         "pr_url": _find_pr_url(body),
     }

@@ -11,7 +11,7 @@ from typing import Any, Literal
 from schemas import BlackboardScope, ModelSpec
 from schemas.risk_profile import RiskProfile, RiskThresholds
 from tools.github_comments import find_existing_comment, github_request, post_pr_comment
-from tools.risk.statistics_stub import calc_risk_stub
+from tools.risk.statistics_stub import calc_risk_from_returns, calc_risk_stub
 from tools.utils.dedupe import dedupe_within
 
 _SCENARIO = Literal["normal", "high_risk"]
@@ -20,37 +20,59 @@ _DEDUPE_SECONDS = 300
 _DEDUPED_WRITERS: dict[str, Callable[..., dict[str, Any]]] = {}
 
 
-def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
+def read_blackboard(
+    input_data: dict[str, Any], *, ctx: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """读取 ModelSpec。
 
     生产路径：通过 BlackboardService 从 PROJECT scope 读取（PR #18 接口）。
-    test/demo fallback：input_data[\"model_spec\"] 或嵌套 blackboard（非生产路径）。
+    P0-2：session 固定 ``PROJECT_SESSION_ID``、key 经归一层 ``normalize_key``
+    解析（裸名自动补 ``shared.model_entries.`` 前缀），与 write_blackboard /
+    trigger_risk_flow 写读两端一致；``project_id`` 仅作为生产路径开关保留。
+    test/demo fallback：input_data["model_spec"] 或嵌套 blackboard（非生产路径）。
     """
     blackboard_key = input_data.get("blackboard_key", "model_spec")
     project_id = input_data.get("project_id")
     blackboard_db_path = input_data.get("blackboard_db_path")
 
     if project_id is not None or blackboard_db_path is not None:
-        from runner.blackboard import BlackboardService, DEFAULT_SESSION_ID
+        from runner.blackboard import BlackboardService
+        from runner.blackboard_keys import PROJECT_SESSION_ID, normalize_key
 
         service = BlackboardService(
             db_path=blackboard_db_path,
-            session_id=project_id or DEFAULT_SESSION_ID,
+            session_id=PROJECT_SESSION_ID,
             requester_group="risk",
         )
-        entry = service.get_entry(BlackboardScope.PROJECT, None, blackboard_key)
+        entry = service.get_entry(
+            BlackboardScope.PROJECT, None, normalize_key(blackboard_key)
+        )
         if entry is not None:
             value = entry.value
             if isinstance(value, dict) and "model_spec" in value:
                 return {"model_spec": value["model_spec"]}
             return {"model_spec": value}
 
-    # test/demo fallback — not the production path
+    # test/demo fallback — not the production path.  The registry wrapper and
+    # direct callers share this guard so a production Agent cannot smuggle a
+    # caller-provided ModelSpec past the canonical Blackboard handoff.
     if "model_spec" in input_data:
+        environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+        if environment not in {"dev", "development", "test"}:
+            raise PermissionError(
+                "production risk evaluation requires ModelSpec from Blackboard; "
+                "inline model_spec fallback is limited to explicit development/test"
+            )
         return {"model_spec": input_data["model_spec"]}
 
     blackboard = input_data.get("blackboard")
     if isinstance(blackboard, dict) and "model_spec" in blackboard:
+        environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+        if environment not in {"dev", "development", "test"}:
+            raise PermissionError(
+                "production risk evaluation requires ModelSpec from Blackboard; "
+                "inline blackboard fallback is limited to explicit development/test"
+            )
         return {"model_spec": blackboard["model_spec"]}
 
     raise KeyError(
@@ -60,12 +82,46 @@ def read_blackboard(input_data: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def calc_risk(model_spec: dict[str, Any], scenario: str = "normal") -> dict[str, Any]:
-    """调用 statistics_stub 计算风控指标。"""
+def calc_risk(
+    model_spec: dict[str, Any],
+    scenario: str = "normal",
+    returns: list[float] | None = None,
+) -> dict[str, Any]:
+    """调用 statistics_stub 计算风控指标。
+
+    returns 可选参数（真值化最小步）：提供真实收益率序列时，
+    max_drawdown / tail_risk_var_99 / volatility 改用
+    calc_risk_from_returns 的真值结果覆盖 stub 值；sharpe 无法落进
+    RiskProfile（extra="forbid" 且无对应字段，加顶层键会炸
+    generate_risk_profile），所以随 analyst_notes 文本如实带出。
+    position_limit / correlation_with_existing / capacity_estimate_usd
+    仍为 stub 占位值。
+
+    诚实标记：RiskProfile 是 extra="forbid"，不能加顶层标记键，
+    因此把数据来源写进 schema 现有字段 analyst_notes——
+    无 returns 时其后缀为 "_is_stub"（纯 stub 数据）；
+    有 returns 时注明哪些字段是真值、哪些仍是 stub。
+    """
     if scenario not in ("normal", "high_risk"):
         raise ValueError(f"Unknown scenario: {scenario!r}")
 
     metrics = calc_risk_stub(scenario)  # type: ignore[arg-type]
+    if returns is not None:
+        computed = calc_risk_from_returns(returns)
+        metrics["max_drawdown"] = computed["max_drawdown"]
+        metrics["tail_risk_var_99"] = computed["tail_risk_var_99"]
+        metrics["volatility"] = computed["volatility"]  # extra 字段，generate_risk_profile 会过滤
+        metrics["analyst_notes"] = (
+            f"max_drawdown/tail_risk_var_99/volatility computed from {len(returns)} returns "
+            f"via calc_risk_from_returns (sharpe={computed['sharpe']:.6f}); "
+            "position_limit/correlation_with_existing/capacity_estimate_usd remain stub "
+            "_is_stub"
+        )
+    else:
+        metrics["analyst_notes"] = (
+            f"risk metrics from statistics_stub (scenario={scenario}, "
+            "no returns provided, values are placeholder stub data)_is_stub"
+        )
     if model_name := model_spec.get("model_name"):
         metrics["strategy_id"] = model_name
     return metrics
@@ -89,15 +145,12 @@ def generate_risk_profile(
     return RiskProfile(**payload)
 
 
-def check_gate(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
-    """检查是否需人工审批，返回 requires_human / reasons / risk_profile。
-
-    Day 4: route_gate_node 会直接消费这个结果构造 HumanGate interrupt payload，
-    所以这里把 risk_profile 一并带回，避免 gate node 再倒推上游状态。
-    """
+def risk_verdict(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
+    """Evaluate risk limits as a domain verdict; never create a HumanGate."""
     reasons = profile.breached_thresholds(thresholds)
     return {
-        "requires_human": bool(reasons),
+        "verdict": str(profile.evaluate_verdict(thresholds)),
+        "breached": bool(reasons),
         "reasons": reasons,
         "risk_profile": profile.model_dump(mode="json"),
     }
@@ -123,7 +176,7 @@ def _pr_comment_dedupe_key(
 
 
 def _risk_comment_marker(head_sha: str, profile: RiskProfile) -> str:
-    return f"<!-- quantcode:risk-gate:profile:{head_sha}:{_profile_hash(profile)} -->"
+    return f"<!-- quantcode:risk-ci:profile:{head_sha}:{_profile_hash(profile)} -->"
 
 
 def _pct(value: float | None) -> str:
@@ -142,7 +195,7 @@ def format_risk_comment(
     pr_number: str,
     head_sha: str,
 ) -> str:
-    """生成 QuantCode Risk Gate Report Markdown（含 dedupe marker）。"""
+    """生成 QuantCode Risk CI Report Markdown（含 dedupe marker）。"""
     thresholds = RiskThresholds()
     breaches = set(profile.breached_thresholds(thresholds))
     verdict = profile.evaluate_verdict(thresholds)
@@ -175,7 +228,7 @@ def format_risk_comment(
     ]
     table = "\n".join(f"| {name} | {value} | {limit} | {status} |" for name, value, limit, status in rows)
     breached_text = ", ".join(sorted(breaches)) if breaches else "None"
-    return f"""## QuantCode Risk Gate Report
+    return f"""## QuantCode Risk CI Report
 
 **Verdict:** `{verdict}`  
 **Strategy:** `{profile.strategy_id}`  

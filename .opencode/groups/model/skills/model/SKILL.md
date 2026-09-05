@@ -79,7 +79,7 @@ model:lit-review   → 文献结构化，沉淀 MEMORY
 model:plan         → 生成设计 spec（特征、标签、验证方案）
 model:execute      → 实现 + 训练（Day 2+ 接真实 runner）
 model:pr-submit    → 生成 ModelSpec + 创建 PR + 触发 risk
-model:cross-handoff→ 显式 handoff 给 risk:gate（可与 pr-submit 合并）
+model:cross-handoff→ 显式 handoff 给 risk:ci（可与 pr-submit 合并）
 ```
 
 详细步骤见 `.opencode/groups/model/skills/*/SKILL.md`。
@@ -115,7 +115,7 @@ result = runner.run(
 2. **风控元数据不能空**：`risk_metadata` 是 risk 组唯一可信的结构化输入；缺字段用 `notes` 说明原因。
 3. **Blackboard 分工**：训练细节、超参 sweep 写 GROUP scope；待审 PR 列表写 PROJECT `shared.pending_risk_reviews`。
 4. **副作用去重**：同一 commit + 同一 PR body 5 分钟内不重复写 Blackboard / 触发 risk。
-5. **HumanGate**：写主线、发外部通知、超 API 预算时暂停等人审批（Pattern 5）。
+5. **HumanGate**：仅共享写入使用 merge、受限跨组读取使用 permission；预算耗尽直接停止。
 
 ## 验收标准（组级）
 

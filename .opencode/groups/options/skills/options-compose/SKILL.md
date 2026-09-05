@@ -10,6 +10,13 @@ tools:
   - run_options_backtest_stub
 schema_in: schemas.options.OptionsSpec
 schema_out: schemas.options.OptionsBacktestReport
+# Compose 流拓扑（runner/compose_executor FLOW_REGISTRY 键 ("options", "options:compose")，
+# 注册于 flows/options_compose.py，import 即注册）
+flow:
+  - build_vol_surface
+  - calc_greeks
+  - run_options_backtest_stub  # stub 回测，report notes 标注 "stub"
+  - verdict  # quality != mock 且 Greeks 齐才 pass
 ---
 
 # Options Group Agent

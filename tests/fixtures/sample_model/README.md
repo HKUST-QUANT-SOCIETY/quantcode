@@ -1,6 +1,6 @@
 # Sample Model Fixture
 
-Day 1 model-group fixture for `model:pr-submit` and risk-gate handoff tests.
+Day 1 model-group fixture for `model:pr-submit` and risk-ci handoff tests.
 
 Files:
 

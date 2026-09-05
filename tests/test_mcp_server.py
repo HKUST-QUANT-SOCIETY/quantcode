@@ -7,14 +7,29 @@ import json
 import pytest
 
 from quantcode import mcp_server
+from quantcode import identity
 from tools.registry import registry as global_registry
 import tools.model._register  # noqa: F401  注册 model 5 个 tool
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry(monkeypatch):
+def _clean_registry(monkeypatch, tmp_path):
     """清空 + 重新注册 model tools。"""
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
+    # P0-7：隔离身份解析 — 清指纹/降级 env，绑定文件指向 tmp（不存在）→ 走 env 降级路径，
+    # 不被开发者本机真实 .opencode/authorized_groups.yaml 干扰。
+    for _var in (
+        "QUANTCODE_SSH_KEY_FINGERPRINT",
+        "QUANTCODE_SSH_FINGERPRINT",
+        "QUANTCODE_ALLOW_UNAUTH",
+    ):
+        monkeypatch.delenv(_var, raising=False)
+    monkeypatch.setattr(
+        identity, "DEFAULT_BINDINGS_PATH", tmp_path / "nonexistent" / "authorized_groups.yaml"
+    )
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
     global_registry._tools.clear()
     importlib.reload(tools.model._register)
     yield
@@ -95,6 +110,117 @@ def test_list_tools_returns_all_registered():
     assert "trigger_risk_flow" in tool_names
 
 
+def test_session_context_returns_authoritative_non_secret_summary(monkeypatch):
+    """session_context 是 UI 的组来源，不能回传私钥或 token。"""
+    monkeypatch.setenv("QUANTCODE_GROUP", "factor")
+    monkeypatch.setenv("QUANTCODE_ENV", "test")
+    importlib.reload(mcp_server)
+    result = mcp_server._session_context_execute(
+        mcp_server.SessionContextArgs(),
+        {
+            "group": "factor",
+            "role": "analyst",
+            "actor_id": "actor-1",
+            "workspace_id": "workspace-1",
+            "workspace_path": "/work/factor",
+            "github_subject": "github-user",
+            "resource_scopes": ["repo:read"],
+            "private_key": "must-not-escape",
+            "token": "must-not-escape",
+        },
+    )
+    assert result["group"] == "factor"
+    assert result["role"] == "analyst"
+    assert "private_key" not in result
+    assert "token" not in result
+
+
+def test_mcp_session_context_freezes_identity_across_env_changes(monkeypatch):
+    """A process session cannot swap actor/workspace by changing its fingerprint."""
+    entries = {
+        "SHA256:first": {
+            "fingerprint": "SHA256:first",
+            "group": "factor",
+            "actor_id": "actor-first",
+            "role": "approver",
+            "workspace_id": "workspace-first",
+            "workspace_path": "/work/first",
+            "github_subject": "github-first",
+            "resource_scopes": ["repo:first"],
+        },
+        "SHA256:second": {
+            "fingerprint": "SHA256:second",
+            "group": "factor",
+            "actor_id": "actor-second",
+            "role": "admin",
+            "workspace_id": "workspace-second",
+            "workspace_path": "/work/second",
+            "github_subject": "github-second",
+            "resource_scopes": ["repo:all"],
+        },
+    }
+    monkeypatch.setattr(identity, "resolve_identity", lambda fp: entries.get(fp))
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:first")
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
+    # The autouse fixture resets the registry; reload the server so the
+    # session_context meta tool is present on the real call_tool path.
+    importlib.reload(mcp_server)
+
+    first = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+    monkeypatch.setenv("QUANTCODE_SSH_KEY_FINGERPRINT", "SHA256:second")
+    second = json.loads(mcp_server.call_tool("session_context", {})["content"][0]["text"])
+
+    assert first["actor_id"] == second["actor_id"] == "actor-first"
+    assert first["role"] == second["role"] == "approver"
+    assert first["workspace_id"] == second["workspace_id"] == "workspace-first"
+    assert second["github_subject"] == "github-first"
+    assert second["identity_source"] == "ssh_roster"
+
+
+def test_search_memory_uses_group_acl_and_reports_empty_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_server, "PROJECT_ROOT", tmp_path)
+    unavailable = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="factor"), {"group": "factor", "role": "analyst"}
+    )
+    assert unavailable["status"] == "UNAVAILABLE"
+
+    from runner.memory.service import MemoryService
+
+    root = tmp_path / ".quantcode"
+    service = MemoryService(root / "memory.db", root=tmp_path, requester_group="factor")
+    service.write(
+        scope="groups",
+        scope_id="factor",
+        type="reference",
+        key="factor-notes",
+        body="factor canonical evaluator",
+        requester_group="factor",
+    )
+    own = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="evaluator"), {"group": "factor", "role": "analyst"}
+    )
+    assert own["status"] == "CONNECTED"
+    assert own["hits"]
+    assert "/.quantcode/memory/groups/factor/" in own["hits"][0]["path"]
+    assert "/.quantcode/.quantcode/" not in own["hits"][0]["path"]
+    cross = mcp_server._search_memory_execute(
+        mcp_server.SearchMemoryArgs(query="evaluator"), {"group": "model", "role": "analyst"}
+    )
+    assert cross["status"] == "EMPTY"
+    assert cross["hits"] == []
+
+
+def test_candidate_review_meta_tool_is_visible_only_to_approver_or_admin():
+    import tools.admin._register as admin_register
+
+    importlib.reload(admin_register)
+    analyst = {tool.id for tool in mcp_server._tools_for_session("factor", "analyst")}
+    approver = {tool.id for tool in mcp_server._tools_for_session("factor", "approver")}
+    assert "review_distill_candidate" not in analyst
+    assert "review_distill_candidate" in approver
+
+
 def test_list_tools_empty_registry(tmp_path):
     """测试 list_tools 在空 registry 下返回空列表。"""
     global_registry._tools.clear()
@@ -131,7 +257,20 @@ def test_list_tools_filters_by_quantcode_group(monkeypatch):
         "read_file",
         "write_file",
         "bash",
-    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash'}}"
+        "list_runs",  # meta tool：reload(mcp_server) 后经 meta 通道附加
+        "list_skills",  # meta tool：同 list_runs 通道（F-01 lens Skill 下拉数据源）
+        "session_context",  # meta tool：UI 读取服务端签发的组/角色摘要
+        # A3（2026-09-01）：algorithms.yaml 注册表三件套同走 _meta 通道，六组可见
+        "list_algorithms",
+        "describe_algorithm",
+        "run_algorithm",
+        # A4 蒸馏闭环：consume_status 只读状态工具同走 _meta 通道，六组可见
+        "consume_status",
+        # A3/P-05（2026-09-01）：AB 实验三件套同走 _meta 通道，六组可见
+        "run_ab_experiment",
+        "list_experiments",
+        "get_experiment",
+    }, f"未预期的 tool 出现了: {tool_names - {'read_pr','extract_metadata','generate_model_spec','write_blackboard','trigger_risk_flow','search_memory','read_file','write_file','bash','list_runs','list_skills','session_context','list_algorithms','describe_algorithm','run_algorithm','consume_status','run_ab_experiment','list_experiments','get_experiment'}}"
 
     # Case 2: 不设置 → 全部
     monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
@@ -189,6 +328,75 @@ def test_list_tools_excludes_non_model_tools_when_quantcode_group_is_model(monke
         assert len(all_names) >= 5, f"兜底模式 tool 太少: {all_names}"
     finally:
         global_registry._tools.pop("factor_only_tool", None)
+
+
+# ---------------------------------------------------------------------------
+# list_runs 只读工具（metrics monitor）
+# ---------------------------------------------------------------------------
+
+
+def test_list_tools_includes_list_runs_for_all_groups(monkeypatch):
+    """list_runs 走 _meta 通道：不进各组 allowlist，但 6 组 MCP server 都能列出。
+
+    list_runs 注册在 quantcode.mcp_server 模块体 → reload(mcp_server) 即恢复
+    （fixture 清空 registry 后仍可重现）。run_agent 注册在 agent_mcp_tool
+    （registry.register 严格模式），其 6 组可见性由既有 Meta 通道保证。
+    """
+    for group in ("model", "risk", "factor", "fundamental", "strategy", "options"):
+        monkeypatch.setenv("QUANTCODE_GROUP", group)
+        importlib.reload(mcp_server)
+        names = {t["name"] for t in mcp_server.list_tools()["tools"]}
+        assert "list_runs" in names, f"group={group} 缺 list_runs: {names}"
+
+
+def test_run_agent_still_listed_via_meta_channel(monkeypatch):
+    """推广 list_tools meta 通道后 run_agent 不回归：无组过滤时仍被列出。
+
+    run_agent 在 agent_mcp_tool 模块体经严格 register 注册；fixture 清空后
+    需 reload(runner.agent_mcp_tool) 才回来（registry 已空 → 不重复）。
+    """
+    import runner.agent_mcp_tool  # noqa: F401
+
+    monkeypatch.delenv("QUANTCODE_GROUP", raising=False)
+    importlib.reload(mcp_server)
+    importlib.reload(runner.agent_mcp_tool)
+    names = {t["name"] for t in mcp_server.list_tools()["tools"]}
+    assert "run_agent" in names
+    assert "list_runs" in names
+
+
+def test_call_tool_list_runs_returns_recent_and_aggregate(tmp_path, monkeypatch):
+    """tools/call list_runs → read_recent + aggregate 结构。
+
+    fixture 清空了 registry，先 reload(mcp_server) 让 list_runs（模块体注册）回来。
+    """
+    importlib.reload(mcp_server)
+    from runner import metrics as run_metrics
+
+    monkeypatch.setattr(run_metrics, "METRICS_PATH", tmp_path / "metrics.jsonl")
+    run_metrics.record_run(
+        group="model", flow="mcp_compose", thread_id="t-list",
+        started_at=0.0, ended_at=1.5, status="completed",
+    )
+    result = mcp_server.call_tool("list_runs", {"limit": 10})
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["aggregate"]["runs"] == 1
+    assert payload["aggregate"]["success_rate"] == 1.0
+    assert any(r["thread_id"] == "t-list" for r in payload["recent_runs"])
+
+
+def test_list_runs_not_visible_to_internal_agent_groups_via_allowlist():
+    """list_runs 是 meta tool：不出现在任何 allowlist 匹配里（仅靠 meta 通道暴露）。
+
+    直接验证 registry.get_tools_for_group 的默认行为不带 meta——保证 ReAct 内部
+    agent 看不到 list_runs，LLM 不会无意义地刷 metrics。
+    """
+    from tools.registry import registry as reg
+
+    internal = {t.id for t in reg.get_tools_for_group("model")}
+    assert "list_runs" not in internal
+    assert "run_agent" not in internal
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +503,7 @@ def test_handle_notifications_initialized_returns_none():
 def test_list_tools_includes_factor_tools_when_group_is_factor(monkeypatch):
     """🟢Day 4 #E 验收:QUANTCODE_GROUP=factor 时 MCP 暴露 ≥3 个 factor tool。
 
-    触发 factor._register 注册 3 个 stub tool(match_main/gen_schema/autoeval),
+    触发 factor._register 注册 3 个 stub tool(match_main/gen_schema/quant_evaluator),
     验证 tools/list 返回的 ids 含这 3 个。
     """
     import tools.factor._register  # noqa: F401  触发 factor tool 注册
@@ -305,7 +513,7 @@ def test_list_tools_includes_factor_tools_when_group_is_factor(monkeypatch):
     tool_names = {t["name"] for t in mcp_server.list_tools()["tools"]}
     assert "match_main" in tool_names, f"match_main missing: {tool_names}"
     assert "gen_schema" in tool_names, f"gen_schema missing: {tool_names}"
-    assert "autoeval" in tool_names, f"autoeval missing: {tool_names}"
+    assert "quant_evaluator" in tool_names, f"quant_evaluator missing: {tool_names}"
     assert len(tool_names) >= 3, f"factor group 至少 3 tools,实际 {len(tool_names)}"
 
 
@@ -323,11 +531,30 @@ def test_list_tools_factor_group_excludes_risk_tools(monkeypatch):
     importlib.reload(tools.risk._register)
     tool_names = {t["name"] for t in mcp_server.list_tools()["tools"]}
     # factor 3 个都在
-    assert {"match_main", "gen_schema", "autoeval"} <= tool_names
+    assert {"match_main", "gen_schema", "quant_evaluator"} <= tool_names
     # risk 工具全被排除
-    risk_ids = {"read_blackboard", "calc_risk", "check_gate", "write_pr_comment", "generate_risk_profile"}
+    risk_ids = {"read_blackboard", "calc_risk", "risk_verdict", "write_pr_comment", "generate_risk_profile"}
     leaked = tool_names & risk_ids
     assert not leaked, f"risk tools 泄漏到 factor group:{leaked}"
+
+
+def test_call_tool_enforces_same_group_allowlist(monkeypatch):
+    """tools/call 不能绕过 tools/list 的组白名单直接调用另一组工具。"""
+    import tools.factor._register  # noqa: F401
+    import tools.risk._register  # noqa: F401
+
+    monkeypatch.setenv("QUANTCODE_GROUP", "factor")
+    monkeypatch.setenv("QUANTCODE_ALLOW_UNAUTH", "1")
+    importlib.reload(mcp_server)
+    importlib.reload(tools.factor._register)
+    importlib.reload(tools.risk._register)
+
+    result = mcp_server.call_tool(
+        "calc_risk",
+        {"model_spec": {"model_name": "x"}, "scenario": "normal"},
+    )
+    assert result["isError"] is True
+    assert "not available" in result["content"][0]["text"]
 
 # ---------------------------------------------------------------------------
 # Day 4 严格验收:subprocess stdio 真跑 QUANTCODE_GROUP=factor
@@ -346,6 +573,9 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
 
     env = os.environ.copy()
     env["QUANTCODE_GROUP"] = "factor"
+    # P0-7：subprocess 无法 monkeypatch 绑定路径，显式允许 env 降级，
+    # 避免被开发者本机真实 .opencode/authorized_groups.yaml 干扰。
+    env["QUANTCODE_ALLOW_UNAUTH"] = "1"
     # 确保 Python 路径包含项目根
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
@@ -384,13 +614,45 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
     tool_names = {t["name"] for t in tools_listed}
     assert "match_main" in tool_names, f"factor group 应有 match_main,got {tool_names}"
     assert "gen_schema" in tool_names, f"factor group 应有 gen_schema,got {tool_names}"
-    assert "autoeval" in tool_names, f"factor group 应有 autoeval,got {tool_names}"
+    assert "quant_evaluator" in tool_names, f"factor group 应有 quant_evaluator,got {tool_names}"
 
 
-def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
-    """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call check_gate。
+def test_mcp_subprocess_stdio_forces_utf8_on_gbk_locale(tmp_path):
+    """MCP JSON-RPC remains valid when the parent process advertises GBK."""
+    import json
+    import os
+    import subprocess
+    import sys
 
-    端到端:subprocess → stdio → tools/call → 真实 check_gate 执行 → 返 JSON 响应。
+    env = os.environ.copy()
+    env.update({
+        "QUANTCODE_ENV": "test",
+        "QUANTCODE_GROUP": "factor",
+        "QUANTCODE_ALLOW_UNAUTH": "1",
+        "PYTHONIOENCODING": "gbk",
+    })
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
+    request = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'
+    proc = subprocess.run(
+        [sys.executable, "-m", "quantcode.mcp_server"],
+        input=request,
+        env=env,
+        cwd=project_root,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    response = json.loads(proc.stdout.splitlines()[-1].decode("utf-8"))
+    assert response["id"] == 1
+    assert "match_main" in {tool["name"] for tool in response["result"]["tools"]}
+
+
+def test_mcp_subprocess_stdio_risk_group_call_risk_verdict(tmp_path):
+    """🟢Day 4 #E 严格验收:subprocess 跑 QUANTCODE_GROUP=risk + tools/call risk_verdict。
+
+    端到端:subprocess → stdio → tools/call → 真实 risk_verdict 执行 → 返 JSON 响应。
     """
     import os
     import subprocess
@@ -412,15 +674,16 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
 
     env = os.environ.copy()
     env["QUANTCODE_GROUP"] = "risk"
+    env["QUANTCODE_ALLOW_UNAUTH"] = "1"  # P0-7：允许 subprocess env 降级（见上个测试）
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 1. tools/list(确认 check_gate 可用)
-    # 2. tools/call check_gate with high_risk profile
+    # 1. tools/list(确认 risk_verdict 可用)
+    # 2. tools/call risk_verdict with high_risk profile
     list_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n"
     call_req = json.dumps({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": "check_gate", "arguments": {"risk_profile": profile}}
+        "params": {"name": "risk_verdict", "arguments": {"risk_profile": profile}}
     }) + "\n"
 
     proc = subprocess.run(
@@ -451,9 +714,9 @@ def test_mcp_subprocess_stdio_risk_group_call_check_gate(tmp_path):
     # content[0].text 是 str,parse 成 dict
     text = result["content"][0]["text"]
     call_data = json.loads(text)
-    # check_gate 应返 requires_human=True(因 var 0.06 > 0.04 阈值)
-    assert call_data.get("requires_human") is True, (
-        f"check_gate 应返 requires_human=True,got {call_data}"
+    # risk_verdict 应返 breached=True(因 var 0.06 > 0.04 阈值)
+    assert call_data.get("breached") is True, (
+        f"risk_verdict 应返 breached=True,got {call_data}"
     )
     assert "tail_risk_var_99" in call_data.get("reasons", []), (
         f"reasons 应含 tail_risk_var_99,got {call_data.get('reasons')}"

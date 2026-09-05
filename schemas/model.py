@@ -47,7 +47,7 @@ class ModelRiskMetadata(BaseModel):
 class ModelSpec(BaseModel):
     """Model group PR metadata contract.
 
-    This payload is embedded in the PR description and handed to risk-gate as
+    This payload is embedded in the PR description and handed to risk-ci as
     the model group's structured claim about code, data range, dependencies,
     hyperparameters, and risk-relevant intent.
     """

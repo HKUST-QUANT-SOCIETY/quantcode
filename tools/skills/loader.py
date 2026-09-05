@@ -4,8 +4,8 @@
 两者可叠加：业务 skill 作为主工作流，元 skill 作为方法论补充。
 
 参考：
-- Architecture_Spec.md §0：MimoCode 的 15 个 compose skill 是 markdown 文本，引擎无关
-- Day 3 任务清单"喂入 1 个 MimoCode skill markdown（如 plan 或 brainstorm）验证可用"
+- docs/QuantCode_Design.md §2：MimoCode 的通用 compose skill 是 markdown 文本，引擎无关
+- docs/archive/pre-v5/Day3_TaskList.md：历史落地背景
 """
 from __future__ import annotations
 
@@ -15,16 +15,24 @@ from pathlib import Path
 # 项目根目录（loader.py → skills/ → tools/ → quantcode/）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 GROUPS_DIR = PROJECT_ROOT / ".opencode" / "groups"
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_identifier(value: str, label: str) -> str:
+    """Validate a user-provided group/skill name before filesystem lookup."""
+    text = str(value or "").strip()
+    if not _IDENTIFIER_RE.fullmatch(text):
+        raise ValueError(f"invalid {label}: {value!r}")
+    return text
 
 # MimoCode 上游仓库的 skill 路径（与 Mimo-code 内容一致，按 GitHub 仓库名大小写）。
 # 实际布局：packages/opencode/src/skill/compose/.bundle（含 src/）。
 # 同时保留不含 src/ 的备选，兼容历史布局。
 #
-# Day 5：优先用仓库内 vendored 副本（vendor/mimo-code/...），这是最稳定的来源——
-# 不依赖用户在仓库外克隆 MiMo-Code。保留仓库外的兄弟目录路径作为回退。
-_VENDORED_BASE = PROJECT_ROOT / "vendor" / "mimo-code" / "packages" / "opencode"
-MIMOCODE_SKILLS_DIR_VENDORED = _VENDORED_BASE / "src" / "skill" / "compose" / ".bundle"
-MIMOCODE_SKILLS_DIR_VENDORED_LEGACY = _VENDORED_BASE / "skill" / "compose" / ".bundle"
+# 仓库内受跟踪的 meta-skill 副本（15 个 compose skill，132KB，替代已删除的
+# 144MB vendor/mimo-code fork 镜像——见 docs/IMPLEMENTATION_AUDIT.md）。
+TRACKED_BUNDLE = PROJECT_ROOT / ".opencode" / "meta-skills"
+MIMOCODE_SKILLS_DIR_VENDORED = TRACKED_BUNDLE
 
 _MIMOCODE_BASE = PROJECT_ROOT.parent / "MiMo-Code" / "packages" / "opencode"
 _MIMOCODE_BASE_FALLBACK = PROJECT_ROOT.parent / "Mimo-code" / "packages" / "opencode"
@@ -38,12 +46,14 @@ MIMOCODE_SKILLS_DIR_FALLBACK_LEGACY = _MIMOCODE_BASE_FALLBACK / "skill" / "compo
 
 def _strip_frontmatter(text: str) -> str:
     """去掉 YAML frontmatter（首两个 --- 之间的内容）。"""
-    return re.sub(r"^---\n.*?\n---\n", "", text, count=1, flags=re.DOTALL)
+    return re.sub(r"^---\r?\n.*?\r?\n---\r?\n", "", text, count=1, flags=re.DOTALL)
 
 
 def _find_business_skill(group: str, skill_name: str) -> Path:
     """在 .opencode/groups/<group>/skills/ 下找 SKILL.md。"""
-    skill_dir = GROUPS_DIR / group / "skills" / skill_name
+    safe_group = _validate_identifier(group, "group")
+    safe_skill = _validate_identifier(skill_name, "skill name")
+    skill_dir = GROUPS_DIR / safe_group / "skills" / safe_skill
     return skill_dir / "SKILL.md"
 
 
@@ -53,15 +63,18 @@ def _find_meta_skill(skill_name: str) -> Path | None:
     元 skill 没有 group 概念，单一来源。
     同时检查带 src/ 和不带 src/ 的两种布局。
     """
+    try:
+        safe_skill = _validate_identifier(skill_name, "meta skill name")
+    except ValueError:
+        return None
     for base in (
-        MIMOCODE_SKILLS_DIR_VENDORED,          # Day 5：优先仓库内 vendored 副本
-        MIMOCODE_SKILLS_DIR_VENDORED_LEGACY,
+        MIMOCODE_SKILLS_DIR_VENDORED,          # 优先仓库内受跟踪副本（.opencode/meta-skills）
         MIMOCODE_SKILLS_DIR,
         MIMOCODE_SKILLS_DIR_LEGACY,
         MIMOCODE_SKILLS_DIR_FALLBACK,
         MIMOCODE_SKILLS_DIR_FALLBACK_LEGACY,
     ):
-        candidate = base / skill_name / "SKILL.md"
+        candidate = base / safe_skill / "SKILL.md"
         if candidate.exists():
             return candidate
     return None

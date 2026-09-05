@@ -1,4 +1,6 @@
 {
+  "_comment_env_mcp": "MCP 主链路（quantcode.mcp_server / run_agent tool）只读环境变量，不读本文件：QUANTCODE_SSH_KEY_FINGERPRINT（服务端 roster 身份，兼容 QUANTCODE_SSH_FINGERPRINT）、QUANTCODE_API_KEY（唯一 key 入口）、QUANTCODE_MODEL_PROVIDER（deepseek|anthropic|stepfun，默认 deepseek）、QUANTCODE_MODEL_NAME（默认 deepseek-chat）、QUANTCODE_MODEL_BASE_URL（deepseek 默认 https://api.deepseek.com/v1）。配置途径：桌面 SSH Agent/Keychain bridge 注入身份，或本地开发时显式设置 QUANTCODE_ENV=development + QUANTCODE_GROUP。生产 MCP 没有 roster 身份会 fail-closed。",
+  "_comment_llm": "以下 llm 段仅供 runner 直跑（runner/llm_config.py、runner/llm_provider.py）消费，MCP 链路不读取。请勿把明文 key 提交入库（config.json 已 gitignore）。推荐直接用上面的 QUANTCODE_* 环境变量。",
   "llm": {
     "provider": "deepseek",
     "api_key": "sk-your-deepseek-api-key-here",
@@ -6,5 +8,17 @@
     "base_url": "https://api.deepseek.com/v1",
     "temperature": 0.0,
     "max_tokens": 4096
-  }
+  },
+  "_comment_ssh_mainline": "P0-7（A09-04/05）：SSH 读各组主线服务器，供 match_main 按因子 idea 关键词摘录主线代码片段。paramiko 为可选依赖（pip install 'quantcode[ssh]'），缺包时返回明确不可用状态。env QUANTCODE_SSH_MAINLINE（同样结构的 JSON 字符串）优先于本段，适合 CI。每项必需 name/host/user/key_path/mainline_dir，port 缺省 22；host_key 可选（OpenSSH 公钥行，提供时 RejectPolicy 严格校验；生产服务器必须提供 pinned host_key，开发环境缺省才允许 AutoAdd + 警告）。读到的目录列表/文件内容缓存在 ~/.cache/quantcode/mainline/<sha1(host)>/（无 TTL，主线变更后手动清缓存）。",
+  "ssh_mainline": [
+    {
+      "name": "factor-server-a",
+      "host": "10.0.0.11",
+      "port": 22,
+      "user": "quant",
+      "key_path": "~/.ssh/id_ed25519",
+      "mainline_dir": "/srv/factor/mainline",
+      "host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...（可选，缺省 AutoAdd + 警告）"
+    }
+  ]
 }

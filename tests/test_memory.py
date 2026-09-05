@@ -155,11 +155,11 @@ class TestFts:
         assert "memory_fts_scope_idx" in idx
         assert "memory_fts_type_idx" in idx
 
-    def test_legal_scopes_quantcode_5(self):
-        # QuantCode: 5 scopes（global / projects / groups / sessions / tasks）
+    def test_legal_scopes_separate_runtime_tasks(self):
+        # Task progress is nested under sessions Runtime State, not Memory scope.
         # 不含 MimoCode 的 "cc"
         assert set(fts_mod.LEGAL_SCOPES) == {
-            "global", "projects", "groups", "sessions", "tasks",
+            "global", "projects", "groups", "sessions",
         }
 
     def test_legal_types_align_with_mimocode(self):
@@ -225,17 +225,17 @@ class TestPathsParsePath:
              ("projects", "uuid-1", "free", "pinned")),                  # legacy v4
             ("/data/memory/projects/abc123def456/conventions.md",
              ("projects", "abc123def456", "free", "conventions")),
-            # tasks / sessions/<sid>/tasks/<tid>/<key> 走 QuantCode 独立 scope
+            # tasks are Runtime State nested under the session scope
             ("/data/memory/sessions/ses_abc/tasks/T1/progress.md",
-             ("tasks", "T1", "progress", "progress")),
+             ("sessions", "ses_abc", "progress", "tasks/T1/progress")),
             ("/data/memory/sessions/ses_abc/tasks/T1/notes.md",
-             ("tasks", "T1", "notes", "notes")),
+             ("sessions", "ses_abc", "notes", "tasks/T1/notes")),
             # multi-segment notes/draft 走 free（不在 6 条 pattern 内）
             ("/data/memory/sessions/ses_abc/tasks/T1/notes/draft.md",
-             ("tasks", "T1", "free", "notes/draft")),
+             ("sessions", "ses_abc", "free", "tasks/T1/notes/draft")),
             # nested key after tid: 整个 notes/auth 留在 key 里
             ("/data/memory/sessions/ses_abc/tasks/T3/notes/auth.md",
-             ("tasks", "T3", "free", "notes/auth")),
+             ("sessions", "ses_abc", "free", "tasks/T3/notes/auth")),
         ],
     )
     def test_parses_mimo_paths(self, path, expected):
@@ -272,10 +272,10 @@ class TestPathsParsePath:
         p.write_text("x", encoding="utf-8")
         loc = parse_path(str(p))
         assert loc is not None
-        assert loc.scope == "tasks"
-        assert loc.scope_id == "T7"
+        assert loc.scope == "sessions"
+        assert loc.scope_id == "sesX"
         assert loc.type == "progress"
-        assert loc.key == "progress"
+        assert loc.key == "tasks/T7/progress"
 
 
 class TestPathsBuildPath:
@@ -296,6 +296,21 @@ class TestPathsBuildPath:
             root="/data/memory", scope="groups", scope_id="factor", key="spec"
         )
         assert p == "/data/memory/.quantcode/memory/groups/factor/spec.md"
+
+    def test_windows_separator_cannot_escape(self):
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(root="/x", scope="global", key="..\\escape")
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(
+                root="/x",
+                scope="sessions",
+                scope_id="S1",
+                key="nested\\..\\escape",
+            )
+
+    def test_windows_drive_path_is_rejected(self):
+        with pytest.raises(ValueError, match="invalid path component"):
+            build_path(root="/x", scope="global", key="C:\\secret")
 
     @pytest.mark.parametrize(
         "kwargs",
@@ -534,6 +549,39 @@ class TestMemoryReconcile:
         rows = list(ws["svc"]._conn().execute("SELECT body FROM memory_fts"))
         assert len(rows) == 1 and rows[0]["body"] == "v2"
 
+    def test_group_reconcile_does_not_prune_other_group_rows(self, tmp_path: Path):
+        root = tmp_path / ".quantcode"
+        db = root / "memory.db"
+        model = root / "memory" / "groups" / "model" / "kept.md"
+        model.parent.mkdir(parents=True)
+        model.write_text("model knowledge", encoding="utf-8")
+        model_svc = MemoryService(
+            db, root=root, requester_group="model", auto_reconcile=False
+        )
+        model_svc.reconcile()
+        model.unlink()
+
+        factor_svc = MemoryService(
+            db, root=root, requester_group="factor", auto_reconcile=False
+        )
+        factor_svc.reconcile()
+        with factor_svc._conn() as conn:
+            row = conn.execute(
+                "SELECT path FROM memory_fts WHERE path LIKE '%kept.md'"
+            ).fetchone()
+        assert row is not None
+
+    def test_root_can_be_project_or_quantcode_directory(self, tmp_path: Path):
+        project_svc = MemoryService(tmp_path / ".quantcode" / "memory.db", root=tmp_path)
+        quantcode_svc = MemoryService(
+            tmp_path / ".quantcode" / "memory.db", root=tmp_path / ".quantcode"
+        )
+        project_path = project_svc.write(scope="global", key="root-form", body="project")
+        quantcode_path = quantcode_svc.write(scope="global", key="root-form-2", body="quantcode")
+        assert "/.quantcode/memory/global/" in project_path.replace("\\", "/")
+        assert "/.quantcode/memory/global/" in quantcode_path.replace("\\", "/")
+        assert "/.quantcode/.quantcode/" not in quantcode_path.replace("\\", "/")
+
 
 # ===========================================================================
 # QuantCode 扩展：GROUP 隔离
@@ -586,3 +634,16 @@ class TestGroupIsolation:
         paths = {r.path for r in results}
         assert any(f"model{sep}public.md" in p for p in paths), f"model/public.md 不在结果: {paths}"
         assert not any(f"factor{sep}secret.md" in p for p in paths), f"factor/secret.md 越权: {paths}"
+
+    def test_bound_service_cannot_switch_requester_group(self, mem_workspace):
+        svc = mem_workspace["model_svc"]
+        with pytest.raises(MemoryPermissionError, match="override"):
+            svc.search(query="secret", requester_group="factor")
+        with pytest.raises(MemoryPermissionError, match="override"):
+            svc.write(
+                scope="groups",
+                scope_id="factor",
+                key="secret",
+                body="secret",
+                requester_group="factor",
+            )

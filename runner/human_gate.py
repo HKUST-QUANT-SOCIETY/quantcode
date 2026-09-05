@@ -1,27 +1,17 @@
-"""HumanGate runner — 阈值判断、gate_id 生成、interrupt payload 构造。"""
+"""HumanGate helpers for merge and permission only."""
 from __future__ import annotations
 
 import uuid
 from typing import Any, Literal
 
-from schemas.human_gate import (
-    HumanGate,
-    HumanGateInterruptPayload,
-    HumanGateStatus,
-)
-from schemas.risk_profile import RiskProfile, RiskThresholds
+from schemas.human_gate import HumanGateInterruptPayload
 
 _GATE_MESSAGE = "⏸️ 等待人工审批"
-_RESOLVED_STATUSES = {
-    HumanGateStatus.APPROVED,
-    HumanGateStatus.REJECTED,
-}
 
 # ---------------------------------------------------------------------------
 # Decision vocabulary normalization  (Day 7 OpenCode human-gate integration)
 # ---------------------------------------------------------------------------
 # OpenCode 对外的 approve/reject，对内映射为 ReAct 路径的 proceed/abort。
-# risk_agent 确定性路径继续使用 approve/reject，不需要转换。
 
 _EXTERNAL_TO_INTERNAL: dict[str, str] = {
     "approve": "proceed",
@@ -61,42 +51,23 @@ def _gate_payload_for_opencode(
     gate_id: str,
     message: str,
     reasons: list[str],
-    risk_metrics: dict[str, Any] | None = None,
-    risk_profile: dict[str, Any] | None = None,
+    kind: str,
+    resource: str | None = None,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """构造 OpenCode 可直接展示的 gate 字段（从 interrupt payload 提取并标准化）。"""
     return {
-        "kind": "human_gate",
+        "kind": kind,
         "gate_id": gate_id,
         "thread_id": thread_id,
         "message": message,
         "reasons": reasons,
-        "risk_metrics": risk_metrics or {},
-        "risk_profile": risk_profile or {},
+        "resource": resource,
+        "evidence": evidence or {},
         "decision_schema": {
             "allowed": ["approve", "reject"],
             "default": "reject",
         },
-    }
-
-
-def should_interrupt(
-    profile: RiskProfile,
-    thresholds: RiskThresholds,
-    gate: HumanGate | None = None,
-) -> bool:
-    """检查是否需要触发 HumanGate（暂停 workflow 等待人工审批）。"""
-    if gate is not None and gate.status in _RESOLVED_STATUSES:
-        return False
-    return bool(profile.breached_thresholds(thresholds))
-
-
-def gate_check(profile: RiskProfile, thresholds: RiskThresholds) -> dict[str, Any]:
-    """返回 requires_human 与 reasons（与 tools.risk.check_gate 对齐）。"""
-    reasons = profile.breached_thresholds(thresholds)
-    return {
-        "requires_human": bool(reasons),
-        "reasons": reasons,
     }
 
 
@@ -109,7 +80,10 @@ def make_gate_id(thread_id: str) -> str:
 def build_interrupt_payload(
     *,
     gate_id: str,
-    risk_profile: dict[str, Any],
+    kind: Literal["merge", "permission"],
+    resource: str | None = None,
+    actor: str | None = None,
+    evidence: dict[str, Any] | None = None,
     reasons: list[str],
     decision: str | None = None,
     message: str = _GATE_MESSAGE,
@@ -117,8 +91,11 @@ def build_interrupt_payload(
     """构造 LangGraph interrupt 用的结构化 payload。"""
     payload = HumanGateInterruptPayload(
         gate_id=gate_id,
+        kind=kind,
+        resource=resource,
+        actor=actor,
+        evidence=evidence or {},
         message=message,
-        risk_profile=risk_profile,
         reasons=reasons,
         decision=decision,
     )
@@ -166,19 +143,20 @@ def format_waiting_for_human(
     从 interrupt payload 提取 gate_id、message、reasons 等字段，
     调用 _gate_payload_for_opencode 组装 OpenCode 可展示的 gate。
     """
-    gate_id = interrupt_payload.get("gate_id", "")
-    message = interrupt_payload.get("message", _GATE_MESSAGE)
-    reasons: list[str] = interrupt_payload.get("reasons", [])
-    risk_metrics = interrupt_payload.get("risk_profile", interrupt_payload.get("risk_metrics", {}))
-    risk_profile = interrupt_payload.get("risk_profile", {})
+    payload = HumanGateInterruptPayload.model_validate(interrupt_payload)
+    gate_id = payload.gate_id
+    message = payload.message
+    reasons = payload.reasons
+    kind = payload.kind
 
     gate = _gate_payload_for_opencode(
         thread_id=thread_id,
         gate_id=gate_id,
         message=message,
         reasons=list(reasons) if isinstance(reasons, list) else [str(reasons)],
-        risk_metrics=risk_metrics if isinstance(risk_metrics, dict) else {},
-        risk_profile=risk_profile if isinstance(risk_profile, dict) else {},
+        kind=kind,
+        resource=payload.resource,
+        evidence=payload.evidence,
     )
 
     return {

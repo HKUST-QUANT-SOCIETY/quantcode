@@ -14,8 +14,8 @@ tool_args / output_data / errors），从源头避开 messages 累积导致指�
         不引入 langgraph 或任何 agent 框架，便于单测与复用。
 
 参考：
-- Architecture_Spec.md §3.2.1（死循环检测）
-- Architecture_Spec.md §3.2.3（状态指纹循环检测，见 ``runner/routing/fingerprint.py``）
+- docs/QuantCode_Design.md §9（死循环检测）
+- docs/QuantCode_Design.md §9（状态指纹循环检测，见 ``runner/routing/fingerprint.py``）
 """
 from __future__ import annotations
 

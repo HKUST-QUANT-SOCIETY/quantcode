@@ -13,6 +13,14 @@ tools:
   - mark_task_done
 schema_in: schemas.fundamental.ResearchSpec
 schema_out: schemas.fundamental.ResearchResult
+# Compose 流拓扑（runner/compose_executor FLOW_REGISTRY 键 ("fundamental", "fundamental:research")，
+# 注册于 flows/fundamental_research.py，import 即注册）
+flow:
+  - pit_rag_search  # force_fixture=True，published_at <= as_of_date
+  - extract_financial  # stub hash 造数，测试不产真数据
+  - dcf_valuation
+  - render_report
+  - acceptance  # 复用 runner/acceptance.py research-pdf 规则；request_human_review 留在工具层
 ---
 
 # Fundamental Group Agent

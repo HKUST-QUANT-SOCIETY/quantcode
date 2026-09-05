@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage
@@ -55,10 +56,16 @@ def create_deepseek_llm(
     Raises:
         ValueError: 没有可用的 API key（config.json 不存在且 DEEPSEEK_API_KEY 未设置）。
     """
-    # 从 config.json 加载（作为 fallback）
+    # 从 config.json 加载（runner-direct fallback）；MCP 注入的统一环境
+    # 变量优先，避免工具链使用另一套凭据/模型配置。
     cfg = get_llm_config() or {}
 
-    resolved_api_key = api_key or cfg.get("api_key", "")
+    resolved_api_key = (
+        api_key
+        or os.environ.get("QUANTCODE_API_KEY", "").strip()
+        or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        or cfg.get("api_key", "")
+    )
     if not resolved_api_key or resolved_api_key == "sk-your-deepseek-api-key-here":
         raise ValueError(
             "DeepSeek API key 未配置。请：\n"
@@ -67,8 +74,18 @@ def create_deepseek_llm(
             "3. 或设置环境变量 DEEPSEEK_API_KEY"
         )
 
-    resolved_model = model or cfg.get("model", "deepseek-chat")
-    resolved_base_url = base_url or cfg.get("base_url", "https://api.deepseek.com/v1")
+    resolved_model = (
+        model
+        or os.environ.get("QUANTCODE_MODEL_NAME", "").strip()
+        or os.environ.get("DEEPSEEK_MODEL", "").strip()
+        or cfg.get("model", "deepseek-chat")
+    )
+    resolved_base_url = (
+        base_url
+        or os.environ.get("QUANTCODE_MODEL_BASE_URL", "").strip()
+        or os.environ.get("DEEPSEEK_BASE_URL", "").strip()
+        or cfg.get("base_url", "https://api.deepseek.com/v1")
+    )
     resolved_temperature = temperature if temperature is not None else cfg.get("temperature", 0.0)
     resolved_max_tokens = max_tokens if max_tokens is not None else cfg.get("max_tokens", 4096)
 

@@ -1,11 +1,15 @@
-"""request_human_review tool — 触发 LangGraph interrupt 等待人工审核 — Day 4。
+"""request_human_review tool — 研报非阻断审阅标记（F-03 v0.2 收窄 / G2-A8）。
 
-在 human_gate 节点之后，LLM 主动调此 tool 时，通过 ``langgraph.types.interrupt()``
-暂停执行，等待人类通过 ``Command(resume=)`` 做出 approve/reject 决策。
+历史（Day 4 / Day 7）：本工具曾是 LangGraph 真阻断 interrupt——调用即经
+``langgraph.types.interrupt()`` 暂停，等 ``Command(resume=...)`` 的人工决策。
 
-Day 4 俞高磊：从 ``random.choice`` stub 替换为真实 interrupt + HumanGate 接口。
+2026-09-01 HumanGate 收窄为**写操作门禁**：研报产出人本来要看，由报告平台
+承接，不再挂 Gate。本工具改为**非阻断审阅标记**：写 review_requested 标记
+（随 tool_result 进 execution_trace 留痕）后直接放行，流程继续。
 """
 from __future__ import annotations
+
+import json
 
 from pydantic import BaseModel
 
@@ -18,65 +22,31 @@ class HumanReviewArgs(BaseModel):
     reason: str = ""
 
 
-def request_human_review_execute(args: HumanReviewArgs, ctx: dict) -> dict:
-    """通过 LangGraph interrupt 暂停，等待人工审核决策。
+def request_human_review_execute(args: HumanReviewArgs, ctx: dict) -> str:
+    """写审阅标记并直接放行（非阻断，零 interrupt）。
 
-    优先使用 ctx 中的 risk_metrics 构造 payload；
-    如果 ctx 中没有，构造基本 payload。
-
-    Day 7: 兼容 OpenCode approve/reject 决策—resume payload 里的
-    ``approve``/``reject`` 会被映射为内部 ``proceed``/``abort``。
+    返回 JSON **字符串**（而非 dict）是刻意的：agent_nodes._extract_state_fields
+    只对 dict 输出做 state 注入，且对 request_human_review 会把
+    ``output["decision"]``（缺省 "abort"）写进 state.human_review_result——
+    审阅标记语义里不存在任何人工决策，字符串返回保证零 state 副作用。
     """
-    from runner.human_gate import (
-        build_interrupt_payload,
-        make_gate_id,
-        normalize_external_decision,
-        parse_resume_decision,
-    )
-
-    thread_id = ctx.get("thread_id", "")
-    if not thread_id:
-        # Fallback: try to get from state via ctx
-        thread_id = ctx.get("source", "mcp")
-
-    risk_metrics = ctx.get("risk_metrics") or {}
-    reasons = [args.reason] if args.reason else []
-
-    gate_id = make_gate_id(thread_id)
-    payload = build_interrupt_payload(
-        gate_id=gate_id,
-        risk_profile=risk_metrics,
-        reasons=reasons,
-        message=f"⏸️ HumanGate: {args.reason}" if args.reason else "⏸️ 等待人工审批",
-    )
-
-    # ★ 真暂停：LangGraph 在此处暂停，等待外部 Command(resume=...)
-    from langgraph.types import interrupt
-
-    resume_value = interrupt(payload)
-
-    # 解析外部传入的决策 — Day 7: 兼容 approve/reject
-    raw = parse_resume_decision(resume_value)
-    decision = normalize_external_decision(raw) if raw else "reject"
-    # 转换为 ReAct 内部决策 (proceed / abort)
-    internal_decision: str = {"approve": "proceed", "reject": "abort"}.get(decision, "abort")
-
-    return {
-        "decision": internal_decision,
-        "external_decision": decision,
+    marker = {
+        "review_requested": True,
+        "status": "review_requested",
         "reason": args.reason,
-        "gate_id": gate_id,
-        "reviewed_by": "human",
+        "thread_id": str(ctx.get("thread_id") or ctx.get("source") or ""),
+        "note": "研报审阅标记（非阻断）：产出由报告平台承接，流程继续",
     }
+    return json.dumps(marker, ensure_ascii=False)
 
 
 request_human_review_tool = ToolDef(
     id="request_human_review",
     description=(
-        "Request a human reviewer to proceed or abort the current workflow step. "
-        "Pauses execution until a human approves (proceed) or rejects (abort). "
-        "Call this when the routing layer triggers a HUMAN_GATE decision, or when "
-        "the agent needs confirmation for a high-risk action."
+        "Flag the current research output (e.g. a rendered report) as pending human "
+        "review and continue. Non-blocking: it only records a review_requested marker "
+        "for the report platform; it does NOT pause or gate the workflow. "
+        "Only write operations into production surfaces require a HumanGate."
     ),
     schema=HumanReviewArgs,
     execute=request_human_review_execute,

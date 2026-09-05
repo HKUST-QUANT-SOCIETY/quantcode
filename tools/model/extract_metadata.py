@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, model_validator
@@ -42,8 +41,12 @@ def _body_from_args(args: ExtractMetadataArgs) -> tuple[str, str | None, str | N
     if args.body is not None:
         return args.body, None, None
     if args.pr_path is not None:
-        body = Path(args.pr_path).read_text(encoding="utf-8")
-        return body, None, None
+        # Keep local PR reads on the same approved-checkout boundary as
+        # ``read_pr``; do not let this convenience input bypass it.
+        from tools.model.read_pr import _read_local_pr
+
+        result = _read_local_pr(args.pr_path)
+        return result["body"], result.get("pr_url"), None
     raise ValueError("extract_metadata requires pr, body, or pr_path")
 
 

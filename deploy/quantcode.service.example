@@ -1,0 +1,36 @@
+# QuantCode systemd 模板（G3-B1）。复制到 /etc/systemd/system/ 后 daemon-reload。
+# 只含路径与启动命令；所有密钥经 EnvironmentFile 注入 QUANTCODE_* 键值，模板不写值。
+# 模拟盘 / dream 变体：仅替换 ExecStart 一行，其余不动。
+
+[Unit]
+Description=QuantCode %i service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantcode
+Group=quantcode
+WorkingDirectory=/srv/quant/quantcode
+# root:0600，内容形如 QUANTCODE_GROUP=factor / QUANTCODE_API_KEY=... （键值不入库）
+EnvironmentFile=/etc/quantcode/quantcode.env
+
+# 变体 A（MCP stdio server，默认）：
+ExecStart=/srv/quant/quantcode/.venv/bin/python -m quantcode.mcp_server
+# 变体 B（dream 消费端，300s 轮询；或挂 quantcode-dream.timer）：
+# ExecStart=/srv/quant/quantcode/.venv/bin/python scripts/dream_consume.py --interval 300
+# 变体 C（模拟盘 cron 扫描，G1-L2 定案后回填命令）：
+# ExecStart=/srv/quant/quantcode/.venv/bin/python scripts/dream_consume.py --once
+
+Restart=on-failure
+RestartSec=5
+
+# .quantcode/ 运行态相对 WorkingDirectory；备份由每夜 cron 打包到 /srv/quant/backups/
+StateDirectory=quant
+ReadWritePaths=/srv/quant
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

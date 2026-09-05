@@ -110,6 +110,6 @@ def test_strategy_agent_multi_step(tmp_db):
     assert {t.id for t in global_registry.get_tools_for_group("strategy")} == {
         "select_signals",
         "combine_signals",
-        "run_strategy_backtest",
-        "deploy_strategy",
+            "run_strategy_backtest",
+            "deployment_candidate",
     }

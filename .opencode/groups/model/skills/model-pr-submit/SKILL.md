@@ -4,6 +4,13 @@ description: 模型组提 PR 时自动填风控元数据 + 触发 risk Compose �
 group: model
 owner: 陈镇鸿
 pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
+# Compose 流拓扑（runner/compose_executor FLOW_REGISTRY 键 ("model", "model:submit")，
+# 注册于 flows/model_submit.py，import 即注册）
+flow:
+  - parse_pr_input  # read_pr + extract_metadata 透传整理
+  - generate_model_spec
+  - handoff_to_risk  # write_blackboard + trigger_risk_flow 组合节点
+  - produce_output
 ---
 
 # Model PR Submit Skill
@@ -25,8 +32,8 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
 1. **读取 PR**：调用 `read_pr(pr_number)` 获取 diff
 2. **提取元数据**：调用 `extract_metadata(diff)` 获取 ticker / factor 信息
 3. **生成 ModelSpec**：调用 `generate_model_spec(metadata)` 生成模型规格
-4. **写入 Blackboard**：调用 `write_blackboard(key="model.pr_<pr_number>_spec", value=spec)` 写入 PROJECT scope
-5. **触发风控**：调用 `trigger_risk_flow(blackboard_key="model.pr_<pr_number>_spec")` 写 PROJECT scope 的 `shared.pending_risk_reviews`，供 risk 组消费
+4. **写入 Blackboard**：调用 `write_blackboard(key="model.pr_<pr_number>_spec", value=spec)` 写入 PROJECT scope（session/key 由 `runner/blackboard_keys.py` 归一层统一：固定 PROJECT session，裸 key 自动补 `shared.model_entries.` 前缀）
+5. **触发风控**：调用 `trigger_risk_flow(blackboard_key="model.pr_<pr_number>_spec")`（裸 key 或第 4 步返回的 `project_entry.key` 均可，归一层幂等解析）写 PROJECT scope 的 `shared.pending_risk_reviews`，供 risk 组消费
 
 当前实现不默认双写 GROUP 私有条目；只有后续确有模型组私有状态需要时，才由对应 tool 显式写 GROUP scope。
 

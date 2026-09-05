@@ -5,10 +5,6 @@
 """
 from __future__ import annotations
 
-import uuid
-
-import pytest
-
 from runner.agent_mcp_tool import (
     RunAgentArgs,
     _format_result,
@@ -45,6 +41,13 @@ class TestRunAgentArgs:
         args = RunAgentArgs(task="test")
         assert args.max_iterations == 50
 
+    def test_inner_agent_excludes_controller_tools(self):
+        from runner.agent_mcp_tool import _inner_agent_tool_ids
+
+        assert _inner_agent_tool_ids({"run_agent", "list_capabilities", "spawn_subagent", "review_distill_candidate"}) == {
+            "list_capabilities"
+        }
+
 
 class TestRunAgentExecuteErrors:
     """run_agent 的错误处理。"""
@@ -56,7 +59,7 @@ class TestRunAgentExecuteErrors:
             ctx={},
         )
         assert result["status"] == "error"
-        assert "QUANTCODE_GROUP" in result["error"]
+        assert "AUTHENTICATION_REQUIRED" in result["error"]
 
     def test_group_empty_string_returns_error(self):
         """group 为空字符串 → 返回 error status。"""
@@ -65,6 +68,15 @@ class TestRunAgentExecuteErrors:
             ctx={"group": ""},
         )
         assert result["status"] == "error"
+
+    def test_request_group_cannot_override_authenticated_session(self):
+        """请求参数不能把已认证 session 改成另一个业务组。"""
+        result = _run_agent_execute(
+            RunAgentArgs(task="test", group="risk"),
+            ctx={"group": "model", "_model": object()},
+        )
+        assert result["status"] == "error"
+        assert "group mismatch" in result["error"]
 
     def test_no_model_returns_error(self, monkeypatch):
         """ctx 中有 group 但没有 _model，且 fallback _get_model 也返回 None → 返回 error。"""
@@ -90,7 +102,8 @@ class TestRunAgentExecuteErrors:
         """resume mode 需要 thread_id，否则返回 error。"""
         # model check happens before thread_id check in _resume_mode,
         # so we need to pass a dummy model to bypass the model gate.
-        dummy_model = lambda x: type("msg", (), {"content": "", "tool_calls": []})()
+        def dummy_model(x):
+            return type("msg", (), {"content": "", "tool_calls": []})()
         result = _run_agent_execute(
             RunAgentArgs(decision="approve"),
             ctx={"group": "risk", "_model": dummy_model},
@@ -98,94 +111,13 @@ class TestRunAgentExecuteErrors:
         assert result["status"] == "error"
         assert "thread_id" in result["error"].lower()
 
-
-import pytest
-
-
-class TestRiskGateMcpFlow:
-    """
-    DEPRECATED: Day 5 已移除 risk 特判路径，统一走 AgentRunner ReAct。
-
-    历史背景：Day 4 为 demo 稳定性临时加了 risk-gate 确定性 pipeline 特判
-    (_start_risk_gate_mode)。Day 5 统一至 AgentRunner ReAct 路径后，此特判已弃用。
-
-    ReAct 路径的测试见 tests/test_risk_react_ready.py 和 tests/test_risk_github_e2e.py。
-    """
-
-    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
-    def test_start_high_risk_returns_waiting_for_human(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
+    def test_analyst_cannot_resume_human_gate(self):
         result = _run_agent_execute(
-            RunAgentArgs(
-                task="run risk_stub high_risk and wait for approval",
-                group="risk",
-                skill_name="risk-gate",
-                thread_id="mcp-risk-start-1",
-            ),
-            ctx={"group": "risk", "_model": lambda messages, tools=None: None},
+            RunAgentArgs(decision="approve", thread_id="gate-1"),
+            ctx={"group": "model", "role": "analyst", "_model": lambda _: None},
         )
-        assert result["status"] == "waiting_for_human"
-        assert result["thread_id"] == "mcp-risk-start-1"
-        assert result["gate"]["decision_schema"]["allowed"] == ["approve", "reject"]
-        assert result["gate"]["reasons"]
-
-    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
-    def test_start_then_approve_completes_without_react_loop(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        thread_id = f"mcp-risk-approve-day4-{uuid.uuid4().hex}"
-        start = _run_agent_execute(
-            RunAgentArgs(
-                task="run risk_stub high_risk and wait for approval",
-                group="risk",
-                skill_name="risk-gate",
-                thread_id=thread_id,
-            ),
-            ctx={"group": "risk", "_model": lambda messages, tools=None: None},
-        )
-        assert start["status"] == "waiting_for_human"
-
-        resumed = _run_agent_execute(
-            RunAgentArgs(
-                group="risk",
-                skill_name="risk-gate",
-                thread_id=thread_id,
-                decision="approve",
-            ),
-            ctx={"group": "risk", "_model": lambda messages, tools=None: None},
-        )
-        assert resumed["status"] == "completed"
-        assert resumed["human_decision"] == "approve"
-        assert resumed["output_data"]["status"] == "completed"
-        assert resumed["output_data"]["pr_comment"] is not None
-
-    @pytest.mark.skip(reason="Day 5 已移除 risk 特判路径，此测试针对已弃用的 _start_risk_gate_mode")
-    def test_start_then_reject_returns_rejected(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        thread_id = f"mcp-risk-reject-day4-{uuid.uuid4().hex}"
-        start = _run_agent_execute(
-            RunAgentArgs(
-                task="run risk_stub high_risk and wait for approval",
-                group="risk",
-                skill_name="risk-gate",
-                thread_id=thread_id,
-            ),
-            ctx={"group": "risk", "_model": lambda messages, tools=None: None},
-        )
-        assert start["status"] == "waiting_for_human"
-
-        resumed = _run_agent_execute(
-            RunAgentArgs(
-                group="risk",
-                skill_name="risk-gate",
-                thread_id=thread_id,
-                decision="reject",
-            ),
-            ctx={"group": "risk", "_model": lambda messages, tools=None: None},
-        )
-        assert resumed["status"] == "rejected"
-        assert resumed["human_decision"] == "reject"
-        assert resumed["output_data"]["status"] == "rejected"
-        assert resumed["output_data"]["pr_comment"] is None
+        assert result["status"] == "error"
+        assert "only an approver or admin" in result["error"]
 
 
 class TestFormatResult:
@@ -212,6 +144,11 @@ class TestFormatResult:
         assert result["iterations"] == 3
         assert result["thread_id"] == "tid-1"
 
+    def test_preserves_explicit_terminal_statuses(self):
+        for status in ("stopped_budget", "stopped_loop", "failed", "error"):
+            result = _format_result({"status": status, "messages": []}, "model")
+            assert result["status"] == status
+
     def test_includes_risk_metrics(self):
         """state 有 risk_metrics → 包含在结果中。"""
         state = {"messages": [], "risk_metrics": {"var_99": 0.08}}
@@ -224,6 +161,24 @@ class TestFormatResult:
         state = {"messages": [], "execution_trace": trace}
         result = _format_result(state, "model")
         assert result["execution_trace"] == trace
+
+    def test_result_keeps_session_and_task_identity(self):
+        result = _format_result(
+            {
+                "messages": [],
+                "task_id": "task-1",
+                "thread_id": "thread-1",
+                "actor_id": "actor-1",
+                "role": "approver",
+            },
+            "factor",
+            actor_id="fallback-actor",
+            role="analyst",
+        )
+        assert result["task_id"] == "task-1"
+        assert result["group"] == "factor"
+        assert result["actor_id"] == "actor-1"
+        assert result["role"] == "approver"
 
     def test_includes_day4_state_backflow_fields(self):
         """Day4 状态回流字段：output_data / artifacts / gate / errors。"""

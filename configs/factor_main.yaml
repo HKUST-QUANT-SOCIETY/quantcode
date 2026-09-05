@@ -1,0 +1,4 @@
+# merge_to_main 主线登记配置（qs-cold：主线=文件系统登记簿，非 git 操作）。
+# 读取方：tools/factor/merge_to_main.py（缺文件/缺键回退代码默认）。
+mainline_index: ".quantcode/mainline/factors.json"   # 主线因子清单索引路径
+require_human: true                                  # 合入主线必须经 HumanGate 审批

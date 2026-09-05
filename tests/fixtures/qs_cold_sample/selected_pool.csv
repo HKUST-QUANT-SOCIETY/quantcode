@@ -1,0 +1,3 @@
+factor_name,family,factor_dir,factor_values_path,format,rank_ic_mean,abs_rank_ic,factor_direction,formula,code_hash
+GTJA191_M019,lqtp_1014,GTJA191_M019,factors/GTJA191_M019,parquet,0.021,0.021,positive,alpha_191#M019,abc123
+DEMO_ABS,lqtp_1014,DEMO_ABS,factors/DEMO_ABS,parquet,0.018,0.018,negative,x/y,def456

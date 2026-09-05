@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +12,7 @@ from tools.fundamental.chroma_store import (
     query_chroma,
 )
 from tools.registry import PROJECT_ROOT, ToolDef
+from tools.utils.paths import resolve_input_path
 
 
 class PitRagSearchArgs(BaseModel):
@@ -31,38 +31,96 @@ class PitRagSearchArgs(BaseModel):
 
 
 def pit_rag_search_execute(args: PitRagSearchArgs, ctx: dict) -> dict:
-    fixture = Path(args.fixture_path)
-    if not fixture.is_absolute():
-        fixture = PROJECT_ROOT / fixture
+    try:
+        fixture = resolve_input_path(args.fixture_path, root=PROJECT_ROOT)
+    except ValueError as exc:
+        return {
+            "status": "UNAVAILABLE",
+            "error": "invalid_fixture_path",
+            "detail": str(exc),
+            "query": args.query,
+            "as_of_date": args.as_of_date.isoformat(),
+            "documents": [],
+            "total_candidates": 0,
+            "filtered_count": 0,
+            "retrieval_time_ms": 0,
+            "backend": "unavailable",
+            "pit_rule": "published_at <= as_of_date",
+        }
 
-    if args.force_fixture:
-        raw_docs = load_fixture_documents(fixture)
-        backend = "fixture_json"
-    else:
-        raw_docs, backend = query_chroma(
-            args.query, top_k=args.top_k, fixture_path=fixture
-        )
+    try:
+        if args.force_fixture:
+            raw_docs = load_fixture_documents(fixture)
+            backend = "fixture_json"
+        else:
+            raw_docs, backend = query_chroma(
+                args.query, top_k=args.top_k, fixture_path=fixture
+            )
+    except (OSError, ValueError, TypeError) as exc:
+        return {
+            "status": "UNAVAILABLE",
+            "error": "corpus_unavailable",
+            "detail": f"PIT corpus could not be loaded: {type(exc).__name__}",
+            "query": args.query,
+            "as_of_date": args.as_of_date.isoformat(),
+            "documents": [],
+            "total_candidates": 0,
+            "filtered_count": 0,
+            "retrieval_time_ms": 0,
+            "backend": "unavailable",
+            "pit_rule": "published_at <= as_of_date",
+        }
+
+    if not raw_docs and not fixture.is_file():
+        return {
+            "status": "UNAVAILABLE",
+            "error": "corpus_unavailable",
+            "detail": "PIT corpus is empty and no fixture is available",
+            "query": args.query,
+            "as_of_date": args.as_of_date.isoformat(),
+            "documents": [],
+            "total_candidates": 0,
+            "filtered_count": 0,
+            "retrieval_time_ms": 0,
+            "backend": "unavailable",
+            "pit_rule": "published_at <= as_of_date",
+        }
 
     total = len(raw_docs)
     kept: list[PITDocument] = []
     filtered = 0
 
-    for d in raw_docs:
-        pub = date.fromisoformat(str(d["published_at"])[:10])
-        if pub > args.as_of_date:
-            filtered += 1
-            continue
-        kept.append(
-            PITDocument(
-                id=d["id"],
-                source=d.get("source", "unknown"),
-                title=d.get("title"),
-                published_at=pub,
-                snippet=d.get("snippet", ""),
-                score=float(d.get("score", 0.5)),
-                url=d.get("url"),
+    try:
+        for d in raw_docs:
+            pub = date.fromisoformat(str(d["published_at"])[:10])
+            if pub > args.as_of_date:
+                filtered += 1
+                continue
+            kept.append(
+                PITDocument(
+                    id=d["id"],
+                    source=d.get("source", "unknown"),
+                    title=d.get("title"),
+                    published_at=pub,
+                    snippet=d.get("snippet", ""),
+                    score=float(d.get("score", 0.5)),
+                    url=d.get("url"),
+                )
             )
-        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return {
+            "status": "UNAVAILABLE",
+            "error": "corpus_invalid",
+            "detail": f"PIT corpus contains an invalid document: {type(exc).__name__}",
+            "query": args.query,
+            "as_of_date": args.as_of_date.isoformat(),
+            "documents": [],
+            "total_candidates": total,
+            "filtered_count": filtered,
+            "retrieval_time_ms": 0,
+            "backend": backend,
+            "pit_rule": "published_at <= as_of_date",
+        }
 
     kept.sort(key=lambda x: x.score, reverse=True)
     kept = kept[: args.top_k]
@@ -88,6 +146,7 @@ def pit_rag_search_execute(args: PitRagSearchArgs, ctx: dict) -> dict:
     payload = result.model_dump(mode="json")
     payload["backend"] = backend
     payload["pit_rule"] = "published_at <= as_of_date"
+    payload["status"] = "CONNECTED" if kept else "EMPTY"
     return payload
 
 

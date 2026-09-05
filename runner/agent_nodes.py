@@ -12,13 +12,15 @@
 
 设计要点：
 - 每个节点函数都是纯函数工厂（不持有状态），依赖通过闭包注入
-- 依赖（model / tools / registry；rlhf_collector 已弃用仅保留兼容）由 ``AgentRunner`` 接线
+- 依赖（model / tools / registry）由 ``AgentRunner`` 接线
 - tools 通过 ``make_llm_node(model, tools)`` 闭包注入，**不放入 state**（ToolDef 不可 msgpack 序列化）
 - 节点函数本身可单测（mock LLM + mock tool）
 """
 from __future__ import annotations
 
 import operator
+import os
+import time
 from typing import Annotated, Any, Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -27,6 +29,12 @@ from runner.langgraph_base import BaseFlowState
 from runner.routing.fingerprint import compute_state_fingerprint
 from runner.routing.router import RouteDecision, route_next_step
 from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
+from runner.solution_workflow import (
+    filter_tools_for_phase,
+    sync_phase_from_blackboard,
+    tool_allowed_in_phase,
+    tool_denied_message,
+)
 from tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
@@ -34,20 +42,134 @@ from tools.registry import ToolRegistry
 # ---------------------------------------------------------------------------
 
 
+def _msg_identity(msg: Any) -> Any:
+    """给无 id 的消息派生稳定标识（供去重 diff）。
+
+    - 有 ``id`` 属性（LangGraph add_messages 会赋 id）用 id
+    - 否则 (类名, content, tool_call_id, tool_calls 指纹)：空 content 的
+      AIMessage 各带不同 tool_calls，不能仅凭空 content 合并成一条
+    """
+    mid = getattr(msg, "id", None)
+    if mid:
+        return ("id", mid)
+    tcs = tuple(
+        (
+            (c.get("name", "") if isinstance(c, dict) else getattr(c, "name", "")),
+            (c.get("id", "") if isinstance(c, dict) else getattr(c, "id", "")),
+        )
+        for c in (getattr(msg, "tool_calls", None) or [])
+    )
+    return (
+        "content",
+        type(msg).__name__,
+        str(getattr(msg, "content", "") or ""),
+        str(getattr(msg, "tool_call_id", "") or ""),
+        tcs,
+    )
+
+
+def merge_messages(current: list[Any] | None, update: list[Any] | None) -> list[Any]:
+    """messages 通道的自定义 reducer（替代 operator.add）。
+
+    翻倍根因：operator.add 把"节点返回的新消息"追加进累计值没问题，但
+    truncate / 摘要类节点返回的是 **整个消息列表**，每个 superstep 都会把
+    累计值原样再 add 一遍 → 长度每轮翻倍。
+
+    修复（两层）：
+    - 节点返回 ``_ReplaceMessages``（整体替换语义，truncate / rebuild 用）
+      → 直接取该列表，不做合并
+    - 正常节点返回普通 list（只带新消息）→ 按 ``_msg_identity`` 去重追加，
+      行为与 operator.add 一致，且即使误传全量列表也不翻倍
+    """
+    if update is None:
+        return list(current or [])
+    if isinstance(update, _ReplaceMessages):
+        return list(update)
+    if current is None:
+        return list(update)
+
+    existing_keys = {_msg_identity(m) for m in current}
+    merged = list(current)
+    for m in update:
+        key = _msg_identity(m)
+        if key not in existing_keys:
+            merged.append(m)
+            existing_keys.add(key)
+        else:
+            # 同 id 消息重发 → 用新版本覆盖（truncate 改写 content 的场景）
+            for i, old in enumerate(merged):
+                if _msg_identity(old) == key:
+                    merged[i] = m
+                    break
+    return merged
+
+
+# P0-8 §4.4：context 占用阈值（占用比）
+CONTEXT_SNAPSHOT_RATIO = 0.7
+CONTEXT_REBUILD_RATIO = 0.9
+
+
+def _context_token_limit() -> int:
+    """上下文窗口上限（tokens）。env ``QUANTCODE_CONTEXT_TOKENS``，默认 128000。"""
+    try:
+        return int(os.environ.get("QUANTCODE_CONTEXT_TOKENS", "128000"))
+    except ValueError:
+        return 128000
+
+
+def estimate_context_chars(state: dict[str, Any]) -> float:
+    """估算当前 context 占用 tokens。
+
+    公式：messages content 长度之和 + system_prompt 长度，每 4 字符 ≈ 1 token。
+    # ponytail: 字符/4 近似 token，升级路径=tiktoken 实测
+    """
+    chars = len(state.get("system_prompt") or "")
+    for m in state.get("messages") or []:
+        content = getattr(m, "content", "")
+        if not isinstance(content, str):
+            content = repr(content)
+        chars += len(content)
+    return chars / 4.0
+
+
+def context_usage_ratio(state: dict[str, Any]) -> float:
+    """context 占用比 = 估算 tokens / 窗口上限。"""
+    return estimate_context_chars(state) / max(_context_token_limit(), 1)
+
+
+def make_checkpoint_event(
+    *,
+    thread_id: str,
+    ratio: float,
+    kind: str = "snapshot",
+) -> dict[str, Any]:
+    """构造一个 checkpoint_snapshot 事件 dict（往 execution_trace 追加用）。
+
+    thread_id 是 state 里的 thread id（唯一执行流），与 checkpoint_id 解耦；
+    ratio 为占用比（0-1+），kind 为 snapshot（>70% 快照）或 rebuild（>90% 重建）。
+    """
+    return {
+        "event_type": "checkpoint_snapshot",
+        "thread_id": thread_id,
+        "kind": kind,
+        "ratio": round(float(ratio), 4),
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+    }
+
+
 class AgentState(BaseFlowState, total=False):
     """Agent 引擎的 state schema，继承 BaseFlowState。
 
     字段必须 msgpack 可序列化（LangGraph checkpointer 限制）：
 
-    - messages      — LangChain BaseMessage 列表（**operator.add 累积**）
+    - messages      — LangChain BaseMessage 列表（**merge_messages 去重合并**，
+                      修复原 operator.add 每 superstep 翻倍的 bug）
     - iterations    — 已执行步数（最后一次返回值覆盖）
     - system_prompt — SKILL.md 拼装出的系统提示（最后一次覆盖）
     - risk_metrics  — 风控指标（由 calc_risk_stub 写入，router.py 消费）
     - risk_profile  — 风控画像（generate_risk_profile 写入；calc_risk_stub 测试场景下也注入，router.py 消费）
     - task_status   — 任务状态（"done" 触发 finish）
-    - human_review_result — 人工审核结果（"proceed"/"abort"，由 request_human_review tool 写入）
     - task_goal     — 任务目标描述（取自 input_data.task）
-    - _gate_purpose — Day 5: risk/loop/max_iter, 内部追踪 gate 来源
     - current_step  — LLM 本轮意图的完整工具批次（list[str]，用于 fingerprint）
     - last_tool     — 本轮实际执行的 tool 列表（list[str]，用于 fingerprint）
     - tool_args     — 本轮实际执行的 tool 参数列表（list[dict]，用于 fingerprint）
@@ -55,6 +177,8 @@ class AgentState(BaseFlowState, total=False):
     - output_data   — 标准化产出（给 MCP / OpenCode 状态回流消费）
     - artifacts     — 产物路径列表（operator.add 累积）
     - gate          — OpenCode 可展示的 HumanGate payload
+    - context_rebuilt — P0-8 §4.4: >90% 重建后 messages 已被压缩为摘要时置 true
+    - checkpoint_snapshot — P0-8 §4.4: 快照/重建事件列表（operator.add 累积）
 
     **不放进 state 的字段**（通过闭包注入）：
     - tools         — ToolDef 列表（Pydantic 模型，msgpack 不支持）
@@ -62,15 +186,24 @@ class AgentState(BaseFlowState, total=False):
      不进 state、不进实例，确保跨任务隔离（Day 3 评审修复）。
     """
 
-    messages: Annotated[list[Any], operator.add]  # 累积所有 node 返回的新消息
+    task_id: str
+    session_id: str | None
+    actor_id: str | None
+    role: str | None
+    workspace_id: str | None
+    workspace_path: str | None
+    github_subject: str | None
+    resource_scopes: list[str]
+    # P0-8 §4.4: messages 改用自定义 reducer（去重合并），修复 truncate/摘要
+    # 节点把整个列表再 add 一遍导致的翻倍 bug（原 Annotated[..., operator.add]）。
+    messages: Annotated[list[Any], merge_messages]
     iterations: int
     system_prompt: str
     risk_metrics: dict | None
     risk_profile: dict | None
     task_status: str | None
-    human_review_result: str | None
+    status: str | None
     task_goal: str
-    _gate_purpose: str | None  # Day 5: risk/loop/max_iter, 内部追踪 gate 来源
     current_step: list[str] | None
     last_tool: list[str] | None
     tool_args: list[dict[str, Any]] | None
@@ -78,6 +211,32 @@ class AgentState(BaseFlowState, total=False):
     output_data: dict[str, Any] | None
     artifacts: Annotated[list[str], operator.add] | None
     gate: dict[str, Any] | None
+    # P0-8 §4.4: >90% 重建后置 true（新字段，最后一个返回值覆盖，无 reducer）
+    context_rebuilt: bool
+    # P0-8 §4.4: checkpoint_snapshot 事件列表（operator.add 累积，快照/重建各一条，
+    # 随 state/trace 流出；前端按未知类型降级渲染）
+    checkpoint_snapshot: Annotated[list[dict[str, Any]], operator.add]
+    # P-07 strict reuse: a successful capability catalog lookup is a
+    # server-side prerequisite before any non-read tool may run.
+    capability_catalog_checked: bool
+    # R2 token budget：budget_tokens 限额（None=不限）；budget_used 每次该 agent
+    # LLM 调用累计消耗（usage 真值优先，取不到 _estimate_tokens 近似）；
+    # budget_grants 记录人审 approve 后的追加额（节点整体返回，最后值覆盖）。
+    budget_tokens: int | None
+    budget_used: int
+    budget_grants: list[int] | None
+    # P-01/F-06: Blackboard sqlite 路径透传（dataset 工具读同一 bb 文件；
+    # None → backing 默认路径 .quantcode/blackboard.db）。
+    _blackboard_db_path: str | None
+    # P-10 方案先行：当前方案阶段（None=未启动工作流 / "draft" / "frozen" /
+    # "superseded"）。draft 态由 make_tool_node/make_llm_node 做阶段限流
+    # （tool 过滤，非 interrupt——不新增 HumanGate 触发点）。
+    solution_phase: str | None
+    # P-10 方案先行：当前 run 激活的 SolutionDoc id（solution 工具输出经
+    # _extract_state_fields 注入；tool_node 据此从 Blackboard 回源 solution_phase）。
+    solution_id: str | None
+    # P-10 服务端任务分类：L2/L3 在 phase=None 时也必须维持方案限流。
+    solution_required: bool
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +286,17 @@ def make_llm_node(
         if state.get("system_prompt"):
             history = [SystemMessage(content=state["system_prompt"])] + history
 
+        # P-10 方案先行（组 allowlist 过滤段）：draft 态只把「方案类工具 +
+        # 只读工具」白名单暴露给模型（可见性收窄）。phase 缺省/非 draft →
+        # 原样返回，行为与改动前一致。
+        visible_tools = filter_tools_for_phase(
+            tools,
+            state.get("solution_phase"),
+            solution_required=bool(state.get("solution_required")),
+        )
+
         # 调 LLM（带 tool 列表）
-        response: AIMessage = model(history, tools=tools)
+        response: AIMessage = model(history, tools=visible_tools)
 
         updates = {
             "messages": [response],
@@ -145,6 +313,21 @@ def make_llm_node(
                     names.append(getattr(call, "name", ""))
             updates["current_step"] = names
 
+        # R2 token budget：每次 LLM 返回后累计消耗。
+        # usage_metadata 真值优先（input+output tokens）；
+        # ponytail: 取不到时退回 _estimate_tokens(全文) 近似，升级路径=provider 统一回报 usage
+        usage = getattr(response, "usage_metadata", None) or {}
+        if usage.get("total_tokens"):
+            spent = int(usage["total_tokens"])
+        else:
+            prompt_chars = len(state.get("system_prompt") or "")
+            for m in history:
+                content = getattr(m, "content", "")
+                prompt_chars += len(content if isinstance(content, str) else repr(content))
+            response_chars = len(str(getattr(response, "content", "") or ""))
+            spent = (prompt_chars + response_chars) // 4
+        updates["budget_used"] = int(state.get("budget_used") or 0) + spent
+
         return updates
 
     return llm_node
@@ -152,13 +335,13 @@ def make_llm_node(
 
 def make_tool_node(
     registry: ToolRegistry,
+    allowed_tool_ids: set[str] | frozenset[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``tool_node``：执行最近一个 AIMessage 里的所有 tool_calls。
 
     tool 返回的是非 str 数据且是 dict 时，会尝试注入 state：
     - ``calc_risk_stub`` → ``risk_metrics``
     - ``task_done`` / ``mark_complete`` → ``task_status="done"``
-    - ``request_human_review`` → ``human_review_result``
     """
 
     def tool_node(state: AgentState) -> dict:
@@ -174,21 +357,119 @@ def make_tool_node(
         ctx = {
             "group": state.get("group", ""),
             "thread_id": state.get("thread_id", ""),
-            "session_id": state.get("thread_id", ""),  # alias
+            "session_id": state.get("session_id") or state.get("thread_id", ""),
+            "actor_id": state.get("actor_id"),
+            "role": state.get("role"),
+            "workspace_id": state.get("workspace_id"),
+            "workspace_path": state.get("workspace_path"),
+            "github_subject": state.get("github_subject"),
+            "resource_scopes": state.get("resource_scopes") or [],
         }
+        # Blackboard 路径透传（P-01/F-06：dataset 工具读同一 bb 文件；
+        # engine 默认 None → backing 默认路径 .quantcode/blackboard.db）。
+        if state.get("_blackboard_db_path"):
+            ctx["blackboard_db_path"] = state["_blackboard_db_path"]
+        # All graph tools must append to the same run evidence chain. Without
+        # this explicit directory, merge_to_main's standalone fallback would
+        # place its HumanGate decision beside the mainline index instead of
+        # next to AgentRunner's tool/output events.
+        ctx["evidence_dir"] = os.environ.get("QUANTCODE_EVIDENCE_DIR")
         ctx["_memory"] = state.get("_memory")  # MemoryService 透传
+
+        # P-10 方案先行（组 allowlist 过滤段）：workflow 激活（state 已带
+        # solution_phase/solution_id）时从 Blackboard 回源当前 SolutionDoc 状态
+        # ——/solution 面板（AG-G）跨进程冻结后 run 侧同步解除限流。未激活 →
+        # phase=None，不读 db，既有 run 行为与开销不变。
+        solution_phase = sync_phase_from_blackboard(
+            state.get("solution_phase"),
+            state.get("solution_id"),
+            ctx.get("blackboard_db_path"),
+        )
 
         results: list[ToolMessage] = []
         # 收集需要注入 state 的字段
         state_updates: dict[str, Any] = {}
 
+        # P-10：把回源后的阶段写回 state，供 make_llm_node 的可见工具面过滤
+        # （draft 态只暴露方案类 + 只读工具；frozen 后解除）。
+        if solution_phase is not None:
+            state_updates["solution_phase"] = solution_phase
+
         executed_tools: list[str] = []
         executed_args: list[dict[str, Any]] = []
         tool_errors: list[str] = []
 
+        try:
+            from runner.distill.cards import strict_reuse_enabled
+
+            strict_reuse = strict_reuse_enabled()
+        except Exception:
+            # A malformed capability config must not silently disable the
+            # safety gate.  Treat it as enabled and return a visible tool
+            # error until the configuration is repaired.
+            strict_reuse = True
+
         for call in tool_calls:
             c = _to_tool_call_dict(call)
             try:
+                if allowed_tool_ids is not None and c["name"] not in allowed_tool_ids:
+                    content = (
+                        f"Tool '{c['name']}' failed: it is not available for the "
+                        "authenticated session."
+                    )
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    tool_errors.append(content)
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
+                # P-07 hard boundary: prompt text is not sufficient evidence
+                # of reuse.  In strict mode the agent must successfully query
+                # the maintained capability catalog before invoking a
+                # write/side-effect tool.  Read-only and solution workflow
+                # tools remain available so the agent can satisfy the gate.
+                from runner.solution_workflow import SOLUTION_TOOLS, is_readonly_tool
+                if (
+                    strict_reuse
+                    and c["name"] not in SOLUTION_TOOLS
+                    and not is_readonly_tool(c["name"])
+                    and not state.get("capability_catalog_checked")
+                ):
+                    content = (
+                        "Strict reuse is enabled: call list_capabilities successfully "
+                        "before invoking non-read tools."
+                    )
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    tool_errors.append(content)
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
+                # P-10 阶段限流（tool 过滤，非 interrupt——不新增 HumanGate 触发点）：
+                # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
+                # permission/enforce 链（避免无谓 interrupt 冒泡）。
+                # phase 非 draft（None/frozen/superseded）时恒放行，行为不变。
+                if not tool_allowed_in_phase(
+                    c["name"],
+                    solution_phase,
+                    solution_required=bool(state.get("solution_required")),
+                ):
+                    content = tool_denied_message(c["name"])
+                    results.append(
+                        ToolMessage(content=content, tool_call_id=c["id"], name=c["name"])
+                    )
+                    tool_errors.append(content)
+                    executed_tools.append(c["name"])
+                    executed_args.append(c["args"])
+                    continue
+                # G4-A1 权限钩子：yaml 配 deny → PermissionError 转 tool_result
+                # error；ask 未批准 → LangGraph interrupt 冒泡（等 HumanGate
+                # resume）。未配置 permission 的 tool → allow，行为与改动前一致。
+                from runner.permission_engine import enforce
+
+                enforce(c["name"], ctx.get("group", ""), ctx)
                 output = registry.call(c["name"], c["args"], ctx=ctx)
                 content = output if isinstance(output, str) else str(output)
                 # 注入逻辑：非 str 的 dict 输出 → 根据 tool name 写入 state
@@ -220,6 +501,7 @@ def make_tool_node(
                         f"Tool '{c['name']}' failed: {type(e).__name__}. "
                         "请改用其他方案或向用户报告。"
                     )
+                tool_errors.append(content)
             executed_tools.append(c["name"])
             executed_args.append(c["args"])
             results.append(
@@ -246,15 +528,13 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     - calc_risk → risk_metrics（完整 dict，含阈值）
     - mark_task_done / task_done → task_status="done"
     - write_blackboard → task_status="done"（流程最后一步，写入完成后标记结束）
-    - request_human_review → human_review_result（"proceed"/"abort"，由 _human_gate_node 最终裁决）
     """
     updates: dict[str, Any] = {}
 
     if tool_name == "calc_risk_stub":
         # 注入 risk_metrics
         updates["risk_metrics"] = output
-        # 测试场景支持：自动构造简单的 risk_profile 让 HumanGate 能触发
-        # 生产场景会通过 generate_risk_profile 工具覆盖此值
+        # 测试场景支持：自动构造简单的 risk_profile 供结果展示。
         updates["risk_profile"] = {
             "strategy_id": output.get("strategy_id"),
             "as_of_date": output.get("as_of_date"),
@@ -267,8 +547,7 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
         updates["risk_metrics"] = output
 
     if tool_name == "generate_risk_profile":
-        # 生产场景：generate_risk_profile 返回 {"risk_profile": {...}}，
-        # 提取进 state 供 route_next_step 的 HUMAN_GATE 条件消费。
+        # 生产场景：generate_risk_profile 返回 {"risk_profile": {...}}。
         profile = output.get("risk_profile")
         if isinstance(profile, dict):
             updates["risk_profile"] = profile
@@ -279,18 +558,20 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
     if tool_name == "write_blackboard":
         updates["task_status"] = "done"
 
-    if tool_name in ("request_human_review", "human_review"):
-        # Day 4 俞高磊：request_human_review 现在含 interrupt() 暂停，
-        # 外部 resume 后返回 {"decision": "proceed"/"abort"}
-        decision = output.get("decision", "abort")
-        updates["human_review_result"] = decision
-        # 同时注入 gate_purpose 标记这是 risk gate
-        if "_gate_purpose" not in updates:
-            updates["_gate_purpose"] = "risk"
+    if tool_name == "list_capabilities" and isinstance(output.get("capabilities"), list):
+        updates["capability_catalog_checked"] = True
 
     # Day 4 控制平面状态回流：标准字段透传给 AgentState/MCP。
     if "output_data" in output and isinstance(output.get("output_data"), dict):
         updates["output_data"] = output["output_data"]
+
+    # P-10 方案先行：solution 工具输出携带 solution_id/solution_phase → 注入
+    # state（激活工作流）；后续每轮 tool_node 据此从 Blackboard 回源阶段，
+    # draft 态对写类工具做 deny（tool 过滤，非 interrupt）。
+    if output.get("solution_id"):
+        updates["solution_id"] = output["solution_id"]
+        if output.get("solution_phase"):
+            updates["solution_phase"] = output["solution_phase"]
 
     if "artifacts" in output:
         artifacts = output.get("artifacts") or []
@@ -390,6 +671,9 @@ def make_routing_edge(
 
     def routing_edge(state: AgentState) -> str:
         messages = state.get("messages", [])
+        budget = budget_total(state)
+        if budget is not None and int(state.get("budget_used") or 0) > budget:
+            return "budget"
         if not messages:
             # print("[DEBUG routing_edge] no messages → end")
             return "end"
@@ -404,11 +688,7 @@ def make_routing_edge(
             return "end"
 
         if not getattr(last, "tool_calls", None):
-            task_status = state.get("task_status")
-            # print(f"[DEBUG routing_edge] no tool_calls, task_status={task_status!r}")
-            if task_status == "done":
-                return "end"
-            return "continue"
+            return "end"
 
         return "continue"
 
@@ -425,9 +705,9 @@ def make_tool_routing_edge(
     历史作为路由输入，委托 ``route_next_step`` 做出决策：
 
     路由结果映射：
-    - 死循环 → "human_gate"
+    - 死循环 → "end"
     - max_iterations → "max_iter"
-    - risk threshold → "human_gate"
+    - risk threshold → no gate
     - finish → "end"
     - 正常 → "rlhf"（继续循环，回到 rlhf 或 llm 节点）
 
@@ -472,7 +752,6 @@ def make_tool_routing_edge(
             "fingerprint_history": list(fingerprint_history),
             "risk_metrics": state.get("risk_metrics"),
             "risk_profile": state.get("risk_profile"),
-            "human_review_result": state.get("human_review_result"),
             "task_status": state.get("task_status"),
             "execution_trace": _build_execution_trace(messages),
             "task_goal": state.get("task_goal", "") or state.get("input_data", {}).get("task", ""),
@@ -488,13 +767,12 @@ def make_tool_routing_edge(
         #       f"tool_args={state.get('tool_args')!r}")
 
         if result.decision == RouteDecision.ABORT_LOOP:
-            return "human_gate"
+            # Runtime loop failure; stop without a human gate.
+            return "loop_stop"
         elif result.decision == RouteDecision.ABORT_MAX_ITERATIONS:
             # Write RLHF entry for max_iter abort before routing to END
             _log_abort_rlhf(state, "abort_max_iterations")
             return "max_iter"
-        elif result.decision == RouteDecision.HUMAN_GATE:
-            return "human_gate"
         elif result.decision == RouteDecision.FINISH:
             return "end"
         # CONTINUE → 继续执行
@@ -594,14 +872,14 @@ def make_post_tool_check(
 
 
 def make_rlhf_collect_node(
-    rlhf_collector: Any,  # 保留兼容（可为 None），但不再写入旧格式
+    rlhf_collector: Any,  # 未使用（None 即可）；占位签名保持既有测试兼容
     fingerprint_history: list[str] | None = None,
 ) -> Callable[[AgentState], dict]:
     """构造 ``rlhf_collect_node``。
 
     Day 5 RLHF 重构：改用 ``make_rlhf_entry()`` + ``log_rlhf_entry()`` 新格式。
     重算路由决策获取 system_decision，记录 risk_features / risk_score / label。
-    rlhf_collector 参数保留向后兼容但不再用于写日志。
+    rlhf_collector 形参未使用（传 None 即可），保留只为既有测试签名兼容。
 
     ``fingerprint_history`` 由 ``AgentRunner.build()`` 创建并共享给
     ``make_tool_routing_edge``，确保两处使用相同的指纹历史。
@@ -707,6 +985,16 @@ def init_agent_state(
     system_prompt: str,
     tools: list,
     input_data: dict | None = None,
+    budget_tokens: int | None = None,
+    blackboard_db_path: str | None = None,
+    solution_required: bool = False,
+    actor_id: str | None = None,
+    role: str | None = None,
+    session_id: str | None = None,
+    workspace_id: str | None = None,
+    workspace_path: str | None = None,
+    github_subject: str | None = None,
+    resource_scopes: list[str] | None = None,
 ) -> AgentState:
     """构造 AgentState 初始 dict，包含第一条 HumanMessage。"""
     user_msg = (input_data or {}).get("task", "")
@@ -717,6 +1005,7 @@ def init_agent_state(
         group=group,
         flow_name=flow_name,
         thread_id=thread_id,
+        task_id=str((input_data or {}).get("task_id") or thread_id),
         input_data=input_data or {},
         messages=messages,
         iterations=0,
@@ -727,6 +1016,17 @@ def init_agent_state(
         artifacts=[],
         errors=[],
         gate=None,
+        budget_tokens=budget_tokens,
+        budget_used=0,
+        _blackboard_db_path=str(blackboard_db_path) if blackboard_db_path else None,
+        solution_required=solution_required,
+        actor_id=actor_id,
+        role=role,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        github_subject=github_subject,
+        resource_scopes=resource_scopes or [],
         # seen_states 由 make_post_tool_check 闭包持有，不入 state
     )
 
@@ -734,8 +1034,8 @@ def init_agent_state(
 
 # ---------------------------------------------------------------------------
 # Token 估算 + truncate 节点 — Day 4 尹一帆（Day 5 从 main 移植回 PR25 引擎）
-# 注意：当前 truncate 用 operator.add reducer 会导致 messages 累积翻倍（已知限制），
-# Week 2 配合自定义 reducer 优化。demo 场景不长，不触发。
+# P0-8：messages reducer 已换成 merge_messages（去重合并），truncate 返回整个
+# 列表不再翻倍；同 id 同内容重发会被去重，改写 content 的同 id 项按 id 覆盖。
 # ---------------------------------------------------------------------------
 try:
     import tiktoken  # type: ignore
@@ -760,12 +1060,12 @@ def _estimate_tokens(text: str, *, model: str = "gpt-4") -> int:
         try:
             enc = tiktoken.encoding_for_model(model)
             return len(enc.encode(text))
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, OSError):
             # 未知 model 名 → 退化为 cl100k_base
             try:
                 enc = tiktoken.get_encoding("cl100k_base")
                 return len(enc.encode(text))
-            except Exception:
+            except (KeyError, ValueError, OSError):
                 pass  # 退化到 len // 2
     return len(text) // 2
 
@@ -796,9 +1096,8 @@ def make_truncate_node(
     """构造 ``truncate_node``:tool 后置 token 裁剪。
 
     检查 ``state["messages"]`` 总 token 数,超 ``max_tokens`` 时,截断中段消息(头 N + 尾 M 保留)。
-    截断后的 messages 列表作为整体返回(LangGraph ``operator.add`` reducer 追加,
-    等效"替换"——LangGraph 后续会处理,实际行为是 messages 累积翻倍;
-    接受这个 trade-off,后续可改 AgentState 的 messages reducer 为 replace_if_truncated)。
+    截断后的 messages 列表作为整体返回;messages 通道用 ``merge_messages`` reducer,
+    同 id 消息按 id 覆盖旧项（改写 content 的截断生效）,未裁掉的项去重后不翻倍。
 
     Args:
         max_tokens: 总 messages 的 token 预算;超此值才裁剪
@@ -806,8 +1105,8 @@ def make_truncate_node(
         head_preserve: 头 N 条消息不裁(系统提示 + 早期对话)
         tail_preserve: 尾 M 条消息不裁(最近上下文)
 
-    注意:本节点不动 state["messages"] 的旧内容,只返回新的 truncated 列表。
-    累积翻倍是已知限制,可后续通过自定义 reducer 优化。
+    注意:本节点只改写中段消息的 content,不动消息条数;同 id 覆盖由 reducer 处理,
+    不会再出现"累积翻倍"。
     """
     def truncate_node(state: AgentState) -> dict:
         messages = state.get("messages", [])
@@ -862,18 +1161,163 @@ def make_truncate_node(
                 truncated_middle.append(m)
 
         truncated = head + truncated_middle + tail
-        # 标记已截断,让后续节点知道
+        # 标记已截断,让后续节点知道;_ReplaceMessages 让 reducer 整体替换,不翻倍
         return {
-            "messages": truncated,
+            "messages": _ReplaceMessages(truncated),
             "_truncated": True,
         }
 
     return truncate_node
 
 
+# ---------------------------------------------------------------------------
+# P0-8 §4.4: context >90% 重建节点 — 把旧 messages 压缩成一条 summary 消息
+# ---------------------------------------------------------------------------
+
+
+class _ReplaceMessages(list):
+    """list 标记子类：节点用它返回 messages 表示"整体替换"（truncate / 摘要重建）。
+
+    merge_messages 看到 _ReplaceMessages 直接取值，不再去重合并——
+    这是 truncate 裁剪和 rebuild 压缩能真正生效、且不翻倍的关键。
+    """
+
+
+def _summarize_rebuild(
+    reason: str,
+    messages: list,
+    task_goal: str | None,
+) -> str:
+    """生成重建摘要：工具名序列 + 最近 user input + 保留说明。"""
+    tool_seq: list[str] = []
+    recent_user_input = ""
+    for m in messages:
+        if isinstance(m, AIMessage):
+            for tc in getattr(m, "tool_calls", None) or []:
+                c = _to_tool_call_dict(tc)
+                if c.get("name"):
+                    tool_seq.append(c["name"])
+        elif isinstance(m, HumanMessage):
+            recent_user_input = str(getattr(m, "content", "") or "")[:300]
+    lines = [
+        f"[context rebuilt: {reason}]",
+        f"工具调用序列: {tool_seq}" if tool_seq else "无工具调用记录",
+    ]
+    if recent_user_input:
+        lines.append(f"最近用户输入: {recent_user_input}")
+    if task_goal:
+        lines.append(f"任务目标: {str(task_goal)[:200]}")
+    lines.append("早期对话与工具输出已压缩；最后 2 条消息保留原文。请基于以上摘要继续任务。")
+    return "\n".join(lines)
+
+
+def budget_total(state: dict[str, Any]) -> int | None:
+    """当前有效预算 = budget_tokens + 已追加额之和（无 budget_tokens → None=不限）。"""
+    base = state.get("budget_tokens")
+    if not base:
+        return None
+    grants = state.get("budget_grants") or []
+    return int(base) + sum(int(g) for g in grants)
+
+
+def make_budget_check_node(
+    *,
+    grant_tokens: int = 50000,
+) -> Callable[[AgentState], dict]:
+    """构造 budget_gate 节点：超预算返回 stopped_budget，不创建 HumanGate。
+
+    - 未超限 → 继续正常路由。
+    - 超限 → 返回 stopped_budget 和 output_data.budget_exhausted=True，正常收尾。
+    """
+    def budget_gate_node(state: AgentState) -> dict:
+        used = int(state.get("budget_used") or 0)
+        budget = budget_total(state)
+        over_by = used - int(budget or 0)
+        if budget is None or over_by <= 0:
+            return {}
+
+        if budget is not None and over_by > 0:
+            output = dict(state.get("output_data") or {})
+            output["budget_exhausted"] = True
+            output["budget_used"] = used
+            output["budget_tokens"] = int(budget)
+            return {
+                "status": "stopped_budget",
+                "task_status": "done",
+                "budget_used": used,
+                "budget_tokens": int(budget),
+                "output_data": output,
+            }
+        return {}
+
+    return budget_gate_node
+
+
+def budget_warning_event(
+    *,
+    budget_used: int,
+    budget_tokens: int,
+    over_by: int,
+) -> dict[str, Any]:
+    """构造 budget_warning 事件（execution_trace 扩展类型，前端降级渲染）。"""
+    return {
+        "event_type": "budget_warning",
+        "budget_used": budget_used,
+        "budget_tokens": budget_tokens,
+        "over_by": over_by,
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+    }
+
+
+def make_rebuild_context_node() -> Callable[[AgentState], dict]:
+    """构造 ``rebuild_context`` 节点：context 用量 > CONTEXT_REBUILD_RATIO 时被路由触发。
+
+    把旧 messages（除内联 SystemMessage 外）压缩成一条 AIMessage 摘要
+    （工具名序列 + 最近 user input），保留最后 2 条消息原文；
+    state 置 ``context_rebuilt=True``，并返回 ``checkpoint_snapshot``
+    事件（kind=rebuild）随 state/trace 流出。
+    """
+    def rebuild_context_node(state: AgentState) -> dict:
+        messages = list(state.get("messages") or [])
+        summary = _summarize_rebuild(
+            "over 90% context limit",
+            messages,
+            state.get("task_goal") or (state.get("input_data") or {}).get("task", ""),
+        )
+        # system 消息原样保留（节点机制里 system_prompt 不入 messages，这里兜底）
+        system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
+        tail = [m for m in messages if not isinstance(m, SystemMessage)][-2:]
+        rebuilt: list[Any] = list(system_msgs)
+        rebuilt.append(AIMessage(content=summary))
+        rebuilt.extend(tail)
+        return {
+            "messages": _ReplaceMessages(rebuilt),
+            "context_rebuilt": True,
+            "checkpoint_snapshot": [
+                make_checkpoint_event(
+                    thread_id=state.get("thread_id", ""),
+                    ratio=context_usage_ratio(state),
+                    kind="rebuild",
+                )
+            ],
+        }
+
+    return rebuild_context_node
+
+
 
 __all__ = [
     "AgentState",
+    "merge_messages",
+    "CONTEXT_SNAPSHOT_RATIO",
+    "CONTEXT_REBUILD_RATIO",
+    "estimate_context_chars",
+    "context_usage_ratio",
+    "make_checkpoint_event",
+    "make_rebuild_context_node",
+    "budget_total",
+    "budget_warning_event",
+    "make_budget_check_node",
     "make_llm_node",
     "make_tool_node",
     "make_should_continue",

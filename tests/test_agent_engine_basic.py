@@ -9,17 +9,13 @@
 """
 from __future__ import annotations
 
-import shutil
-import tempfile
-from pathlib import Path
-from typing import Iterator
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import clear_checkpointer_cache
-from tools.registry import ToolDef, register_tool
+from tools.registry import ToolDef, ToolRegistry, register_tool
 from tools.registry import registry as global_registry
 from pydantic import BaseModel
 
@@ -279,6 +275,41 @@ def test_agent_filters_tools_by_group(tmp_db, clean_registry):
     assert "risk_only_tool" not in tool_ids
 
 
+def test_direct_agent_runner_classifies_l2_before_exposing_tools(tmp_db):
+    """P-10 cannot be bypassed by omitting the optional solution flag."""
+    class _CaptureLLM:
+        def __init__(self):
+            self.tools = []
+
+        def __call__(self, messages, tools=None):
+            self.tools = list(tools or [])
+            return AIMessage(content="done")
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDef(
+            id="write_side_effect",
+            description="write",
+            schema=BaseModel,
+            execute=lambda args, ctx: {"ok": True},
+        )
+    )
+    llm = _CaptureLLM()
+    runner = AgentRunner(
+        group="model",
+        model=llm,
+        registry=registry,
+        checkpoint_db=tmp_db,
+    )
+    state = runner.stream(
+        task="跨文件修改模型适配层",
+        system_prompt="x",
+        thread_id="p10-direct-classification",
+    )
+    assert state["solution_required"] is True
+    assert all(tool.id != "write_side_effect" for tool in llm.tools)
+
+
 def test_agent_resume_from_checkpoint(tmp_db, clean_registry):
     """checkpoint 持久化 + 同 thread_id 能加载回 state。
 
@@ -515,14 +546,23 @@ def test_explicit_thread_id_is_preserved(tmp_db, clean_registry):
 
 
 def test_agent_triggers_human_gate_end_to_end_via_risk_tool(tmp_db, clean_registry):
-    """端到端验证 human_gate：LLM 调用 calc_risk_stub(high_risk) 后自动注入 risk_metrics。"""
-    from tools.risk_stub_tool import calc_risk_stub_tool
+    """端到端验证 human_gate：LLM 调 calc_risk(high_risk) + generate_risk_profile 后自动注入。"""
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    register_tool(calc_risk_stub_tool)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
 
     llm = ScriptedLLM(
         [
-            _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], "step1"),
+            _ai_with_tools([("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"})], "step1"),
+            _ai_with_tools(
+                [("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics})],
+                "step2",
+            ),
             AIMessage(content="Risk is high but I think it is fine."),
         ]
     )
@@ -551,7 +591,7 @@ def test_agent_triggers_human_gate_end_to_end_via_risk_tool(tmp_db, clean_regist
 def test_agent_triggers_human_gate_when_risk_metrics_exceed_thresholds(tmp_db, clean_registry):
     """当 state 中 risk_metrics 超过阈值时，tool 条件边应触发 human_gate 直接 END。"""
     from langchain_core.messages import HumanMessage
-    from tools.risk_stub import calc_risk_stub
+    from tools.risk.statistics_stub import calc_risk_stub
 
     register_tool(READ_PR)
 
@@ -655,8 +695,6 @@ def test_agent_runner_resets_loop_detector_across_runs(tmp_db, clean_registry):
     # 用一个会循环触发 tool_call 的 LLM：每次都要求调 read_pr
     # 注意：LoopDetector 默认 threshold=5，第一次 run 内根本不会触达，
     # 所以这个测试重点是验证 reset() 被调用，第二次 run 不被上一次污染。
-    from tools.loop_detector import LoopDetector
-
     llm = ScriptedLLM([AIMessage(content="done")])
     runner = AgentRunner(
         group="model",
@@ -755,6 +793,154 @@ def test_agent_runner_separates_seen_states_across_builds(tmp_db, clean_registry
     assert check2(dummy_state) == "rlhf", (
         "两次 build 的 seen_states 应相互隔离"
     )
+
+
+def test_agent_runner_hides_management_candidate_review_from_inner_agent(tmp_db, clean_registry):
+    """Approver review stays on the outer management plane, never inner LLM tools."""
+    from tools.registry import ToolDef
+
+    class _Args(BaseModel):
+        pass
+
+    clean_registry.register(ToolDef(
+        id="review_distill_candidate", description="management", schema=_Args,
+        execute=lambda args, ctx: {"ok": True},
+    ))
+    class _CaptureLLM:
+        def __init__(self):
+            self.tools = []
+
+        def __call__(self, messages, tools=None):
+            self.tools = list(tools or [])
+            return AIMessage(content="done")
+
+    llm = _CaptureLLM()
+    runner = AgentRunner(
+        group="factor", model=llm, registry=clean_registry,
+        allowed_tool_ids={"review_distill_candidate"}, checkpoint_db=tmp_db,
+    )
+    runner.run(task="review candidate", system_prompt="x", thread_id="candidate-review-guard")
+    assert all(tool.id != "review_distill_candidate" for tool in llm.tools)
+
+
+def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, tmp_path):
+    """Approvers resume another actor's run while creator context stays auditable."""
+
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+            "workspace_id": "workspace-a",
+            "workspace_path": "/work/a",
+            "github_subject": "github-a",
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def stream(self, init, config):
+            yield {"llm": {"task_status": "done", "messages": []}}
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="approver",
+        session_id="session-b",
+        workspace_id="workspace-b",
+        workspace_path="/work/b",
+        github_subject="github-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+
+    resumed = runner.resume(thread_id="factor-gate-1", decision="approve")
+    assert resumed["task_status"] == "done"
+    assert resumed["execution_trace"][-1]["type"] == "agent_end"
+
+
+def test_stream_resume_decision_requires_approver_or_admin(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def stream(self, init, config):
+            yield {"llm": {"task_status": "done", "messages": []}}
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="analyst",
+        session_id="session-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="approver or admin"):
+        runner.stream(
+            task="resume",
+            system_prompt="x",
+            thread_id="factor-gate-stream",
+            resume_decision="approve",
+        )
+
+
+def test_run_resume_cannot_bypass_pending_gate(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {
+            "group": "factor",
+            "actor_id": "actor-a",
+            "role": "analyst",
+            "session_id": "session-a",
+            "__interrupt__": [{"kind": "permission", "gate_id": "hg-1"}],
+        }
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+        def invoke(self, init, config):
+            raise AssertionError("pending gate must not be invoked without a decision")
+
+    runner = AgentRunner(
+        group="factor",
+        model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db",
+        actor_id="actor-b",
+        role="analyst",
+        session_id="session-b",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="approver or admin"):
+        runner.run(task="resume", thread_id="factor-gate-run", resume=True)
+
+
+def test_resume_rejects_checkpoint_without_creator_context(monkeypatch, tmp_path):
+    class _Snapshot:
+        values = {"group": "factor", "role": "analyst"}
+
+    class _App:
+        def get_state(self, config):
+            return _Snapshot()
+
+    runner = AgentRunner(
+        group="factor", model=lambda messages, tools=None: AIMessage(content="done"),
+        checkpoint_db=tmp_path / "checkpoint.db", actor_id="approver-b", role="approver",
+    )
+    monkeypatch.setattr(runner, "build", lambda **kwargs: _App())
+    with pytest.raises(PermissionError, match="missing creator Session Context"):
+        runner.resume(thread_id="factor-gate-2", decision="approve")
 
 
 def test_agent_runner_e2e_seen_states_isolated_across_runs(tmp_db, clean_registry):
@@ -928,24 +1114,36 @@ def test_agent_runner_no_retry_by_default(tmp_db, clean_registry):
 # ---------------------------------------------------------------------------
 
 
-def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
-    """验证 human_gate 条件边触发后端到端工作。
+def test_high_risk_does_not_trigger_human_gate(tmp_db, clean_registry):
+    """v5：风险结果可进入 state，但不创建普通 HumanGate。
 
     场景：
-    1. mock LLM 调 read_pr + calc_risk_stub(high_risk)
-    2. tool_node 把高风险数据注入 state["risk_metrics"]
+    1. mock LLM 调 read_pr，然后一步调 calc_risk(high_risk) + generate_risk_profile
+    2. tool_node 把高风险数据注入 state["risk_metrics"] / state["risk_profile"]
     3. tool_routing → route_next_step → HUMAN_GATE → human_gate node
-    4. _human_gate_routing 当前默认返回 "end" → END
-    5. 验证 iterations 在 calc_risk_stub 之后立即停止（不会继续回到 llm）
+    4. human_gate node interrupt 暂停（测试断言 iterations 停在 gate 触发点）
+    5. 验证 iterations 在风险超标后立即停止（不会继续回到 llm）
     """
-    from tools.risk_stub_tool import calc_risk_stub_tool as risk_tool
-    register_tool(READ_PR)
-    register_tool(risk_tool)
+    from tools.risk._register import calc_risk_tool, generate_risk_profile_tool
+    from tools.risk.statistics_stub import calc_risk_stub
 
-    # 第 1 步调 read_pr，第 2 步调 calc_risk_stub(high_risk)
+    register_tool(READ_PR)
+    register_tool(calc_risk_tool)
+    register_tool(generate_risk_profile_tool)
+
+    risk_metrics = calc_risk_stub("high_risk")
+    model_spec = {"model_name": "pb_roe_ranker"}
+
+    # 第 1 步调 read_pr，第 2 步同时调 calc_risk(high_risk) + generate_risk_profile
     llm = ScriptedLLM([
         _ai_with_tools([("read_pr", {"pr_number": 42})], call_id_prefix="hg"),
-        _ai_with_tools([("calc_risk_stub", {"scenario": "high_risk"})], call_id_prefix="hg2"),
+        _ai_with_tools(
+            [
+                ("calc_risk", {"model_spec": model_spec, "scenario": "high_risk"}),
+                ("generate_risk_profile", {"model_spec": model_spec, "risk_metrics": risk_metrics}),
+            ],
+            call_id_prefix="hg2",
+        ),
     ])
 
     runner = AgentRunner(
@@ -962,11 +1160,9 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
         thread_id="human-gate-e2e-1",
     )
 
-    # 关键断言：calc_risk_stub 返回 high_risk 后 human_gate 应立即终止
-    # iterations=2 表示：step1(read_pr) → step2(calc_risk_stub) → human_gate → END
-    assert final["iterations"] == 2, (
-        f"Expected human_gate after calc_risk_stub but got {final['iterations']} iterations"
-    )
+    assert "__interrupt__" not in final
+    assert final.get("status") != "waiting_for_human"
+    assert final.get("gate") is None
 
     # 验证 risk_metrics 确实被注入到 final state
     assert "risk_metrics" in final, "risk_metrics should be in final state"
@@ -974,5 +1170,5 @@ def test_human_gate_triggers_end_and_stops_early(tmp_db, clean_registry):
     assert risk is not None, "risk_metrics should not be None"
     assert risk.get("tail_risk_var_99", 0) > 0.05, "should be high risk data"
 
-    print(f"[human_gate_test] PASS: iterations={final['iterations']}, "
+    print(f"[risk_verdict_test] PASS: iterations={final['iterations']}, "
           f"risk_metrics.tail_risk_var_99={risk['tail_risk_var_99']}")

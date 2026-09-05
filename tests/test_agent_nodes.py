@@ -249,6 +249,72 @@ def test_tool_node_handles_unknown_tool_with_friendly_error(registry_with_echo):
     assert "failed" in out["messages"][0].content
 
 
+def test_tool_node_rejects_tool_outside_authenticated_allowlist(registry_with_echo):
+    """LLM 伪造 tool call 不能绕过 AgentRunner 的组工具面。"""
+    node = make_tool_node(registry_with_echo, allowed_tool_ids={"other_tool"})
+    state: AgentState = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "echo", "args": {"msg": "secret"}, "id": "c1"}],
+            )
+        ],
+        "group": "model",
+        "thread_id": "t-1",
+    }
+    out = node(state)
+    assert "not available" in out["messages"][0].content
+
+
+def test_strict_reuse_requires_capability_catalog_before_side_effects(registry_with_echo, monkeypatch, tmp_path):
+    """P-07: strict reuse is enforced in the server-side tool node, not only prompt text."""
+    (tmp_path / "capabilities.yaml").write_text("strict_reuse: true\ncards: []\n", encoding="utf-8")
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    from runner.config_loader import load_yaml
+
+    load_yaml.cache_clear()
+
+    class CatalogArgs(BaseModel):
+        pass
+
+    catalog = ToolDef(
+        id="list_capabilities",
+        description="catalog",
+        schema=CatalogArgs,
+        execute=lambda args, ctx: {"capabilities": []},
+    )
+    registry_with_echo.register(catalog)
+
+    denied = make_tool_node(registry_with_echo)(
+        {
+            "messages": [AIMessage(content="", tool_calls=[{"name": "echo", "args": {"msg": "x"}, "id": "c1"}])],
+            "group": "factor",
+            "thread_id": "t-1",
+        }
+    )
+    assert "Strict reuse is enabled" in denied["messages"][0].content
+
+    queried = make_tool_node(registry_with_echo)(
+        {
+            "messages": [AIMessage(content="", tool_calls=[{"name": "list_capabilities", "args": {}, "id": "c2"}])],
+            "group": "factor",
+            "thread_id": "t-1",
+        }
+    )
+    assert queried["capability_catalog_checked"] is True
+
+    allowed = make_tool_node(registry_with_echo)(
+        {
+            "messages": [AIMessage(content="", tool_calls=[{"name": "echo", "args": {"msg": "x"}, "id": "c3"}])],
+            "group": "factor",
+            "thread_id": "t-1",
+            "capability_catalog_checked": True,
+        }
+    )
+    assert allowed["messages"][0].content == "echo: x"
+    load_yaml.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # Day 3 评审修复（🟢#7）：tool_node 异常脱敏测试
 # ---------------------------------------------------------------------------
@@ -299,6 +365,7 @@ def test_tool_node_sanitizes_api_key_in_exception(registry_with_echo):
     assert "RuntimeError" in content
     # 工具名应保留（让 LLM 知道是哪个 tool 失败）
     assert "api_client" in content
+    assert out["errors"] == [content]
 
 
 def test_tool_node_preserves_detail_for_read_like_tools(registry_with_echo):

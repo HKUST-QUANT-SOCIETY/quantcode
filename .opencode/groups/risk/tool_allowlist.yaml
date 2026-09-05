@@ -1,15 +1,13 @@
 # risk 组 tool 白名单 — Day 4 + Day 7 HumanGate
 allowlist:
-  - run_agent
   - read_blackboard
   - calc_risk
-  - calc_risk_stub
   - generate_risk_profile
-  - check_gate
+  - risk_verdict
   - request_human_review
   - write_pr_comment
   # 共享工具
-  - search_memory
-  - read_file
-  - write_file
-  - bash
+  - search_memory  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - read_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - write_file  # openai 内建（平台侧提供，QuantCode registry 无此 tool）
+  - bash  # openai 内建（平台侧提供，QuantCode registry 无此 tool）

@@ -53,6 +53,11 @@ from .human_gate import (
     HumanGateInterruptPayload,
     HumanGateStatus,
 )
+from .component_call_result import ComponentCallResult, ComponentResultStatus
+from .gitgraph import GitGraph, GitSyncStatus
+from .pop import Pop, PopType
+from .session_context import SessionContext
+from .admin_deploy import AdminDeployRequest, AdminDeployResult, AdminDeployStatus
 from .model import ModelRiskMetadata, ModelSpec, ModelType
 from .options import (
     GreeksProfile,
@@ -67,7 +72,7 @@ from .options import (
     VolSurfacePoint,
     VolSurfaceResult,
 )
-from .risk_profile import RiskGateVerdict, RiskProfile, RiskThresholds
+from .risk_profile import RiskVerdict, RiskProfile, RiskThresholds
 from .strategy import (
     BacktestSummary,
     SignalCandidate,
@@ -114,8 +119,18 @@ __all__ = [
     "HumanGateDecision",
     "HumanGateDecisionAction",
     "HumanGateInterruptPayload",
+    "ComponentCallResult",
+    "ComponentResultStatus",
+    "GitGraph",
+    "GitSyncStatus",
+    "Pop",
+    "PopType",
+    "SessionContext",
+    "AdminDeployRequest",
+    "AdminDeployResult",
+    "AdminDeployStatus",
     "HumanGateStatus",
-    "RiskGateVerdict",
+    "RiskVerdict",
     "RiskProfile",
     "RiskThresholds",
     "OptionSide",

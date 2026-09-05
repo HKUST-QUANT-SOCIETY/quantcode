@@ -1,0 +1,192 @@
+{
+  "additionalProperties": false,
+  "description": "能力卡片（P-07 唯一契约，extra=\"forbid\"）。\n\n落盘单源：``configs/capabilities.yaml``（configs 顶层键 ``cards:`` 列表，\n经 runner/config_loader.load_yaml 加载——yaml 单源模式，不走 db）。",
+  "properties": {
+    "id": {
+      "description": "卡片 id（kebab-case；进入摘要行 / list_capabilities / Memory key）",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "description": "能力显示名（如 'Quant Evaluator 批量因子评估器'）",
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "type": {
+      "description": "asset=资产卡（repo 蒸馏）；contract=口径契约卡（如 TargetReturnView/v1）",
+      "enum": [
+        "asset",
+        "contract"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "canonical_repo": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Canonical repository or component identifier",
+      "title": "Canonical Repo"
+    },
+    "domain_authority": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Domain Authority"
+    },
+    "visibility": {
+      "default": "group",
+      "maxLength": 64,
+      "title": "Visibility",
+      "type": "string"
+    },
+    "maturity_status": {
+      "default": "SCAFFOLD",
+      "enum": [
+        "PRODUCTION",
+        "STAGING",
+        "RESEARCH",
+        "SCAFFOLD",
+        "LEGACY"
+      ],
+      "title": "Maturity Status",
+      "type": "string"
+    },
+    "integration_status": {
+      "default": "UNVERIFIED",
+      "enum": [
+        "CONNECTED",
+        "PARTIAL",
+        "UNAVAILABLE",
+        "UNVERIFIED"
+      ],
+      "title": "Integration Status",
+      "type": "string"
+    },
+    "inputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "outputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Outputs",
+      "type": "array"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Depends On",
+      "type": "array"
+    },
+    "consumed_by": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Consumed By",
+      "type": "array"
+    },
+    "deprecated_aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Deprecated Aliases",
+      "type": "array"
+    },
+    "observed_at": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Observed At"
+    },
+    "api_surface": {
+      "description": "关键入口列表（每条 = 模块路径/门面函数/契约类型名 + 一句话）；蒸馏粒度守则：只蒸 API 面，不蒸实现细节；数据字段清单与部署底层结构不进本字段",
+      "items": {
+        "type": "string"
+      },
+      "title": "Api Surface",
+      "type": "array"
+    },
+    "when_to_use": {
+      "description": "何时用（进入常驻摘要行；写给 Agent 的复用触发条件）",
+      "minLength": 1,
+      "title": "When To Use",
+      "type": "string"
+    },
+    "when_not_to_reinvent": {
+      "description": "何时别自造（最大复用原则的反面清单：已有能力覆盖时禁止另造）",
+      "minLength": 1,
+      "title": "When Not To Reinvent",
+      "type": "string"
+    },
+    "owner_group": {
+      "description": "属组（Git repo 权限 = Memory 权限同源）；contract 卡用 'all'；asset 卡为六组之一（Memory groups scope 落点）",
+      "enum": [
+        "factor",
+        "fundamental",
+        "model",
+        "options",
+        "risk",
+        "strategy",
+        "all"
+      ],
+      "title": "Owner Group",
+      "type": "string"
+    },
+    "source_commit": {
+      "default": "",
+      "description": "蒸馏源 commit（org repo 的 HEAD sha 短码，Step 0 gh 实测）；in-repo 契约卡（本仓 schemas/）无法读 git 时留空并在 name/描述标注分支",
+      "maxLength": 64,
+      "title": "Source Commit",
+      "type": "string"
+    },
+    "distilled_at": {
+      "description": "蒸馏日期（ISO 日期，Step 0 调研日）",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Distilled At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "type",
+    "when_to_use",
+    "when_not_to_reinvent",
+    "owner_group",
+    "distilled_at"
+  ],
+  "title": "CapabilityCard",
+  "type": "object"
+}

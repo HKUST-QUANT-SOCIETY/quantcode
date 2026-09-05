@@ -10,7 +10,7 @@ import pytest
 import tools.risk._register  # noqa: F401
 from runner.compose_executor import execute_compose_flow, unregister_flow
 from runner.langgraph_base import clear_checkpointer_cache, make_thread_id
-from runner.risk_agent import register_risk_gate_flow
+from runner.risk_ci import register_risk_ci_flow
 from tools.registry import registry
 from tools.risk.risk_tools import clear_write_pr_comment_dedupe_cache
 
@@ -27,7 +27,7 @@ def cleanup():
     yield
     clear_checkpointer_cache()
     clear_write_pr_comment_dedupe_cache()
-    unregister_flow("risk", "risk:gate")
+    unregister_flow("risk", "risk:ci")
 
 
 def test_risk_allowlist_matches_registered_tools():
@@ -35,11 +35,9 @@ def test_risk_allowlist_matches_registered_tools():
     assert {t.id for t in tools} == {
         "read_blackboard",
         "calc_risk",
-        "calc_risk_stub",
         "generate_risk_profile",
-        "check_gate",
+        "risk_verdict",
         "write_pr_comment",
-        "request_human_review",
     }
 
 
@@ -48,12 +46,12 @@ def test_risk_agent_normal_end_to_end(tmp_path, monkeypatch):
     pytest.importorskip("langgraph.checkpoint.sqlite")
 
     monkeypatch.chdir(tmp_path)
-    thread_id = make_thread_id("risk", "risk:gate", ts=10, suffix="agent-normal")
-    register_risk_gate_flow(checkpoint_db=tmp_path / "checkpoints.db")
+    thread_id = make_thread_id("risk", "risk:ci", ts=10, suffix="agent-normal")
+    register_risk_ci_flow(checkpoint_db=tmp_path / "checkpoints.db")
 
     result = execute_compose_flow(
         group="risk",
-        flow_name="risk:gate",
+        flow_name="risk:ci",
         input_data={
             "scenario": "normal",
             "model_spec": _fixture_model_spec(),

@@ -7,3 +7,6 @@
 from .dedupe import dedupe_within
 
 __all__ = ["dedupe_within"]
+from .paths import safe_filename_component
+
+__all__ = ["safe_filename_component"]

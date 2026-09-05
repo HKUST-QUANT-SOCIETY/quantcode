@@ -1,4 +1,9 @@
-"""Fundamental AgentRunner human-gate interrupt/resume — Day5 刘炽."""
+"""Fundamental AgentRunner 研报审阅标记（非阻断）— Day5 刘炽 / v0.2 收窄改写。
+
+2026-09-01 HumanGate 收窄（F-03 / governance G2-A8）：研报产出不 gate——
+``request_human_review`` 由 LangGraph 真阻断 interrupt 改为非阻断审阅标记：
+写 review_requested 标记后直接放行，流程完成、全程零 ``__interrupt__``。
+"""
 from __future__ import annotations
 
 import importlib
@@ -49,7 +54,8 @@ def test_fundamental_allowlist_includes_human_review():
     assert "mark_task_done" in ids
 
 
-def test_fundamental_agentrunner_human_gate_interrupt_resume():
+def test_fundamental_agentrunner_review_marker_non_blocking():
+    """研报审阅收窄语义：审阅标记存在 + 全程零 interrupt + 流程完成。"""
     tmp = Path(tempfile.mkdtemp())
     try:
         clear_checkpointer_cache()
@@ -71,8 +77,8 @@ def test_fundamental_agentrunner_human_gate_interrupt_resume():
                     {"reason": "研报待研究员验收"},
                     "c2",
                 ),
-                # After human approve resume, finish the graph cleanly.
-                _ai("mark_task_done", {"summary": "研报已人审通过"}, "c3"),
+                # 无需任何 resume：标记后直接放行，收尾完成。
+                _ai("mark_task_done", {"summary": "研报已挂审阅标记，报告平台承接"}, "c3"),
             ]
         )
         runner = AgentRunner(
@@ -80,29 +86,24 @@ def test_fundamental_agentrunner_human_gate_interrupt_resume():
             model=llm,
             checkpoint_db=tmp / "ckpt.db",
         )
-        paused = runner.stream(
-            task="渲染研报并提交人审",
+        final = runner.run(
+            task="渲染研报并挂审阅标记",
             skill_name="fundamental-compose",
-            thread_id="fund-hg-1",
+            thread_id="fund-review-1",
             flow_name="fundamental_hg",
         )
-        assert (
-            paused.get("status") == "waiting_for_human"
-            or "__interrupt__" in paused
-            or any(
-                e.get("type") == "human_gate"
-                for e in (paused.get("execution_trace") or [])
-            )
-        ), f"expected human gate, got keys={list(paused.keys())}"
 
-        resumed = runner.resume(
-            thread_id="fund-hg-1",
-            decision="approve",
-            skill_name="fundamental-compose",
-            flow_name="fundamental_hg",
+        # 1) 全程零 human_gate interrupt
+        assert "__interrupt__" not in final
+        # 2) 流程完成（不再停在 waiting_for_human，无需 resume）
+        assert final.get("task_status") == "done"
+        # 3) 审阅标记存在（随 tool_result 进 messages / execution_trace）
+        tool_outputs = [str(getattr(m, "content", "")) for m in final["messages"]]
+        assert any("review_requested" in output for output in tool_outputs), (
+            f"expected review marker in tool outputs; got {tool_outputs}"
         )
-        assert "__interrupt__" not in resumed
-        assert resumed.get("task_status") == "done"
+        trace_types = [e.get("type") for e in (final.get("execution_trace") or [])]
+        assert "human_gate" not in trace_types
     finally:
         clear_checkpointer_cache()
         shutil.rmtree(tmp, ignore_errors=True)

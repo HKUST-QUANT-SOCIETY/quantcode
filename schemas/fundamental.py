@@ -128,12 +128,8 @@ class ResearchResult(BaseModel):
     @field_validator("pdf_path", "markdown_path")
     @classmethod
     def _check_path_exists_if_set(cls, v: str | None) -> str | None:
-        if v:
-            # TODO: 实际实现时检查文件是否存在
-            # from pathlib import Path
-            # if not Path(v).exists():
-            #     raise ValueError(f"file not found: {v}")
-            pass
+        if v is not None and not v.strip():
+            raise ValueError("artifact path cannot be blank")
         return v
 
 

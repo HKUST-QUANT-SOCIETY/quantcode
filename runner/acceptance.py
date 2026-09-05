@@ -9,8 +9,49 @@ Owner: T0 / 用户（Lead）
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from runner.config_loader import load_yaml_checked
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 代码默认兜底（yaml 缺文件/缺键时使用）—— 阈值单源在 configs/acceptance.*.yaml
+# ---------------------------------------------------------------------------
+
+_FACTOR_REQUIRED = ("ic_abs_min", "ir_min", "turnover_monthly_max", "t_stat_min")
+_RISK_REQUIRED = ("max_drawdown", "position_limit", "correlation_limit")
+
+_FACTOR_DEFAULTS: dict[str, Any] = {
+    "ic_abs_min": 0.03,
+    "ir_min": 0.5,
+    "turnover_monthly_max": 0.8,
+    "t_stat_min": 2.0,
+}
+_RISK_DEFAULTS: dict[str, Any] = {
+    "max_drawdown": 0.20,
+    "position_limit": 0.30,
+    "correlation_limit": 0.60,
+}
+
+
+def factor_thresholds() -> dict[str, Any]:
+    """factor 验收阈值：configs/acceptance.factor.yaml 优先，缺项回退代码默认。"""
+    merged = dict(_FACTOR_DEFAULTS)
+    merged.update(load_yaml_checked("acceptance.factor", _FACTOR_REQUIRED))
+    return merged
+
+
+def risk_thresholds() -> dict[str, Any]:
+    """risk 验收阈值：configs/acceptance.risk.yaml 优先，缺项回退代码默认。
+
+    供 runner/risk_ci._risk_acceptance_thresholds 等调用方共享单源。
+    """
+    merged = dict(_RISK_DEFAULTS)
+    merged.update(load_yaml_checked("acceptance.risk", _RISK_REQUIRED))
+    return merged
 
 
 @dataclass
@@ -30,11 +71,13 @@ class AcceptanceResult:
         return all(c.passed for c in self.checks)
 
 
-def _check_risk_gate(payload: dict[str, Any], thresholds: dict[str, Any]) -> list[CheckResult]:
+def _check_risk_evaluation(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
     """RiskProfile 验收：max_drawdown / position_limit / correlation / VaR"""
-    max_dd = thresholds.get("max_drawdown", 0.20)
-    pos_limit = thresholds.get("position_limit", 0.30)
-    corr_limit = thresholds.get("correlation_limit", 0.60)
+    # 显式 thresholds（如 risk_ci 传 RiskThresholds 同源值）优先，否则 yaml 单源
+    t = thresholds if thresholds else risk_thresholds()
+    max_dd = t.get("max_drawdown", 0.20)
+    pos_limit = t.get("position_limit", 0.30)
+    corr_limit = t.get("correlation_limit", 0.60)
     return [
         CheckResult(
             name="max_drawdown",
@@ -59,13 +102,14 @@ def _check_risk_gate(payload: dict[str, Any], thresholds: dict[str, Any]) -> lis
     ]
 
 
-def _check_factor_eval(payload: dict[str, Any], thresholds: dict[str, Any]) -> list[CheckResult]:
+def _check_factor_eval(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
     """FactorReport 验收：IC / IR / 换手 / t_stat"""
+    t = thresholds if thresholds else factor_thresholds()
     ic = payload.get("ic_metrics", {})
-    ic_min = thresholds.get("ic_abs_min", 0.03)
-    ir_min = thresholds.get("ir_min", 0.5)
-    turnover_max = thresholds.get("turnover_monthly_max", 0.8)
-    tstat_min = thresholds.get("t_stat_min", 2.0)
+    ic_min = t.get("ic_abs_min")
+    ir_min = t.get("ir_min")
+    turnover_max = t.get("turnover_monthly_max")
+    tstat_min = t.get("t_stat_min")
     return [
         CheckResult(
             name="ic_mean",
@@ -90,9 +134,10 @@ def _check_factor_eval(payload: dict[str, Any], thresholds: dict[str, Any]) -> l
     ]
 
 
-def _check_pit_rag(payload: dict[str, Any], thresholds: dict[str, Any]) -> list[CheckResult]:
+def _check_pit_rag(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
     """PITResult 验收：所有文档 published_at <= as_of_date"""
-    as_of = thresholds.get("as_of_date") or payload.get("as_of_date")
+    t = thresholds or {}
+    as_of = t.get("as_of_date") or payload.get("as_of_date")
     docs = payload.get("documents", [])
     leaked = [d["id"] for d in docs if as_of and d.get("published_at", "") > as_of]
     return [CheckResult(
@@ -102,10 +147,11 @@ def _check_pit_rag(payload: dict[str, Any], thresholds: dict[str, Any]) -> list[
     )]
 
 
-def _check_research_pdf(payload: dict[str, Any], thresholds: dict[str, Any]) -> list[CheckResult]:
+def _check_research_pdf(payload: dict[str, Any], thresholds: dict[str, Any] | None = None) -> list[CheckResult]:
     """research-pdf 验收：渲染成功 + 章节非空 + 引用数"""
-    min_citations = thresholds.get("min_citations", 10)
-    required = thresholds.get(
+    t = thresholds or {}
+    min_citations = t.get("min_citations", 10)
+    required = t.get(
         "required_sections",
         ["overview", "business", "financials", "valuation", "risks"],
     )
@@ -130,9 +176,9 @@ def _check_research_pdf(payload: dict[str, Any], thresholds: dict[str, Any]) -> 
 
 
 _DISPATCH: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[CheckResult]]] = {
-    "risk-gate": _check_risk_gate,
+    "risk-evaluation": _check_risk_evaluation,
     "factor-eval": _check_factor_eval,
-    "factor:autoeval": _check_factor_eval,
+    "factor:evaluation": _check_factor_eval,
     "pit-rag": _check_pit_rag,
     "research-pdf": _check_research_pdf,
 }
@@ -148,7 +194,8 @@ def run_acceptance(
     Args:
         skill: 已注册 skill 名（见 _DISPATCH）
         payload: skill 输出的 JSON
-        thresholds: 阈值字典，缺省时每个 check 取默认值
+        thresholds: 显式阈值字典（调用方自带时优先）；缺省时用
+            configs/acceptance.<group>.yaml 单源，yaml 缺失/缺键回退代码默认
 
     Returns:
         AcceptanceResult with verdict and per-check results
