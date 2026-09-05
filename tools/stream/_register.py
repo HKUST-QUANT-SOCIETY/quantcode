@@ -31,6 +31,22 @@ def _check_tool_stream_execute(args: CheckToolStreamArgs, ctx: dict) -> dict:
 
     from runner.stream_channel import read_from
 
+    # A meta tool is discoverable, not public. Resolve ownership from the
+    # persisted checkpoint; knowing a thread id never grants access to its trace.
+    if ctx.get("role") is not None:
+        from runner.langgraph_base import CHECKPOINTS_DB, get_checkpointer
+
+        checkpoint = get_checkpointer(ctx.get("_checkpoint_db") or CHECKPOINTS_DB).get_tuple(
+            {"configurable": {"thread_id": args.run_id, "checkpoint_ns": ""}}
+        )
+        values = checkpoint.checkpoint.get("channel_values", {}) if checkpoint else {}
+        if not values:
+            raise PermissionError("stream has no authenticated owner checkpoint")
+        if ctx.get("role") != "admin":
+            for field in ("actor_id", "group", "workspace_id", "workspace_path"):
+                if not ctx.get(field) or values.get(field) != ctx.get(field):
+                    raise PermissionError("stream is outside the current actor/workspace scope")
+
     deadline = args.wait_s if args.wait_s and args.wait_s > 0 else 0
     waited = 0.0
     interval = 0.1

@@ -375,26 +375,18 @@ def _start_mode(
 
     # ── attach_stream：start run 事件通道（旁路，emit 失败静默不影响主流程） ──
     def _stream_call() -> dict[str, Any]:
-        """包装 runner.stream()：拿到全量 trace 后逐条 emit 到通道。
-
-        # ponytail: emit 在 stream() 全量返回后补齐（终态结构 100% 不变）；
-        # 真·逐步中途可读需在 AgentRunner.stream() 循环内挂钩子（改 engine），
-        # 窗口秒级，需要更低延迟时再升级。
-        """
+        """Publish each trace event while the graph is running."""
         from runner import stream_channel
 
         channel = stream_channel.get_or_open(thread_id)
-        final_state = runner.stream(
+        return runner.stream(
             task=task,
             skill_name=resolved_skill,
             flow_name="mcp_compose",
             thread_id=thread_id,
             solution_required=bool(classification.get("solution_required")),
+            trace_sink=channel.emit,
         )
-        for ev in (final_state.get("execution_trace") or []):
-            if isinstance(ev, dict):
-                channel.emit(ev)
-        return final_state
 
     final_state: dict[str, Any] = {}
     try:

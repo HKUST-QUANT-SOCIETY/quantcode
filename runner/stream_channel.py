@@ -8,7 +8,7 @@
 - 游标 = 行偏移（0 起）；读不重复不丢，``next_cursor`` 直接回传即可续读。
 - 文件缺失（未 attach / run 已清理）→ ``exists=False`` 空返回，不抛错。
 - 进程内 registry（dict + threading.Lock，parallel_registry 同款）记
-  StreamChannel 单例，防同 run_id 多开句柄交叉清空。
+  StreamChannel 单例，复用同 run_id 的通道。
 """
 from __future__ import annotations
 
@@ -50,11 +50,11 @@ class StreamChannel:
 
 
 def open_stream(run_id: str) -> StreamChannel:
-    """创建/清空 ``.quantcode/streams/<run_id>.jsonl``，返回通道（幂等）。"""
+    """创建/重开 ``.quantcode/streams/<run_id>.jsonl``，返回通道（幂等）。"""
     run_id = _validate_run_id(run_id)
     STREAMS_DIR.mkdir(parents=True, exist_ok=True)
     path = STREAMS_DIR / f"{run_id}.jsonl"
-    path.write_text("", encoding="utf-8")
+    path.touch(exist_ok=True)
     return StreamChannel(run_id, path)
 
 
@@ -67,32 +67,37 @@ def read_from(run_id: str, cursor: int = 0) -> dict:
         cursor + 索引（通道契约按行对齐，事件本身不注入字段）。
     """
     run_id = _validate_run_id(run_id)
+    if cursor < 0:
+        raise ValueError("cursor must be non-negative")
     path = STREAMS_DIR / f"{run_id}.jsonl"
     if not path.is_file():
         return {"events": [], "next_cursor": int(cursor), "exists": False}
-    # ponytail: 全文件读取后切片 — 单 run 事件量级 ~几十行，O(n) 足够；
-    # 若涨到大文件再换 seek 按行偏移。
-    lines = path.read_text(encoding="utf-8").splitlines()
     events = []
-    for line in lines[int(cursor):]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return {"events": events, "next_cursor": len(lines), "exists": True}
+    next_cursor = 0
+    # Consume complete lines only: an in-flight append must remain readable on
+    # the next poll rather than advancing the cursor past an incomplete event.
+    with path.open("rb") as source:
+        for index, line in enumerate(source):
+            if not line.endswith(b"\n"):
+                break
+            next_cursor = index + 1
+            if index < cursor:
+                continue
+            try:
+                events.append(json.loads(line))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+    return {"events": events, "next_cursor": max(cursor, next_cursor), "exists": True}
 
 
-# 进程内 registry：run_id → StreamChannel。open_stream 记账，防同 run_id
-# 重复 open 交叉清空（parallel_registry 同款 dict + Lock 模式）。
+
+# 进程内 registry：run_id → StreamChannel，文件在进程退出后仍可重开。
 _registry_lock = threading.Lock()
 _registry: dict[str, StreamChannel] = {}
 
 
 def get_or_open(run_id: str) -> StreamChannel:
-    """registry 命中复用，未命中走 open_stream（清空首次创建的文件）。"""
+    """registry 命中复用，未命中重开持久文件，保留进程退出前的事件。"""
     run_id = _validate_run_id(run_id)
     with _registry_lock:
         ch = _registry.get(run_id)

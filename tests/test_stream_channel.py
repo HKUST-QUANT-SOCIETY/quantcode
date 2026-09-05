@@ -163,14 +163,14 @@ def test_emit_lines_are_jsonl(streams_dir):
     assert json.loads(lines[1]) == {"b": "中文"}
 
 
-def test_open_stream_truncates_existing_file(streams_dir):
-    """open_stream 幂等：重复 open 清空旧文件（同 run_id 重跑不串事件）。"""
+def test_open_stream_preserves_existing_file(streams_dir):
+    """Reopening after a worker restart must preserve the durable cursor."""
     ch = sc.open_stream("reopen")
     ch.emit({"old": True})
     sc.open_stream("reopen")
     r = sc.read_from("reopen", 0)
-    assert r["events"] == []
-    assert r["next_cursor"] == 0
+    assert r["events"] == [{"old": True}]
+    assert r["next_cursor"] == 1
 
 
 def test_get_or_open_registry_reuses_channel(streams_dir):
@@ -334,8 +334,8 @@ def test_attach_stream_false_writes_no_channel(streams_dir, tmp_db, clean_regist
 def test_attach_stream_read_while_events_accumulate(streams_dir, tmp_db, clean_registry, run_ids):
     """中途可读语义：run 产出事件后，旧游标读取仍稳定，新游标拿到增量。
 
-    attach_stream 通道在 stream() 返回时已补齐整条 trace；本测试验证
-    分段消费语义：先模拟"读到一半"的控制器状态（只消费第 1 条），再从
+    本测试验证完成后的分段消费语义：
+    先模拟"读到一半"的控制器状态（只消费第 1 条），再从
     cursor=1 续读拿到剩余全部事件（不重不丢）。
     """
     _register_echo_and_mark_done()
@@ -394,3 +394,72 @@ def test_check_tool_stream_wait_s_returns_on_new_events(streams_dir):
     )
     assert out2["events"] == [] and out2["exists"] is True
     assert _time.time() - t0 >= 0.5
+
+
+def test_partial_append_is_not_consumed(streams_dir):
+    channel = sc.open_stream("partial")
+    channel.emit({"first": 1})
+    with channel.path.open("ab") as output:
+        output.write(b'{"second":')
+    result = sc.read_from("partial")
+    assert result == {"events": [{"first": 1}], "next_cursor": 1, "exists": True}
+    with channel.path.open("ab") as output:
+        output.write(b'2}\n')
+    assert sc.read_from("partial", result["next_cursor"])["events"] == [{"second": 2}]
+
+
+def test_events_visible_before_model_returns(streams_dir, tmp_db, clean_registry, run_ids):
+    _register_echo_and_mark_done()
+    called = []
+
+    def model(messages, tools=None):
+        events = sc.read_from(run_ids)["events"]
+        assert events[0]["type"] == "agent_start"
+        assert not any(event["type"] == "agent_end" for event in events)
+        called.append(True)
+        return _ai_tools("mark_task_done", {}, "live-done")
+
+    result = _run_agent_execute(
+        RunAgentArgs(task="inspect", group="model", thread_id=run_ids,
+                     attach_stream=True, max_total_tokens=0),
+        ctx={"group": "model", "_model": model, "_checkpoint_db": tmp_db},
+    )
+    assert result["status"] == "completed"
+    assert called
+    assert sc.read_from(run_ids)["events"] == result["execution_trace"]
+
+
+def test_stream_survives_fresh_process(streams_dir):
+    import subprocess
+    import sys
+
+    sc.open_stream("restart").emit({"before": True})
+    script = """
+import sys
+from pathlib import Path
+from runner import stream_channel as sc
+sc.STREAMS_DIR = Path(sys.argv[1])
+sc.get_or_open("restart").emit({"after": True})
+"""
+    subprocess.run([sys.executable, "-c", script, str(streams_dir)], check=True)
+    assert sc.read_from("restart")["events"] == [{"before": True}, {"after": True}]
+
+
+@pytest.mark.parametrize("field", ["actor_id", "group", "workspace_id", "workspace_path"])
+def test_authenticated_stream_requires_owner_scope(streams_dir, monkeypatch, field):
+    from types import SimpleNamespace
+    import runner.langgraph_base as base
+    from tools.stream._register import CheckToolStreamArgs, _check_tool_stream_execute
+
+    ctx = dict(actor_id="owner", group="factor", workspace_id="work",
+               workspace_path="/work", role="analyst")
+    values = dict(ctx)
+    saver = SimpleNamespace(get_tuple=lambda config: SimpleNamespace(
+        checkpoint={"channel_values": values}))
+    monkeypatch.setattr(base, "get_checkpointer", lambda path: saver)
+    sc.open_stream("private").emit({"secret": True})
+    args = CheckToolStreamArgs(run_id="private")
+    assert _check_tool_stream_execute(args, ctx)["events"] == [{"secret": True}]
+    ctx[field] = "another"
+    with pytest.raises(PermissionError, match="scope"):
+        _check_tool_stream_execute(args, ctx)

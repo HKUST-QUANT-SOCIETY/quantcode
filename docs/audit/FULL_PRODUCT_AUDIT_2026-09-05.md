@@ -111,3 +111,8 @@
 复现入口：`bash scripts/verify_product_audit.sh`。设置 `QUANTCODE_TEST_PYTHON` 指定已安装项目依赖的 Python；设置 `QUANTCODE_UI_ROOT` 为 opencode-lens 根目录可同时运行 UI/typecheck/Playwright。首次浏览器运行需要在前端 app 包安装 Chromium（`bunx playwright install chromium`）。脚本使用正式品牌启动器，复用已有 dev server，不自动重启服务。
 
 本轮通过验证脚本完整运行上述链路。改动仍保存在两个本地工作区，尚未提交或部署。
+
+
+## 后续增量：F-02 恢复和事件通道
+
+2026-09-05 后续实现及验证见 [F02_RECOVERY_STREAM_2026-09-05.md](F02_RECOVERY_STREAM_2026-09-05.md)。本批修复 checkpoint 恢复归属、已有 thread_id 覆盖、实时事件回调、跨进程事件文件保留及流读取授权。全量后端 **1,113 passed / 4 skipped**。服务端历史列表、完整回放和生产故障恢复仍未验收，不将 F-02 标记完成。前述初轮“尚未提交”只描述当时状态；此前批次已经推送 main。

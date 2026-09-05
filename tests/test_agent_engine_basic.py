@@ -1173,3 +1173,53 @@ def test_high_risk_does_not_trigger_human_gate(tmp_db, clean_registry):
 
     print(f"[risk_verdict_test] PASS: iterations={final['iterations']}, "
           f"risk_metrics.tail_risk_var_99={risk['tail_risk_var_99']}")
+
+
+@pytest.mark.parametrize("change", [
+    {"actor_id": "another"}, {"workspace_id": "another"},
+    {"workspace_path": "/another"}, {"group": ""}, {"actor_id": None},
+])
+def test_authenticated_crash_resume_rejects_wrong_owner(tmp_path, change):
+    from types import SimpleNamespace
+    values = dict(group="factor", actor_id="owner", role="analyst",
+                  session_id="old-session", workspace_id="workspace", workspace_path="/work")
+    values.update(change)
+    app = SimpleNamespace(get_state=lambda config: SimpleNamespace(values=values))
+    runner = AgentRunner(group="factor", model=lambda *args: None,
+                         checkpoint_db=tmp_path / "owner.db", actor_id="owner",
+                         role="analyst", session_id="new-session",
+                         workspace_id="workspace", workspace_path="/work")
+    with pytest.raises(PermissionError):
+        runner._validate_resume_checkpoint(app, "owned", decision=False)
+
+
+def test_authenticated_crash_resume_allows_new_session(tmp_path):
+    from types import SimpleNamespace
+    values = dict(group="factor", actor_id="owner", role="analyst",
+                  session_id="old-session", workspace_id="workspace", workspace_path="/work")
+    app = SimpleNamespace(get_state=lambda config: SimpleNamespace(values=values))
+    runner = AgentRunner(group="factor", model=lambda *args: None,
+                         checkpoint_db=tmp_path / "owner.db", actor_id="owner",
+                         role="analyst", session_id="new-session",
+                         workspace_id="workspace", workspace_path="/work")
+    assert runner._validate_resume_checkpoint(app, "owned", decision=False) == values
+    app.get_state = lambda config: SimpleNamespace(
+        values=values, tasks=(SimpleNamespace(interrupts=(
+            SimpleNamespace(value={"kind": "permission", "gate_id": "pending"}),
+        )),))
+    with pytest.raises(PermissionError, match="approver or admin"):
+        runner._validate_resume_checkpoint(app, "owned", decision=False)
+
+
+@pytest.mark.parametrize("method", ["run", "stream"])
+def test_new_authenticated_task_cannot_overwrite_checkpoint(tmp_path, monkeypatch, method):
+    from types import SimpleNamespace
+    app = SimpleNamespace(get_state=lambda config: SimpleNamespace(
+        values={"actor_id": "other-owner", "group": "factor"}))
+    runner = AgentRunner(group="factor", model=lambda *args: None,
+                         checkpoint_db=tmp_path / "collision.db", actor_id="owner",
+                         role="analyst", session_id="new-session",
+                         workspace_id="workspace", workspace_path="/work")
+    monkeypatch.setattr(runner, "build", lambda **kwargs: app)
+    with pytest.raises(PermissionError, match="already exists"):
+        getattr(runner, method)("overwrite", thread_id="existing")

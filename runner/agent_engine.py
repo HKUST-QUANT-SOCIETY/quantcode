@@ -503,6 +503,8 @@ class AgentRunner:
 
         if resume:
             self._validate_resume_checkpoint(app, thread_id, decision=False)
+        else:
+            self._validate_new_checkpoint(app, thread_id)
 
         # Metrics hook (best-effort): record run duration/status on all paths.
         _started_at = time.time()
@@ -571,6 +573,7 @@ class AgentRunner:
         resume: bool = False,
         resume_decision: str | None = None,
         solution_required: bool = False,
+        trace_sink: Callable[[dict], None] | None = None,
     ) -> dict:
         """Run agent via LangGraph app.stream() and return node-level execution_trace.
 
@@ -600,7 +603,7 @@ class AgentRunner:
         def emit(event_type: str, *, node: str | None = None, iteration: int | None = None, data: dict | None = None) -> None:
             nonlocal seq
             seq += 1
-            trace.append({
+            event = {
                 "schema_version": "agent_trace.v1",
                 "seq": seq,
                 "type": event_type,
@@ -610,14 +613,10 @@ class AgentRunner:
                 "flow_name": flow_name,
                 "iteration": iteration,
                 "data": data or {},
-            })
-
-        emit("agent_start", data={"task": task})
-        if skill_name:
-            emit("skill_loaded", data={
-                "skill_name": skill_name,
-                "summary": system_prompt[:500],
-            })
+            }
+            trace.append(event)
+            if trace_sink is not None:
+                trace_sink(event)
 
         app = self.build(
             skill_name=skill_name,
@@ -646,6 +645,7 @@ class AgentRunner:
             self._validate_resume_checkpoint(app, thread_id, decision=False)
             init_state: dict | None = None
         else:
+            self._validate_new_checkpoint(app, thread_id)
             init_state = init_agent_state(
                 group=self.group,
                 flow_name=flow_name,
@@ -664,6 +664,13 @@ class AgentRunner:
                 github_subject=self.github_subject,
                 resource_scopes=self.resource_scopes,
             )
+
+        emit("agent_start", data={"task": task})
+        if skill_name:
+            emit("skill_loaded", data={
+                "skill_name": skill_name,
+                "summary": system_prompt[:500],
+            })
 
         final_state: dict[str, Any] = {}
         _started_at = time.time()
@@ -902,6 +909,14 @@ class AgentRunner:
             resume_decision=decision,
         )
 
+    def _validate_new_checkpoint(self, app: Any, thread_id: str) -> None:
+        """A new authenticated task must not overwrite an existing run."""
+        if self.role is None:
+            return
+        snapshot = app.get_state({"configurable": {"thread_id": thread_id}})
+        if getattr(snapshot, "values", None):
+            raise PermissionError("thread_id already exists; use explicit checkpoint resume")
+
     def _validate_resume_checkpoint(
         self, app: Any, thread_id: str, *, decision: bool
     ) -> dict[str, Any]:
@@ -913,7 +928,7 @@ class AgentRunner:
             raise ValueError(f"checkpoint not found for thread_id={thread_id!r}")
 
         checkpoint_group = str(values.get("group") or "")
-        if checkpoint_group and checkpoint_group != self.group:
+        if (self.role is not None or checkpoint_group) and checkpoint_group != self.group:
             raise PermissionError(
                 f"resume group mismatch: checkpoint is '{checkpoint_group}', "
                 f"session is '{self.group}'"
@@ -921,13 +936,20 @@ class AgentRunner:
 
         from runner.human_gate import extract_interrupt_payload
 
-        pending_gate = extract_interrupt_payload(values)
+        interrupts = getattr(snapshot, "interrupts", ()) or tuple(
+            interrupt
+            for task in (getattr(snapshot, "tasks", ()) or ())
+            for interrupt in (getattr(task, "interrupts", ()) or ())
+        )
+        pending_gate = extract_interrupt_payload(values) or extract_interrupt_payload(
+            {"__interrupt__": interrupts}
+        )
         # ``role=None`` is kept for embedded/local callers that predate the
         # authenticated session context.  Once a role is present, approval is
         # restricted to the privileged roles just like ``resume()``.
         if decision and self.role is not None and self.role not in {"approver", "admin"}:
             raise PermissionError("only an approver or admin may resume a HumanGate")
-        if pending_gate and not decision:
+        if (pending_gate is not None or interrupts) and not decision:
             if self.role is not None and self.role not in {"approver", "admin"}:
                 raise PermissionError("only an approver or admin may resume a HumanGate")
             raise PermissionError(
@@ -936,7 +958,7 @@ class AgentRunner:
 
         # The checkpoint keeps the creator's context for audit.  A privileged
         # resumer may be a different actor, but the creator context must exist.
-        if self.role in {"approver", "admin"}:
+        if self.role is not None:
             checkpoint_role = str(values.get("role") or "")
             if checkpoint_role not in {"analyst", "approver", "admin"}:
                 raise PermissionError("checkpoint has no valid creator Session Context role")
@@ -945,6 +967,13 @@ class AgentRunner:
                 raise PermissionError(
                     "checkpoint missing creator Session Context fields: " + ", ".join(missing)
                 )
+        if self.role is not None and not decision:
+            if not self.actor_id or values.get("actor_id") != self.actor_id:
+                raise PermissionError("checkpoint belongs to another actor")
+            for field in ("workspace_id", "workspace_path"):
+                expected = getattr(self, field, None)
+                if values.get(field) != expected:
+                    raise PermissionError(f"checkpoint {field} does not match session")
         return values
 
     @staticmethod
