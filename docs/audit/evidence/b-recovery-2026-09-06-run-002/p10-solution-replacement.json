@@ -1,0 +1,13 @@
+{
+  "base_commit": "f0ec06fa80c9ffad28753827ce9533b080ea5f30",
+  "scenario": "checkpoint-resume-after-same-id-frozen-solution-replacement",
+  "crash_returncode": -9,
+  "original_doc_hash": "a880960cb32f543c",
+  "replacement_doc_hash": "6636a9765e56f197",
+  "resumed": {
+    "solution_phase": "invalid",
+    "solution_doc_hash": "a880960cb32f543c",
+    "side_effects": [],
+    "tool_result_prefix": "方案未冻结，代码工具不可用"
+  }
+}

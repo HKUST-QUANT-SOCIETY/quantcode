@@ -1,0 +1,3 @@
+# Server-side expiry policy for merge/permission HumanGates.
+# Review clients display expires_at but cannot choose or extend this TTL.
+ttl_seconds: 86400

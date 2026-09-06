@@ -1,0 +1,12 @@
+ M runner/agent_engine.py
+ M runner/agent_mcp_tool.py
+ M runner/human_gate.py
+ M tests/test_human_gate.py
+?? configs/human_gate.yaml
+?? docs/audit/evidence/
+?? scripts/repro_checkpoint_sigkill.py
+?? scripts/repro_tool_receipt_crash.py
+?? tests/test_approval_reliability.py
+?? tests/test_checkpoint_recovery_process.py
+?? tests/test_gate_expiry.py
+?? tests/test_tool_receipts_process.py

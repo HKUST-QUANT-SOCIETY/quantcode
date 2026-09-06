@@ -1,0 +1,32 @@
+{
+  "base_commit": "f0ec06fa80c9ffad28753827ce9533b080ea5f30",
+  "external_write_before_sigkill": {
+    "scenario": "before-side-effect",
+    "crash_returncode": -9,
+    "after_restart": {
+      "status": "executed",
+      "executed": true,
+      "result": {"external_id": "report-1"}
+    },
+    "external_write_count": 1,
+    "unresolved_receipts": []
+  },
+  "solution_replacement_after_sigkill": {
+    "crash_returncode": -9,
+    "original_doc_hash": "55fa268bb942bf09",
+    "replacement_doc_hash": "81ca1b9a88b08065",
+    "resumed_solution_phase": "invalid",
+    "side_effects": []
+  },
+  "focused_acceptance": {
+    "passed": 88,
+    "failed": 0,
+    "skipped": 0
+  },
+  "full_backend": {
+    "passed": 1167,
+    "skipped": 4,
+    "warnings": 2,
+    "duration_seconds": 29.90
+  }
+}

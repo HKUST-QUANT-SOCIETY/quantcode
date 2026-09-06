@@ -46,6 +46,11 @@ docs/Day2_to_Day5_Roadmap.md
 # SDD working artifacts(plan / brief / report / review / progress),不入库
 .superpowers/
 
+# 审计故障脚本生成的可再生运行目录（SQLite、锁和崩溃标记）
+docs/audit/evidence/**/*-workdir/
+# JUnit 会嵌入本机主机名；公开台账仅提交去标识化摘要。
+docs/audit/evidence/**/b2-acceptance.xml
+
 
 # 本地工具状态不入库
 .mimosa/
