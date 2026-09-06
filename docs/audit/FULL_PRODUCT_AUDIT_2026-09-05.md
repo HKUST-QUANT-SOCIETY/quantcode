@@ -2,6 +2,8 @@
 
 本报告依据 FUNCTIONAL_SPEC v0.5.1、PRD v5.1、QuantCode_Design v5.1，以 UI_DESIGN_SPEC v4.1 补充界面验收。用户提供的 [HKUST 组件统计](../references/HKUST_QUANT_COMPONENTS_GUIDE.md) 是复用边界的补充资料，不覆盖三份顶层设计，也不视为 GitHub 实时状态证明。
 
+F-02 / F-03 / P-10 本轮故障注入、恢复安全、审批可靠性与方案失效的详细步骤和证据索引见 [B 线专项验收台账](B_TASK_RECOVERY_APPROVAL_2026-09-06.md)。
+
 ## 当前目标与验收顺序
 
 本文件是当前状态台账，后续实现直接更新本表，不以追加旧批次结论代替状态维护。
