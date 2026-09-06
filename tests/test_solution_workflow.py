@@ -33,6 +33,7 @@ from runner.solution_workflow import (
     SolutionStore,
     SolutionWorkflowError,
     add_round,
+    compute_doc_hash,
     filter_tools_for_phase,
     freeze_solution,
     load_workflow_config,
@@ -424,19 +425,57 @@ def test_llm_node_filters_visible_tools_in_draft():
     node = make_llm_node(llm, tools)
     node({"messages": [], "solution_phase": "draft"})
     assert [t.id for t in llm.seen_tools] == ["read_pr", "draft_solution"]
-    # 未启动工作流 / frozen → 全量可见
+    # 未启动工作流 → 全量可见
     node({"messages": []})
     assert len(llm.seen_tools) == 3
+    # frozen 却缺少绑定文档无法回源证明，fail-closed。
     node({"messages": [], "solution_phase": "frozen"})
-    assert len(llm.seen_tools) == 3
+    assert [t.id for t in llm.seen_tools] == ["read_pr", "draft_solution"]
+
+
+def test_llm_node_filters_write_tools_after_frozen_solution_replacement(
+    sol_env, std_config
+):
+    """从 LLM 节点恢复时也先回源，不能向模型暴露失效方案下的写工具。"""
+    store, db = sol_env
+    original = _frozen_doc(store, goal="模型工具面原方案")
+    replacement = original.model_copy(
+        update={"goal": "模型工具面替换方案", "version": original.version + 1}
+    )
+    replacement = replacement.model_copy(
+        update={"doc_hash": compute_doc_hash(replacement)}
+    )
+    store.save(replacement)
+
+    llm = _CaptureLLM()
+    tools = [_tool("write_blackboard"), _tool("read_pr"), _tool("draft_solution")]
+    node = make_llm_node(llm, tools)
+    out = node({
+        "messages": [],
+        "solution_phase": "frozen",
+        "solution_id": original.id,
+        "solution_doc_hash": original.doc_hash,
+        "solution_required": True,
+        "_blackboard_db_path": str(db),
+    })
+
+    assert [tool.id for tool in llm.seen_tools] == ["read_pr", "draft_solution"]
+    assert out["solution_phase"] == "invalid"
 
 
 def test_extract_state_fields_injects_solution_keys():
     updates = _extract_state_fields(
-        "draft_solution", {"ok": True, "solution_id": "sol-x", "solution_phase": "draft"}
+        "draft_solution",
+        {
+            "ok": True,
+            "solution_id": "sol-x",
+            "solution_phase": "frozen",
+            "doc_hash": "sha256-original",
+        },
     )
     assert updates["solution_id"] == "sol-x"
-    assert updates["solution_phase"] == "draft"
+    assert updates["solution_phase"] == "frozen"
+    assert updates["solution_doc_hash"] == "sha256-original"
     # 非 solution 工具输出不注入
     assert "solution_id" not in _extract_state_fields("calc_risk", {"risk_metrics": {}})
     # 缺 solution_id 的输出不注入（防误激活工作流）
@@ -453,6 +492,84 @@ def test_sync_phase_from_blackboard(sol_env, std_config):
     # 已激活但文档缺失时禁止继续写操作
     assert sync_phase_from_blackboard("draft", None, str(db)) == "invalid"
     assert sync_phase_from_blackboard("draft", "sol-nope", str(db)) == "invalid"
+
+
+def test_tool_node_denies_write_when_frozen_solution_is_replaced(
+    sol_env, std_config, phase_registry
+):
+    """恢复前同 id 方案被另一份有效 frozen 文档替换时，不得执行原任务写操作。
+
+    替换文档自身摘要完全合法，因此仅校验“当前文档是否自洽”不够；checkpoint
+    必须绑定原冻结摘要，并在真实工具执行边界重新比对。
+    """
+    store, db = sol_env
+    reg, rec = phase_registry
+    original = _frozen_doc(store, goal="原方案", files=["original.py"])
+
+    replacement = original.model_copy(
+        update={
+            "goal": "替换后的另一方案",
+            "file_impact": ["replacement.py"],
+            "version": original.version + 1,
+        }
+    )
+    replacement = replacement.model_copy(
+        update={"doc_hash": compute_doc_hash(replacement)}
+    )
+    store.save(replacement)
+
+    node = make_tool_node(reg)
+    state: AgentState = {
+        "messages": [_ai_call("write_blackboard", {"path": "original.py"})],
+        "group": "model",
+        "thread_id": "t-replaced-solution",
+        "solution_phase": "frozen",
+        "solution_id": original.id,
+        "solution_doc_hash": original.doc_hash,
+        "solution_required": True,
+        "_blackboard_db_path": str(db),
+    }
+
+    out = node(state)
+
+    assert out["solution_phase"] == "invalid"
+    assert PHASE_DENY_MESSAGE in out["messages"][0].content
+    assert rec.calls == []
+
+
+@pytest.mark.parametrize("invalidation", ["superseded", "deleted", "tampered"])
+def test_tool_node_denies_write_for_each_frozen_solution_invalidation(
+    sol_env, std_config, phase_registry, invalidation
+):
+    """撤销、删除和摘要篡改都在写工具边界 fail-closed。"""
+    store, db = sol_env
+    reg, rec = phase_registry
+    original = _frozen_doc(store, goal=f"方案-{invalidation}")
+
+    if invalidation == "superseded":
+        supersede_solution(original.id, store=store)
+    elif invalidation == "deleted":
+        db.unlink()
+    else:
+        store.save(original.model_copy(update={"goal": "未更新摘要的篡改内容"}))
+
+    node = make_tool_node(reg)
+    state: AgentState = {
+        "messages": [_ai_call("write_blackboard", {"path": "blocked.py"})],
+        "group": "model",
+        "thread_id": f"t-invalidated-{invalidation}",
+        "solution_phase": "frozen",
+        "solution_id": original.id,
+        "solution_doc_hash": original.doc_hash,
+        "solution_required": True,
+        "_blackboard_db_path": str(db),
+    }
+
+    out = node(state)
+
+    assert out["solution_phase"] == "invalid"
+    assert PHASE_DENY_MESSAGE in out["messages"][0].content
+    assert rec.calls == []
 
 
 # ---------------------------------------------------------------------------

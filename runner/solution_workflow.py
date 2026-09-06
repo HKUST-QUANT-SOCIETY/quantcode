@@ -57,6 +57,7 @@ __all__ = [
     "add_round",
     "start_solution",
     "supersede_solution",
+    "sync_solution_from_blackboard",
     "sync_phase_from_blackboard",
     "tool_allowed_in_phase",
     "tool_denied_message",
@@ -323,6 +324,7 @@ def sync_phase_from_blackboard(
     doc_id: str | None,
     blackboard_db_path: str | Path | None,
     *,
+    expected_doc_hash: str | None = None,
     store: SolutionStore | None = None,
 ) -> str | None:
     """workflow 激活时从 Blackboard 回源 SolutionDoc 当前状态（agent_nodes tool 段用）。
@@ -331,17 +333,40 @@ def sync_phase_from_blackboard(
     run 侧下一次 tool 执行即可读到 frozen、解除限流。
 
     无工作流时不读库；已关联的方案每次读当前版本。
-    文档丢失、读取失败或摘要不符时返回 invalid，限制为只读与方案修复工具。
+    文档丢失、读取失败、摘要不符，或与 checkpoint 绑定的冻结摘要不一致时
+    返回 invalid，限制为只读与方案修复工具。expected_doc_hash=None 兼容尚未
+    写入摘要字段的旧 checkpoint。
     """
+    synced_phase, _doc_hash = sync_solution_from_blackboard(
+        phase,
+        doc_id,
+        blackboard_db_path,
+        expected_doc_hash=expected_doc_hash,
+        store=store,
+    )
+    return synced_phase
+
+
+def sync_solution_from_blackboard(
+    phase: str | None,
+    doc_id: str | None,
+    blackboard_db_path: str | Path | None,
+    *,
+    expected_doc_hash: str | None = None,
+    store: SolutionStore | None = None,
+) -> tuple[str | None, str | None]:
+    """一次回源返回阶段和摘要，供工具边界建立/核验冻结方案决策锁。"""
     if not doc_id:
-        return "invalid" if phase else None
+        return ("invalid" if phase else None), None
     try:
         doc = (store or SolutionStore(blackboard_db_path=blackboard_db_path)).get(str(doc_id))
     except Exception:
-        return "invalid"
+        return "invalid", None
     if doc is None:
-        return "invalid"
-    return str(doc.status.value)
+        return "invalid", None
+    if expected_doc_hash and doc.doc_hash != expected_doc_hash:
+        return "invalid", None
+    return str(doc.status.value), doc.doc_hash
 
 
 # ---------------------------------------------------------------------------
