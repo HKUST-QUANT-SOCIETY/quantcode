@@ -1,6 +1,7 @@
 """HumanGate v5 tests: only merge and permission are valid."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -90,6 +91,48 @@ def test_extract_and_format_interrupt() -> None:
     assert result["status"] == "waiting_for_human"
     assert result["gate"]["kind"] == "permission"
     assert result["gate"]["resource"] == "memory:risk/private"
+
+
+def test_waiting_gate_preserves_expiry_for_reviewer() -> None:
+    expiry = datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    payload = build_interrupt_payload(
+        gate_id="g-expiring",
+        kind="permission",
+        resource="memory:risk/private",
+        reasons=["cross-group restricted resource"],
+        expires_at=expiry,
+    )
+
+    result = format_waiting_for_human(
+        thread_id="t-expiring",
+        interrupt_payload=payload,
+    )
+
+    assert result["gate"]["expires_at"] == "2030-01-02T03:04:05+00:00"
+
+
+def test_new_gate_gets_server_policy_expiry(monkeypatch, tmp_path) -> None:
+    from runner.config_loader import load_yaml
+
+    (tmp_path / "human_gate.yaml").write_text("ttl_seconds: 120\n", encoding="utf-8")
+    monkeypatch.setenv("QUANTCODE_CONFIG_DIR", str(tmp_path))
+    load_yaml.cache_clear()
+    before = datetime.now(timezone.utc)
+    try:
+        payload = build_interrupt_payload(
+            gate_id="g-policy-expiry",
+            kind="merge",
+            resource="factor:pb_roe",
+            reasons=["shared write"],
+        )
+    finally:
+        load_yaml.cache_clear()
+    after = datetime.now(timezone.utc)
+
+    expires_at = datetime.fromisoformat(payload["expires_at"])
+    assert before + timedelta(seconds=120) <= expires_at
+    assert expires_at <= after + timedelta(seconds=120)
+    assert expires_at.utcoffset() == timedelta(0)
 
 
 def test_extract_empty_and_parse_resume() -> None:

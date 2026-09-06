@@ -963,7 +963,7 @@ class AgentRunner:
                 f"session is '{self.group}'"
             )
 
-        from runner.human_gate import extract_interrupt_payload
+        from runner.human_gate import extract_interrupt_payload, validate_gate_expiry
 
         interrupts = getattr(snapshot, "interrupts", ()) or tuple(
             interrupt
@@ -973,11 +973,15 @@ class AgentRunner:
         pending_gate = extract_interrupt_payload(values) or extract_interrupt_payload(
             {"__interrupt__": interrupts}
         )
+        if decision and pending_gate is not None:
+            validate_gate_expiry(pending_gate)
         # ``role=None`` is kept for embedded/local callers that predate the
         # authenticated session context.  Once a role is present, approval is
         # restricted to the privileged roles just like ``resume()``.
         if decision and self.role is not None and self.role not in {"approver", "admin"}:
             raise PermissionError("only an approver or admin may resume a HumanGate")
+        if decision and pending_gate is None:
+            raise PermissionError("HumanGate decision requires a pending HumanGate")
         if (pending_gate is not None or interrupts) and not decision:
             if self.role is not None and self.role not in {"approver", "admin"}:
                 raise PermissionError("only an approver or admin may resume a HumanGate")

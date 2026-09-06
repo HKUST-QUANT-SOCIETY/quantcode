@@ -835,6 +835,13 @@ def test_resume_requires_creator_context_but_allows_approver_actor(monkeypatch, 
             "workspace_id": "workspace-a",
             "workspace_path": "/work/a",
             "github_subject": "github-a",
+            "__interrupt__": [{
+                "kind": "permission",
+                "gate_id": "hg-factor-gate-1",
+                "message": "permission approval required",
+                "reasons": ["restricted write"],
+                "expires_at": "2999-01-01T00:00:00+00:00",
+            }],
         }
 
     class _App:
@@ -932,7 +939,17 @@ def test_run_resume_cannot_bypass_pending_gate(monkeypatch, tmp_path):
 
 def test_resume_rejects_checkpoint_without_creator_context(monkeypatch, tmp_path):
     class _Snapshot:
-        values = {"group": "factor", "role": "analyst"}
+        values = {
+            "group": "factor",
+            "role": "analyst",
+            "__interrupt__": [{
+                "kind": "permission",
+                "gate_id": "hg-factor-gate-2",
+                "message": "permission approval required",
+                "reasons": ["restricted write"],
+                "expires_at": "2999-01-01T00:00:00+00:00",
+            }],
+        }
 
     class _App:
         def get_state(self, config):
