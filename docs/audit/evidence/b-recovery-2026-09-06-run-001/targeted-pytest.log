@@ -1,0 +1,8 @@
+......................                                                   [100%]
+=============================== warnings summary ===============================
+tools/registry.py:59
+  <repo>/tools/registry.py:59: UserWarning: Field name "schema" in "ToolDef" shadows an attribute in parent "BaseModel"
+    class ToolDef(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+22 passed, 1 warning in 4.78s

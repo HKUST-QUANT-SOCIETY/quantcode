@@ -572,13 +572,23 @@ def _resume_mode(
             )
         else:
             from runner.langgraph_base import get_checkpointer
-            from runner.human_gate import pending_gate_from_writes
-            latest = get_checkpointer(checkpoint_db).get_tuple({"configurable": {"thread_id": args.thread_id}})
+            from runner.human_gate import (
+                pending_gate_from_writes,
+                validate_gate_expiry,
+            )
+            latest = get_checkpointer(checkpoint_db).get_tuple(
+                {"configurable": {"thread_id": args.thread_id}}
+            )
             pending = pending_gate_from_writes(latest.pending_writes) if latest else None
             if not pending or pending["gate_id"] != args.expected_gate_id:
                 raise ValueError("Gate changed or resolved; reload the approval queue")
-            if args.expected_checkpoint_id and latest.config["configurable"].get("checkpoint_id") != args.expected_checkpoint_id:
+            if (
+                args.expected_checkpoint_id
+                and latest.config["configurable"].get("checkpoint_id")
+                != args.expected_checkpoint_id
+            ):
                 raise ValueError("checkpoint changed; reload the approval queue")
+            validate_gate_expiry(pending)
             final_state = runner.resume(
                 thread_id=args.thread_id, decision=decision,
                 skill_name=resolved_skill, flow_name="mcp_compose",

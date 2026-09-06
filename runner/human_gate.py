@@ -1,12 +1,14 @@
 """HumanGate helpers for merge and permission only."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import uuid
 from typing import Any, Literal
 
 from schemas.human_gate import HumanGateInterruptPayload
 
 _GATE_MESSAGE = "⏸️ 等待人工审批"
+DEFAULT_GATE_TTL_SECONDS = 86_400
 
 # ---------------------------------------------------------------------------
 # Decision vocabulary normalization  (Day 7 OpenCode human-gate integration)
@@ -54,6 +56,7 @@ def _gate_payload_for_opencode(
     kind: str,
     resource: str | None = None,
     evidence: dict[str, Any] | None = None,
+    expires_at: str | None = None,
 ) -> dict[str, Any]:
     """构造 OpenCode 可直接展示的 gate 字段（从 interrupt payload 提取并标准化）。"""
     return {
@@ -64,6 +67,7 @@ def _gate_payload_for_opencode(
         "reasons": reasons,
         "resource": resource,
         "evidence": evidence or {},
+        "expires_at": expires_at,
         "decision_schema": {
             "allowed": ["approve", "reject"],
             "default": "reject",
@@ -77,6 +81,22 @@ def make_gate_id(thread_id: str) -> str:
     return f"hg_{safe_tid}_{uuid.uuid4().hex[:12]}"
 
 
+def _new_gate_expiry() -> datetime:
+    """Return the server-issued expiry from the HumanGate policy."""
+    from runner.config_loader import load_yaml
+
+    configured = load_yaml("human_gate", strict=True).get(
+        "ttl_seconds", DEFAULT_GATE_TTL_SECONDS
+    )
+    if (
+        isinstance(configured, bool)
+        or not isinstance(configured, int)
+        or configured <= 0
+    ):
+        raise ValueError("human_gate.ttl_seconds must be a positive integer")
+    return datetime.now(timezone.utc) + timedelta(seconds=configured)
+
+
 def build_interrupt_payload(
     *,
     gate_id: str,
@@ -87,14 +107,17 @@ def build_interrupt_payload(
     reasons: list[str],
     decision: str | None = None,
     message: str = _GATE_MESSAGE,
+    expires_at: datetime | None = None,
 ) -> dict[str, Any]:
     """构造 LangGraph interrupt 用的结构化 payload。"""
+    expires_at = expires_at or _new_gate_expiry()
     payload = HumanGateInterruptPayload(
         gate_id=gate_id,
         kind=kind,
         resource=resource,
         actor=actor,
         evidence=evidence or {},
+        expires_at=expires_at,
         message=message,
         reasons=reasons,
         decision=decision,
@@ -157,6 +180,7 @@ def format_waiting_for_human(
         kind=kind,
         resource=payload.resource,
         evidence=payload.evidence,
+        expires_at=payload.expires_at.isoformat() if payload.expires_at else None,
     )
 
     return {
@@ -173,6 +197,36 @@ def pending_gate_from_writes(writes) -> dict | None:
             continue
         for interrupt in value if isinstance(value, (tuple, list)) else [value]:
             payload = getattr(interrupt, "value", interrupt)
-            if isinstance(payload, dict) and payload.get("kind") in {"merge", "permission"} and payload.get("gate_id"):
+            if (
+                isinstance(payload, dict)
+                and payload.get("kind") in {"merge", "permission"}
+                and payload.get("gate_id")
+            ):
                 return payload
     return None
+
+
+def validate_gate_expiry(
+    gate_payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Reject an expired Gate before its decision can resume execution."""
+    raw_expiry = gate_payload.get("expires_at")
+    if raw_expiry is None:
+        return
+    try:
+        expires_at = (
+            raw_expiry
+            if isinstance(raw_expiry, datetime)
+            else datetime.fromisoformat(str(raw_expiry).replace("Z", "+00:00"))
+        )
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("HumanGate expires_at is invalid") from exc
+    if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+        raise PermissionError("HumanGate expires_at must include a timezone")
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("Gate expiry comparison requires a timezone-aware clock")
+    if current >= expires_at:
+        raise PermissionError("HumanGate expired; reload the task and create a new Gate")

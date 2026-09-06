@@ -1,0 +1,1 @@
+{"after_restart": {"executed": false, "result": {"external_id": "report-1"}, "status": "replayed"}, "crash_returncode": -9, "external_write_count": 1, "scenario": "after-completion", "unresolved_receipts": [], "while_locked": null}

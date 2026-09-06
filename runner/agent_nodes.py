@@ -31,7 +31,7 @@ from runner.routing.router import RouteDecision, route_next_step
 from runner.routing.guards import MAX_ITERATIONS as ROUTING_MAX_ITERATIONS
 from runner.solution_workflow import (
     filter_tools_for_phase,
-    sync_phase_from_blackboard,
+    sync_solution_from_blackboard,
     tool_allowed_in_phase,
     tool_denied_message,
 )
@@ -236,6 +236,9 @@ class AgentState(BaseFlowState, total=False):
     # P-10 方案先行：当前 run 激活的 SolutionDoc id（solution 工具输出经
     # _extract_state_fields 注入；tool_node 据此从 Blackboard 回源 solution_phase）。
     solution_id: str | None
+    # 与 solution_id 一起写入 checkpoint 的冻结方案摘要。恢复及每次工具调用
+    # 都用它核对 Blackboard 当前版本，防止同 id 的有效文档替换绕过决策锁。
+    solution_doc_hash: str | None
     # P-10 服务端任务分类：L2/L3 在 phase=None 时也必须维持方案限流。
     solution_required: bool
 
@@ -289,12 +292,18 @@ def make_llm_node(
         if state.get("system_prompt"):
             history = [SystemMessage(content=state["system_prompt"])] + history
 
-        # P-10 方案先行（组 allowlist 过滤段）：draft 态只把「方案类工具 +
-        # 只读工具」白名单暴露给模型（可见性收窄）。phase 缺省/非 draft →
-        # 原样返回，行为与改动前一致。
+        # P-10：LLM 节点也先回源方案，避免 checkpoint 从模型调用前恢复时，
+        # 仍按陈旧 frozen 状态向模型暴露写工具。工具节点会在真正执行前再次
+        # 校验，形成可见性 + 执行边界的双层约束。
+        solution_phase, current_solution_hash = sync_solution_from_blackboard(
+            state.get("solution_phase"),
+            state.get("solution_id"),
+            state.get("_blackboard_db_path"),
+            expected_doc_hash=state.get("solution_doc_hash"),
+        )
         visible_tools = filter_tools_for_phase(
             tools,
-            state.get("solution_phase"),
+            solution_phase,
             solution_required=bool(state.get("solution_required")),
         )
 
@@ -305,6 +314,10 @@ def make_llm_node(
             "messages": [response],
             "iterations": state.get("iterations", 0) + 1,
         }
+        if solution_phase is not None:
+            updates["solution_phase"] = solution_phase
+        if solution_phase == "frozen" and current_solution_hash:
+            updates["solution_doc_hash"] = current_solution_hash
 
         tc = getattr(response, "tool_calls", None)
         if tc:
@@ -384,10 +397,11 @@ def make_tool_node(
         # solution_phase/solution_id）时从 Blackboard 回源当前 SolutionDoc 状态
         # ——/solution 面板（AG-G）跨进程冻结后 run 侧同步解除限流。未激活 →
         # phase=None，不读 db，既有 run 行为与开销不变。
-        solution_phase = sync_phase_from_blackboard(
+        solution_phase, current_solution_hash = sync_solution_from_blackboard(
             state.get("solution_phase"),
             state.get("solution_id"),
             ctx.get("blackboard_db_path"),
+            expected_doc_hash=state.get("solution_doc_hash"),
         )
 
         results: list[ToolMessage] = []
@@ -398,6 +412,8 @@ def make_tool_node(
         # （draft 态只暴露方案类 + 只读工具；frozen 后解除）。
         if solution_phase is not None:
             state_updates["solution_phase"] = solution_phase
+        if solution_phase == "frozen" and current_solution_hash:
+            state_updates["solution_doc_hash"] = current_solution_hash
 
         executed_tools: list[str] = []
         executed_args: list[dict[str, Any]] = []
@@ -457,13 +473,18 @@ def make_tool_node(
                 # draft 态写类工具 deny，返回可纠偏的 ToolMessage；不进
                 # permission/enforce 链（避免无谓 interrupt 冒泡）。
                 # 废弃或无法回源验证的方案与 draft 一样限制写操作。
-                solution_phase = sync_phase_from_blackboard(
+                solution_phase, current_solution_hash = sync_solution_from_blackboard(
                     state_updates.get("solution_phase", solution_phase),
                     state_updates.get("solution_id", state.get("solution_id")),
                     ctx.get("blackboard_db_path"),
+                    expected_doc_hash=state_updates.get(
+                        "solution_doc_hash", state.get("solution_doc_hash")
+                    ),
                 )
                 if solution_phase is not None:
                     state_updates["solution_phase"] = solution_phase
+                if solution_phase == "frozen" and current_solution_hash:
+                    state_updates["solution_doc_hash"] = current_solution_hash
                 if not tool_allowed_in_phase(
                     c["name"],
                     solution_phase,
@@ -602,6 +623,8 @@ def _extract_state_fields(tool_name: str, output: dict) -> dict[str, Any]:
         updates["solution_id"] = output["solution_id"]
         if output.get("solution_phase"):
             updates["solution_phase"] = output["solution_phase"]
+        if output.get("solution_phase") == "frozen" and output.get("doc_hash"):
+            updates["solution_doc_hash"] = output["doc_hash"]
 
     if "artifacts" in output:
         artifacts = output.get("artifacts") or []

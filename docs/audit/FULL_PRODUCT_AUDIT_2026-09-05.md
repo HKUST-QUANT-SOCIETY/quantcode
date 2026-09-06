@@ -2,6 +2,8 @@
 
 本报告依据 FUNCTIONAL_SPEC v0.5.1、PRD v5.1、QuantCode_Design v5.1，以 UI_DESIGN_SPEC v4.1 补充界面验收。用户提供的 [HKUST 组件统计](../references/HKUST_QUANT_COMPONENTS_GUIDE.md) 是复用边界的补充资料，不覆盖三份顶层设计，也不视为 GitHub 实时状态证明。
 
+F-02 / F-03 / P-10 本轮故障注入、恢复安全、审批可靠性与方案失效的详细步骤和证据索引见 [B 线专项验收台账](B_TASK_RECOVERY_APPROVAL_2026-09-06.md)。
+
 ## 当前目标与验收顺序
 
 本文件是当前状态台账，后续实现直接更新本表，不以追加旧批次结论代替状态维护。
@@ -34,7 +36,7 @@
 
 | 检查 | 结果 | 证明范围 |
 |---|---|---|
-| 后端全量 pytest | **1,139 passed / 4 skipped**，21.37 秒 | 当前后端回归；新增真实隔离 SSH agent 签名、challenge 重放拒绝、凭据哈希持久化、退出/过期与权限变更撤销；回执重放、崩溃拒绝重试、身份变更、摘要完整性、人工核对及目录即时回源；知识发布安装/审计/激活失败恢复、撤销及来源/正文/过期校验。4 项真实 LLM 测试跳过，不算通过 |
+| 后端全量 pytest | **1,167 passed / 4 skipped**，29.90 秒 | 当前后端回归；B2 新增写前/写后真实 SIGKILL、MCP `run_agent` 重复与并发恢复、损坏/未知回执阻断、Gateway 人工对账双路径、创建者实时撤权、Gate 过期及方案失效恢复；4 项真实 LLM 测试跳过，不算通过。去标识化机器结果见 `docs/audit/evidence/b-recovery-2026-09-06-run-003/observations.json` |
 | 前端与宿主类型检查 | 两个包 `bun typecheck` 均通过 | app 与 opencode 类型一致性 |
 | QuantCode 组件测试 | **126 passed / 0 failed** | 当前 16 个组件测试文件；管理入口从占位改为实际任务/报告导航 |
 | 本地 Dev Headless UI | **14 passed** | 复用 localhost:4444；身份/角色展示、Memory、两种尺寸、历史分页与未知回执阻止恢复、目录刷新、GitGraph 分页和通知确认。其中 2 项直接挂载当前 Vite 编译的审批/恢复组件，验证提交失败可重试、受理后禁用及旧错误清除；其余 12 项为完整工作区流程。MCP 响应采用明确 fixture，不证明真实 SSH/服务权限 |
@@ -49,8 +51,8 @@
 | 基线 | 当前证据与当前处理 | 尚未做到 / 验收边界 |
 |---|---|---|
 | F-01 任务与组路由 | `quantcode/mcp_server.py`、identity、effective catalog；八组 stdio 启动/发现/拒绝非法工具回归。UI 使用服务端组与 Skill；未认证不显示默认 factor；切服务清除旧会话引用 | 部分、待接入：本机公钥选择、SSH agent 签名、gateway 会话和 MCP 重连已接线，真实闭环未验收；浏览器角色测试使用明确 fixture |
-| F-02 执行记录与恢复 | 服务端分页历史、checkpoint 消息/产物回放、普通恢复协议与 MCP 单任务进程锁；认证任务默认持久事件，恢复权限重验 | 实现待验收：新增事件分页、损坏提示、身份权限变更拒绝尚未统一检查；跨机器和真实长任务副作用恢复仍待验 |
-| F-03 HumanGate | permission/merge 白名单、拒绝路径、审批 evidence；同组持久队列支持游标分页，提交绑定 Gate/checkpoint；跨人审批重验创建者身份 | 实现待验收：新增长队列和创建者撤销/过期路径尚未检查；真实 interrupt→审批→resume 待验。风险/预算/CI 不扩充 Gate |
+| F-02 执行记录与恢复 | 服务端分页历史、checkpoint 消息/产物回放、普通恢复协议与 MCP 单任务进程锁；认证任务默认持久事件，恢复权限重验 | B2 本机持久域验收通过：写前 SIGKILL 安全重试一次；写后未知结果阻断；完成回执重放；MCP 重复/并发恢复拒绝；损坏回执阻断；Gateway `confirmed_completed` / `confirmed_not_executed` 对账后分别重放/单次重试。跨机器恢复明确不在本 PR 验收范围 |
+| F-03 HumanGate | permission/merge 白名单、拒绝路径、审批 evidence；同组持久队列支持游标分页，提交绑定 Gate/checkpoint；跨人审批重验创建者身份 | B2 后端验收通过：无 pending Gate 的 decision 拒绝；过期 Gate、旧 Gate/checkpoint、创建者 logout/session 过期/实时 roster 删除/resource scope 变化均在恢复前拒绝；approve/reject 并发只允许一个进入。真实组织 SSH/Gateway 与浏览器跨角色流程仍待 A/D 联调 |
 | F-04 Memory/能力目录 | `runner/memory`、`runner/distill`；修复 LIMIT 前排除 Runtime State、坏索引报错、搜索竞态与输入失焦；Admin 跨组/项目读取留痕；卡片补输入输出依赖与别名 | 部分：项目检索已补 roster scope 与可撤销/过期 ACL 双重校验，默认无授权；当前实现待统一验收；卡片实时状态同步待接 |
 | F-05 SSH | challenge/roster/session 后端及单测存在；UI 区分 HTTP 服务连通和身份认证，移除默认供应商“已配置”假象 | 待接入：本地 agent/keychain 签名、真实 SSH gateway、主机/密钥/roster 各失败状态的桌面闭环未完成 |
 | F-06 组件适配 | `tools/factor`、FactorPanel、QuantEvaluator adapter 与状态契约；12 个主链组件已登记；移除 PIT 前端私算估值 | 部分、待接入：目录存在不代表组件已接通；DataAccess→FE→QE 等真实输入/输出/版本/artifact 尚需服务验收；不自建替代组件 |
@@ -66,7 +68,7 @@
 | P-07 蒸馏与复用 | 候选生成/晋升/拒绝/supersede、strict reuse；摘要包含 maturity/integration 和“不重复造轮子”；提供组件交叉表 | 部分：定时消费入口不等于生产 timer 已启用；定期实读 GitHub、人工确认冲突、状态刷新未闭环 |
 | P-08 Admin 中枢 | 全组运行/错误/Blackboard 查询与角色检查；新增敏感读取审计；UI 明细和错误状态已修复 | 部分：组织任务/报告查询已补入并要求跨组读取审计；后台 GitHub 汇聚、持久审批队列和异常调用人工核对已补入；角色隔离与真实服务仍待统一验收 |
 | P-09 Admin Deploy | `runner/admin_operations.py` 黑盒 STAGING + required evidence；八组 MCP 不注册 deploy | STAGING：本地部署记录、幂等暂存/取消及 Admin 管理界面已补入待验收；生产执行队列、回滚协议与服务账号尚未接通；不会伪造生产成功 |
-| P-10 Solution-First | 分级/工作流/一致性判定；执行前回源方案并核验摘要，废弃、缺失、读取失败均限制写操作，移除跨进程失效缓存 | 实现待验收：新增方案失效和恢复路径尚未检查；真实 L2/L3 冻结、执行、偏离检测端到端仍未验收 |
+| P-10 Solution-First | 分级/工作流/一致性判定；checkpoint 绑定 frozen `doc_hash`，LLM 可见性与每次工具执行前均回源 Blackboard；撤销、删除、摘要篡改、同 ID 有效替换均限制写操作 | B2 后端恢复验收通过：真实 SIGKILL 后新进程恢复检测同 ID 方案替换，状态 `invalid` 且写副作用为 0；完整 L2/L3 浏览器冻结→执行→偏离展示仍由 D 线验收 |
 
 ## 决策锁 D-001～D-015
 
@@ -107,7 +109,7 @@
 ## 全量验收尚未关闭的事项
 
 1. F-01/F-05：真实 SSH agent/keychain、gateway、roster 与桌面接通。八组已实现；人员表 46 条提交、39 个身份标识、31 条密钥绑定候选，10 人有待确认项。正式 roster 尚未激活，角色和真实工作目录不能根据姓名推断。
-2. F-02/F-03/P-10：普通恢复预览绑定、审批队列分页、持久事件与方案失效限制已补入，待统一验收；已补认证 Agent 写工具的持久回执：调用前提交 STARTED，成功结果提交 COMPLETED，恢复同一调用时重放已完成结果；缺少完成回执时停止自动执行，不猜测外部结果。权限 interrupt 顺序保留，merge_to_main 继续使用领域 code_hash 幂等机制。历史页已补未确认调用 ID、工具名和摘要，并禁止恢复；回执库不可读时仍保留消息/产物回放，恢复入口再次拒绝。已补 gateway 专用人工核对接口：同组 approver/admin 绑定 checkpoint 和原摘要、提供证据引用与说明；可恢复原结果或确认未执行后标为 RETRY_ALLOWED。原回执和审核同事务保留，required evidence 先记录意图，不自动启动任务，也不加入模型工具目录。桌面历史页已补证据引用、核对说明、原始结果与明确确认表单，专用宿主路由核对同一 gateway/MCP 会话后转交，不向浏览器暴露凭据；完成后只刷新历史。历史详情还展示已提交审核人、时间、调用 ID、证据、结论与结果摘要，记录读取失败显式提示，不将审核成功等同于任务已恢复。接口客户端已重新生成；完整故障注入、角色隔离和 UI 操作仍待统一验收。
+2. F-02/F-03/P-10：普通恢复预览绑定、审批队列分页、持久事件与方案失效限制已补入；已补认证 Agent 写工具的持久回执：调用前提交 STARTED，成功结果提交 COMPLETED，恢复同一调用时重放已完成结果；缺少完成回执时停止自动执行，不猜测外部结果。权限 interrupt 顺序保留，merge_to_main 继续使用领域 code_hash 幂等机制。历史页已补未确认调用 ID、工具名和摘要，并禁止恢复；回执库不可读时仍保留消息/产物回放，恢复入口再次拒绝。已补 gateway 专用人工核对接口：同组 approver/admin 绑定 checkpoint 和原摘要、提供证据引用与说明；可恢复原结果或确认未执行后标为 RETRY_ALLOWED。原回执和审核同事务保留，required evidence 先记录意图，不自动启动任务，也不加入模型工具目录。桌面历史页已补证据引用、核对说明、原始结果与明确确认表单，专用宿主路由核对同一 gateway/MCP 会话后转交，不向浏览器暴露凭据；完成后只刷新历史。历史详情还展示已提交审核人、时间、调用 ID、证据、结论与结果摘要，记录读取失败显式提示，不将审核成功等同于任务已恢复。接口客户端已重新生成。本机持久域的真实 SIGKILL、重复/并发恢复、未知/损坏回执、人工对账、创建者撤权、Gate 过期和方案失效后端验收已完成；仍待 A/D 线以真实组织 SSH/Gateway 和浏览器跨角色流程完成外部联调。跨机器恢复不在本 PR 验收范围。
 3. F-04/P-07：项目 grant 解析、过期/撤销校验和候选预览/晋升/拒绝/替代界面已补入，待统一验收。发布中恢复、撤销、来源摘要和过期加载校验已补入；目录排除非生效发布并返回不可用原因。目录读取与复用策略改为即时回源配置，重复 ID/坏配置显式失败；目录接口补输入输出、依赖、消费者、别名和来源字段，UI 可主动刷新。仍需统一故障验收；外部组件状态不可通过本地刷新伪造。
 4. F-06/F-08/P-01～03：按组件复用表接通真实输入输出、版本和 artifact。真数据/组件缺失必须明确报告，不能由前端编造结果。
 5. F-09/P-08/P-09：组织历史、个人 Pop read/ack、实时仓库权限重验、Dev 每分钟同步、可见分支/HEAD/近期 DAG、含子目录的依赖版本及 Admin 暂存/取消已补入，待验收。本机系统提醒已接入待验收；通知长列表分页与全量授权未读计数已补入；gateway 后台循环与状态查询已补入；静态组引用和 requirements 本仓库引用已补入；动态依赖仅可追踪声明，不执行构建代码；生产部署执行需要真实服务契约。
