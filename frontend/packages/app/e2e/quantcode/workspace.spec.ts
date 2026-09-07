@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 
+test.use({ locale: "zh-CN" })
+
 // A production bundle normally shares its origin with the host. A static
 // artifact preview can select an existing host through the normal saved setting.
 test.beforeEach(async ({ page }) => {
@@ -160,6 +162,7 @@ test("history remains read-only, pages events and blocks uncertain recovery", as
   await expect(detail).toContainText("第二页事件")
   await expect(detail).toContainText("1 条损坏事件")
   expect(requested).toEqual(["list_run_history", "get_run_history", "get_run_history"])
+  await page.screenshot({ path: "e2e/test-results/quantcode/redesign-history-detail.png" })
 })
 
 test("capability refresh replaces stale state and preserves search focus", async ({ page }) => {
@@ -181,7 +184,7 @@ test("capability refresh replaces stale state and preserves search focus", async
   await expect(catalog.getByRole("searchbox")).toBeFocused()
   await catalog.getByRole("button", { name: "刷新能力目录" }).click()
   await expect(catalog).toContainText("UNAVAILABLE")
-  await expect(catalog).not.toContainText("UNVERIFIED")
+  await expect(catalog.locator(".qc-capability-results")).not.toContainText("UNVERIFIED")
   await expect(catalog.getByRole("searchbox")).toHaveValue("FixtureInput")
   await expect(catalog).toContainText("FixtureOutput")
 })
@@ -265,12 +268,12 @@ test("HTTP failure in memory is unavailable, never an empty success", async ({ p
   await page.locator(".qc-memory-search-input").fill("evaluator")
   await page.locator(".qc-memory-search-input").press("Enter")
   await expect(page.locator(".qc-memory-results")).toHaveAttribute("aria-busy", "false")
-  await expect(page.locator(".qc-memory-empty")).toContainText(/未接通|not connected/)
+  await expect(page.locator(".qc-memory-empty")).toContainText(/暂不可用|not connected/)
   await expect(page.locator(".qc-memory-hit-row")).toHaveCount(0)
 })
 
 for (const viewport of [{ width: 900, height: 650 }, { width: 1440, height: 900 }]) {
-  test(`long results scroll inside an inset panel at ${viewport.width}px`, async ({ page }) => {
+  test(`long results scroll inside the workspace at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await mockContext(page, "admin")
     await page.route("**/experimental/quantcode/tool?*", async (route) => {
@@ -292,7 +295,7 @@ for (const viewport of [{ width: 900, height: 650 }, { width: 1440, height: 900 
     const inset = await page.locator(".qc-memory-search-input").evaluate(input =>
       input.getBoundingClientRect().x - input.closest(".qc-detail-panel")!.getBoundingClientRect().x)
     expect(inset).toBeGreaterThanOrEqual(20)
-    expect(await page.locator(".qc-memory-query").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    expect(await page.locator(".qc-view-content").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
     await page.locator(".qc-memory-hit-row").last().scrollIntoViewIfNeeded()
     await expect(page.locator(".qc-memory-hit-row").last()).toBeInViewport()
     await expect(page.getByRole("button", { name: "关闭详情", exact: true })).toBeInViewport()
@@ -368,6 +371,7 @@ test("admin: knowledge candidate review is scoped and refreshes after promotion"
   })
   await page.goto("/")
   await page.getByRole("button", { name: "Memory", exact: true }).click()
+  await page.getByRole("tab", { name: "知识候选审核", exact: true }).click()
   const review = page.getByLabel("知识候选审核")
   await expect(review).toContainText("factor-review-fixture")
   await review.getByText(/factor-review-fixture/).click()
@@ -375,4 +379,79 @@ test("admin: knowledge candidate review is scoped and refreshes after promotion"
   await expect(review).toContainText("promoted")
   await review.getByText(/factor-review-fixture/).click()
   await expect(review.getByRole("button", { name: "撤销发布", exact: true })).toBeVisible()
+})
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`workspace views have full layouts and preserve domain boundaries at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await mockContext(page, "admin")
+    await page.route("**/experimental/quantcode/tool?*", route => {
+      const tool = new URL(route.request().url()).searchParams.get("tool")
+      if (tool === "list_run_history") return route.fulfill({ json: { runs: [], next_cursor: null } })
+      if (tool === "list_capabilities") return route.fulfill({ json: { capabilities: [{
+        id: "evaluator", name: "QuantEvaluator / 批量评估", owner_group: "factor", maturity_status: "PRODUCTION", integration_status: "PARTIAL",
+        canonical_repo: "quant_evaluator", when_to_use: "批量评估因子，保留数据与标签契约。", when_not_to_reinvent: "指标口径由组件维护。",
+        inputs: ["FactorBatch"], outputs: ["EvaluationArtifact"], api_surface: ["evaluate(FactorBatch, LabelBundle)"],
+      }] } })
+      if (tool === "search_memory") return route.fulfill({ json: { status: "CONNECTED", hits: [{ path: "global/target-return.md", scope: "global", snippet: "<<目标收益>>契约采用已核验的数据口径。", score: 1 }] } })
+      return route.fallback()
+    })
+    await page.goto("/")
+    await expect(page.getByRole("button", { name: "因子评估", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "PIT 估值", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "账号与登录" })).toContainText("管理员")
+    for (const label of ["执行记录", "HumanGate", "Memory", "能力目录"]) {
+      await page.getByRole("button", { name: label, exact: true }).click()
+      await expect(page.getByRole("heading", { name: label, exact: true }).first()).toBeVisible()
+      await expect(page.locator(".qc-stage")).toBeHidden()
+      const bounds = await page.locator(".qc-detail-panel").boundingBox()
+      expect(bounds!.width).toBeGreaterThan(viewport.width - 190)
+      if (label === "Memory") {
+        await page.getByRole("tab", { name: "长期知识", exact: true }).press("ArrowRight")
+        await expect(page.getByRole("tab", { name: "知识候选审核", exact: true })).toHaveAttribute("aria-selected", "true")
+        await page.getByRole("tab", { name: "知识候选审核", exact: true }).press("ArrowLeft")
+        await page.getByRole("searchbox").fill("目标收益")
+        await page.getByRole("searchbox").press("Enter")
+        await expect(page.locator(".qc-memory-hit-row")).toHaveCount(1)
+        await expect(page.locator(".qc-memory-snippet")).not.toContainText("<<")
+        await expect(page.locator(".qc-knowledge-review")).toHaveCount(0)
+      }
+      if (label === "能力目录") {
+        await expect(page.locator(".qc-capability-card")).toHaveCount(1)
+        await page.locator(".qc-capability-details summary").click()
+        await expect(page.locator(".qc-capability-details")).toContainText("EvaluationArtifact")
+        await page.getByLabel("能力接入状态").selectOption("CONNECTED")
+        await expect(page.locator(".qc-capability-empty")).toBeVisible()
+        await page.getByLabel("能力接入状态").selectOption("all")
+      }
+      expect(await page.locator(".qc-view-content").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      await page.screenshot({ path: `e2e/test-results/quantcode/redesign-${viewport.width}-${label}.png` })
+    }
+    await page.getByRole("button", { name: "账号与登录" }).click()
+    await expect(page.getByLabel("SSH 账号登录")).toBeVisible()
+    await expect(page.locator('input[type="password"], textarea[name*="key"]')).toHaveCount(0)
+    await page.screenshot({ path: `e2e/test-results/quantcode/redesign-${viewport.width}-login.png` })
+  })
+}
+
+test("expired identity clears visible private Memory and offers login", async ({ page }) => {
+  await mockContext(page, "analyst")
+  let active = true
+  await page.route("**/experimental/quantcode/tool?*", route => {
+    const tool = new URL(route.request().url()).searchParams.get("tool")
+    if (tool === "session_context") return route.fulfill({ json: active ? { session_id: "private-session", actor_id: "member", role: "analyst", group: "factor", workspace_id: "member-space" } : { error: "Session expired" } })
+    if (tool === "search_memory") return route.fulfill({ json: { status: "CONNECTED", hits: [{ path: "groups/factor/verified.md", snippet: "private-memory-content" }] } })
+    return route.fallback()
+  })
+  await page.goto("/")
+  await expect(page.locator(".qc-identity")).toContainText("member")
+  await page.getByRole("button", { name: "Memory", exact: true }).click()
+  await page.getByRole("searchbox").fill("verified")
+  await page.getByRole("searchbox").press("Enter")
+  await expect(page.locator(".qc-memory-results")).toContainText("private-memory-content")
+  active = false
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+  await expect(page.getByRole("button", { name: "账号与登录" })).toContainText("登录工作区")
+  await expect(page.locator(".qc-view-content")).not.toContainText("private-memory-content")
+  await expect(page.getByRole("heading", { name: "登录后检索知识" })).toBeVisible()
 })

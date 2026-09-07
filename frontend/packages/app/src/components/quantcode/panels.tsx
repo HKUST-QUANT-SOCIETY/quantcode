@@ -31,9 +31,7 @@ import { QcBigNumber, QcProgress, formatMetricValue, type MetricTone } from "./m
 import { buildResearchInstruction, buildResumeInstruction, buildRecoveryInstruction, QUANTCODE_GROUPS, type QuantCodeGroup } from "./instructions"
 import { isRunAgentResult, type RunAgentResult, type TraceEvent } from "./result-contract"
 import { submitQuantCodeInstruction, type QuantCodeSubmissionHandler } from "./submission"
-import { FactorFlowView } from "./factor-screen"
 import { NotificationsBell, NotificationsPanel, pendingNotifications } from "./notifications"
-import { PitValuationView } from "./pit-screen"
 import { SupplierView } from "./settings-supplier"
 import { SshLoginView, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
 import { CapabilityCatalogView } from "./capability-catalog"
@@ -45,6 +43,7 @@ import { MemoryQueryView } from "./memory-query"
 import { SolutionPanelView } from "./solution-panel"
 import { AdminConsoleView } from "./admin-console"
 import { GitHubWorkspace } from "./github-workspace"
+import { WorkspaceEmpty, navigateViewTabs } from "./workspace-ui"
 import {
   readQuantCodeTool,
   reconcileQuantCodeReceipt,
@@ -62,9 +61,10 @@ import {
 } from "./api"
 import { METRIC_LABELS } from "./metrics"
 import "./panels.css"
+import "./workspace.css"
 
 const [_trace, setTrace] = createSignal<RunAgentResult | null>(null)
-const [_group, setGroup] = createSignal("factor")
+const [_group, setGroup] = createSignal("")
 const [_threadHistory, setThreadHistory] = createSignal<RunAgentResult[]>([])
 /** run_agent 结果所属的 opencode session；HumanGate resume 需要向它发 prompt */
 const [_sessionId, setSessionId] = createSignal<string | undefined>(undefined)
@@ -196,8 +196,6 @@ type DetailView =
   | "capabilities"
   | "solution"
   | "settings"
-  | "factor"
-  | "pit"
   | "admin"
   | "gitgraph"
 type SubmitState = "idle" | "starting" | "submitted" | "error"
@@ -337,11 +335,7 @@ function ActivityPanel(props: { onUseTask: (task: string) => void }): JSX.Elemen
       <Show
         when={run()}
         fallback={
-          <div class="qc-empty-state">
-            <span class="qc-empty-index">00</span>
-            <h3>还没有执行记录</h3>
-            <p>发起一次研究后，Agent、工具调用和产物会按时间顺序出现在这里。</p>
-          </div>
+          <WorkspaceEmpty icon="task" title="当前没有运行中的任务"><button type="button" class="qc-button qc-button-primary" onClick={() => props.onUseTask("")}><Icon name="plus" size="small" />新建研究</button></WorkspaceEmpty>
         }
       >
         {(item) => (
@@ -503,6 +497,7 @@ function SettingsPanel(props: {
   sessionStatus: "loading" | "ready" | "error"
   sessionRole: string
   sessionActor: string
+  workspacePath: string
   algorithms: QuantCodeAlgorithm[]
   serverName: string
   serverReady: boolean
@@ -516,12 +511,14 @@ function SettingsPanel(props: {
   sshIdentityError: string
 }): JSX.Element {
   return (
-    <div class="qc-detail-body">
+    <div class="qc-detail-body qc-settings-content">
+      <section class="qc-account-section" aria-label="SSH 账号登录">
+      <div class="qc-section-heading"><Icon name="shield" /><h3>账号与身份</h3></div>
       <div class="qc-setting-row">
         <div>
-          <span class="qc-section-label">SSH IDENTITY</span>
-          <strong>{props.sessionActor}</strong> <span class="qc-status">{props.sessionRole}</span>
-          <p>身份和组由服务端认证会话绑定；服务可达不代表 SSH 已认证。</p>
+          <span class="qc-section-label">当前账号</span>
+          <strong>{props.sessionStatus === "ready" ? props.sessionActor : "尚未登录"}</strong>
+          <Show when={props.sessionStatus === "ready"}><span class="qc-status">{props.sessionRole === "admin" ? "管理员" : props.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
         </div>
         <span class="qc-connection-pill" classList={{ "is-disconnected": props.sessionStatus !== "ready" }}>
           <i /> {props.sessionStatus === "ready" ? "会话已认证" : "未认证"}
@@ -529,12 +526,25 @@ function SettingsPanel(props: {
       </div>
       <div class="qc-setting-row">
         <div>
-          <span class="qc-section-label">SESSION GROUP</span>
-          <strong>{props.sessionStatus === "ready" ? _group() : "未连接"}</strong>
-          <span class="qc-status">{props.sessionRole}</span>
+          <span class="qc-section-label">业务组</span>
+          <strong>{props.sessionStatus === "ready" ? _group() : "尚未绑定"}</strong>
         </div>
-        <span class="qc-status">{props.sessionStatus === "ready" ? "服务端绑定" : "身份接线未完成"}</span>
+        <span class="qc-status">{props.sessionStatus === "ready" ? "服务端绑定" : "等待登录"}</span>
       </div>
+      <Show when={props.sessionStatus === "ready" && props.workspacePath}>
+        <div class="qc-setting-row"><div><span class="qc-section-label">个人工作目录</span><code>{props.workspacePath}</code></div></div>
+      </Show>
+      <div class="qc-detail-section">
+        <span class="qc-section-label">本机 SSH 身份</span>
+        <Show when={props.sshIdentityError}><p role="alert">{props.sshIdentityError}</p></Show>
+        <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
+          {identity => <SshLoginView t={props.sshT} connect={props.sshConnect} disconnect={props.sshDisconnect}
+            identities={identity.identities} session={identity.session} />}
+        </Show>
+      </div>
+      </section>
+      <section class="qc-preferences-section">
+      <div class="qc-section-heading"><Icon name="settings-gear" /><h3>工作区配置</h3></div>
       <label class="qc-field-label" for="qc-settings-skill">
         默认 Skill
       </label>
@@ -553,21 +563,14 @@ function SettingsPanel(props: {
         <For each={props.skills}>{(skill) => <option value={skill.id}>{skillLabel(skill)}</option>}</For>
       </select>
       <div class="qc-detail-section">
-        <span class="qc-section-label">EXECUTION TARGET</span>
+        <span class="qc-section-label">研究服务</span>
         <div class="qc-server-line">
           <span>{props.serverName}</span>
           <code>{props.serverTransport}</code>
         </div>
       </div>
-      <div class="qc-detail-section">
-        <span class="qc-section-label">SSH LOGIN</span>
-        <Show when={props.sshIdentityError}><p role="alert">{props.sshIdentityError}</p></Show>
-        <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
-          {identity => <SshLoginView t={props.sshT} connect={props.sshConnect} disconnect={props.sshDisconnect}
-            identities={identity.identities} session={identity.session} />}
-        </Show>
-      </div>
       <SupplierView algorithms={props.algorithms} />
+      </section>
     </div>
   )
 }
@@ -596,6 +599,10 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     sessionStatus: "loading" as "loading" | "ready" | "error",
     sessionRole: "未连接",
     sessionActor: "未连接",
+    sessionId: "",
+    workspacePath: "",
+    memoryTab: "knowledge" as "knowledge" | "review",
+    activityTab: "history" as "history" | "current",
     historyScope: "",
     githubUnread: 0,
     identityRevision: 0,
@@ -682,7 +689,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     setSessionId(undefined)
     lastResultJson = undefined
     resetQuantCodeState()
-    setState({ historyScope: "", sessionStatus: "loading", sessionRole: "未连接", sessionActor: "未连接", skills: [], skill: "" })
+    setState({ historyScope: "", sessionStatus: "loading", sessionRole: "未连接", sessionActor: "未连接", workspacePath: "", sessionId: "", skills: [], skill: "", memoryTab: "knowledge" })
     void getQuantCodeSessionContext(client).then(
       (context) => {
         if (cancelled) return
@@ -697,7 +704,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         resetQuantCodeState()
         if (activeThreadCacheKey) loadScopedThreadCache(activeThreadCacheKey)
         setQuantCodeSessionGroup(group)
-        setState({ historyScope: activeThreadCacheKey ?? "", sessionStatus: "ready", sessionRole: context.role ?? "analyst", sessionActor: context.actor_id ?? "已认证身份" })
+        setState({ historyScope: activeThreadCacheKey ?? "", sessionStatus: "ready", sessionRole: context.role ?? "analyst", sessionActor: context.actor_id ?? "已认证身份", workspacePath: context.workspace_path ?? "", sessionId: context.session_id ?? "" })
       },
       () => {
         if (cancelled) return
@@ -706,6 +713,39 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         setState({ sessionStatus: "error", sessionRole: "身份接线未完成", sessionActor: "未连接", skillsStatus: "error", skill: "" })
       },
     )
+  })
+
+  // Keep the visible account in step with revoked/expired host sessions.
+  createEffect(() => {
+    if (state.sessionStatus !== "ready") return
+    const expected = state.sessionId
+    const scope = state.historyScope
+    const role = state.sessionRole
+    const client = serverSDK().client
+    const serverKey = String(server.key)
+    let cancelled = false
+    let pending = false
+    const verify = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const context = await getQuantCodeSessionContext(client)
+        if (!cancelled && ((context.session_id ?? "") !== expected || context.role !== role ||
+          scopedThreadCacheKey({ ...context, group: context.group! }, serverKey) !== scope)) {
+          setState("identityRevision", value => value + 1)
+        }
+      } catch {
+        if (!cancelled) {
+          activeThreadCacheKey = undefined
+          resetQuantCodeState()
+          setGroup("")
+          setState({ sessionStatus: "error", sessionActor: "未连接", sessionRole: "未连接", sessionId: "", workspacePath: "", historyScope: "", sshSession: undefined, skills: [], skill: "", skillsStatus: "error", memoryTab: "knowledge" })
+        }
+      } finally { pending = false }
+    }
+    const interval = setInterval(() => void verify(), 60_000)
+    window.addEventListener("focus", verify)
+    onCleanup(() => { cancelled = true; clearInterval(interval); window.removeEventListener("focus", verify) })
   })
 
   createEffect(() => {
@@ -923,8 +963,6 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
   const navItems: { id: DetailView; label: string; icon: IconProps["name"] }[] = [
     { id: "compose", label: "新建研究", icon: "plus" },
     { id: "activity", label: "执行记录", icon: "checklist" },
-    { id: "factor", label: "因子评估", icon: "sliders" },
-    { id: "pit", label: "PIT 估值", icon: "file-tree" },
     { id: "gate", label: "HumanGate", icon: "review" },
     { id: "memory", label: "Memory", icon: "brain" },
     { id: "capabilities", label: "能力目录", icon: "mcp" },
@@ -937,7 +975,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
   ]
 
   return (
-    <div ref={shell} class="qc-shell" data-quantcode-workspace="true">
+    <div ref={shell} class="qc-shell" data-quantcode-workspace="true" data-view={state.view}>
       <a class="qc-skip-link" href="#qc-research-prompt">
         跳到研究输入
       </a>
@@ -968,6 +1006,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                 onClick={() => setState("view", item.id)}
               >
                 <Icon name={item.icon} size="normal" />
+                <span class="qc-nav-label">{item.label}</span>
                 <Show when={item.id === "gate" && gateWaiting()}>
                   <span class="qc-rail-alert" />
                 </Show>
@@ -998,6 +1037,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
             onClick={() => setState("view", "settings")}
           >
             <Icon name="settings-gear" size="normal" />
+            <span class="qc-nav-label">设置与登录</span>
           </button>
           <Show when={props.onClose}>
             <button
@@ -1015,16 +1055,17 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
 
       <main class="qc-main">
         <header class="qc-identity-bar">
-          <div class="qc-identity">
-            <span>{state.sessionActor}</span>
-            <i />
-            <strong>{state.sessionStatus === "ready" ? _group() : "未连接"}</strong>
-          </div>
+          <button type="button" class="qc-identity" aria-label="账号与登录" title="账号与登录" onClick={() => setState("view", "settings")}>
+            <Icon name="shield" size="small" />
+            <span>{state.sessionStatus === "ready" ? state.sessionActor : "登录工作区"}</span>
+            <Show when={state.sessionStatus === "ready"}><strong>{_group()} 组</strong><span class="qc-role">{state.sessionRole === "admin" ? "管理员" : state.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
+            <Icon name="chevron-down" size="small" />
+          </button>
           <div class="qc-environment">
             <span>{serverName()}</span>
             <i />
             <span class="qc-connected" classList={{ "is-disconnected": !serverReady() }}>
-              <b /> {serverReady() ? "已连接" : "未连接"}
+              <b /> {serverReady() ? "服务在线" : "服务离线"}
             </span>
           </div>
         </header>
@@ -1069,6 +1110,9 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
           </section>
 
           <section class="qc-compose-zone" id="qc-research-prompt" aria-label="研究任务">
+            <Show when={state.sessionStatus !== "ready"}>
+              <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState("view", "settings")}>登录工作区<Icon name="arrow-right" size="small" /></button></div>
+            </Show>
             <div class="qc-compose-grid">
               <div class="qc-compose-left">
                 <div class="qc-composer" classList={{ "has-error": state.submit === "error" }}>
@@ -1195,35 +1239,14 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
             </div>
           </section>
 
-          <GitHubWorkspace
-            scope={state.historyScope}
-            ready={state.sessionStatus === "ready"}
-            visible={state.view === "gitgraph"}
-            fetcher={(tool, cursor) => readQuantCodeTool(serverSDK().client, tool, undefined, { cursor })}
-            update={(id, changes) => updateQuantCodePop(serverSDK().client, id, changes)}
-            onUnread={(count) => setState("githubUnread", count)}
-            notificationPermission={async () => {
-              if (platform.platform === "desktop") return true
-              if (!("Notification" in window)) return false
-              if (Notification.permission === "granted") return true
-              if (Notification.permission === "denied") return false
-              return await Notification.requestPermission() === "granted"
-            }}
-            notify={(count) => platform.notify("QuantCode · GitHub 更新", `发现 ${count} 条新更新，请在 GitGraph 中查看。`)}
-          />
-          <Show when={state.view !== "compose"}>
-            <section class="qc-detail-panel" aria-label="QuantCode 详情">
+            <section class="qc-detail-panel" aria-label="QuantCode 详情" hidden={state.view === "compose"}>
               <div class="qc-detail-header">
                 <div>
                   <span>QUANTCODE / {state.view.toUpperCase()}</span>
                   <h2>
                     {state.view === "activity"
                       ? "执行记录"
-                      : state.view === "factor"
-                        ? "因子评估"
-                        : state.view === "pit"
-                          ? "PIT 估值"
-                          : state.view === "gate"
+                      : state.view === "gate"
                           ? "HumanGate"
                           : state.view === "memory"
                             ? "Memory"
@@ -1242,50 +1265,81 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                   <Icon name="close" size="normal" />
                 </button>
               </div>
+              <div class="qc-view-content">
+          <GitHubWorkspace
+            scope={state.historyScope}
+            ready={state.sessionStatus === "ready"}
+            visible={state.view === "gitgraph"}
+            fetcher={(tool, cursor) => readQuantCodeTool(serverSDK().client, tool, undefined, { cursor })}
+            update={(id, changes) => updateQuantCodePop(serverSDK().client, id, changes)}
+            onUnread={(count) => setState("githubUnread", count)}
+            notificationPermission={async () => {
+              if (platform.platform === "desktop") return true
+              if (!("Notification" in window)) return false
+              if (Notification.permission === "granted") return true
+              if (Notification.permission === "denied") return false
+              return await Notification.requestPermission() === "granted"
+            }}
+            notify={(count) => platform.notify("QuantCode · GitHub 更新", `发现 ${count} 条新更新，请在 GitGraph 中查看。`)}
+          />
               <Switch>
                 <Match when={state.view === "activity"}>
-                  <ActivityPanel onUseTask={focusComposer} />
+                  <div class="qc-view-tabs" role="tablist" aria-label="执行记录视图" onKeyDown={navigateViewTabs}>
+                    <button type="button" role="tab" tabIndex={state.activityTab === "history" ? 0 : -1} aria-selected={state.activityTab === "history"} onClick={() => setState("activityTab", "history")}>已保存的任务</button>
+                    <button type="button" role="tab" tabIndex={state.activityTab === "current" ? 0 : -1} aria-selected={state.activityTab === "current"} onClick={() => setState("activityTab", "current")}>当前执行</button>
+                  </div>
+                  <Show when={state.activityTab === "current"}><ActivityPanel onUseTask={focusComposer} /></Show>
+                  <Show when={state.activityTab === "history"}>
                   <RunHistoryView
                     scope={state.historyScope}
                     ready={state.sessionStatus === "ready"}
+                    onNew={() => focusComposer()}
                     onRecover={(threadId, checkpointId) => submitInstruction(buildRecoveryInstruction(threadId, checkpointId), "activity")}
                     reconcileGroup={_group()}
                     reconcile={state.sessionStatus === "ready" && ["approver", "admin"].includes(state.sessionRole)
                       ? payload => reconcileQuantCodeReceipt(serverSDK().client, payload) : undefined}
                     fetcher={(tool, params) => readQuantCodeTool(serverSDK().client, tool, undefined, params)}
                   />
-                </Match>
-                <Match when={state.view === "factor"}>
-                  <FactorFlowView run={_trace()} />
-                </Match>
-                <Match when={state.view === "pit"}>
-                  <PitValuationView run={_trace()} />
+                  </Show>
                 </Match>
                 <Match when={state.view === "gate"}>
-                  <GatePanel role={state.sessionRole} onResume={sendGateDecision} />
+                  <Show when={_trace()?.gate}><GatePanel role={state.sessionRole} onResume={sendGateDecision} /></Show>
                   <Show when={state.sessionStatus === "ready" && ["approver", "admin"].includes(state.sessionRole)}>
                     <ApprovalQueue scope={state.historyScope}
                       fetcher={(cursor) => readQuantCodeTool(serverSDK().client, "list_pending_gates", undefined, { cursor, limit: 20 })}
                       decide={(threadId, checkpointId, gateId, decision) => submitInstruction(buildResumeInstruction(threadId, decision, gateId, checkpointId), "activity")} />
                   </Show>
+                  <Show when={state.sessionStatus !== "ready" || (state.sessionRole === "analyst" && !_trace()?.gate)}>
+                    <WorkspaceEmpty icon="shield" title={state.sessionStatus !== "ready" ? "登录后查看审批" : "当前没有待处理请求"} description={state.sessionStatus !== "ready" ? "尚未取得审批身份。" : "当前身份为研究员，审批操作由审批人或管理员处理。"} />
+                  </Show>
                 </Match>
                 <Match when={state.view === "memory"}>
+                  <div class="qc-view-tabs" role="tablist" aria-label="Memory 视图" onKeyDown={navigateViewTabs}>
+                    <button type="button" role="tab" tabIndex={state.memoryTab === "knowledge" ? 0 : -1} aria-selected={state.memoryTab === "knowledge"} onClick={() => setState("memoryTab", "knowledge")}>长期知识</button>
+                    <Show when={state.sessionStatus === "ready" && ["approver", "admin"].includes(state.sessionRole)}><button type="button" role="tab" tabIndex={state.memoryTab === "review" ? 0 : -1} aria-selected={state.memoryTab === "review"} onClick={() => setState("memoryTab", "review")}>知识候选审核</button></Show>
+                  </div>
+                  <Show when={state.memoryTab === "knowledge"}>
+                  <Show keyed when={state.sessionStatus === "ready" ? state.historyScope : undefined} fallback={<WorkspaceEmpty icon="shield" title="登录后检索知识" />}>
                   <MemoryQueryView
                     t={language.t as (key: string) => string}
                     fetcher={(query) => searchQuantCodeMemory(serverSDK().client, query)}
                   />
-                  <Show when={state.sessionStatus === "ready" && ["approver", "admin"].includes(state.sessionRole)}>
+                  </Show>
+                  </Show>
+                  <Show when={state.memoryTab === "review" && state.sessionStatus === "ready" && ["approver", "admin"].includes(state.sessionRole)}>
                     <KnowledgeReview scope={state.historyScope}
                       fetcher={() => readQuantCodeTool(serverSDK().client, "list_distill_candidates")}
                       review={(name, action, digest, replacement) => reviewQuantCodeCandidate(serverSDK().client, name, action, digest, replacement)} />
                   </Show>
                 </Match>
                 <Match when={state.view === "capabilities"}>
+                  <Show keyed when={state.sessionStatus === "ready" ? state.historyScope : undefined} fallback={<WorkspaceEmpty icon="shield" title="登录后查看授权能力" />}>
                   <CapabilityCatalogView
                     t={language.t as (key: string) => string}
                     run={_trace()}
                     fetcher={() => listQuantCodeCapabilities(serverSDK().client)}
                   />
+                  </Show>
                 </Match>
                 <Match when={state.view === "solution"}>
                   <SolutionPanelView t={language.t as (key: string) => string} run={_trace()} />
@@ -1310,9 +1364,6 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                       undefined, params)}
                   />
                 </Match>
-                <Match when={state.view === "gitgraph" && state.sessionStatus === "ready"}>
-                  <p class="qc-detail-body">仓库、分支和持久更新通知显示于工作台。</p>
-                </Match>
                 <Match when={state.view === "settings"}>
                   <SettingsPanel
                     skill={state.skill}
@@ -1322,6 +1373,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                     sessionStatus={state.sessionStatus}
                     sessionRole={state.sessionRole}
                     sessionActor={state.sessionActor}
+                    workspacePath={state.workspacePath}
                     algorithms={state.algorithms}
                     serverName={serverName()}
                     serverReady={serverReady()}
@@ -1335,8 +1387,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                   />
                 </Match>
               </Switch>
+              </div>
             </section>
-          </Show>
         </div>
       </main>
     </div>

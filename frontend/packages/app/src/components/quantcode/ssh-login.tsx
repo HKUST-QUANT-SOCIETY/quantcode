@@ -70,7 +70,6 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
   const identities = props.identities ?? []
   const root = document.createElement("div")
   root.className = "qc-ssh"
-  root.style.cssText = "display:grid;gap:10px;justify-items:start;min-width:0;width:100%;overflow-wrap:anywhere;"
 
   let status: SshLoginStatus = props.session ? "connected" : "form"
   let identityId = identities[0]?.id ?? ""
@@ -95,8 +94,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
       status.textContent = t("quantcode.ssh.reason.unavailable")
       const hint = document.createElement("p")
       hint.className = "qc-ssh-hint"
-      hint.style.cssText = "margin:0;color:var(--qc-muted);font-size:10px;"
-      hint.textContent = "Connect with the local SSH Agent or Keychain identity provided by the desktop host."
+      hint.textContent = "未发现可用的本机 SSH 身份。"
       root.replaceChildren(status, hint)
       return
     }
@@ -104,7 +102,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     const identityLabel = document.createElement("label")
     identityLabel.className = "qc-field-label"
     identityLabel.htmlFor = "qc-ssh-identity"
-    identityLabel.textContent = "SSH identity"
+    identityLabel.textContent = "登录身份"
     const identitySelect = document.createElement("select")
     identitySelect.id = "qc-ssh-identity"
     identitySelect.className = "qc-select-wide"
@@ -126,7 +124,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
 
     const target = document.createElement("code")
     target.className = "qc-artifact"
-    target.textContent = `${user}@${host}`
+    target.textContent = host
 
     const submit = document.createElement("button")
     submit.type = "button"
@@ -138,7 +136,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     submit.addEventListener("click", () => {
       status = "connecting"
       reason = ""
-      logs = [`ssh ${user}@${host}`, t("quantcode.ssh.logWaiting")]
+      logs = [t("quantcode.ssh.logWaiting")]
       render()
       void attempt()
     })
@@ -286,7 +284,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
 
     const detail = document.createElement("p")
     detail.className = "qc-ssh-reason"
-    detail.style.cssText = "margin:0;font-size:11px;"
+    detail.setAttribute("role", "alert")
     detail.textContent = REASON_KEYS[reason] ? t(REASON_KEYS[reason]) : reason
 
     const retry = document.createElement("button")

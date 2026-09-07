@@ -1,5 +1,6 @@
 import { For, Show, createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
+import { RefreshAction, WorkspaceEmpty } from "./workspace-ui"
 
 type Candidate = { name: string; group: string; status?: string; content?: string; digest?: string; error?: string }
 export function KnowledgeReview(props: {
@@ -35,14 +36,13 @@ export function KnowledgeReview(props: {
     } finally { setState("busy", "") }
   }
   createEffect(() => { props.scope; revision++; setState({ items: [], replacement: "", busy: "" }); void load() })
-  return <section class="qc-detail-body" aria-label="知识候选审核">
-    <h3>知识候选审核</h3><p>阅读草稿后再晋升为组内 Skill；审核操作记录当前人员身份。</p>
-    <button type="button" disabled={state.loading || !!state.busy} onClick={() => void load()}>刷新候选</button>
-    <Show when={state.loading}><p role="status">正在读取…</p></Show>
+  return <section class="qc-detail-body qc-knowledge-review" aria-label="知识候选审核">
+    <div class="qc-view-toolbar"><h3>知识候选审核</h3><span class="qc-count">{state.items.length} 项候选</span><RefreshAction label="刷新候选" disabled={state.loading || !!state.busy} onClick={() => void load()} /></div>
+    <Show when={state.loading}><p class="qc-loading" role="status">正在读取知识候选…</p></Show>
     <Show when={state.error}><p role="alert">{state.error}</p></Show>
-    <Show when={!state.loading && !state.error && !state.items.length}><p>当前权限范围内暂无候选。</p></Show>
+    <Show when={!state.loading && !state.error && !state.items.length}><WorkspaceEmpty icon="brain" title="暂无待审核知识" description="当前权限范围内暂无候选。" /></Show>
     <For each={state.items}>{item => <details class="qc-detail-section">
-      <summary>{item.name} · {item.group} · {item.status || "draft"}</summary>
+      <summary><span>{item.name}</span><span class="qc-status">{item.group}</span><span class="qc-status">{item.status || "draft"}</span></summary>
       <Show when={item.error}><p role="alert">{item.error}</p></Show>
       <pre style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>{item.content}</pre>
       <Show when={!item.status || item.status === "draft" || item.status === "publishing"}>

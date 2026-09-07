@@ -6,6 +6,7 @@
  * 跨组读取被拒（MemoryPermissionError fail-closed）→ "无权限" 空态。
  * 纯 DOM 构建（沿 ssh-login 模式，bun test 兼容）。
  */
+import { viewEmpty, viewIcon } from "./workspace-ui"
 
 export type MemoryHit = {
   id?: string
@@ -58,7 +59,6 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
   const fetcher = props.fetcher ?? stubMemoryFetcher
   const root = document.createElement("div")
   root.className = "qc-memory-query"
-  root.style.cssText = "display:grid;gap:12px;align-content:start;"
 
   let lastQuery = ""
   let searching = false
@@ -76,26 +76,19 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
   }
 
   const emptyState = (titleKey: string, errorTone?: boolean) => {
-    const empty = document.createElement("div")
-    empty.className = "qc-empty-state qc-memory-empty"
-    const index = document.createElement("span")
-    index.className = "qc-empty-index"
-    index.textContent = "—"
-    const title = document.createElement("h3")
-    title.textContent = t(titleKey)
-    if (errorTone) title.style.color = "#aa2e23"
-    empty.append(index, title)
+    const empty = viewEmpty(t(titleKey), errorTone ? "shield" : "brain")
+    empty.classList.add("qc-memory-empty")
+    if (errorTone) empty.classList.add("is-error")
     return empty
   }
 
   const renderSnippet = (hit: MemoryHit) => {
     const wrap = document.createElement("div")
     wrap.className = "qc-memory-snippet"
-    for (const segment of highlightSegments(hit.snippet ?? "", resultQuery)) {
+    for (const segment of highlightSegments((hit.snippet ?? "").replace(/<<|>>/g, ""), resultQuery)) {
       if (!segment.text) continue
       const part = document.createElement(segment.hit ? "mark" : "span")
       if (segment.hit) {
-        part.style.cssText = "background:rgba(154,91,18,0.18);color:inherit;"
         part.className = "qc-memory-hit"
       }
       part.textContent = segment.text
@@ -112,13 +105,17 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     const maxScore = Math.max(0, ...hits.map((hit) => (typeof hit.score === "number" && Number.isFinite(hit.score) ? hit.score : 0)))
     const list = document.createElement("div")
     list.className = "qc-memory-hits"
+    const count = document.createElement("p")
+    count.className = "qc-results-count"
+    count.textContent = `${hits.length} 条匹配知识`
+    results.append(count)
     for (const hit of hits) {
       const row = document.createElement("div")
       row.className = "qc-memory-hit-row"
-      row.style.cssText = "display:grid;gap:4px;padding:10px 0;border-bottom:1px solid var(--qc-line);"
 
       const head = document.createElement("div")
-      head.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;"
+      head.className = "qc-memory-hit-heading"
+      head.append(viewIcon("file-tree"))
       const title = document.createElement("strong")
       title.textContent = hit.title || hit.id || "Memory"
       head.append(title)
@@ -131,16 +128,22 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
       row.append(head)
 
       row.append(renderSnippet(hit))
+      if (hit.id) {
+        const path = document.createElement("code")
+        path.className = "qc-memory-path"
+        path.textContent = hit.id
+        row.append(path)
+      }
 
       if (typeof hit.score === "number" && Number.isFinite(hit.score) && maxScore > 0) {
         const barWrap = document.createElement("div")
-        barWrap.style.cssText = "display:flex;align-items:center;gap:8px;"
+        barWrap.className = "qc-memory-score"
         const scoreLabel = document.createElement("span")
-        scoreLabel.style.cssText = "font-size:9px;color:var(--qc-muted);"
+        scoreLabel.className = "qc-muted"
         scoreLabel.textContent = `${t("quantcode.memory.score")} ${hit.score.toFixed(2)}`
         const bar = document.createElement("div")
         bar.className = "qc-memory-score-bar"
-        bar.style.cssText = `height:4px;width:${Math.max(2, Math.round((hit.score / maxScore) * 100))}%;background:var(--qc-ink);border-radius:2px;`
+        bar.style.width = `${Math.max(2, Math.round((hit.score / maxScore) * 100))}%`
         barWrap.append(scoreLabel, bar)
         row.append(barWrap)
       }
@@ -177,7 +180,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     results.setAttribute("aria-busy", "true")
     const pending = document.createElement("span")
     pending.className = "qc-connection-pill qc-memory-pending"
-    pending.textContent = "…"
+    pending.textContent = "正在检索知识…"
     results.append(pending)
     try {
       const result = await fetcher(query)
@@ -206,7 +209,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     const intro = document.createElement("div")
     intro.className = "qc-memory-intro"
     intro.append(
-      sectionLabel("RESEARCH MEMORY"),
+      sectionLabel("GROUP MEMORY"),
       (() => {
         const title = document.createElement("h3")
         title.textContent = t("quantcode.memory.title")
@@ -214,7 +217,6 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
       })(),
       (() => {
         const desc = document.createElement("p")
-        desc.style.cssText = "margin:0;font-size:11px;color:var(--qc-muted);"
         desc.textContent = t("quantcode.memory.intro")
         return desc
       })(),
@@ -223,7 +225,6 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
 
     const form = document.createElement("div")
     form.className = "qc-memory-search"
-    form.style.cssText = "display:flex;gap:8px;"
     const input = document.createElement("input")
     input.className = "qc-select-wide qc-memory-search-input"
     input.type = "search"
@@ -243,7 +244,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     })
     submit.type = "button"
     submit.className = "qc-button qc-button-primary qc-memory-search-submit"
-    submit.textContent = t("quantcode.memory.search")
+    submit.append(viewIcon("magnifying-glass"), document.createTextNode(t("quantcode.memory.search")))
     submit.disabled = searching || !lastQuery.trim()
     submit.addEventListener("click", () => void runSearch())
     form.append(input, submit)

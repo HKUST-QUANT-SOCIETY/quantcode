@@ -70,7 +70,7 @@ describe("SshLoginView", () => {
     // 连接态：spinner + 逐行日志
     expect(view.querySelector(".qc-ssh-spinner")).toBeTruthy()
     const log = view.querySelector(".qc-ssh-log")!
-    expect(log.textContent).toContain("ssh analyst@quant.internal")
+    expect(log.textContent).not.toContain("ssh analyst@quant.internal")
     expect(log.textContent).toContain("等待服务器响应…")
 
     await flush()

@@ -1,5 +1,7 @@
-import { For, Show, createEffect, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Icon } from "@opencode-ai/ui/icon"
+import { RefreshAction, WorkspaceEmpty, runStatusLabel } from "./workspace-ui"
 import { ReceiptReview } from "./receipt-review"
 import type { ReceiptReconciliation } from "./api"
 
@@ -35,6 +37,7 @@ type Detail = Run & {
 export function RunHistoryView(props: {
   scope: string
   ready: boolean
+  onNew?: () => void
   mode?: "tasks" | "reports"
   onRecover?: (threadId: string, checkpointId: string) => Promise<boolean>
   reconcile?: (payload: ReceiptReconciliation) => Promise<unknown>
@@ -45,9 +48,12 @@ export function RunHistoryView(props: {
 }) {
   const [state, setState] = createStore({
     runs: [] as Run[], cursor: undefined as string | undefined,
-    detail: undefined as Detail | undefined, loading: false, error: "", recovering: false,
+    detail: undefined as Detail | undefined, loading: false, error: "", recovering: false, query: "", filter: "all",
   })
   let revision = 0
+  const visible = createMemo(() => state.runs.filter(run =>
+    (state.filter === "all" || run.status === state.filter) &&
+    `${run.task} ${run.thread_id}`.toLowerCase().includes(state.query.trim().toLowerCase())))
   onCleanup(() => revision++)
 
   async function load(params: { cursor?: string; thread_id?: string; checkpoint_id?: string; trace_cursor?: number } = {}) {
@@ -96,28 +102,41 @@ export function RunHistoryView(props: {
     props.mode
     const ready = props.ready
     revision++
-    setState({ runs: [], detail: undefined, cursor: undefined, error: "", loading: false })
+    setState({ runs: [], detail: undefined, cursor: undefined, error: "", loading: false, query: "", filter: "all" })
     if (ready) void load()
   })
 
-  return <section class="qc-detail-body" aria-label="服务端研究历史">
-    <div class="qc-detail-section">
+  return <section class="qc-detail-body qc-history" aria-label="服务端研究历史">
+    <div class="qc-view-toolbar">
       <h3>{props.mode === "reports" ? "组织报告与产物" : props.mode === "tasks" ? "组织任务管理" : "服务端研究历史"}</h3>
-      <p>{props.mode ? "组织视图，仅 Admin 可读，跨组读取留有审计记录。" : "记录保存在当前服务器，按人员和工作区隔离。"}查看历史不会重新执行任务。</p>
-      <button type="button" disabled={!props.ready || state.loading} onClick={() => void load()}>刷新历史</button>
-      <Show when={!props.ready}><p>请先连接已认证的工作区。</p></Show>
-      <Show when={state.loading}><p role="status">正在读取…</p></Show>
+      <span class="qc-count">{state.runs.length}{state.cursor ? "+" : ""} 个任务</span>
+      <RefreshAction label="刷新历史" disabled={!props.ready || state.loading} onClick={() => void load()} />
+    </div>
+    <div class="qc-filter-bar">
+      <label class="qc-search-field"><Icon name="magnifying-glass" /><input type="search" aria-label="搜索执行记录" placeholder="搜索任务或编号" value={state.query} onInput={e => setState("query", e.currentTarget.value)} /></label>
+      <select aria-label="任务状态" value={state.filter} onChange={e => setState("filter", e.currentTarget.value)}><option value="all">全部状态</option><For each={[...new Set(state.runs.map(run => run.status))]}>{status => <option value={status}>{runStatusLabel(status)}</option>}</For></select>
+    </div>
+      <Show when={!props.ready}><WorkspaceEmpty icon="shield" title="登录后查看执行记录" description="当前工作区尚未认证。" /></Show>
+      <Show when={state.loading}><p class="qc-loading" role="status">正在读取执行记录…</p></Show>
       <Show when={state.error}><p role="alert">{state.error}</p></Show>
-      <Show when={props.ready && !state.loading && !state.error && !state.runs.length}><p>当前工作区还没有已保存的任务。</p></Show>
-      <For each={state.runs}>{run => <button type="button" class="qc-recent-row" disabled={state.loading}
+      <Show when={props.ready && !state.loading && !state.error && !state.runs.length}>
+        <WorkspaceEmpty icon="checklist" title="暂无执行记录" description="当前工作区还没有已保存的任务。">
+          <Show when={props.onNew}><button type="button" class="qc-button qc-button-primary" onClick={props.onNew}><Icon name="plus" size="small" />新建研究</button></Show>
+        </WorkspaceEmpty>
+      </Show>
+      <Show when={state.runs.length > 0 && !visible().length}><WorkspaceEmpty icon="magnifying-glass" title="没有匹配的任务" /></Show>
+    <div class="qc-history-layout" classList={{ "has-detail": !!state.detail }}>
+    <div class="qc-history-list">
+      <For each={visible()}>{run => <button type="button" class="qc-history-row" aria-pressed={state.detail?.thread_id === run.thread_id} disabled={state.loading}
         onClick={() => void load({ thread_id: run.thread_id })}>
-        <span class="qc-recent-copy"><strong>{run.task || run.thread_id}</strong><small>{run.timestamp}</small></span>
-        <span>{run.status === "completed" ? "已完成" : "已保存检查点"}</span>
+        <Icon name="task" /><span class="qc-history-copy"><strong>{run.task || run.thread_id}</strong><small>{run.timestamp || run.thread_id}</small></span>
+        <span class={`qc-status qc-status-${run.status}`}>{runStatusLabel(run.status)}</span><Icon name="chevron-right" size="small" />
       </button>}</For>
       <Show when={state.cursor}><button type="button" disabled={state.loading}
         onClick={() => void load({ cursor: state.cursor })}>加载更多</button></Show>
     </div>
-    <Show when={state.detail}>{detail => <div class="qc-detail-section" aria-label="历史详情">
+    <Show when={state.detail}>{detail => <div class="qc-history-detail" aria-label="历史详情">
+      <div class="qc-view-toolbar"><span class={`qc-status qc-status-${detail().status}`}>{runStatusLabel(detail().status)}</span><button type="button" class="qc-icon-action" aria-label="关闭历史详情" title="关闭历史详情" onClick={() => { revision++; setState({ detail: undefined, loading: false, recovering: false }) }}><Icon name="close" /></button></div>
       <h3>{detail().task || detail().thread_id}</h3>
       <p>只读回放 · {detail().timestamp}</p>
       <Show when={detail().pending_approval}><p>该任务有待审批中断，需通过 HumanGate 明确处理，不能用普通恢复绕过。</p></Show>
@@ -183,5 +202,6 @@ export function RunHistoryView(props: {
         thread_id: detail().thread_id, checkpoint_id: detail().checkpoint_id, trace_cursor: detail().timeline?.next_cursor,
       })}>加载更多执行事件</button></Show>
     </div>}</Show>
+    </div>
   </section>
 }

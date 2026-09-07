@@ -736,7 +736,7 @@ alpha_flow 当前只登记为 SCAFFOLD/部署目标接口。它的内部模块�
 | Schema 卡片 | Pydantic/JSON Schema 字段、版本、来源、导出和修改入口 |
 | Activity | trace 时间线、工具调用、错误、artifact、再次运行和回放 |
 | Memory 浏览器 | 组内 Memory、公共契约、checkpoint、任务进度和来源 |
-| 因子/PIT 面板 | 只渲染外部 artifact 和契约 warning，不在 UI 重算领域结果 |
+| 组件结果展示 | 任务内只渲染外部 artifact 和契约 warning；因子/PIT 不设全局业务页面，不在 UI 重算领域结果 |
 | GatePanel | 普通用户只显示 merge/permission 写操作 Gate；Admin 管理面另有生产部署操作 |
 | 通知中心 | Gate、跨组 handoff、repo/package Pop、系统状态 |
 | 设置/SSH | 本地身份选择、fingerprint 摘要、roster 结果、连接失败和 provider readout |

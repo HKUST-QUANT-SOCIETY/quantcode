@@ -16,22 +16,18 @@ describe("SupplierView", () => {
     el.remove()
   })
 
-  test("labels rows with env config names and shows env hint", () => {
+  test("shows model availability without exposing implementation configuration", () => {
     const el = SupplierView({})
     const names = [...el.querySelectorAll(".qc-supplier-row code")].map((n) => n.textContent)
-    expect(names).toEqual([
-      "QUANTCODE_MODEL_PROVIDER",
-      "QUANTCODE_MODEL_NAME",
-      "QUANTCODE_MODEL_BASE_URL",
-    ])
-    expect(el.querySelector(".qc-supplier-hint")?.textContent).toContain("mcp.environment")
+    expect(names).toEqual([])
+    expect(el.querySelector(".qc-supplier-hint")?.textContent).toContain("尚未提供模型信息")
     el.remove()
   })
 
   test("shows algorithms empty state for empty list", () => {
     const el = SupplierView({})
-    expect(el.querySelector(".qc-section-label")?.textContent).toBe("ALGORITHMS")
-    expect(el.querySelector(".qc-supplier-empty")?.textContent).toContain("list_algorithms")
+    expect(el.querySelector(".qc-section-label")?.textContent).toBe("算法目录")
+    expect(el.querySelector(".qc-supplier-empty")?.textContent).toBe("暂无可见算法。")
     el.remove()
   })
 

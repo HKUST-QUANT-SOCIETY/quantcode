@@ -109,13 +109,17 @@ UI 只消费服务端 session、工具目录、结构化 artifact 和外部平�
 | F-03 | GatePanel、通知中心 | 仅 `merge`/`permission`；部署另走 Admin 面 |
 | F-04/P-07 | Memory、能力目录 | 组内共享、公共契约、卡片状态和 ACL |
 | F-05 | SSH/设置 | 本地公钥证明、roster 结果和个人工作目录 |
-| F-06 | 因子评估、PIT、外部结果入口 | 只展示 QuantEvaluator、DataAccess 和报告 artifact |
+| F-06 | 任务结果中的组件产物与外部链接 | 因子评估、PIT 估值不设全局业务页面；只展示 QuantEvaluator、DataAccess 和报告 artifact |
 | F-07/F-08 | 会话结果和外部链接 | CI/handoff 与组内工具，不新增业务产品页 |
 | F-09/P-08 | Admin、GitGraph、Pop | Admin 全组织可见；普通用户遵守 GitHub 权限 |
 | P-09 | Admin 部署入口 | 生产服务账号受控执行，普通 Agent 不可见 |
 | P-10 | 方案面板 | L2/L3 方案冻结和一致性 verdict |
 
 ## 4. 首页与任务提交
+
+2026-09-07 UI 复核：全局导航保留新建研究、执行记录、HumanGate、Memory、能力目录、方案、GitGraph，以及 Admin 专属中枢。执行记录、知识检索、审批、能力目录和设置使用完整工作区，不再并排挤进首页的窄浮层。执行记录区分保存的历史与当前执行；Memory 区分长期知识和有审核权限时可见的候选审核。账号入口在顶栏，显示服务端核验的账号、业务组和角色；服务在线与身份已认证分别显示。会话核验失败会清除当前界面中的私有知识结果。
+
+本轮 UI 验收证据：真实 `127.0.0.1:4544` 页面覆盖新建研究、执行记录、HumanGate、Memory、能力目录、方案、Admin、GitGraph 和设置；桌面/手机视口的 21 条 QuantCode Playwright 用例通过。真实 Lead 登录后显示 `chenyuanheng / agent / admin`、个人工作目录和 SSH 指纹；真实 Server C Memory 查询返回 7 条逻辑路径结果；能力目录真实渲染 14 张能力卡。因子评估与 PIT 估值不再作为全局导航页面，仍可由任务结果和组件 artifact 承载。
 
 首页提供自然语言任务、已绑定的组/角色、可用 Skill 和最近任务。组由认证会话提供，页面不提供组选择器。Skill 列表从维护员发布的 `list_skills` 目录获取，加载失败显示明确错误。
 

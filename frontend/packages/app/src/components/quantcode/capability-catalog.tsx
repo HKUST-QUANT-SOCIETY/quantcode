@@ -8,6 +8,7 @@
  * 纯 DOM 构建（沿 ssh-login / settings-supplier 模式，bun test 兼容）。
  */
 import type { TraceEvent } from "./result-contract"
+import { viewEmpty, viewIcon } from "./workspace-ui"
 
 export type CapabilityCard = {
   id?: string
@@ -74,15 +75,16 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
   const t = props.t
   const root = document.createElement("div")
   root.className = "qc-capability-catalog"
-  root.style.cssText = "display:grid;gap:12px;align-content:start;"
 
   let fetched: CapabilityCard[] | undefined
   let fetchState: "idle" | "loading" | "ready" | "unavailable" = props.fetcher ? "loading" : "idle"
   let query = ""
+  let status = "all"
 
   const cards = (): CapabilityCard[] => (props.fetcher ? fetched ?? [] : capabilitiesFromTrace(props.run))
 
   const matches = (card: CapabilityCard) => {
+    if (status !== "all" && (card.integration_status ?? "UNVERIFIED") !== status) return false
     if (!query) return true
     const haystack = [card.id, card.name, card.canonical_repo, card.type, card.owner_group, card.when_to_use, card.when_not_to_reinvent, ...(card.api_surface ?? []), ...(card.deprecated_aliases ?? []), ...(card.inputs ?? []), ...(card.outputs ?? []), ...(card.depends_on ?? []), ...(card.consumed_by ?? [])]
       .filter(isCardText)
@@ -101,39 +103,43 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
   }
 
   const renderCard = (card: CapabilityCard) => {
-    const cardEl = document.createElement("div")
+    const cardEl = document.createElement("article")
     cardEl.className = "qc-capability-card"
-    cardEl.style.cssText = "display:grid;gap:6px;padding:10px 0;border-bottom:1px solid var(--qc-line);"
+    cardEl.dataset.integration = card.integration_status ?? "UNVERIFIED"
 
     const head = document.createElement("div")
-    head.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;"
+    head.className = "qc-capability-heading"
+    head.append(viewIcon("mcp"))
     const name = document.createElement("strong")
     name.textContent = card.name ?? ""
     head.append(name)
-    if (isCardText(card.type)) head.append(chip(card.type))
-    if (isCardText(card.maturity_status)) head.append(chip(`maturity: ${card.maturity_status}`))
+    cardEl.append(head)
+    const badges = document.createElement("div")
+    badges.className = "qc-capability-badges"
+    if (isCardText(card.type)) badges.append(chip(card.type))
+    if (isCardText(card.maturity_status)) badges.append(chip(`maturity: ${card.maturity_status}`))
     if (isCardText(card.integration_status)) {
       const tone = card.integration_status === "CONNECTED" ? "green" : "yellow"
-      head.append(chip(`integration: ${card.integration_status}`, tone))
+      badges.append(chip(`integration: ${card.integration_status}`, tone))
     }
     if (isCardText(card.owner_group)) {
       const owner = chip(`${t("quantcode.capability.ownerGroup")}: ${card.owner_group}`)
       owner.classList.add("qc-capability-owner")
-      head.append(owner)
+      badges.append(owner)
     }
-    cardEl.append(head)
+    cardEl.append(badges)
 
     if (isCardText(card.canonical_repo) || isCardText(card.domain_authority)) {
       const meta = document.createElement("p")
-      meta.style.cssText = "margin:0;font-size:10px;color:var(--qc-muted);"
+      meta.className = "qc-capability-source"
       meta.textContent = [card.canonical_repo, card.domain_authority].filter(isCardText).join(" · ")
       cardEl.append(meta)
     }
 
     if (isCardText(card.when_to_use)) {
       const use = document.createElement("p")
-      use.style.cssText = "margin:0;font-size:11px;"
-      use.textContent = `${t("quantcode.capability.whenToUse")}：${card.when_to_use}`
+      use.className = "qc-capability-description"
+      use.textContent = card.when_to_use
       cardEl.append(use)
     }
 
@@ -141,23 +147,28 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
     if (isCardText(card.when_not_to_reinvent)) {
       const ban = document.createElement("p")
       ban.className = "qc-capability-ban"
-      ban.style.cssText =
-        "margin:0;padding:6px 8px;font-size:11px;color:#9a5b12;border:1px solid rgba(154,91,18,0.3);border-radius:6px;background:rgba(154,91,18,0.06);"
-      ban.textContent = `⚠ ${t("quantcode.capability.whenNotToReinvent")}：${card.when_not_to_reinvent}`
+      ban.textContent = `${t("quantcode.capability.whenNotToReinvent")}：${card.when_not_to_reinvent}`
       cardEl.append(ban)
     }
+
+    const detail = document.createElement("details")
+    detail.className = "qc-capability-details"
+    detail.open = !!query
+    const summary = document.createElement("summary")
+    summary.append(document.createTextNode("接口与契约"), viewIcon("chevron-down"))
+    detail.append(summary)
 
     if (card.api_surface?.length) {
       const surfaceLabel = document.createElement("span")
       surfaceLabel.className = "qc-section-label"
       surfaceLabel.textContent = t("quantcode.capability.apiSurface")
-      cardEl.append(surfaceLabel)
+      detail.append(surfaceLabel)
       for (const line of card.api_surface) {
         if (!isCardText(line)) continue
         const code = document.createElement("code")
         code.className = "qc-artifact"
         code.textContent = line
-        cardEl.append(code)
+        detail.append(code)
       }
     }
 
@@ -179,27 +190,22 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
       value.textContent = card.observed_at
       contracts.append(label, value)
     }
-    if (contracts.childElementCount) cardEl.append(contracts)
+    if (contracts.childElementCount) detail.append(contracts)
 
     if (isCardText(card.source_commit)) {
       const commit = document.createElement("code")
       commit.className = "qc-artifact"
       commit.textContent = `${t("quantcode.capability.source")}:${card.source_commit}`
-      cardEl.append(commit)
+      detail.append(commit)
     }
+    cardEl.append(detail)
 
     return cardEl
   }
 
   const renderEmpty = (titleKey: string) => {
-    const empty = document.createElement("div")
-    empty.className = "qc-empty-state qc-capability-empty"
-    const index = document.createElement("span")
-    index.className = "qc-empty-index"
-    index.textContent = "—"
-    const title = document.createElement("h3")
-    title.textContent = t(titleKey)
-    empty.append(index, title)
+    const empty = viewEmpty(t(titleKey), "mcp")
+    empty.classList.add("qc-capability-empty")
     return empty
   }
 
@@ -207,6 +213,7 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
     // ponytail: 列表区可复用容器——搜索重渲只 replaceChildren 这里，搜索框不参与重渲，避免每敲一字失焦
     listHost.replaceChildren()
     const visible = cards().filter(matches)
+    count.textContent = `${visible.length} / ${cards().length} 项能力`
     if (fetchState === "loading") {
       listHost.append(renderEmpty("quantcode.capability.loading"))
       return
@@ -237,7 +244,6 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
   const title = document.createElement("h3")
   title.textContent = t("quantcode.capability.title")
   const desc = document.createElement("p")
-  desc.style.cssText = "margin:0;font-size:11px;color:var(--qc-muted);"
   desc.textContent = t("quantcode.capability.intro")
   intro.append(label, title, desc)
 
@@ -246,6 +252,7 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
   search.className = "qc-select-wide qc-capability-search"
   search.type = "search"
   search.placeholder = t("quantcode.capability.searchPlaceholder")
+  search.setAttribute("aria-label", t("quantcode.capability.searchPlaceholder"))
   search.autocomplete = "off"
   search.addEventListener("input", () => {
     query = search.value.trim().toLowerCase()
@@ -254,9 +261,24 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
   const listHost = document.createElement("div")
   listHost.className = "qc-capability-results"
 
+  const filter = document.createElement("select")
+  filter.setAttribute("aria-label", "能力接入状态")
+  for (const value of ["all", "CONNECTED", "PARTIAL", "UNAVAILABLE", "UNVERIFIED"]) {
+    const option = document.createElement("option")
+    option.value = value
+    option.textContent = value === "all" ? "全部接入状态" : value
+    filter.append(option)
+  }
+  filter.addEventListener("change", () => { status = filter.value; renderList() })
+  const count = document.createElement("span")
+  count.className = "qc-results-count"
+
   const refresh = document.createElement("button")
   refresh.type = "button"
-  refresh.textContent = "刷新能力目录"
+  refresh.className = "qc-icon-action"
+  refresh.title = "刷新能力目录"
+  refresh.setAttribute("aria-label", "刷新能力目录")
+  refresh.append(viewIcon("reset"))
   refresh.hidden = !props.fetcher
   const fetchCards = () => {
     if (!props.fetcher || refresh.disabled) return
@@ -283,7 +305,10 @@ export function CapabilityCatalogView(props: CapabilityCatalogProps): HTMLElemen
       .finally(() => { refresh.disabled = false })
   }
   refresh.addEventListener("click", fetchCards)
-  root.replaceChildren(intro, search, refresh, listHost)
+  const toolbar = document.createElement("div")
+  toolbar.className = "qc-filter-bar"
+  toolbar.append(search, filter, refresh)
+  root.replaceChildren(intro, toolbar, count, listHost)
   renderList()
   fetchCards()
 
