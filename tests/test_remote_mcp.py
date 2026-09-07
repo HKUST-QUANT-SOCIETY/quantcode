@@ -96,6 +96,7 @@ def test_sandbox_runs_production_mcp_with_bounded_lifetime_and_private_state():
     assert "--property=ReadWritePaths=/srv/quant/users/person" in command
     assert "--property=InaccessiblePaths=/home /root" in command
     assert "QUANTCODE_ENV=production" in command
+    assert "QUANTCODE_SHARED_MEMORY=gateway" in command
     assert "QUANTCODE_ALLOW_UNAUTH=1" not in command
 
 

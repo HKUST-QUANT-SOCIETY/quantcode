@@ -22,9 +22,14 @@ from schemas.session_context import SessionContext
 
 
 class IdentityGateway:
-    def __init__(self, *, roster: Path, database: Path):
+    def __init__(self, *, roster: Path, database: Path, memory_root: Path | None = None):
         self.roster = roster.resolve()
         self.database = database.resolve()
+        self.memory_root = (memory_root or self.database.parent).resolve()
+        if self.memory_root == self.roster.parent or self.memory_root == self.database.parent:
+            # The default is the private gateway data directory; callers must
+            # explicitly choose a shared Memory authority in production.
+            self.memory_root = self.database.parent / "shared-memory"
         self.database.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.challenges = ChallengeStore()
         self.lock = threading.Lock()
@@ -122,6 +127,65 @@ class IdentityGateway:
             raise PermissionError("task creator permissions changed")
         return {"valid": True}
 
+    def search_memory(self, token: str, payload: dict) -> dict:
+        """Search the server-owned group Memory using only the live session ACL."""
+        if set(payload) - {"query", "limit", "expected_session_id"}:
+            raise ValueError("memory query contains unsupported fields")
+        query = payload.get("query")
+        limit = payload.get("limit", 10)
+        expected_session_id = payload.get("expected_session_id")
+        if not isinstance(query, str) or not query.strip() or len(query) > 512:
+            raise ValueError("invalid memory query")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+            raise ValueError("invalid memory limit")
+        if not isinstance(expected_session_id, str) or not expected_session_id:
+            raise ValueError("expected session id is required")
+        context = self.session(token)
+        if context.session_id != expected_session_id:
+            raise PermissionError("session changed; reconnect")
+        from runner.memory.service import MemoryService
+
+        db_path = self.memory_root / ".quantcode" / "memory.db"
+        if not db_path.is_file():
+            return {"status": "UNAVAILABLE", "error": "Memory store is not initialized", "hits": []}
+        service = MemoryService(db_path, root=self.memory_root, requester_group=context.group)
+        hits = service.search(query=query, scope="global", limit=limit, long_term_only=True, strict_errors=True)
+        if context.role == "admin":
+            for scope_id in self._authorized_memory_groups():
+                group_service = MemoryService(db_path, root=self.memory_root, requester_group=scope_id)
+                hits.extend(group_service.search(query=query, scope="groups", scope_id=scope_id, limit=limit,
+                                                 long_term_only=True, strict_errors=True))
+        elif context.group:
+            hits.extend(service.search(query=query, scope="groups", scope_id=context.group, limit=limit,
+                                       long_term_only=True, strict_errors=True))
+        from runner.memory.grants import project_read_grants
+        for project_id in project_read_grants(context.model_dump(mode="json")):
+            hits.extend(service.search(query=query, scope="projects", scope_id=project_id, limit=limit,
+                                       long_term_only=True, strict_errors=True))
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        result = {"status": "CONNECTED" if hits else "EMPTY",
+                  "hits": [{**hit.to_dict(), "path": self._memory_public_path(hit.path)} for hit in hits[:limit]]}
+        if context.role == "admin":
+            from runner.admin_scope import audited_read_result
+            audit_context = context.model_dump(mode="json")
+            audit_context["evidence_dir"] = str(self.memory_root / ".quantcode" / "evidence")
+            return audited_read_result("search_memory", audit_context, result)
+        return result
+
+    @staticmethod
+    def _authorized_memory_groups() -> list[str]:
+        from schemas.groups import GROUP_IDS
+        return sorted(GROUP_IDS)
+
+    def _memory_public_path(self, path: str) -> str:
+        """Return a stable logical path without revealing Server C directories."""
+        root = (self.memory_root / ".quantcode" / "memory").resolve()
+        candidate = Path(path).resolve()
+        try:
+            return candidate.relative_to(root).as_posix()
+        except ValueError:
+            raise PermissionError("Memory result escaped the authority root") from None
+
 
 def handler(gateway: IdentityGateway):
     class Handler(BaseHTTPRequestHandler):
@@ -177,6 +241,8 @@ def handler(gateway: IdentityGateway):
                     raise ValueError("object payload required")
                 if self.path == "/session/validate-checkpoint":
                     return self.reply(200, gateway.validate_checkpoint(self.token(), payload))
+                if self.path == "/memory/search":
+                    return self.reply(200, gateway.search_memory(self.token(), payload))
                 if self.path == "/receipts/reconcile":
                     from runner.receipt_reconciliation import ReconcileReceipt, reconcile
                     from runner.langgraph_base import CHECKPOINTS_DB

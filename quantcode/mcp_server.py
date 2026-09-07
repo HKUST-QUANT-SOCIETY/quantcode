@@ -505,6 +505,23 @@ class SearchMemoryArgs(BaseModel):
 
 def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
     """Search maintained long-term Memory with group ACL; never auto-reconciles disk."""
+    if os.environ.get("QUANTCODE_SHARED_MEMORY", "").strip().lower() == "gateway":
+        session_file = os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE", "").strip()
+        if not session_file:
+            raise RuntimeError("AUTHENTICATION_REQUIRED: shared Memory requires a gateway session")
+        from quantcode.identity_login import _session_record
+        import httpx
+        record = _session_record(Path(session_file))
+        expected = (ctx or {}).get("session_id")
+        payload = {"query": args.query, "limit": args.limit, "expected_session_id": expected}
+        with httpx.Client(base_url=record["gateway"], timeout=15, follow_redirects=False, trust_env=False) as client:
+            response = client.post("/memory/search", json=payload,
+                                   headers={"Authorization": f"Bearer {record['token']}"})
+        if response.status_code == 401:
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory session is expired or revoked")
+        if response.status_code != 200:
+            raise RuntimeError(f"shared Memory unavailable ({response.status_code})")
+        return response.json()
     # MemoryService.root is the project root.  It owns the canonical
     # ``<project>/.quantcode/memory/...`` layout; passing ``.quantcode`` here
     # would create a second ``.quantcode/.quantcode`` prefix on disk.

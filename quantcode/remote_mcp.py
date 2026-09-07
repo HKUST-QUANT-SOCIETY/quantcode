@@ -85,7 +85,7 @@ def sandbox_command(root: Path, workspace: Path, credential: Path, unit: str, tt
             "--property=MemoryMax=2G", "--property=TasksMax=128", "--property=CPUQuota=200%",
             f"--property=WorkingDirectory={workspace}", f"--property=ReadWritePaths={workspace}",
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", f"HOME={workspace}", "LANG=C.UTF-8",
-            "PYTHONDONTWRITEBYTECODE=1", "QUANTCODE_ENV=production",
+            "PYTHONDONTWRITEBYTECODE=1", "QUANTCODE_ENV=production", "QUANTCODE_SHARED_MEMORY=gateway",
             f"QUANTCODE_IDENTITY_SESSION_FILE={credential}",
             str(root / ".venv/bin/python"), "-I", "-c",
             "import sys; sys.path.insert(0, sys.argv[1]); from quantcode.remote_mcp import serve_runtime; serve_runtime()", str(root)]

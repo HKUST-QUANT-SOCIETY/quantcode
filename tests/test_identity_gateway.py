@@ -134,6 +134,94 @@ def test_real_host_http_login_mcp_logout(host_gateway):
     assert not session_file.exists()
 
 
+def test_shared_memory_is_live_across_actors_and_rejects_scope_overrides(gateway_login, tmp_path, monkeypatch):
+    import httpx
+    from quantcode.gateway import handler
+    from quantcode import mcp_server
+    from runner.memory.service import MemoryService
+
+    gateway, first_login, roster, entry = gateway_login
+    memory_root = tmp_path / "authority"
+    gateway.memory_root = memory_root
+    store = MemoryService(memory_root / ".quantcode/memory.db", root=memory_root, requester_group="factor")
+    store.write(scope="groups", scope_id="factor", key="canonical", body="sharedword maintained factor reference")
+    store.write(scope="global", key="public", body="sharedword public contract")
+    store.write(scope="sessions", scope_id="private", key="runtime", body="sharedword runtime must stay private")
+    MemoryService(store.db_path, root=memory_root, requester_group="model").write(
+        scope="groups", scope_id="model", key="secret", body="sharedword private model reference")
+    second_key = tmp_path / "second-key"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(second_key)], check=True, capture_output=True)
+    public = second_key.with_suffix(".pub").read_text()
+    second_entry = {**entry, "actor_id": "second-actor", "fingerprint": fingerprint_of_public_key(public), "groups": ["factor", "model"]}
+    roster.write_text(yaml.safe_dump({"bindings": [entry, second_entry]}))
+    first, _ = first_login()
+    challenge = gateway.issue(public)
+    signature = subprocess.run(["ssh-keygen", "-Y", "sign", "-n", "quantcode", "-f", str(second_key)],
+                               input=challenge["nonce"], text=True, capture_output=True, check=True).stdout
+    second = gateway.verify({"challenge_id": challenge["challenge_id"], "public_key": public, "signature": signature})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(gateway))
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.server_port}", trust_env=False) as client:
+            for signed in (first, second):
+                headers = {"Authorization": f"Bearer {signed['token']}"}
+                payload = {"query": "sharedword", "expected_session_id": signed["session"]["session_id"]}
+                response = client.post("/memory/search", json=payload, headers=headers)
+                assert response.status_code == 200
+                hits = response.json()["hits"]
+                assert {hit["scope"] for hit in hits} == {"groups", "global"}
+                assert {hit["scope_id"] for hit in hits} == {"factor", ""}
+                assert all(str(memory_root) not in hit["path"] for hit in hits)
+                for override in ({"group": "model"}, {"role": "admin"}, {"memory_root": str(tmp_path)}, {"limit": 51}):
+                    rejected = client.post("/memory/search", json={**payload, **override}, headers=headers)
+                    assert rejected.status_code == 400
+            # The real MCP path must use the authority, not its private local DB.
+            session_file = tmp_path / "session.json"
+            session_file.write_text(json.dumps({"gateway": str(client.base_url), "token": second["token"]}))
+            session_file.chmod(0o600)
+            monkeypatch.setenv("QUANTCODE_IDENTITY_SESSION_FILE", str(session_file))
+            monkeypatch.setenv("QUANTCODE_SHARED_MEMORY", "gateway")
+            monkeypatch.setattr(mcp_server, "PROJECT_ROOT", tmp_path / "empty-private-runtime")
+            result = mcp_server._search_memory_execute(mcp_server.SearchMemoryArgs(query="sharedword"), second["session"])
+            assert result["status"] == "CONNECTED" and len(result["hits"]) == 2
+            store.write(scope="groups", scope_id="factor", key="new", body="newsharedword live update")
+            live = mcp_server._search_memory_execute(mcp_server.SearchMemoryArgs(query="newsharedword"), second["session"])
+            assert len(live["hits"]) == 1
+            gateway.logout(second["token"])
+            with pytest.raises(PermissionError):
+                mcp_server._search_memory_execute(mcp_server.SearchMemoryArgs(query="sharedword"), second["session"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+def test_shared_memory_admin_read_requires_authority_audit(gateway_login, tmp_path, monkeypatch):
+    from runner.memory.service import MemoryService
+    from runner import evidence
+
+    gateway, login, roster, entry = gateway_login
+    root = tmp_path / "authority"
+    gateway.memory_root = root
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "role": "admin"}]}))
+    session, _ = login()
+    store = MemoryService(root / ".quantcode/memory.db", root=root, requester_group="model")
+    store.write(scope="groups", scope_id="model", key="secret", body="auditword model knowledge")
+    payload = {"query": "auditword", "expected_session_id": session["session"]["session_id"]}
+    result = gateway.search_memory(session["token"], payload)
+    assert result["hits"][0]["scope_id"] == "model"
+    logs = list((root / ".quantcode/evidence").glob("admin-read-*.jsonl"))
+    assert len(logs) == 1 and "auditword" not in logs[0].read_text()
+
+    def unavailable(*args, **kwargs):
+        raise OSError("audit unavailable")
+
+    monkeypatch.setattr(evidence, "append_event", unavailable)
+    with pytest.raises(OSError):
+        gateway.search_memory(session["token"], payload)
+
+
 def test_real_agent_login_persists_only_token_hash_and_rejects_replay(gateway_login):
     gateway, login, roster, entry = gateway_login
     result, payload = login()
