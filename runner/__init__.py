@@ -17,17 +17,19 @@ from .langgraph_base import (
     make_thread_id,
 )
 
-from .compose_executor import (
-    FLOW_REGISTRY,
-    PRE_INVOKE_HOOKS,
-    execute_compose_flow,
-    list_registered_flows,
-    register_flow,
-    register_pre_invoke_hook,
-    clear_pre_invoke_hooks,
-    unregister_flow,
-    aexecute_compose_flow,
-)
+_COMPOSE_EXPORTS = frozenset({
+    "FLOW_REGISTRY", "PRE_INVOKE_HOOKS", "execute_compose_flow", "list_registered_flows",
+    "register_flow", "register_pre_invoke_hook", "clear_pre_invoke_hooks", "unregister_flow",
+    "aexecute_compose_flow",
+})
+
+
+def __getattr__(name: str):
+    """Avoid compiling every flow when a lightweight runner submodule is imported."""
+    if name not in _COMPOSE_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from . import compose_executor
+    return getattr(compose_executor, name)
 
 __all__ = [
     # Day 1

@@ -189,7 +189,7 @@ def test_shared_memory_is_live_across_actors_and_rejects_scope_overrides(gateway
             live = mcp_server._search_memory_execute(mcp_server.SearchMemoryArgs(query="newsharedword"), second["session"])
             assert len(live["hits"]) == 1
             gateway.logout(second["token"])
-            with pytest.raises(PermissionError):
+            with pytest.raises(PermissionError, match="AUTHENTICATION_REQUIRED"):
                 mcp_server._search_memory_execute(mcp_server.SearchMemoryArgs(query="sharedword"), second["session"])
     finally:
         server.shutdown()
