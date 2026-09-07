@@ -25,7 +25,7 @@ python -m quantcode.roster /path/to/roster.xlsx \
 
 工作目录根是拟定的服务器研发目录，导入不会创建服务器账号/目录，不会修改 SSH authorized_keys，不会自动激活授权。每次导入要求新的输出目录，避免覆盖先前确认记录。
 
-本次 46 条提交按邮箱归并 39 个标识；生成 19 条公钥绑定候选，21 人存在待确认问题。19 是密钥绑定数，不是人数。分组未决 18 人；仅指纹 2 条；姓名冲突 1 人；不同身份共用公钥涉及 2 人。问题可重叠。
+本次 46 条提交按邮箱归并 39 个标识；历史候选文件保留原始 `REVIEW_REQUIRED` 结果。当前已激活 37 条组员绑定和 1 条本机 Lead/Admin 运维身份；张佳音为 `model + factor(Mining)`，杨欣琳为 `model + agent`，其余已确认的冲突归组已收敛。当前仍有 3 个身份案例待处理：张博睿、李卓缺完整公钥；叶易涵两条邮箱记录共用同一把 RSA 公钥。问题可重叠。
 
 ## 验证
 
@@ -42,9 +42,9 @@ python -m quantcode.roster /path/to/roster.xlsx \
 
 ## 尚需明确的组织配置
 
-1. 基建/AI Agent 等组和多组成员的业务组归属；不默认猜测“所有人进 factor”或“都是 Admin”。
+1. 3 个剩余身份案例的完整公钥/邮箱归并确认。
 2. 哪些 actor 是 approver/admin。人员表没有角色字段，不能推断。
-3. 同邮箱不同姓名、不同人员共用公钥、仅填指纹的纠正。
+3. 正式服务器 workspace 根及 SSH gateway 入口的运维核对。
 4. 实际研发服务器 workspace 根及 SSH gateway 入口。候选路径不是已部署路径。
 5. GitHub subject 与授权 token 的服务端绑定，不以邮箱代替用户名。
 
