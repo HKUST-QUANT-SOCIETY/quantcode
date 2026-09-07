@@ -234,20 +234,21 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 - 正式 roster 为 38 条公钥绑定、36 个 actor，包含 37 条组员绑定和 1 条 Lead/Admin 运维绑定。本地与 Server C 文件 SHA-256 完全一致。杨欣琳为 `model` 主组、`agent` 第二授权；张佳音为 `model` 主组、`factor`（Mining）第二授权，均为 analyst。登记完成不代表成员设备已登录验收。
 - Server C 的 `quantcode-gateway.service` 为 `active/running`，运行用户 `ubuntu`，启用 `NoNewPrivileges=yes`，仅监听 `127.0.0.1:4097`，最近检查 `NRestarts=0`。本机通过 SSH 隧道登录 Lead 会话成功。
 - 先复现再修复四个身份问题：challenge 组可被更改、多组会话混入另一组 Memory scope、移除第二组后原会话未撤销，以及 `PYTEST_CURRENT_TEST` 导致生产认证失败回退。补齐 Admin 跨组审核时的创建者会话校验，普通 approver 仍受同组限制。
-- Gateway 的三个身份模块已同步 Server C，原 roster/数据库保留，旧模块有备份。MCP 修复位于本仓库；Server C 完整 Agent/MCP 环境尚未部署。
+- Gateway 的身份模块和完整 Agent/MCP 运行时已同步 Server C，原 roster/数据库保留，旧模块有备份；当前 `/opt/quantcode/runtime/current` 指向 `db7e0c6`。
 - 网页组选项与真实退出已补齐：HTTP 接口只接受固定组枚举，宿主和 gateway 都重验 roster；退出失败保留凭据和重试入口，退出成功刷新为未认证，重新打开设置恢复当前身份。修复 SDK 抛出 HTTP 异常时把退出失败误报为主机不可达的问题。
 - Python **1,154 passed / 4 skipped**，Ruff 通过，QuantCode 组件 **127 passed / 403 assertions**，app/opencode 类型通过，网页生产构建通过（保留既有 chunk/sourcemap 警告），Dev Playwright **18 passed**。浏览器业务/身份响应使用 fixture；新增真实宿主 HTTP/CLI/临时 SSH agent/gateway/生产 MCP 联调另验证第二组、并发准入、退出撤销和 MCP 断连，既有宿主 HTTP 回归 7 项通过。
 - Server C 已部署 `/auth/identity` 授权组查询，更新前校验远端文件哈希并备份。独立本机预览 `4196/4544` 已读取正式 roster，并通过宿主登录接口完成真实 Lead 签名及 MCP session_id 一致性核验。该测试不代表多人远程运行环境已部署；旧 `4096/4444` 服务未重启。
 - Server C 完整 Python 依赖已按源码 `07eacd7` 与 `uv.lock` 冻结安装，共 114 包；运行目录由 root 管理。真实 systemd 沙箱 17 项预检通过，包含私有状态可写、源码不可写、Gateway 数据及其他隔离目录不可读、未认证 MCP 拒绝启动；DynamicUser 和实际研究 UID 两种运行方式均通过。另已为 36 个 actor 创建独立无 sudo 研究账号和 `0700` 个人目录，逐账号 216 项权限检查通过，重复执行开通脚本均返回 EXISTING；Lead 使用本机公钥成功 SSH 登录其新研究账号。新增开通计划 9 项回归后，全量 Python **1,163 passed / 4 skipped**。详情见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
+- 共享组 Memory 已在 Server C 建立权威目录并初始化 14 张能力卡；Gateway 查询不再依赖 LangGraph/LLM 执行依赖，管理员跨组查询必须写入仅含元数据的审计记录。Lead 经真实 SSH MCP 查询返回 7 条共享记录，路径仅返回逻辑相对路径，Runtime State 与 checkpoint/progress 不进入结果。最终远程运行时已切换到提交 `db7e0c6`，Gateway 保持 `active` 且 `NRestarts=0`。
 
 ### 仍阻塞的事项
 
-远程运行补充验收：源码 `272ab3b` 已安装到 Server C，36 个账号注册为 AVAILABLE_ON_DEMAND。Lead 本机签名会话经 SSH stdio 传递，远端校验 actor/UID/workspace 后由 systemd 用户服务运行；42 个工具发现、存活进程会话撤销拒绝、EOF 清理均通过。最终用户级启动方式的 17 项隔离检查通过，真实本地网页已通过宿主连接远程 MCP 并显示 Lead 的组和角色。全量 Python **1,177 passed / 4 skipped**。未把实际系统不支持的 BindPaths/PrivateDevices 属性当作生效隔离；采用 root 管理的每 UID 代码视图和私有状态目录，详见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
+远程运行补充验收：源码 `db7e0c6` 已安装到 Server C，36 个账号注册为 AVAILABLE_ON_DEMAND。Lead 本机签名会话经 SSH stdio 传递，远端校验 actor/UID/workspace 后由 systemd 用户服务运行；42 个工具发现、存活进程会话撤销拒绝、EOF 清理均通过。最终用户级启动方式的 17 项隔离检查通过，真实本地网页已通过宿主连接远程 MCP 并显示 Lead 的组和角色。共享 Memory 真实查询返回 7 条记录，逻辑路径和 Runtime State 排除检查通过；全量 Python **1,177 passed / 4 skipped**。未把实际系统不支持的 BindPaths/PrivateDevices 属性当作生效隔离；采用 root 管理的每 UID 代码视图和私有状态目录，详见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
 
 | 事项 | 实测状态与影响 | 下一步及责任边界 |
 |---|---|---|
 | 剩余人员 | 张博睿、李卓只有指纹而缺完整公钥；叶易涵有共用公钥/邮箱归并问题；这些记录未激活 | 成员补完整公钥；用户确认叶易涵对应记录是否同一人。只影响未激活身份，不阻止其他已审核成员接入 |
-| Server C 完整运行环境 | 依赖、36 个独立研究账号、个人目录与 SSH MCP 按需 systemd 运行已落地；Lead 身份、42 工具发现、撤销和清理及最终运行方式隔离检查通过 | 私有状态不能替代共享组 Memory、跨人审批和组织权威存储；正式模型与外部服务未配置 |
+| Server C 完整运行环境 | 依赖、36 个独立研究账号、个人目录、SSH MCP 按需 systemd 运行及 Gateway 权威共享 Memory 已落地；Lead 身份、共享查询、42 工具发现、撤销和清理及最终运行方式隔离检查通过 | 其他成员逐设备验收、跨人审批和组织权威服务仍未完成；正式模型与外部服务未配置 |
 | 成员本机签名 | 本机 OpenCode 宿主签名，短期会话经 SSH stdio 传到对应远程 MCP；私钥留本机且不转发 SSH agent | 其他成员逐设备配置 host/public key/agent 并验收；浏览器公共多租户登录不在当前证据内 |
 | GitHub/通知 | token 映射仅本机配置；Server C 未配置 broker，`--github-sync-interval 0`；系统通知仅有客户端实现证据 | 用户/组织管理员提供正式授权，工程完成服务端按身份映射与撤销、启用同步、验收客户端通知送达 |
 | Dream/Distill | worker 代码存在；Server C 为 `--dream-interval 0`，没有 QuantCode timer，未验证持续消费和重启恢复 | 工程落实证据数据目录与权限、参数、正式托管和恢复验收；配置定时器不等于完成蒸馏闭环 |
@@ -257,4 +258,4 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 
 量化组件 API、安装包、签名及跨平台发行属于用户明确暂缓事项，不计入本阶段阻塞。组件本地 checkout 路径和版本仍需核对；目录存在检查只证明目录存在，不证明 canonical 组件已接通。
 
-`scripts/verify_deployment_readiness.sh` 的 PASS 仅是配置/可达性预检：它接受未认证 `/session` 的 401，也不验证完整运行环境、有效成员会话、后台 worker 或生产执行。因此不能据此宣称生产可用。当前结论是 **roster 主体及身份 gateway 已落地，Server C 多人工作流和正式生产链仍未完成**。
+`scripts/verify_deployment_readiness.sh` 的 PASS 仅是配置/可达性预检：它接受未认证 `/session` 的 401，也不验证完整运行环境、有效成员会话、后台 worker 或生产执行。因此不能据此宣称生产可用。当前结论是 **roster 主体、身份 gateway、Server C 远程运行和共享 Memory 已落地，其他成员设备接入及正式生产链仍未完成**。

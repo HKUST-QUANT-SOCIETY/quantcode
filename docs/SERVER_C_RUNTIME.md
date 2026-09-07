@@ -1,12 +1,12 @@
 # Server C 研究运行环境
 
-本文件记录 2026-09-07 的实际部署。当前已完成 Python 运行依赖、独立研究账号、本机签名到远程 MCP 的会话传递、systemd 按需运行和隔离验收。共享组 Memory、后台 worker、正式 provider 和外部服务仍待接线，不代表全产品发布。
+本文件记录 2026-09-07 的实际部署。当前已完成 Python 运行依赖、独立研究账号、本机签名到远程 MCP 的会话传递、systemd 按需运行、隔离验收和 Gateway 权威共享组 Memory。后台 worker、正式 provider 和外部服务仍待接线，不代表全产品发布。
 
 ## 已落地状态
 
 | 项目 | 状态 |
 |---|---|
-| Python 源码基线 | `272ab3b1b12b488fec56833523c0eda6695f8f4b` |
+| Python 源码基线 | `db7e0c6cfa075abe4633d7e63d87c52c421cbf51` |
 | 运行目录 | `/opt/quantcode/runtime/current` 指向上述完整 commit 目录，root 所有；用户源码视图为 `users/<uid>` |
 | Python | 3.12.3，Linux x86_64 |
 | 依赖 | `uv.lock` 冻结安装，含 SSH extra，共 114 个包；`uv pip check` 通过 |
@@ -16,6 +16,7 @@
 | 账号注册表 | `/etc/quantcode/research-identities.json`，root 所有、`0600`；不提交仓库 |
 | SSH 身份 | 从已审核 roster 导入完整公钥；账号未设置可用密码，服务器禁用密码认证 |
 | 研究进程 | 注册表为 `AVAILABLE_ON_DEMAND`；SSH 连接按需创建 systemd 用户服务，断连清理，最长运行到身份会话过期，不自动重放任务 |
+| 共享 Memory | `/home/ubuntu/quantcode-gateway-data/shared-memory` 由 Gateway 权威持有；已初始化平台契约和 14 张能力卡；管理员跨组读取写入元数据审计，结果不暴露 Server C 绝对路径 |
 
 实际 SSH 公钥匹配显示，现有实名账号仅能对应 11 个 roster actor，且部分账号有服务器管理权限。因此本次按独立研究账号方案准备，不把现有账号的组权限继承到 Agent 进程。业务组和 Admin 权限继续由 Gateway 的 SessionContext 决定，Linux 账号不授予 QuantCode Admin 身份。
 
@@ -26,9 +27,9 @@
 只从已提交源码导出 Python runtime 所需文件；正式 roster、会话、GitHub/provider 凭据和 `.quantcode` 运行数据不进入归档。
 
 ```sh
-git archive --format=tar --output=/tmp/quantcode-runtime.tar 272ab3b1b12b488fec56833523c0eda6695f8f4b \
+git archive --format=tar --output=/tmp/quantcode-runtime.tar db7e0c6cfa075abe4633d7e63d87c52c421cbf51 \
   pyproject.toml uv.lock README.md LICENSE quantcode runner schemas tools flows configs .opencode dream \
-  scripts/verify_server_runtime.py scripts/install_remote_mcp.py ops/remote-mcp
+  scripts/verify_server_runtime.py scripts/install_remote_mcp.py scripts/initialize_shared_memory.py ops/remote-mcp
 ```
 
 在目标目录解包后，以独立工具环境中的 `uv 0.10.9` 安装：
@@ -40,7 +41,7 @@ uv pip check --python .venv/bin/python
 
 采用源码布局运行，避免当前 Python wheel 不包含配置、Skill 和 Dream 源文件的边界问题。完成安装后将运行目录交给 root 管理，并移除所有组/其他用户写权限；git archive 和 uv 目录可能保留 `0775`，部署脚本会明确拒绝。使用 copy 模式可避免修改运行目录属主时影响 uv 缓存中的硬链接。当前源码版本复用已锁定且由 root 管理的 `07eacd7` 依赖环境，两个版本的 `uv.lock` 哈希一致；新版本不能覆盖旧源码目录。
 
-服务器运行目录内的 `runtime-manifest.json` 保存源码 commit、归档/锁文件/入口脚本 SHA-256、解释器和完整包版本。当前归档 SHA-256 为 `db6a9ca53c21c33dc7d68c8c8479baa2c69c38e7472b09a80d912bd53047dadd`，锁文件 SHA-256 为 `59765736c83690f45030d9511f5bced5a4ae78f6772d5f7f0c4d8e1caafdbcd2`。
+服务器运行目录内的 `runtime-manifest.json` 保存源码 commit、归档/锁文件/入口脚本 SHA-256、解释器和完整包版本。当前 `db7e0c6` 归档 SHA-256 为 `4b44f0a6c5f5b435552952be491e948855bde22376eca1e12f98f7c930856d0b`；锁文件沿用已冻结的 `59765736c83690f45030d9511f5bced5a4ae78f6772d5f7f0c4d8e1caafdbcd2`。
 
 ## 远程 MCP 安装与连接
 
@@ -89,7 +90,7 @@ sudo python scripts/provision_research_accounts.py --roster /absolute/approved-r
 ## 后续接线
 
 1. 对其他成员设备逐人验收，补齐一键连接所需的 SSH host、公钥路径和本地 agent；当前 Lead 验收不代表全员已签入。
-2. 对共享组 Memory、跨人审批、组织历史和后台消费确定服务端权威存储；每人私有状态目录不能替代共享知识库。
+2. 完成跨人审批、组织历史和后台消费的服务端权威存储；共享 Memory 已落地，每人私有状态目录仍不能替代组织审批与历史。
 3. 配置正式 provider、GitHub broker、后台同步与 Dream；生产部署仍由 Admin 受控接口承接。
 
 安装包、签名和量化组件 API 继续按用户要求暂缓。
