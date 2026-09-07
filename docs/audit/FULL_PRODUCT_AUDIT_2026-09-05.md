@@ -240,6 +240,7 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 - Server C 已部署 `/auth/identity` 授权组查询，更新前校验远端文件哈希并备份。独立本机预览 `4196/4544` 已读取正式 roster，并通过宿主登录接口完成真实 Lead 签名及 MCP session_id 一致性核验。该测试不代表多人远程运行环境已部署；旧 `4096/4444` 服务未重启。
 - Server C 完整 Python 依赖已按源码 `07eacd7` 与 `uv.lock` 冻结安装，共 114 包；运行目录由 root 管理。真实 systemd 沙箱 17 项预检通过，包含私有状态可写、源码不可写、Gateway 数据及其他隔离目录不可读、未认证 MCP 拒绝启动；DynamicUser 和实际研究 UID 两种运行方式均通过。另已为 36 个 actor 创建独立无 sudo 研究账号和 `0700` 个人目录，逐账号 216 项权限检查通过，重复执行开通脚本均返回 EXISTING；Lead 使用本机公钥成功 SSH 登录其新研究账号。新增开通计划 9 项回归后，全量 Python **1,163 passed / 4 skipped**。详情见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
 - 共享组 Memory 已在 Server C 建立权威目录并初始化 14 张能力卡；Gateway 查询不再依赖 LangGraph/LLM 执行依赖，管理员跨组查询必须写入仅含元数据的审计记录。Lead 经真实 SSH MCP 查询返回 7 条共享记录，路径仅返回逻辑相对路径，Runtime State 与 checkpoint/progress 不进入结果。最终远程运行时已切换到提交 `db7e0c6`，Gateway 保持 `active` 且 `NRestarts=0`。
+- 2026-09-07 UI 复核完成：真实网页覆盖 9 个保留导航视图和设置/登录，执行记录、HumanGate、Memory、能力目录均使用完整工作区布局；桌面/手机视口 QuantCode Playwright **21 passed**。真实 Lead 登录显示账号、`agent` 组、`admin` 角色、工作目录和指纹；Memory 查询真实返回 7 条共享记录；能力目录真实返回 14 张能力卡。因子评估/PIT 估值已从全局导航移除，改由任务结果和组件 artifact 承载，符合顶层设计的业务边界。
 
 ### 仍阻塞的事项
 
@@ -255,6 +256,20 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 | 长期模型配置 | 早先临时 Qwen 凭据仅用于限时联调，不能作为常驻服务配置 | 用户提供正式 provider 接入/授权，工程配置并执行真实请求回归；不复用已过期临时凭据 |
 | Admin 生产执行 | 有暂存/取消及可选提交 adapter，生产队列、服务账号、结果状态和回滚没有完成闭环 | 生产负责人提供受控接口及服务凭据，工程接入 Admin 管理面；普通研究 Agent 不获得生产账号或 shell |
 | 可复现发布 | 本轮身份修复、回归测试和验收台账纳入同一提交；尚无覆盖完整 Server C 运行环境、配置模板和验收证据的 release tag | 工程完成部署清单及全链验收后再形成 release；不把身份 gateway 更新当作全产品发布 |
+
+### 2026-09-07 UI 与安装包复核
+
+| 检查项 | 证据 | 结论 |
+|---|---|---|
+| UI 功能导航 | 真实 `4544` 浏览器覆盖新建研究、执行记录、HumanGate、Memory、能力目录、方案、Admin、GitGraph、设置/登录 | 通过；PIT/因子不再作为全局业务页面 |
+| UI 响应式 | 900/1440 与 390/844 视口 Playwright；工作区无横向溢出，Memory/能力目录/执行记录可滚动 | 通过 |
+| 身份 UI | 真实 SSH agent + Gateway 登录；显示 `chenyuanheng / agent / admin`、个人工作目录和指纹；会话失效清除私有视图 | 通过 |
+| Memory UI | 真实 Server C 查询返回 7 条记录；逻辑路径、组标签、摘要和相关度条可见 | 通过 |
+| 能力目录 UI | 真实渲染 14 张能力卡；接入状态筛选、搜索、契约折叠、属组和复用提示可用 | 通过 |
+| Python/前端回归 | Python `1181 passed, 4 skipped`；QuantCode 组件 `127 passed`；App 单元 `633 passed`；浏览器单元 `17 passed`；桌面脚本 `34 passed`；Ruff、类型检查、产品审计通过 | 通过 |
+| macOS 安装包 QA | `quantcode-1.17.11-mac-arm64.dmg`、ZIP 与 blockmap 已生成；DMG 可挂载；Bundle ID `org.hkust.quantcode`；packaged Electron/sidecar smoke 通过 | unsigned QA 包通过 |
+
+当前安装包仍不是正式外发版本：本机没有 Developer ID 证书，未执行 macOS 签名/公证；Windows/Linux 需要 GitHub Actions 对应 runner 构建。正式发布仍需签名、公证、跨平台产物、release manifest 和环境审批。
 
 量化组件 API、安装包、签名及跨平台发行属于用户明确暂缓事项，不计入本阶段阻塞。组件本地 checkout 路径和版本仍需核对；目录存在检查只证明目录存在，不证明 canonical 组件已接通。
 
