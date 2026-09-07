@@ -1,0 +1,3 @@
+#!/bin/sh
+# Installed at /opt/quantcode/ops/remote-mcp; all code is root-owned.
+exec /opt/quantcode/runtime/current/.venv/bin/python -I -c 'import sys; sys.path.insert(0, "/opt/quantcode/runtime/current"); from quantcode.remote_mcp import main; raise SystemExit(main())'
