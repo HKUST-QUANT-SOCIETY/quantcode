@@ -201,14 +201,24 @@ def handler(gateway: IdentityGateway):
 
 def main():
     parser = argparse.ArgumentParser()
+    from runner.config_loader import read_yaml
+    dream_defaults = read_yaml("dream_consumer")
     parser.add_argument("--roster", type=Path, required=True)
     parser.add_argument("--database", type=Path, default=Path(".quantcode/identity-gateway.db"))
     parser.add_argument("--port", type=int, default=4097)
     parser.add_argument("--github-sync-interval", type=int, default=60,
                         help="Seconds between GitHub sync cycles; 0 disables the worker, otherwise at least 60")
+    parser.add_argument("--dream-interval", type=int, default=int(dream_defaults.get("interval_seconds", 300)),
+                        help="Seconds between Dream/Distill cycles; 0 disables the worker")
+    parser.add_argument("--dream-min-occurrences", type=int, default=int(dream_defaults.get("min_occurrences", 3)),
+                        help="Successful repetitions required before a distill candidate is emitted")
     args = parser.parse_args()
     if args.github_sync_interval != 0 and args.github_sync_interval < 60:
         parser.error("GitHub sync interval must be 0 or at least 60 seconds")
+    if args.dream_interval != 0 and args.dream_interval < 60:
+        parser.error("Dream interval must be 0 or at least 60 seconds")
+    if args.dream_min_occurrences < 1:
+        parser.error("Dream min occurrences must be at least 1")
     gateway = IdentityGateway(roster=args.roster, database=args.database)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(gateway))
     stop = threading.Event()
@@ -216,6 +226,15 @@ def main():
         from runner.github_worker import serve
         threading.Thread(target=serve, args=(gateway, stop, args.github_sync_interval),
                          name="quantcode-github-sync", daemon=True).start()
+    if args.dream_interval:
+        from runner.dream_worker import serve as serve_dream
+        threading.Thread(
+            target=serve_dream,
+            args=(stop,),
+            kwargs={"interval": args.dream_interval, "min_occurrences": args.dream_min_occurrences},
+            name="quantcode-dream-consumer",
+            daemon=True,
+        ).start()
     try:
         server.serve_forever()
     finally:

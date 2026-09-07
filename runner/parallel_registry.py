@@ -20,7 +20,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import CHECKPOINTS_DB, make_thread_id

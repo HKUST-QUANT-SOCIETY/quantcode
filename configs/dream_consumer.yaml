@@ -1,0 +1,4 @@
+# Background knowledge distillation defaults. Promotion remains manual.
+interval_seconds: 300
+min_occurrences: 3
+with_judge: false

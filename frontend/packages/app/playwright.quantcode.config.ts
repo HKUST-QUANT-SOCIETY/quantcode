@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4444"
+
 export default defineConfig({
   testDir: "./e2e/quantcode",
   outputDir: "./e2e/test-results/quantcode",
@@ -8,14 +10,14 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"], ["html", { outputFolder: "e2e/quantcode-report", open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:4444",
+    baseURL,
     ...devices["Desktop Chrome"],
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  webServer: {
+  webServer: process.env.PLAYWRIGHT_EXTERNAL_SERVER === "1" ? undefined : {
     command: "bun run --cwd ../.. dev:quantcode",
-    url: "http://127.0.0.1:4444",
+    url: baseURL,
     reuseExistingServer: true,
     timeout: 120_000,
   },

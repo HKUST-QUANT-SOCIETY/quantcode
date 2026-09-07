@@ -22,18 +22,23 @@ if (mode !== "web" && mode !== "desktop") {
   process.exit(2)
 }
 
+const backendPort = process.env.QUANTCODE_BACKEND_PORT ?? "4096"
+const appPort = process.env.QUANTCODE_APP_PORT ?? "4444"
+
 const commands =
   mode === "desktop"
     ? [["bun", "run", "--cwd", "packages/desktop", "dev"]]
     : [
-        ["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts", "serve", "--port", "4096"],
-        ["bun", "run", "--cwd", "packages/app", "dev", "--host", "127.0.0.1", "--port", "4444"],
+        ["bun", "run", "--cwd", "packages/opencode", "--conditions=browser", "src/index.ts", "serve", "--port", backendPort],
+        ["bun", "run", "--cwd", "packages/app", "dev", "--host", "127.0.0.1", "--port", appPort],
       ]
 
 const processes = commands.map((command) =>
   Bun.spawn(command, {
     cwd: root,
-    env,
+    env: command.includes("packages/app")
+      ? { ...env, VITE_OPENCODE_SERVER_HOST: "127.0.0.1", VITE_OPENCODE_SERVER_PORT: backendPort }
+      : env,
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",

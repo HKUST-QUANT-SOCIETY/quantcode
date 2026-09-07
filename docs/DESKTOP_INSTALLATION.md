@@ -2,7 +2,7 @@
 
 QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 自己的产品身份、界面和发布通道。普通组员安装正式包后不需要安装 Bun、Node.js 或完整 OpenCode 源码。
 
-> 当前状态（2026-08-24）：[GitHub Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981) 已通过 macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 四目标构建、packaged launch smoke 和最终 release bundle 校验；Linux 产物包括 AppImage、DEB、RPM。它们均为 unsigned 测试 artifact，正式 Release 尚未发布。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing，以及私有 Release 仓库的自动更新访问方案。当前测试包不能当作正式安装包外发。Linux ARM64 尚未纳入正式矩阵。
+> 当前状态（2026-09-06）：本机已用当前单仓库构建并生成 macOS Apple Silicon unsigned DMG/ZIP，产物结构、QuantCode app id、URL scheme、app.asar 和 SHA-256 已检查；本机没有 Developer ID，因此产物为 ad-hoc/unsigned，只能用于内部 QA。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing、跨平台 CI packaged smoke，以及私有 Release 仓库的发布审批。Linux ARM64 尚未纳入正式矩阵。
 
 正式安装包完成验收后将发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行矩阵覆盖 macOS、Windows 和 Linux x64：
 
@@ -17,7 +17,15 @@ QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 
 
 ## 源码与构建入口
 
-前端、Electron 桌面壳和后端现统一在 quantcode 仓库。源码位于 `frontend/packages/app`、`frontend/packages/desktop`；根目录提供 `bun run dev:quantcode`、`bun run dev:desktop` 与 `bun run package:desktop`。构建工作流在本仓库 `.github/workflows/quantcode-desktop.yml`，仅手动触发；当前不执行 Mac/Windows 安装包验收。迁移指南见 [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md)。
+前端、Electron 桌面壳和后端现统一在 quantcode 仓库。源码位于 `frontend/packages/app`、`frontend/packages/desktop`；根目录提供 `bun run dev:quantcode`、`bun run dev:desktop` 与 `bun run package:desktop`。构建工作流在本仓库 `.github/workflows/quantcode-desktop.yml`，仅手动触发。当前本机已验收 macOS arm64 unsigned 包，Windows/Linux 和正式签名包仍由 CI 与发布环境负责。
+
+正式部署前运行：
+
+```bash
+bun run check:deployment
+```
+
+这个门禁要求正式 roster、Python/MCP、SSH 公钥、身份会话文件和 gateway 都已配置，并检查安装包产物。正式 roster 默认读取 `.opencode/authorized_groups.yaml`；部署在受控私有目录时可设置 `QUANTCODE_ROSTER_FILE=/absolute/path/to/approved-roster.yaml`。开发环境可继续使用 `./scripts/start-quantcode.sh --check`，它只验证本地开发依赖，不宣称生产身份已就绪。
 
 ## 安装前准备
 
@@ -27,7 +35,7 @@ QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 
 2. 已登记公钥对应的 SSH 私钥；私钥只保存在成员设备上，不提交到 Git，也不上传到 QuantCode Release。
 3. 如需直接调用模型，按组内规范准备对应 API 凭据。
 
-QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会在每次启动时重新创建 Python virtual environment，也不会重复安装 OpenCode。研究任务所需的集中式运行环境由 Server B 维护。
+QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会在每次启动时重新创建 Python virtual environment，也不会重复安装 OpenCode。当前安装包不会内置 QuantCode Python MCP、成员私钥或 GitHub token；研究任务所需的 QuantCode 编排和身份环境由已配置的 Server B/gateway 维护。
 
 ## macOS
 
@@ -80,8 +88,8 @@ macOS/Windows 升级代码已配置为每十分钟检查一次 QuantCode GitHub 
 只有参与桌面端开发的人才需要 Bun 和 OpenCode fork：
 
 ```bash
-git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
-cd opencode
+git clone https://github.com/HKUST-QUANT-SOCIETY/quantcode.git
+cd quantcode
 bun install
 bun run dev:desktop
 ```

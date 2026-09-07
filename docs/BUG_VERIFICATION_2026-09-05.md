@@ -1,9 +1,8 @@
 # QuantCode 测试问题核验记录
 
 > 核验日期：2026-09-05
-> 当前后端仓库：`/Users/hendrixchen/Desktop/私募/QUANTcode`
-> 外部 UI 仓库：`/Users/hendrixchen/Desktop/私募/opencode-lens`
-> 本文只记录核验结论，不把附件中的描述当作实现指令。
+> 当前单仓库：QuantCode 仓库；前端位于 `frontend/`。
+> 本文为问题核验记录；最新状态以 [FULL_PRODUCT_AUDIT_2026-09-05.md](audit/FULL_PRODUCT_AUDIT_2026-09-05.md) 和 [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md) 为准。
 
 ## 1. 核验范围与结论
 
@@ -14,7 +13,7 @@
 3. `report-quantcode-desktop.md`：2026-09-03 Desktop 四层 QA；
 4. `QuantCode v0.2.1 产品探索报告 — Jerry（可读版）.html`：2026-09-03 Desktop 探索记录。
 
-附件中的后端结论不能直接代表当前状态：当前后端已经迁移到 v5，风险越限、预算、循环和部署的语义均有收窄；UI 代码则位于独立的 `opencode-lens` 仓库，不能只用后端 pytest 代替 UI 验收。
+当前实现已统一到 v5 契约：风险越限、预算、循环和部署不会扩大普通 HumanGate；UI 和后端位于同一仓库，分别通过组件、类型和 Headless 验收。
 
 当前核验结果：
 
@@ -65,7 +64,7 @@
 | `check_factor_gate` 缺失 | **已过时/改名** | 当前由 `validate_factor_contract` + acceptance 契约承担，不再保留旧 Gate 名称。 |
 | P-09 必须走普通 HumanGate resume | **不是当前 v5 契约** | v5 将部署移到 Admin management plane；`submit_deploy()` 只返回 `STAGING` 并要求 Admin/evidence。普通 Catalog 不注册部署工具。真实生产队列仍未接入，但不是“普通 Agent resume 失败”。 |
 | pit-screen 首次范围条静态定位 | **已修复** | `pit-screen.tsx:180` 在有 FCF 时同步调用 `paint(compute())`；UI pit 测试通过。 |
-| README/旧测试数量不一致 | **已修复（当前主仓）** | README、TEST_GUIDE 和 v5 审计已更新为当前 `1060 passed, 4 skipped`；附件中的 1021/1026 属旧提交或旧环境结果。 |
+| README/测试数量不一致 | **已修复** | README、测试台账和 v5 审计统一为当前 `1142 passed, 4 skipped`；真实 LLM 测试仍需显式凭据。 |
 
 ## 4. 无法在当前环境确认的事项
 
@@ -101,21 +100,21 @@
 PYTHONPATH=. pytest -q tests/spec_v5 tests/test_solution_workflow.py tests/test_mcp_server.py \
   tests/test_admin_scope.py tests/test_factor_tools.py tests/test_market_tools.py \
   tests/test_config_loading.py tests/test_evidence_chain.py
-135 passed, 1 warning
+135 passed
 
 PYTHONPATH=. pytest -q tests/test_risk_github_e2e.py tests/test_admin_scope.py \
   tests/test_factor_tools.py tests/test_solution_workflow.py tests/test_market_tools.py \
   tests/test_config_loading.py tests/test_agent_truncate_node.py
-98 passed, 1 warning
+98 passed
 ```
 
-此前 v5 全量回归：`987 passed, 4 skipped, 1 warning`；本轮最新全量回归：`1060 passed, 4 skipped, 1 warning`。跳过项均为需要显式真实 LLM 凭据的测试。
+当前单仓库全量回归：`1142 passed, 4 skipped`。跳过项均为需要显式真实 LLM 凭据的测试。
 
-当前 `.venv/bin/ruff check --exclude build .` 仍报告 `172 errors`，其中 `99` 项可自动修复；这与附件报告的 336 项不同，但说明 Ruff/Black 规范债仍未清零。此次没有批量格式化，避免把无关测试和历史兼容代码大面积改写。
+当前 `uv run ruff check .` 通过，当前运行时、工具、脚本和测试的 Ruff 规范债已清零。`docs/archive/` 作为冻结快照不参与当前 lint。
 
 ### UI
 
-在 `/Users/hendrixchen/Desktop/私募/opencode-lens/packages/app` 执行：
+在 `frontend/packages/app` 执行：
 
 ```text
 bun test --preload ./happydom.ts ./src/components/quantcode
@@ -145,7 +144,7 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 - Lens 普通会话删除 `/deploy` 命令；Compose 前缀不再携带可伪造的 group 参数。OpenCode 只读 API 的工具名集合去除重复声明。
 - 四份顶层文档新增一致的 F/P 状态台账和外部待验边界；本台账仍不把真实 SSH gateway、ReturnsDataset 或生产部署队列视为完成。
 
-本轮已修改后端与外部 `opencode-lens` UI，并为已修复项补充回归测试；未把外部服务依赖（SSH gateway、ReturnsDataset、生产队列）伪装成完成。
+本轮已在单仓库同时复核后端与 `frontend/` UI；未把外部服务依赖（SSH gateway、ReturnsDataset、生产队列）伪装成完成。
 
 ## 9. 本轮追加核验（2026-09-05）
 
@@ -162,4 +161,4 @@ UI 单测通过证明组件当前输入下可渲染，不等于真实 MCP、SSH�
 | Agent 正常最终回答状态、工具错误链不完整 | **已修复** | 无 tool-call 的最终 AIMessage 返回 `completed`；run/stream 均回写 status，工具失败内容累计到 `errors`。 |
 | Admin GitHub repo/package 查询权限描述不一致 | **不是实现缺陷** | 当前 v5 明确定义 org/package 元数据为全员只读发现面；GitHub token 仍按用户 ctx 或 Admin 中心 token 规则解析，缺失时返回 `UNAVAILABLE`。 |
 
-追加回归后后端全量为 `1060 passed, 4 skipped, 1 warning`。仍未验证真实 Windows 文件锁、Desktop E2E、SSH gateway、canonical ReturnsDataset 和生产部署队列。
+追加回归后后端全量为 `1142 passed, 4 skipped`。仍未验证真实 Windows 文件锁、真实 SSH gateway、canonical ReturnsDataset 和生产部署队列。

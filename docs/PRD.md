@@ -6,7 +6,7 @@
 > **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
-> **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD 与 Day1-5 任务表是历史材料；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。
+> **唯一功能基线**：[FUNCTIONAL_SPEC.md](../specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。归档内容不作为当前行为或验收依据。
 
 > **2026-09-05 实现核验摘要**：`session_context` 是组/角色唯一来源；普通 UI 不提供自由切组、私钥文本输入或 `/deploy` 命令；Memory 通过只读 `search_memory` 接入，空库和未连接明确返回状态。PR、实验和领域数据输入统一经过仓库路径边界校验，生产拒绝仓库外路径。P-07 已有候选评审审计，生产运行时 strict reuse 默认启用，消费脚本支持定时消费；生产 timer 启用、真实 SSH gateway、ReturnsDataset/生产部署队列仍未完成，见 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md`。
 
@@ -124,9 +124,9 @@ Admin 以自然语言询问组织状态，例如：
 
 固定面板仍保留，用于快速浏览；语义查询用于跨资源组合和解释。所有跨组查询和审批均需可追踪。
 
-### 3.5 六组 Compose 配置
+### 3.5 八组 Compose 配置
 
-六个组共享 OpenCode 的桌面、session、工具调用和状态流，也共享 MimoCode 的 Compose ReAct、Memory、Task、Checkpoint、Subagent、Goal/Judge、Dream/Distill 语义。每个组只通过登录会话、Skill、Memory scope 和当前生效工具目录获得差异。
+八个组共享 OpenCode 的桌面、session、工具调用和状态流，也共享 MimoCode 的 Compose ReAct、Memory、Task、Checkpoint、Subagent、Goal/Judge、Dream/Distill 语义。六个领域组保持各自的业务 Compose 流，`infra` 和 `agent` 组承载工程与平台任务。每个组只通过登录会话、Skill、Memory scope 和当前生效工具目录获得差异。
 
 | 流 | 主要步骤 | QuantCode 保留内容 | 业务边界 |
 |---|---|---|---|
@@ -197,7 +197,7 @@ AlphaProbe、CogAlpha、FactorMiner、Factor Research DB、Sentinel、PaperRAG�
 - 组身份、角色和权限边界；
 - Skill、能力目录和组内 Memory；
 - Agent 任务编排、上下文注入、Checkpoint、trace、回放和错误记录；
-- 组件发现、调用、契约检查和适配；
+- 组件发现、调用、契约检查和适配；当前量化组件按组员本地 checkout + Agent 预学习运行，服务 API 上线后再接入；
 - 方案先行工作流；
 - Admin 中枢、GitGraph、Pop 和运行治理；
 - Admin 专属生产部署黑盒入口和部署审计；
@@ -261,7 +261,7 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 
 ### 8.1 近期
 
-- 六个组都能完成登录、组绑定和组内 Memory 访问；
+- 八个组都能完成登录、组绑定和组内 Memory 访问；
 - Agent 在典型任务中优先命中 canonical 组件；
 - 目标收益和关键数据契约不再被业务仓重复计算；
 - 复杂开发任务能留下方案、实现和一致性证据；
@@ -280,10 +280,10 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 
 | 里程碑 | 达成标准 |
 |---|---|
-| M1 地基 | OpenCode/MimoCode 底座接入；ComposeTask、BlackboardState、HumanGate 和领域 Schema 完成评审；六组 Skill 可加载；AgentRunner 可运行 |
+| M1 地基 | OpenCode/MimoCode 底座接入；ComposeTask、BlackboardState、HumanGate 和领域 Schema 完成评审；八组 Skill 可加载；AgentRunner 可运行 |
 | M2 端到端 | 至少一条研究链完成任务、组件调用、artifact、trace、Memory 和回放；GitHub Actions 风控基建保持可运行 |
 | M3 横向接入 | 因子、模型、风控、基本面至少三组使用同一运行时；跨组 handoff、数据契约和权限审计可验证 |
-| M4 组织闭环 | 六组登录和组内 Memory 可用；Admin 查询、GitGraph、Pop、能力目录和错误聚合进入日常工作台 |
+| M4 组织闭环 | 八组登录和组内 Memory 可用；Admin 查询、GitGraph、Pop、能力目录和错误聚合进入日常工作台 |
 | M5 生产交接 | Admin 管理面通过生产服务账号完成受控部署；部署结果、artifact、版本和证据可回放；普通研究 Agent 无生产 shell |
 
 运行质量要求：一次因子评估（CSI 1000、三年回溯）目标 P95 小于 30 秒；PIT 检索目标 P95 小于 500 毫秒；研报 PDF 目标小于 5 分钟；Admin 跨组查询目标 P95 小于 15 秒；方案首轮输出目标小于 5 分钟。指标必须标注环境、数据规模、观察时间和降级状态。

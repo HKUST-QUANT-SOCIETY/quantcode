@@ -10,7 +10,7 @@
 > **上位文档**：specs/FUNCTIONAL_SPEC.md 定义功能契约，docs/PRD.md 定义产品目标，docs/UI_DESIGN_SPEC.md 定义桌面端体验。
 > **修订原则**：本版本保留原有 Agent 基础能力和工程设计，并把 OpenCode/MimoCode 的原生能力明确列为底座；只根据组长会议修正运营模式、职责边界和权限语义。不得把“领域产品不由 QuantCode 负责”误读为“QuantCode 删除 Agent 和 Compose 基础设施”。
 
-> **2026-09-05 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；PR、实验、期权数据和 PIT fixture 经过统一路径 containment 校验，生产拒绝仓库外输入；普通桌面会话不注册 `/deploy`，也不接受私钥文本。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
+> **2026-09-07 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；PR、实验、期权数据和 PIT fixture 经过统一路径 containment 校验，生产拒绝仓库外输入；普通桌面会话不注册 `/deploy`，也不接受私钥文本。量化组件当前采用“组员本地 checkout + Agent 预学习能力卡/README”的模式，QuantCode 不把本地 fixture 当作生产组件；组件 API 发布后再同步适配器。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
 
 ---
 
@@ -70,7 +70,7 @@ Idea → 任务/模式识别 → 组内能力发现 → 主线匹配 → 动态 
 - UI 统一，不为每个组复制一套前端；
 - 六个业务组保留各自的 Compose 配置、Skill 和组级 Memory；工具集合由维护员后端的注册表动态生成；
 - 组身份由登录会话决定，不由任务文本、普通参数或 UI 下拉框任意改写；
-- 第一阶段可以让六组共用同一套研究/开发工具集合，后端保留按组或角色增加覆盖规则的兼容位；
+- 八组共用同一套研究/开发工具集合，后端保留按组或角色增加覆盖规则的兼容位；
 - 工具和 Flow 只能由维护员后端注册、审核和发布，用户、前端和 Agent 不得动态注册能力；
 - 跨组协作通过 Blackboard、公共契约、授权摘要和通知完成，不把会话临时切换成另一个组。
 
@@ -113,7 +113,7 @@ QuantCode 运行在 OpenCode 控制平面之上，吸收 MimoCode 已验证的�
 |---|---|---|---|
 | 交互与会话 | Desktop/TUI、会话、消息流、模型/Provider 配置、文件和 Shell 工作区、会话历史 | 通用命令和工作流入口的 Markdown 组织方式 | SSH 身份登录后的组页面、QuantCode 任务入口、统一量化工作区 |
 | 工具与扩展 | MCP 客户端/服务端、工具调用、工具结果回流、插件/Provider 接入 | 工具编排和能力发现的组织方式 | 动态 Tool Catalog、组上下文、组件能力卡、量化适配器和契约检查 |
-| 工作流 | 会话内连续 Agent 执行、命令和上下文管理 | `brainstorm/plan/execute/tdd/review/debug/feedback/report/parallel/subagent` 等 Compose Skill 形态 | 六组 Skill、ComposeTask、L0-L3 方案先行、主线匹配和跨组 handoff |
+| 工作流 | 会话内连续 Agent 执行、命令和上下文管理 | `brainstorm/plan/execute/tdd/review/debug/feedback/report/parallel/subagent` 等 Compose Skill 形态 | 八组 Skill、ComposeTask、L0-L3 方案先行、主线匹配和跨组 handoff |
 | 状态与长任务 | 会话历史、可恢复的执行上下文 | Memory FTS/BM25、reconcile、checkpoint/replay、任务树、Subagent、Goal/Judge、Dream/Distill | 组级共享 Memory、Blackboard 公共契约、量化 artifact/evidence、按 actor/group 的可见性 |
 | 安全与治理 | OpenCode 的本地工作区、Provider 和 MCP 边界 | 通用权限提示与工作流纪律参考 | SSH roster 自动绑定、动态工具集合、GitHub 权限映射、Admin 中枢、GitGraph/Pop、Admin-only `/deploy` |
 
@@ -150,8 +150,8 @@ MimoCode 的价值主要体现在可移植的 Compose 工作流和 Memory 设计
 
 | MimoCode 能力 | 保留内容 | QuantCode 实现/边界 |
 |---|---|---|
-| Compose ReAct | `while` 式 thought → tool → observation → next thought 循环，不把流程硬编码成固定 DAG | `AgentRunner`/LangGraph；六组共用循环，组差异来自 session、Skill、Memory 和工具目录 |
-| 通用 Compose Skill | `brainstorm`、`plan`、`execute`、`tdd`、`review`、`debug`、`feedback`、`report`、`parallel`、`subagent`、`worktree`、`verify`、`ask`、`new-skill`、`merge` | 以 `.opencode/meta-skills/*/SKILL.md` 形式加载；QuantCode 再叠加六组 Skill 和量化契约 |
+| Compose ReAct | `while` 式 thought → tool → observation → next thought 循环，不把流程硬编码成固定 DAG | `AgentRunner`/LangGraph；八组共用循环，组差异来自 session、Skill、Memory 和工具目录 |
+| 通用 Compose Skill | `brainstorm`、`plan`、`execute`、`tdd`、`review`、`debug`、`feedback`、`report`、`parallel`、`subagent`、`worktree`、`verify`、`ask`、`new-skill`、`merge` | 以 `.opencode/meta-skills/*/SKILL.md` 形式加载；QuantCode 再叠加八组 Skill 和量化契约 |
 | Memory | Markdown 文件作为事实载体，SQLite FTS5/BM25 作为检索索引，磁盘与索引 reconcile | `runner/memory`；增加 `groups` 组内隔离和 `tasks` 任务进度，具体 ACL 由 QuantCode session 决定 |
 | Context 维护 | 长上下文裁剪、摘要、最近消息保留和可继续执行 | `truncate`、`rebuild_context`、checkpoint；重建后必须重新校验当前身份和工具权限 |
 | Task/子任务 | 将复杂请求拆成有边界的任务，保留父子关系和状态 | `ComposeTask`、Subagent、任务 progress；子任务继承 actor/group/workspace 和预算 |
@@ -185,7 +185,7 @@ QuantCode 保留原有语言和职责边界：TypeScript 控制平面负责接�
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ 控制平面 Control Plane                                            │
-│ OpenCode / opencode-lens（TypeScript + Electron/SolidJS）         │
+│ QuantCode frontend（TypeScript + Electron/SolidJS）              │
 │                                                                  │
 │ OpenCode 原生 Desktop/TUI、会话、消息流、Provider、MCP 客户端   │
 │ 本地 SSH 身份界面、自动组/角色展示、任务输入、Activity          │
@@ -277,7 +277,7 @@ HumanGate 是底座提供的 interrupt/resume 机制。QuantCode 当前把它用
 
 ### 3.3 Compose 流与三种执行模式
 
-Compose 是 QuantCode 的编排核心。六个组共享 OpenCode/MimoCode 的 Agent 交互底座和同一个 ReAct 循环；组内差异先由 Skill、Memory 和任务上下文表达，工具集合由维护员后端动态生成。
+Compose 是 QuantCode 的编排核心。八个组共享 OpenCode/MimoCode 的 Agent 交互底座和同一个 ReAct 循环；六个领域组保持业务 Compose 流，`infra` 和 `agent` 组承载工程与平台任务，工具集合由维护员后端动态生成。
 
 控制平面入口：
 
@@ -303,7 +303,7 @@ compose  → 按组加载工作流配置，由 Agent 自主编排多个 skill/to
 每次 tools/call 再按 session 和资源策略校验
 ```
 
-第一阶段允许六组共用同一套研究/开发工具集合，以降低初期权限配置成本；以后出现数据、仓库或写操作权限需求，再由维护员增加 group/role/resource mask。Admin 工具和生产部署工具始终是独立管理面，不因“共用工具集合”而暴露给普通研究 Agent。
+八组共用同一套研究/开发工具集合，以降低权限配置成本；出现数据、仓库或写操作权限需求时，由维护员增加 group/role/resource mask。Admin 工具和生产部署工具始终是独立管理面，不因“共用工具集合”而暴露给普通研究 Agent。
 
 ### 3.4 仓库结构与职责落位
 
@@ -347,7 +347,7 @@ quantcode/
 └── docs/                           # 顶层、领域和运维文档
 ```
 
-控制平面位于独立的 HKUST-QUANT-SOCIETY/opencode fork；本仓库通过 MCP 和契约接入，不把 TypeScript UI 逻辑当作领域真相。
+控制平面位于当前 `HKUST-QUANT-SOCIETY/quantcode` 仓库的 `frontend/` 工作区；通过 MCP 和契约接入，不把 TypeScript UI 逻辑当作领域真相。
 
 ---
 
@@ -404,7 +404,7 @@ side_effect / idempotency metadata
 source / version / capability card reference
 ```
 
-ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；服务端 session、外部 API 和资源层再次校验权限。第一阶段默认提供六组共用的研究/开发工具集合，静态 `tool_allowlist.yaml` 作为维护员配置的兼容覆盖，用户不能修改权限。_meta 工具用于能力目录、Memory、运行状态和诊断；Admin 工具与生产部署工具使用独立管理面，不进入普通 Agent 工具集合。
+ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；服务端 session、外部 API 和资源层再次校验权限。八组共用的研究/开发工具集合，静态 `tool_allowlist.yaml` 作为维护员配置的兼容覆盖，用户不能修改权限。_meta 工具用于能力目录、Memory、运行状态和诊断；Admin 工具与生产部署工具使用独立管理面，不进入普通 Agent 工具集合。
 
 工具目录的生命周期由维护员后端负责：注册 → schema/副作用审查 → 发布版本 → 绑定可用环境 → 下线/回滚。Agent 只能消费已发布目录，不能注册、修改、提升或自授予工具权限。未来增加细粒度权限时，按 `actor → group → role → resource` 计算 effective tool set，并在 `tools/list` 和 `tools/call` 两端使用同一结果。
 
@@ -640,9 +640,9 @@ alpha_flow 当前只登记为 SCAFFOLD/部署目标接口。它的内部模块�
 
 ---
 
-## 8. 六组 Compose 配置与跨组边界
+## 8. 八组 Compose 配置与跨组边界
 
-六组流是 Agent 的组内配置和工具组合。每个流可调用本组工具、组织标准组件和外部平台，并把结果落成 artifact；各组业务系统继续维护领域事实。
+六个领域流是 Agent 的组内业务配置和工具组合；`infra` 和 `agent` 组使用同一套组件契约承载工程与平台任务。每个流可调用本组工具、组织标准组件和外部平台，并把结果落成 artifact；各组业务系统继续维护领域事实。
 
 ### 8.1 基本面组（fundamental）
 
@@ -925,7 +925,7 @@ Dog Food 保留为 Agent 组的内部研发能力，而非 QuantCode 领域产�
 
 ### 14.1 OpenCode 关系
 
-- Fork：HKUST-QUANT-SOCIETY/opencode，基于 OpenCode 上游；
+- 前端来源：基于 OpenCode 上游的 QuantCode `frontend/` 工作区；
 - 控制平面负责 Desktop UI、session、MCP 接入和可视化；
 - QuantCode 业务代码位于本仓库，通过 MCP/tool/skill 接入；
 - 上游升级需锁定版本并运行 UI、MCP 和回归 smoke test。
@@ -976,7 +976,7 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 | F-02 | Activity、execution trace、artifact、再次运行和回放 | trace bridge + checkpoint |
 | F-03 | HumanGate 写操作门禁（merge/permission；生产部署由 Admin 管理面） | human_gate + permission_engine |
 | F-04 | Memory 与组织能力目录 | runner/memory + `search_memory`/CapabilityCard |
-| F-05 | 设置、供应商 readout、本地 SSH 登录和组绑定 | opencode-lens identity surface + identity/roster；真实 gateway 外部待接 |
+| F-05 | 设置、供应商 readout、本地 SSH 登录和组绑定 | frontend identity surface + identity/roster；真实 gateway 外部待接 |
 | F-06 | 组件发现、调用、适配与契约检查（部署归 P-09） | tools/factor + component adapters |
 | F-07 | 跨组协同与模型风险 CI 基建 | Blackboard + GitHub Actions |
 | F-08 | 策略/期权/基本面/组合工具适配层 | tools/* + flows/*，不复制领域产品 |
@@ -1017,7 +1017,7 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 | 组身份与 Skill 加载 | SSH fingerprint → roster → group/role → allowlist/Memory；`session_context` 回流到 UI | 后端通过；真实本地身份/gateway surface 待完善 |
 | 组件能力目录 | gh 调研、CapabilityCard、状态、别名、摘要/详情分层 | 首批已存在，持续核验 |
 | 组件调用与契约检查 | 主链选择、Data/PIT/版本/接口检查 | 逐组件接入 |
-| 六组 Compose | 同一 ReAct + 六组 Skill/工具/Memory | 保留，逐流完善 |
+| 八组 Compose | 同一 ReAct + 八组 Skill/工具/Memory | 六个领域流加两个工程组 |
 | Admin 中枢 | 全组运行、错误、Memory、组件、报告和任务查询 | 基础已存在，持续聚合 |
 | GitGraph | 权限范围内完整 repo/分支/提交树 | 基础状态已有，完整树增强 |
 | Pop | repo/package 变化、基线、去重、已读和通知 | 基础 UI 已有，后台增强 |
@@ -1026,7 +1026,7 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 
 ### 15.3 领域工具保留策略
 
-tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六组 flow 代码不删除。它们作为对应组的工具适配层和回归对象保留；QuantCode 不把它们重新包装为统一策略/组合/期权产品，也不让平台层复制业务事实。
+tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六个领域 flow 代码不删除。它们作为对应组的工具适配层和回归对象保留；QuantCode 不把它们重新包装为统一策略/组合/期权产品，也不让平台层复制业务事实。
 
 ### 15.4 原有设计的正确归类
 
@@ -1048,7 +1048,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六组 flow
 2. **权限测试**：SSH roster、组锁定、Admin 权威源、GitHub repo 可见性、Memory Mask、跨组 permission；
 3. **运行时测试**：ReAct、ToolRegistry、checkpoint、replay、循环、预算、错误降级和去重；
 4. **运营路径测试**：组内 Memory 写入/晋升、能力优先复用、缺口先问人、Admin 查询、GitGraph 和 Pop；
-5. **六组回归**：各组 flow、外部组件 adapter、PIT/RAG、策略/期权/组合工具保持可运行；
+5. **六个领域流回归**：各组 flow、外部组件 adapter、PIT/RAG、策略/期权/组合工具保持可运行；
 6. **UI/E2E**：登录、组/角色显示、Activity、方案分级、普通 Agent Gate、Admin、GitGraph、Pop，以及 Admin 专属 /deploy 黑盒断言。
 
 每个 Skill 和 Compose flow 可以通过 compose:verify 运行结构化验收。验收输出包括契约版本、工具调用、artifact 引用、通过/失败原因和可重放入口。
@@ -1069,7 +1069,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六组 flow
 
 ### 16.3 工程验收目标
 
-- 六组都能完成身份绑定、Skill 加载、Memory 访问和基础任务提交；
+- 八组都能完成身份绑定、Skill 加载、Memory 访问和基础任务提交；
 - 典型任务能命中 canonical 组件并输出来源、版本和 artifact；
 - 长任务可 checkpoint、恢复和回放，循环和错误可见；
 - Admin 可跨组查询运行、错误、Memory、组件和 GitGraph；

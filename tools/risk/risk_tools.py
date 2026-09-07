@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from schemas import BlackboardScope, ModelSpec
 from schemas.risk_profile import RiskProfile, RiskThresholds
-from tools.github_comments import find_existing_comment, github_request, post_pr_comment
+from tools.github_comments import find_existing_comment, github_request
 from tools.risk.statistics_stub import calc_risk_from_returns, calc_risk_stub
 from tools.utils.dedupe import dedupe_within
 
@@ -104,6 +104,16 @@ def calc_risk(
     """
     if scenario not in ("normal", "high_risk"):
         raise ValueError(f"Unknown scenario: {scenario!r}")
+
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if (
+        returns is None
+        and environment not in {"dev", "development", "test"}
+        and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1"
+    ):
+        raise PermissionError(
+            "canonical risk component is not connected; local checkout/API required before production risk evaluation"
+        )
 
     metrics = calc_risk_stub(scenario)  # type: ignore[arg-type]
     if returns is not None:

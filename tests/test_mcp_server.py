@@ -603,7 +603,7 @@ def test_mcp_subprocess_stdio_factor_group(tmp_path):
     # 验证 stdout 含 JSON-RPC 响应
     assert stdout, f"stdout 空(可能 subprocess 启动失败),stderr={stderr!r}"
     # 找最后一行(可能 init 通知 + list 响应)
-    lines = [l for l in stdout.split("\n") if l.strip()]
+    lines = [line for line in stdout.split("\n") if line.strip()]
     assert lines, f"stdout 无有效行:{stdout!r}"
     # 最后一行应是 list 响应(jsonrpc id=1)
     last_line = lines[-1]
@@ -702,7 +702,7 @@ def test_mcp_subprocess_stdio_risk_group_call_risk_verdict(tmp_path):
     stdout, stderr = proc.stdout, proc.stderr
 
     assert stdout, f"stdout 空,stderr={stderr!r}"
-    lines = [l for l in stdout.split("\n") if l.strip()]
+    lines = [line for line in stdout.split("\n") if line.strip()]
     assert len(lines) >= 2, f"应有 ≥2 行响应(list + call),got {lines}"
 
     # 解析第二行(tools/call 响应)

@@ -17,8 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 
 
 # ---------------------------------------------------------------------------

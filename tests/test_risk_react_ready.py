@@ -17,7 +17,6 @@ from langchain_core.messages import AIMessage
 import tools.risk._register  # noqa: F401
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import clear_checkpointer_cache
-from tools.registry import registry
 
 
 class ScriptedRiskLLM:

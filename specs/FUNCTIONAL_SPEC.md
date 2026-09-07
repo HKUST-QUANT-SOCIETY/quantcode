@@ -69,8 +69,8 @@ L2/L3 必须形成 SolutionDoc；L0/L1 不得被固定讨论轮次阻塞。L3 �
 
 | 模式 | 典型用户 | Agent/系统行为 | 治理方式 |
 |---|---|---|---|
-| 研究/分析 | 六组研究员 | 查资料、查能力、调用评估器、生成分析和报告引用 | 否 |
-| 工程开发 | 六组研究员 | 按任务复杂度形成方案，复用已有组件，生成或修改个人工作环境代码 | 否 |
+| 研究/分析 | 八组成员 | 查资料、查能力、调用评估器、生成分析和报告引用 | 否 |
+| 工程开发 | 八组成员 | 按任务复杂度形成方案，复用已有组件，生成或修改个人工作环境代码 | 否 |
 | 组件适配 | 因子/模型/策略相关成员 | 把已调试代码接到组织标准接口，报告契约违规 | 否；结果交给 Admin 管理面 |
 | 生产变更 | Admin | 通过 Admin 管理面和生产服务账号执行受控部署 | Admin 操作审计，不进入普通 Agent Gate |
 | 运营管理 | Admin | 查看所有组的任务、错误、组件、Memory、Blackboard、GitGraph 和通知 | 查询不需要；审批动作仍留 Gate 记录 |
@@ -135,7 +135,7 @@ DataAccess
 
 游客或未认证用户只看公开契约；普通组员按 GitHub/组权限看到摘要和被授权详情；Admin 看到完整目录。目录发现不代表运行时已经接入，卡片必须明确 `maturity_status` 和 `integration_status`。
 
-工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。第一阶段六组共用研究/开发工具集合；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
+工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。八组共用研究/开发工具集合，各组差异由 session、Skill、Memory 和已发布 catalog 表达；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
 
 ### 2.3 数据口径契约
 
@@ -157,7 +157,7 @@ DataAccess
 
 | 编号 | 状态 | 功能性 | 完整性 | 可维护性 | 证据/剩余边界 |
 |---|---|---|---|---|---|
-| F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、Lens `session_context`；真实桌面身份桥待验 |
+| F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、frontend `session_context`；真实桌面身份桥待验 |
 | F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`/resume、checkpoint、trace contract；恢复阶段也写入 execution trace，本地缓存按 actor/group/workspace 隔离 |
 | F-03 | IMPLEMENTED | 通过 | Admin 部署仍为 STAGING | 通过 | `merge`/`permission` Gate；风险、预算、循环只返回结果/停止状态 |
 | F-04 | IMPLEMENTED | 通过 | 外部组件状态同步和完整 Admin UI 待接 | 通过 | FTS5 Group ACL、`search_memory`、`list_capabilities`、14 张卡；Memory 根为 `<project>/.quantcode` |
@@ -194,7 +194,7 @@ DataAccess
 
 首页提交任务，服务端从已认证会话得到组身份，加载该组 Skill、能力摘要和可用工具。允许显式选择 Skill，但不能用 `group` 参数越权切换组；多组授权必须来自服务端 roster。`list_skills` 应来自真实目录。
 
-**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定、`session_context` 和 `tools/list`/`tools/call` 共用的 effective catalog 已有；Lens 已读取服务端组/角色并移除自由切组，真实本地身份 bridge 仍依赖外部桌面环境。
+**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定、`session_context` 和 `tools/list`/`tools/call` 共用的 effective catalog 已有；frontend 已读取服务端组/角色并移除自由切组，真实本地身份 bridge 仍依赖外部桌面环境。
 
 **验收补充**：提交请求只能使用认证 session 的 `group`；请求中出现不同组时拒绝；`tools/list` 与 `tools/call` 必须使用同一份 effective tool set；无 roster 的生产请求 fail-closed。Skill 列表来自维护员发布目录，不能由用户输入或 Agent 运行时注册。
 
@@ -352,5 +352,5 @@ PyTest 全绿只说明测试与当前代码一致。凡是断言风险越限 Hum
 |---|---|
 | 2026-09-01 | HumanGate 收窄为写操作；模型 PR 降级为 CI；业务流水线归组内；新增 P-07/P-08/P-09/P-10 |
 | 2026-09-03 | 根据组长会议与组件指南重建运营基线：组内 Memory、组件权威与复用纪律、Admin 全权限、GitHub 权限一致、SSH 不进生产、GitGraph 全增强、方案按复杂度分级 |
-| 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、六组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
+| 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、八组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
 | 2026-09-05 | v0.5.1 核验同步：Session Context 成为唯一组/角色来源；Memory 接入只读 `search_memory`；普通 UI 移除自由切组、私钥文本和 `/deploy`；补充 F/P 功能性、完整性、可维护性台账及外部待验边界 |

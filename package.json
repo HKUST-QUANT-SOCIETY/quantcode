@@ -14,6 +14,7 @@
     "build:web": "OPENCODE_CHANNEL=quantcode bun run --cwd frontend/packages/app build",
     "build:desktop": "bun run --cwd frontend/packages/desktop build",
     "package:desktop": "bun run --cwd frontend/packages/desktop package",
+    "check:deployment": "bash scripts/verify_deployment_readiness.sh",
     "check:product": "bash scripts/verify_product_audit.sh"
   }
 }

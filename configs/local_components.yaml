@@ -1,0 +1,31 @@
+mode: local_checkout
+prelearn_from: configs/capabilities.yaml
+components:
+  data-access:
+    canonical_repo: data_access
+    local_path: /Users/hendrixchen/Desktop/私募/服务器/平台代码/data_access
+    future_api_env: DATA_ACCESS_API_URL
+  factor-engine:
+    canonical_repo: factor_engine
+    local_path: /Users/hendrixchen/Desktop/私募/因子评估/仓库/AutoFactorEvaluation/factor_engine
+    future_api_env: FACTOR_ENGINE_API_URL
+  quant-evaluator:
+    canonical_repo: quant_evaluator
+    local_path: ''
+    future_api_env: QUANT_EVALUATOR_API_URL
+  modeling:
+    canonical_repo: modeling
+    local_path: ''
+    future_api_env: MODELING_API_URL
+  barra-engine:
+    canonical_repo: barra_engine
+    local_path: ''
+    future_api_env: BARRA_ENGINE_API_URL
+  riskfolio-qs:
+    canonical_repo: riskfolio_qs
+    local_path: ''
+    future_api_env: RISKFOLIO_QS_API_URL
+  vectorbt-qs:
+    canonical_repo: vectorbt_qs
+    local_path: ''
+    future_api_env: VECTORBT_QS_API_URL

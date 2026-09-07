@@ -18,8 +18,6 @@ Stub 行为如实标注：
 """
 from __future__ import annotations
 
-import json
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -68,7 +66,6 @@ def test_model_submit_flow_state(tmp_path, monkeypatch):
     from flows.model_submit import ModelSubmitFlowState  # noqa: F401
 
     from flows.model_submit import (
-        build_workflow,
         generate_model_spec_node,
         handoff_to_risk,
         parse_pr_input,
@@ -189,7 +186,6 @@ def _invoke_registered(group, flow_name, input_data, tmp_path, ts):
         FLOW_REGISTRY,
         execute_compose_flow,
         register_flow,
-        unregister_flow,
     )
 
     saved_app = FLOW_REGISTRY.get((group, flow_name))

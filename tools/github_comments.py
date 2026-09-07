@@ -1,7 +1,6 @@
 """Shared GitHub PR comment client — risk / model 组复用。"""
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 

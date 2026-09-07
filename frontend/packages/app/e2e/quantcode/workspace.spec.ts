@@ -261,3 +261,67 @@ for (const group of ["infra", "agent"]) {
     await expect(page.getByRole("button", { name: "开始研究", exact: true })).toBeEnabled()
   })
 }
+
+test("admin: deployment staging and organization history entry points are usable", async ({ page }) => {
+  await mockContext(page, "admin")
+  let submitted = false
+  let deploymentStatus = "STAGING"
+  const deployment = {
+    deployment_id: "dep-fixture",
+    actor_id: "browser-fixture",
+    created_at: "2026-09-06T00:00:00Z",
+    payload: { artifact_ref: "artifacts/factor/report.json", target: "staging", manifest: { version: "1.2.3" } },
+  }
+  await page.route("**/experimental/quantcode/deployments**", async (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: { deployments: submitted ? [{ ...deployment, status: deploymentStatus }] : [], executor_status: "UNAVAILABLE", executor_message: "Production executor is not configured" } })
+    }
+    submitted = true
+    return route.fulfill({ json: { ...deployment, status: deploymentStatus } })
+  })
+  await page.route("**/experimental/quantcode/deployments/cancel**", async (route) => {
+    submitted = true
+    deploymentStatus = "CANCELLED"
+    return route.fulfill({ json: { ...deployment, status: deploymentStatus } })
+  })
+  await page.goto("/")
+  await page.getByRole("button", { name: "Admin 中枢", exact: true }).click()
+  const admin = page.getByLabel("Admin 部署管理")
+  await expect(admin).toContainText("Production executor is not configured")
+  await expect(admin.getByRole("button", { name: "暂存部署请求", exact: true })).toBeDisabled()
+  await admin.getByLabel("产物引用").fill("artifacts/factor/report.json")
+  await admin.getByLabel("目标环境").fill("staging")
+  await admin.getByLabel("版本").fill("1.2.3")
+  await admin.getByRole("button", { name: "暂存部署请求", exact: true }).click()
+  await expect(admin).toContainText("artifacts/factor/report.json")
+  await expect(admin).toContainText("STAGING")
+  await admin.getByRole("button", { name: "取消暂存请求", exact: true }).click()
+  await expect(admin).toContainText("CANCELLED")
+  await page.getByRole("button", { name: "报告与产物", exact: true }).click()
+  await expect(page.getByText("组织报告与产物", { exact: true })).toBeVisible()
+})
+
+test("admin: knowledge candidate review is scoped and refreshes after promotion", async ({ page }) => {
+  await mockContext(page, "admin")
+  let candidateStatus = "draft"
+  await page.route("**/experimental/quantcode/tool?*", async (route) => {
+    const tool = new URL(route.request().url()).searchParams.get("tool")
+    if (tool === "list_distill_candidates") {
+      return route.fulfill({ json: { candidates: [{ name: "factor-review-fixture", group: "factor", status: candidateStatus, digest: "a".repeat(64), content: "verified evaluator contract" }] } })
+    }
+    return route.fallback()
+  })
+  await page.route("**/experimental/quantcode/candidate**", async (route) => {
+    candidateStatus = "promoted"
+    return route.fulfill({ json: { ok: true, status: candidateStatus, candidate_name: "factor-review-fixture" } })
+  })
+  await page.goto("/")
+  await page.getByRole("button", { name: "Memory", exact: true }).click()
+  const review = page.getByLabel("知识候选审核")
+  await expect(review).toContainText("factor-review-fixture")
+  await review.getByText(/factor-review-fixture/).click()
+  await review.getByRole("button", { name: "晋升为组内 Skill", exact: true }).click()
+  await expect(review).toContainText("promoted")
+  await review.getByText(/factor-review-fixture/).click()
+  await expect(review.getByRole("button", { name: "撤销发布", exact: true })).toBeVisible()
+})

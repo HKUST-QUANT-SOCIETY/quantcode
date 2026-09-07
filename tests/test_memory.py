@@ -21,28 +21,19 @@ from typing import Iterator
 import pytest
 
 from runner.memory import fts as fts_mod
-from runner.memory import paths as paths_mod
-from runner.memory import query as query_mod
-from runner.memory import reconcile as reconcile_mod
 from runner.memory.paths import (
-    MemoryLocator,
     assert_safe_component,
     build_path,
-    detect_type,
     parse_path,
     resolve_project_id,
 )
 from runner.memory.query import build_fts_query
 from runner.memory.reconcile import (
-    index_from_disk,
     reconcile_once,
-    walk_memory_dir,
 )
 from runner.memory.service import (
-    MemoryHit,
     MemoryPermissionError,
     MemoryService,
-    DEFAULT_FLOOR_RATIO,
 )
 
 

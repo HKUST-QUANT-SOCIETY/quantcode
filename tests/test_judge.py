@@ -203,7 +203,7 @@ class TestApplySessionVerdict:
         assert report["mode"] == "auto"
         assert report["marked_iterations"] == [3]  # risk_score 最高者
         # label 已回填到第 3 条
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         by_iter = {r["metadata"]["iteration"]: r for r in lines}
         assert by_iter[3]["label"] == 1
         assert by_iter[7]["label"] is None
@@ -213,7 +213,7 @@ class TestApplySessionVerdict:
         _seed_risk_continues(tmp_rlhf_path.parent, "t1", [(3, 0.9), (7, 0.5), (11, 0.8)])
         report = apply_session_verdict("t1", "risky", top_n=2)
         assert sorted(report["marked_iterations"]) == [3, 11]
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         by_iter = {r["metadata"]["iteration"]: r for r in lines}
         assert by_iter[3]["label"] == 1
         assert by_iter[11]["label"] == 1
@@ -221,14 +221,14 @@ class TestApplySessionVerdict:
     def test_safe_no_change(self, tmp_rlhf_path):
         _seed_risk_continues(tmp_rlhf_path.parent, "t1", [(3, 0.9)])
         apply_session_verdict("t1", "safe")
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         assert all(r["label"] is None for r in lines)
 
     def test_other_threads_untouched(self, tmp_rlhf_path):
         _seed_risk_continues(tmp_rlhf_path.parent, "t1", [(3, 0.9)])
         _seed_risk_continues(tmp_rlhf_path.parent, "t2", [(5, 0.7)])
         apply_session_verdict("t1", "risky", top_n=1)
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         t2 = [r for r in lines if r["thread_id"] == "t2"]
         assert all(r["label"] is None for r in t2)
 
@@ -245,7 +245,7 @@ class TestApplyJudgedSession:
         assert report["verdict"] == "met"
         assert report["mode"] == "judge"
         assert report["marked_iterations"] == [3]
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         by_iter = {r["metadata"]["iteration"]: r for r in lines}
         assert by_iter[3]["label"] == 1
         assert by_iter[3]["notes"].startswith("judge:met")
@@ -256,7 +256,7 @@ class TestApplyJudgedSession:
         llm = _llm_returning('{"verdict": "missed", "reasons": ["任务失败"]}')
         report = apply_judged_session("t1", "目标", _trace_v1("error"), llm=llm)
         assert report["verdict"] == "missed"
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         top3 = [r for r in lines if r["metadata"]["iteration"] == 3][0]
         assert top3["label"] == 0
 
@@ -266,7 +266,7 @@ class TestApplyJudgedSession:
         report = apply_judged_session("t1", "目标", _trace_v1(), llm=llm)
         assert report["verdict"] == "partial"
         assert report["marked_iterations"] == []
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         by_iter = {r["metadata"]["iteration"]: r for r in lines}
         assert by_iter[3]["label"] is None          # 0.5 落不进 0/1 域 → 不写 label
         assert by_iter[3]["notes"].startswith("judge:partial")
@@ -290,6 +290,6 @@ class TestApplyJudgedSession:
         llm = _llm_returning('{"verdict": "partial", "reasons": ["r"]}')
         report = apply_judged_session("t9", "目标", _trace_v1(), llm=llm)
         assert report["verdict"] == "partial"
-        lines = [json.loads(l) for l in tmp_rlhf_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in tmp_rlhf_path.read_text().splitlines() if line.strip()]
         assert lines[0]["notes"].startswith("judge:partial")
         assert lines[0]["label"] is None

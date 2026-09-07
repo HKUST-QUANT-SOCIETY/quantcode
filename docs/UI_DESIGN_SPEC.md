@@ -5,8 +5,8 @@
 
 > **版本**：v4.1（2026-09-05，实现核验同步）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
-> **UI 仓库**：`opencode-lens`，组件根目录为 `packages/app/src/components/quantcode/`。
-> **上位规范**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)；本文件只定义桌面端接入、展示和操作，不复制领域业务平台。
+> **UI 仓库**：`frontend/`，组件根目录为 `frontend/packages/app/src/components/quantcode/`。
+> **上位规范**：[FUNCTIONAL_SPEC.md](../specs/FUNCTIONAL_SPEC.md)；本文件只定义桌面端接入、展示和操作，不复制领域业务平台。
 
 ## 1. 设计目标
 

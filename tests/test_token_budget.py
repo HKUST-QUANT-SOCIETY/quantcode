@@ -14,7 +14,6 @@ llm 前的 budget_gate 处必然超限 → interrupt。这是最小确定性触�
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel
 
 import pytest
 

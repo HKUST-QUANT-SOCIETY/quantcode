@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime, timezone
+import os
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -85,6 +86,14 @@ def eval_from_panel_impl(
     """核心实现（tests 与 ToolDef 共用；错误以 error 对象返回，不抛崩溃）。"""
     from flows.factor_eval_real import evaluate_factor_panel
     from tools.market.backing import staging_error
+
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if environment not in {"test"} and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1":
+        return staging_error(
+            "canonical_component_not_connected",
+            detail="QuantEvaluator/DataAccess are local-checkout components until their API is published; no proxy metrics are emitted.",
+            result_status="UNAVAILABLE",
+        )
 
     try:
         from pydantic import ValidationError

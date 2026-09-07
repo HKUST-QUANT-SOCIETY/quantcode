@@ -1,6 +1,6 @@
 # QuantCode 用户手册
 
-> **目标用户**：HKUST QUANT SOCIETY 6个业务组的研究员
+> **目标用户**：HKUST QUANT SOCIETY 八个业务组的研究与工程成员
 > **版本**：v5.1
 > **最后更新**：2026-09-05
 
@@ -16,8 +16,9 @@
 6. [Fundamental组（基本面研究）](#fundamental组基本面研究)
 7. [Strategy组（策略构建）](#strategy组策略构建)
 8. [Options组（期权定价）](#options组期权定价)
-9. [Admin、GitGraph 与 Pop](#admingitgraph-与-pop)
-10. [常见问题](#常见问题)
+9. [Infra 与 Agent 组](#infra-与-agent-组)
+10. [Admin、GitGraph 与 Pop](#admingitgraph-与-pop)
+11. [常见问题](#常见问题)
 
 ---
 
@@ -38,10 +39,16 @@ cd /path/to/QUANTcode
 ./scripts/start-quantcode.sh
 ```
 
+只检查 Python、依赖、Bun、provider 和身份配置，不启动桌面端：
+
+```bash
+./scripts/start-quantcode.sh --check
+```
+
 **方式2：手动启动**（需先完成 LLM 环境变量配置，见 README Quick Start）
 ```bash
 # 1. 启动桌面端
-cd opencode && bun run dev:desktop
+cd frontend && bun run dev:desktop
 
 # 2. 在桌面端选择本地 SSH 身份并完成公钥认证
 # 3. 服务端按 roster 返回 actor、业务组、角色和个人工作目录
@@ -378,6 +385,14 @@ QuantCode:
 | `run_options_backtest` | 期权策略回测 |
 
 ---
+
+## Infra 与 Agent 组
+
+`infra` 和 `agent` 是工程组，与六个领域组共用同一套 Agent 运行时、权限和任务记录。它们不伪造题材领域流，主要处理宿主、MCP、工具、测试和平台开发。
+
+- 任务仍由登录身份绑定的组决定，不能在输入框或组合命令中切组。
+- 多文件或共享主线任务仍遵守 P-10 方案先行和 `merge`/`permission` Gate。
+- 生产部署仍由 Admin 管理面发起，普通 `infra` 或 `agent` 会话不会获得生产 shell。
 
 ## Admin、GitGraph 与 Pop
 

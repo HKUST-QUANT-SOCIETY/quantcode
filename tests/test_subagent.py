@@ -258,7 +258,6 @@ def test_task_tree_list_children_parent_child_relation(
     reg, sub_tools, tmp_db, subagent_tools
 ):
     """同 parent spawn 两个子任务 → list_subagents 返回两条 children；别家 parent 查不到。"""
-    model = ScriptedLLM([_ai("task_done", "s1")])
     for _ in range(2):
         subagent_tools._spawn_subagent_execute(
             subagent_tools.SpawnSubagentArgs(task="child", group="factor"),
@@ -312,7 +311,6 @@ def test_spawn_depth_guard_blocks_beyond_max_tree_depth(reg, sub_tools, tmp_db):
 
     model = ScriptedLLM([AIMessage(content="leaf")])
     # 造一条深度 4 的链：p0 → s1 → s2 → s3 → s4（s4 是第 4 层，允许）
-    parent = ""
     tid = "chain-root-0"
     ids = []
     for i in range(MAX_TREE_DEPTH):

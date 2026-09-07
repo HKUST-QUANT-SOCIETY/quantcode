@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 from pathlib import Path
 
@@ -68,7 +67,6 @@ def test_dream_writes_memory_from_checkpoints_db(tmp_path):
 
     try:
         # factor allowlist 暂没 echo,加进去
-        from tools.registry import registry
         runner = AgentRunner(
             group="factor",
             model=_LLM(),

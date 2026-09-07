@@ -1,6 +1,6 @@
 # QuantCode v5 实现审计
 
-> 后续跨仓库复核：[完整功能/UI 台账与新修复](audit/FULL_PRODUCT_AUDIT_2026-09-05.md)、[组件复用交叉表](audit/COMPONENT_REUSE_MAP.md)。下述早期“通过”不表示所有桌面流程或真实服务已验收。
+> 后续跨仓库复核：[完整功能/UI 台账与新修复](audit/FULL_PRODUCT_AUDIT_2026-09-05.md)、[组件复用交叉表](audit/COMPONENT_REUSE_MAP.md)。服务账号接入边界见 [SERVICE_ACCOUNT_INTEGRATION_BOUNDARY.md](SERVICE_ACCOUNT_INTEGRATION_BOUNDARY.md)。下述早期“通过”不表示所有桌面流程或真实服务已验收。
 
 > 日期：2026-09-05
 > 规范：FUNCTIONAL_SPEC v0.5.1 / PRD v5.1 / Design v5.1 / UI Spec v4.1
@@ -28,7 +28,7 @@
 | Evidence / Metrics | 通过 | 哈希链、Artifact 绑定、actor/role、有限 tail 读取 | POSIX/Windows 锁回退；关键管理/合并写入 required | 继续使用 |
 | P-10 Task Classification | 通过 | 四维分类与 L0-L3/Solution 要求已实现 | 复杂度不再代替权限 | 继续使用 |
 | GitGraph / Pop | 契约、Baseline、依赖 diff、Dedupe/read/ack 已实现 | GitHub 后台同步和系统通知需部署环境 | SQLite Pop + 原子 baseline；错误/partial/stale 状态显式 | 外部同步服务待接 |
-| 六组领域工具 | 可回归 | 非 canonical 的 stub/proxy 仅开发用途 | 不进入产品主线或生产 allowlist | 有条件保留 |
+| 六个领域工具 | 可回归 | 非 canonical 的 stub/proxy 仅开发用途 | 不进入产品主线或生产 allowlist | 有条件保留 |
 
 ## 2. 本轮已删除的旧语义
 
@@ -55,11 +55,11 @@
 
 ## 4. 外部依赖与不能伪装完成的项
 
-1. `opencode-lens` 的真实 SSH gateway、自由切组删除和 Desktop E2E；Admin Console、Memory/GitGraph UI 已接入本地 trace/受限查询面；
+1. 当前 `frontend/` 的真实 SSH gateway、自由切组删除和 Desktop E2E；Admin Console、Memory/GitGraph UI 已接入本地 trace/受限查询面；正式 roster 已激活无冲突绑定，未决人员仍待确认；
 2. SSH gateway 的生产 roster、证书轮换与 Session 签发部署；
-3. QuantEvaluator、DataAccess、Modeling、Barra、Riskfolio-QS、VectorBT-QS 的真实服务连接；
+3. QuantEvaluator、DataAccess、Modeling、Barra、Riskfolio-QS、VectorBT-QS 的真实服务连接；当前采用组员本地 checkout + Agent 能力卡预学习，待组件发布 API 后再接入；
 4. Admin Deploy 生产队列、服务账号和回滚协议；
-5. GitHub App/OAuth token broker、后台同步进程和操作系统通知。
+5. GitHub App/OAuth token broker、真实凭据映射和外部进程托管；gateway 内的后台同步、Pop 持久化和系统通知代码已接入。
 
 这些模块当前必须返回 `UNAVAILABLE`、`STAGING`、`PARTIAL` 或明确错误，不能显示生产成功。
 
@@ -85,4 +85,4 @@ test_scope: full pytest + v5 contract suite
 known_legacy_tests: migrated or deleted
 ```
 
-此前 v5 基线为 `987 passed, 4 skipped, 1 warning`；本轮最新后端全量回归 `1060 passed, 4 skipped, 1 warning`，OpenCode Experimental API 回归 `7 passed`，Lens QuantCode UI 回归 `114 passed`，session-ui 回归 `57 passed`，App/OpenCode/SDK TypeScript 类型检查通过。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。唯一 warning 是 Pydantic 的 `ToolDef.schema` 字段遮蔽 `BaseModel.schema`；该字段已被工具注册表和客户端广泛使用，暂保兼容，后续若迁移应通过版本化 alias 一次完成。
+当前单仓库 `main@f0ec06f` 复核：后端全量回归 `1142 passed, 4 skipped`，Ruff `0 errors`，QuantCode UI 组件 `126 passed`，App/OpenCode/Desktop TypeScript 类型检查通过，生产构建通过，当前单仓库 Dev Headless `16 passed`。启动器支持独立端口，本轮使用 `4196/4544` 启动并验证新宿主路由，未停止或重启其他工作区。`ToolDef` 已通过 Pydantic alias 保留外部 `schema` 契约并消除字段遮蔽告警。4 个 skipped 均为需显式真实 LLM 凭据的集成测试；单独的通过数不构成生产验收。

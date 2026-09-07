@@ -15,12 +15,13 @@ The active workflow validates four platform/architecture targets. Linux arm64
 support remains available in the build action and metadata finalizer, but it is
 not part of the active matrix or published asset set.
 
-The desktop source lives in the `HKUST-QUANT-SOCIETY/opencode` fork, while
-release assets target `HKUST-QUANT-SOCIETY/quantcode`. The workflow must be
-merged into the source repository's default `dev` branch before
+The desktop source and release workflow live in the `HKUST-QUANT-SOCIETY/quantcode`
+repository. Release assets also target `HKUST-QUANT-SOCIETY/quantcode`. The
+workflow must be
+merged into the source repository's default branch before
 `workflow_dispatch` is available. A pull request runs unsigned packaging and
 the packaged-launch smoke test; a tag named `quantcode-vX.Y.Z`, or a manual
-dispatch from `dev` with `publish=true`, runs the approved release path.
+dispatch from the default branch with `publish=true`, runs the approved release path.
 Manual dispatch also accepts `sign=true,publish=false`: this runs the protected
 Apple, Azure, and Linux release jobs, finalizes and attests their artifacts, but
 does not mutate the target GitHub Release. Use that mode to validate signing
@@ -72,7 +73,7 @@ chat message, workflow input, or local configuration committed to the repo.
    password and `.p8` contents in their separate secrets.
 2. **Azure Trusted Signing**: create an Entra application and a federated
    credential constrained to
-   `repo:HKUST-QUANT-SOCIETY/opencode:environment:quantcode-release-windows`.
+   `repo:HKUST-QUANT-SOCIETY/quantcode:environment:quantcode-release-windows`.
    Grant it only the Azure Trusted Signing permissions required by the selected
    account and certificate profile. Record the exact certificate Subject DN in
    `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`; the workflow rejects a different
@@ -180,7 +181,7 @@ repository does not produce matching source-repository provenance. Verify a
 download with:
 
 ```bash
-gh attestation verify <installer> -R HKUST-QUANT-SOCIETY/opencode
+gh attestation verify <installer> -R HKUST-QUANT-SOCIETY/quantcode
 ```
 
 For a published run, a separate release job creates or reuses a draft release,
@@ -219,13 +220,13 @@ There is no `QUANTCODE_PACKAGED_SMOKE` product flag.
 Run an artifact-only build from the default branch with:
 
 ```bash
-gh workflow run quantcode-desktop.yml -R HKUST-QUANT-SOCIETY/opencode -f version=0.1.0 -f sign=false -f publish=false
+gh workflow run quantcode-desktop.yml -R HKUST-QUANT-SOCIETY/quantcode -f version=0.1.0 -f sign=false -f publish=false
 ```
 
 Run a protected signed, non-publishing validation with:
 
 ```bash
-gh workflow run quantcode-desktop.yml -R HKUST-QUANT-SOCIETY/opencode -f version=0.1.0 -f sign=true -f publish=false
+gh workflow run quantcode-desktop.yml -R HKUST-QUANT-SOCIETY/quantcode -f version=0.1.0 -f sign=true -f publish=false
 ```
 
 For pull requests, inspect `Finalize release bundle` and its

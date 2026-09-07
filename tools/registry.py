@@ -17,13 +17,12 @@
 """
 from __future__ import annotations
 
-import functools
 import re
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # 路径常量
@@ -74,12 +73,16 @@ class ToolDef(BaseModel):
 
     id: str
     description: str
-    schema: type[BaseModel]
+    schema_: type[BaseModel] = Field(alias="schema", serialization_alias="schema")
     execute: ExecuteFn
     format_validation_error: Optional[FormatErrorFn] = None
     # G4-A1：权限三态声明（ask/deny/allow）。None = 未声明（执行层默认 allow）。
     # 仅元数据；实际执行策略由 runner/permission_engine 读 configs/permissions.yaml。
     permission: Optional[str] = None
+
+    @property
+    def schema(self) -> type[BaseModel]:
+        return self.schema_
 
 
 # ---------------------------------------------------------------------------

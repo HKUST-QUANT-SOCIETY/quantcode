@@ -11,6 +11,13 @@ export type GlobalEvent = {
 class GlobalBusEmitter extends EventEmitter<{
   event: [GlobalEvent]
 }> {
+  constructor() {
+    super()
+    // Global SSE and TUI subscribers are legitimate long-lived listeners;
+    // EventEmitter's default limit of 10 is lower than a normal workspace.
+    this.setMaxListeners(0)
+  }
+
   override emit(eventName: "event", event: GlobalEvent): boolean {
     if (event.payload && typeof event.payload === "object" && !("id" in event.payload)) {
       event.payload.id = event.payload.syncEvent?.id ?? Identifier.create("evt", "ascending")

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Export the evidence-led HTML investor brief with its diagrams embedded."""
-from pathlib import Path
 from html import unescape
-import re, subprocess, tempfile, time
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import time
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -11,7 +14,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as RLImage, PageBreak, Paragraph, SimpleDocTemplate
 
-ROOT = Path('/Users/hendrixchen/Desktop/私募/QUANTcode')
+ROOT = Path(__file__).resolve().parent
 HTML, PDF = ROOT / 'QuantCode_Investor_Brief_v2.html', ROOT / 'QuantCode_Investor_Brief_v2.pdf'
 for name, path in [('CN', '/System/Library/Fonts/STHeiti Light.ttc'), ('CN-Bold', '/System/Library/Fonts/STHeiti Medium.ttc')]:
     try: pdfmetrics.registerFont(TTFont(name, path))

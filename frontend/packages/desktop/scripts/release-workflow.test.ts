@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { fileURLToPath } from "node:url"
 
-const root = new URL("../../..", import.meta.url).pathname
+const root = fileURLToPath(new URL("../../..", import.meta.url))
 const workflow = await Bun.file(`${root}/.github/workflows/quantcode-desktop.yml`).text()
 const action = await Bun.file(`${root}/.github/actions/build-quantcode-desktop/action.yml`).text()
 const setupBun = await Bun.file(`${root}/.github/actions/setup-bun/action.yml`).text()

@@ -12,7 +12,6 @@ from __future__ import annotations
 import sqlite3
 
 from runner.langgraph_base import (
-    CHECKPOINTS_DB,
     clear_checkpointer_cache,
     get_checkpointer,
     make_thread_id,

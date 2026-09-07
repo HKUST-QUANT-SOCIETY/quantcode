@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+import os
 
 from tools.registry import ToolDef
 
@@ -17,6 +18,14 @@ class DcfValuationArgs(BaseModel):
 
 
 def dcf_valuation_execute(args: DcfValuationArgs, ctx: dict) -> dict:
+    if os.environ.get("QUANTCODE_ENV", "").strip().lower() not in {"test"} and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1":
+        return {
+            "status": "STAGING",
+            "result_status": "UNAVAILABLE",
+            "source": "fundamental_canonical_component",
+            "error": "canonical valuation component is not connected; local checkout/API required",
+            "target_identifier": args.target_identifier,
+        }
     if args.wacc <= args.terminal_growth:
         raise ValueError("wacc must be greater than terminal_growth")
 

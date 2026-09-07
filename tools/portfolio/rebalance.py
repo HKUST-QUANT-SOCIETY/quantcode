@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from schemas.portfolio import RebalancePlan, TargetPortfolio
+from schemas.portfolio import RebalancePlan
 
 # double-sided commission + sell stamp tax（configs/portfolio.yaml 同源默认）
 DEFAULT_COMMISSION = 0.0003

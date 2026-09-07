@@ -1,0 +1,24 @@
+# Non-secret service-principal observations from the external operations manual.
+# This is an inventory/status contract only; it contains no CAM keys, tokens,
+# sudoers content, coscli configuration, or production topology.
+source: external-ops-manual-v1.0
+observed_at: "2026-09-07"
+principals:
+  - id: qsvc-data
+    server: server-a
+    purpose: data pipeline
+    capabilities: [raw-cos, clean-cos]
+    executor_status: ACTIVE
+    deletion_allowed: true
+  - id: qsvc-compute
+    server: server-b
+    purpose: reserved compute pipeline
+    capabilities: []
+    executor_status: EMPTY
+    deletion_allowed: false
+  - id: qsvc-factor-prod
+    server: server-c
+    purpose: factor production write
+    capabilities: [factor-prod-cos]
+    executor_status: ACTIVE
+    deletion_allowed: false

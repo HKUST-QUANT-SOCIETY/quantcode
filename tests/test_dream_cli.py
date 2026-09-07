@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 
 def test_dream_cli_once_writes_event(tmp_path):

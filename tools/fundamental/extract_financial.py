@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,15 @@ class ExtractFinancialArgs(BaseModel):
 
 
 def extract_financial_execute(args: ExtractFinancialArgs, ctx: dict) -> dict:
+    if os.environ.get("QUANTCODE_ENV", "").strip().lower() not in {"test"} and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1":
+        return {
+            "status": "STAGING",
+            "result_status": "UNAVAILABLE",
+            "source": "fundamental_canonical_component",
+            "error": "canonical fundamental component is not connected; local checkout/API required",
+            "target_identifier": args.target_identifier,
+            "as_of_date": args.as_of_date.isoformat(),
+        }
     # Deterministic stub financials keyed by ticker hash
     seed = sum(ord(c) for c in args.target_identifier) % 17
     revenue = 10_000 + seed * 500

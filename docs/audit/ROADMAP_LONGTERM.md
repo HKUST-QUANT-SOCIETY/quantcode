@@ -1,7 +1,7 @@
 # QuantCode 中长期总计划（对标 Z code，迈向工业级组合研究平台）
 
 > 版本：v3（2026-09-04，随 QuantCode v5 顶层设计同步）。v1/v2 的规划方法与会议裁决保留为历史背景；当前路线以 `docs/IMPLEMENTATION_AUDIT.md` 的模块审计和外部依赖清单为准。
-> 现状基线：后端 v5 回归 `1060 passed, 4 skipped`；AgentRunner、MCP 身份/组锁定、Memory/能力目录、Blackboard、Evidence、Risk CI、Admin staging、GitGraph/Pop 本地契约和六组适配器均有代码证据。桌面身份/Admin UI、GitHub 后台同步、canonical 组件连接、生产部署队列和模拟盘/实盘接口仍是外部或后续接入项。
+> 现状基线：后端 v5 回归 `1142 passed, 4 skipped`；AgentRunner、MCP 身份/组锁定、Memory/能力目录、Blackboard、Evidence、Risk CI、Admin staging、GitGraph/Pop 本地契约和八组适配器均有代码证据。桌面身份/Admin UI、GitHub 后台同步、canonical 组件连接、生产部署队列和模拟盘/实盘接口仍是外部或后续接入项。
 
 ---
 
@@ -130,7 +130,7 @@ token 预算(R2) ──→ spawn_subagent 预算扣减(R3)
 ## 6. A3 首期落地（2026-09-01）：配置单源 + 算法注册表
 
 - **三套阈值口径从 YAML 单源**（架构决策 3「配置不喂 LLM」）：`configs/acceptance.factor.yaml`（0.03/0.5/0.8/2.0）+ `configs/acceptance.risk.yaml`（0.15/0.8/0.05/0.6）为唯一真源；`runner/config_loader.py`（lru_cache + `QUANTCODE_CONFIG_DIR` 覆盖 + 极简 schema 校验）→ `runner/acceptance.py` yaml 优先 / 代码默认兜底（缺文件 warning 一次）；`runner/risk_ci._risk_acceptance_thresholds` 改引同一出口 `runner.acceptance.risk_thresholds()`。数值 = 现默认，行为零变化。
-- **signal_algorithms 注册表首例**：`configs/algorithms.yaml` 两条目（equal_weight_composite_ranker 真实 demo 评分器 + pb_roe_ranker 占位→tools/factor PB-ROE 线注释映射）；执行端 `tools/algorithms/_register.py` 三工具 `list_algorithms` / `describe_algorithm` / `run_algorithm`，demo 评分器 `tools/algorithms/score_demo.py`（读 Blackboard `shared.datasets.panel/*` FactorPanel，最新截面等权 rank 合成，返回 top_n 资产表）；`quantcode/mcp_server.py` 经 `_meta` 通道六组 MCP server 可见（不进组 allowlist）。
+- **signal_algorithms 注册表首例**：`configs/algorithms.yaml` 两条目（equal_weight_composite_ranker 真实 demo 评分器 + pb_roe_ranker 占位→tools/factor PB-ROE 线注释映射）；执行端 `tools/algorithms/_register.py` 三工具 `list_algorithms` / `describe_algorithm` / `run_algorithm`，demo 评分器 `tools/algorithms/score_demo.py`（读 Blackboard `shared.datasets.panel/*` FactorPanel，最新截面等权 rank 合成，返回 top_n 资产表）；`quantcode/mcp_server.py` 经 `_meta` 通道八组 MCP server 可见（不进组 allowlist）。
 
 ## 7. 真实数据因子评估首例（2026-09-01）：panel_real_v1
 

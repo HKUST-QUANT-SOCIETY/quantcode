@@ -5,7 +5,7 @@
 ## 已完成
 
 - `python -m quantcode.roster` 从指定列读取问卷 xlsx，不导入 IP、来源位置、答卷耗时等与授权无关的数据。
-- 常见业务组名称映射到六组；CTA 映射 strategy。基建、AI Agent、多组填写等不自动映射，也不自动授予 approver/admin。
+- 常见业务组名称映射到八组；CTA 映射 strategy。基建、AI Agent、多组填写等不自动映射，也不自动授予 approver/admin。
 - 公钥通过 OpenSSH 验证。缺少类型前缀时只根据 blob 内部算法恢复；只有 SHA256 指纹的记录不冒充完整公钥。
 - 重复邮箱归并为稳定 actor 标识，保留来源行；同邮箱姓名/组冲突、不同身份共用公钥均隔离。多台设备的不同公钥可属于同一 actor。
 - 邮箱不自动变成 GitHub subject；不生成 repo 权限。角色默认最低 analyst，仅有对应组 Memory scope。
@@ -42,12 +42,12 @@ python -m quantcode.roster /path/to/roster.xlsx \
 
 ## 尚需明确的组织配置
 
-1. 基建/AI Agent 等非六组记录和多组成员的业务组归属；不默认猜测“所有人进 factor”或“都是 Admin”。
+1. 基建/AI Agent 等组和多组成员的业务组归属；不默认猜测“所有人进 factor”或“都是 Admin”。
 2. 哪些 actor 是 approver/admin。人员表没有角色字段，不能推断。
 3. 同邮箱不同姓名、不同人员共用公钥、仅填指纹的纠正。
 4. 实际研发服务器 workspace 根及 SSH gateway 入口。候选路径不是已部署路径。
 5. GitHub subject 与授权 token 的服务端绑定，不以邮箱代替用户名。
 
-对应人员与原 Excel 行号只在 `.quantcode/roster-import-20260905/review.md` 中保存。以上未确认前，F-01 标记“导入与本地身份契约通过，生产人员授权待确认”，不能标记整项完成。
+对应人员与原 Excel 行号只在 `.quantcode/roster-import-20260905/review.md` 中保存。当前已将 31 条组别唯一、公钥完整且无冲突的绑定激活到受保护的 `.opencode/authorized_groups.yaml`；10 位存在待确认事项的人员仍只保留在 review 队列，不能登录。F-01 标记为“部分激活，生产人员授权待确认”，不能把整张人员表标记完成。
 
-最终后端回归：2026-09-05，Python 3.12，**1,084 passed / 4 skipped**，16.50 秒。4 项真实 LLM 未启用；既有 ToolDef.schema 告警保留。
+最终后端回归：2026-09-05，Python 3.12，**1,142 passed / 4 skipped**，4 项真实 LLM 未启用；ToolDef 外部 `schema` 契约通过 alias 保留，字段遮蔽告警已消除。

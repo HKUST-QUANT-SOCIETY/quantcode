@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib
 import math
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -363,7 +362,6 @@ def test_runagent_portfolio_gate_breach_zero_interrupts(tmp_db, clean_registry):
 def test_config_yaml_single_source(tmp_path, monkeypatch):
     """QUANTCODE_CONFIG_DIR 指向 tmp configs；改 portfolio.yaml 值 → rebalance/gate 行为随之变。"""
     import shutil
-    from pathlib import Path
 
     import tools.portfolio.gate as gate_mod
     import tools.portfolio.rebalance as reb_mod

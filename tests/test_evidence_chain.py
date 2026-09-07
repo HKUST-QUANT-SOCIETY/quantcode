@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,7 +22,6 @@ from pydantic import ValidationError
 
 from runner import evidence as ev
 from schemas.evidence_chain import (
-    AuditEvent,
     AuditEventKind,
     ArtifactRef,
     DecisionRecord,
@@ -354,7 +352,6 @@ def test_stream_run_writes_evidence_chain(tmp_path, monkeypatch):
     """完整构造一次带 evidence 钩子的 stream run：
     trace 的 tool_call/tool_result/output_data + human_gate interrupt 逐环落到
     QUANTCODE_EVIDENCE_DIR/<thread_id>.jsonl，且能通过 verify_chain 重放校验。"""
-    import os
 
     from langchain_core.messages import AIMessage
     from pydantic import BaseModel
@@ -423,7 +420,7 @@ def test_stream_run_writes_evidence_chain(tmp_path, monkeypatch):
     assert result.get("output_data") == {"ok": True}
     chain_path = ev.evidence_path(thread_id, evidence_target)
     assert chain_path.is_file(), f"evidence chain missing: {chain_path}"
-    lines = [l for l in chain_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [line for line in chain_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) >= 1
 
     kinds = [e.kind for e in ev.verify_chain(thread_id, evidence_target)]

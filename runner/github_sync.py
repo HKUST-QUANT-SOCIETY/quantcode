@@ -25,7 +25,9 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
     if not token:
         raise PermissionError("GitHub identity token is not connected")
     repos, visibility = _visible_repos(ctx, token)
-    get = lambda path: _gh_get(path, token)
+    def get(path: str) -> dict:
+        return _gh_get(path, token)
+
     store = PopService(db_path or PROJECT_ROOT / ".quantcode" / "pops.db")
     scope = hashlib.sha256(json.dumps([
         ctx.get("actor_id"), ctx.get("group"), ctx.get("role"), ctx.get("workspace_id"),
@@ -101,8 +103,12 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
                     sha = blobs[path]
                     if sha not in text_cache:
                         blob = get(f"{base}/git/blobs/{quote(sha, safe='')}")
-                        if blob.get("encoding") != "base64" or int(blob.get("size", 0)) > 5_000_000:
-                            raise ValueError("dependency blob is unsupported or exceeds 5 MB")
+                        # Large lockfiles can make permissive JSON5 parsing
+                        # monopolize the sync worker. Track the file change and
+                        # mark version parsing unsupported beyond this bound;
+                        # never let one repository stall all identities.
+                        if blob.get("encoding") != "base64" or int(blob.get("size", 0)) > 1_000_000:
+                            raise ValueError("dependency blob is unsupported or exceeds 1 MB")
                         text_cache[sha] = base64.b64decode("".join(blob["content"].split()), validate=True).decode("utf-8")
                     return text_cache[sha]
 

@@ -45,7 +45,7 @@ Compare the printed value with the matching `SHA256SUMS` line. With GitHub CLI
 installed, verify source-workflow provenance as well:
 
 ```bash
-gh attestation verify ./quantcode-0.1.0-mac-arm64.dmg -R HKUST-QUANT-SOCIETY/opencode
+gh attestation verify ./quantcode-0.1.0-mac-arm64.dmg -R HKUST-QUANT-SOCIETY/quantcode
 ```
 
 The macOS manifest must report `developer-id-notarized`; the Windows manifest

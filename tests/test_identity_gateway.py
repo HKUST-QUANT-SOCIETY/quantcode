@@ -13,6 +13,7 @@ import yaml
 
 from quantcode.gateway import IdentityGateway
 from quantcode.identity import fingerprint_of_public_key
+from schemas.session_context import SessionContext
 
 
 @pytest.fixture
@@ -105,3 +106,50 @@ def test_review_required_roster_never_issues_challenge(gateway_login):
     roster.write_text(yaml.safe_dump({"status": "REVIEW_REQUIRED", "bindings": [entry]}))
     with pytest.raises(ValueError, match="review before activation"):
         gateway.issue(roster.parent.joinpath("test-key.pub").read_text())
+
+
+def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(gateway_login, tmp_path):
+    gateway, login, roster, creator_entry = gateway_login
+    creator, _ = login()
+
+    approver_key = tmp_path / "approver-key"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(approver_key)],
+        check=True,
+        capture_output=True,
+    )
+    approver_entry = {
+        **creator_entry,
+        "fingerprint": fingerprint_of_public_key(approver_key.with_suffix(".pub").read_text().strip()),
+        "actor_id": "fixture-approver",
+        "role": "approver",
+    }
+    roster.write_text(yaml.safe_dump({"bindings": [creator_entry, approver_entry]}))
+    now = datetime.now(timezone.utc)
+    approver_context = SessionContext(
+        session_id="approver-session",
+        actor_id=approver_entry["actor_id"],
+        role=approver_entry["role"],
+        group=approver_entry["group"],
+        workspace_id=approver_entry["workspace_id"],
+        workspace_path=approver_entry["workspace_path"],
+        github_subject=approver_entry["github_subject"],
+        resource_scopes=approver_entry["resource_scopes"],
+        issued_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    approver_token = "fixture-approver-token"
+    with sqlite3.connect(gateway.database) as conn:
+        conn.execute(
+            "INSERT INTO identity_sessions VALUES(?,?,?)",
+            (
+                hashlib.sha256(approver_token.encode()).hexdigest(),
+                approver_entry["fingerprint"],
+                approver_context.model_dump_json(),
+            ),
+        )
+
+    assert gateway.validate_checkpoint(approver_token, creator["session"]) == {"valid": True}
+    gateway.logout(creator["token"])
+    with pytest.raises(PermissionError, match="creator session expired or revoked"):
+        gateway.validate_checkpoint(approver_token, creator["session"])

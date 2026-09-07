@@ -12,6 +12,16 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 export QUANTCODE_ROOT="$PROJECT_ROOT"
 
+python_bin="${QUANTCODE_PYTHON:-}"
+if [ -z "$python_bin" ]; then
+    for candidate in "$PROJECT_ROOT/.venv/bin/python" python3.12 python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+fi
+
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,46 +51,36 @@ echo "================================"
 
 # 1. 检查Python环境
 info "检查Python环境..."
-if ! command -v python3 &> /dev/null; then
+if [ -z "$python_bin" ]; then
     error "Python 3未安装。请先安装Python 3.12+"
 fi
 
-PYTHON_VERSION=$(python3 --version | awk '{print $2}')
+PYTHON_VERSION=$($python_bin --version | awk '{print $2}')
 info "Python版本: $PYTHON_VERSION"
 
 # 2. 检查Python包
 info "检查QuantCode Python包..."
-if ! PYTHONPATH="$PROJECT_ROOT" python3 -c "import runner" &> /dev/null; then
+if ! PYTHONPATH="$PROJECT_ROOT" "$python_bin" -c "import runner" &> /dev/null; then
     warn "QuantCode包未安装，正在安装..."
     if command -v uv &> /dev/null; then
         uv sync --extra dev || error "安装失败"
+        python_bin="$PROJECT_ROOT/.venv/bin/python"
     else
-        python3 -m pip install -e ".[dev]" || error "安装失败"
+        "$python_bin" -m pip install -e ".[dev]" || error "安装失败"
     fi
     info "✓ Python包安装完成"
 else
     info "✓ QuantCode包已安装"
 fi
 
-# 3. 检查配置文件
+# 3. 检查可选运行配置
 info "检查配置文件..."
-if [ ! -f "config.json" ]; then
-    warn "config.json不存在，从示例文件创建..."
-    if [ -f "config.example.json" ]; then
-        cp config.example.json config.json
-        warn "⚠️ 请编辑config.json填入真实的API keys"
-        warn "   DeepSeek API: https://platform.deepseek.com"
-        warn "   编辑完成后重新运行此脚本"
-        exit 1
-    else
-        error "config.example.json不存在"
-    fi
+if [ -n "${QUANTCODE_API_KEY:-}" ]; then
+    info "✓ 已检测 QUANTCODE_API_KEY；MCP 将使用环境变量配置"
+elif [ -f "$PROJECT_ROOT/config.json" ]; then
+    info "✓ 已发现 runner-direct config.json；MCP 仍只读取环境变量"
 else
-    # 检查API key是否配置
-    if grep -q "your-.*-api-key-here" config.json; then
-        error "config.json中仍有示例API key，请先配置真实的keys"
-    fi
-    info "✓ config.json已配置"
+    warn "未配置 QUANTCODE_API_KEY；桌面和只读页面仍可启动，Agent 运行会明确返回 provider unavailable。"
 fi
 
 # 4. 检查OpenCode桌面端
@@ -119,6 +119,12 @@ fi
 if [ -z "${QUANTCODE_SSH_KEY_FINGERPRINT:-}" ] && [ ! -f "$PROJECT_ROOT/.opencode/authorized_groups.yaml" ]; then
     warn "未检测到 SSH roster 身份；MCP 将按 v5 规则保持 fail-closed。"
     warn "请由桌面 SSH Agent/Keychain bridge 注入 QUANTCODE_SSH_KEY_FINGERPRINT。"
+fi
+
+if [ "${1:-}" = "--check" ]; then
+    cd "$PROJECT_ROOT"
+    info "✓ QuantCode 启动前检查通过"
+    exit 0
 fi
 
 # 8. 启动桌面端

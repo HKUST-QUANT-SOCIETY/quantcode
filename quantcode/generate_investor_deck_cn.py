@@ -7,16 +7,14 @@ QuantCode 投资人介绍文档生成器
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm, mm
+from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle,
-    Image as RLImage, KeepTogether
+    Image as RLImage
 )
-from reportlab.pdfgen import canvas
 from reportlab.graphics.shapes import Drawing, Rect, String, Line, Circle, Polygon
-from reportlab.graphics import renderPDF
 import os
 
 # 注册中文字体
@@ -26,13 +24,13 @@ try:
     pdfmetrics.registerFont(TTFont('SimHei-Bold', '/System/Library/Fonts/STHeiti Medium.ttc'))
     FONT_NAME = 'SimHei'
     FONT_NAME_BOLD = 'SimHei-Bold'
-except:
+except Exception:
     try:
         pdfmetrics.registerFont(TTFont('SimHei', '/System/Library/Fonts/PingFang.ttc'))
         pdfmetrics.registerFont(TTFont('SimHei-Bold', '/System/Library/Fonts/PingFang.ttc'))
         FONT_NAME = 'SimHei'
         FONT_NAME_BOLD = 'SimHei-Bold'
-    except:
+    except Exception:
         FONT_NAME = 'Helvetica'
         FONT_NAME_BOLD = 'Helvetica-Bold'
 
@@ -1319,4 +1317,3 @@ if __name__ == "__main__":
 
     generator = InvestorDeckGenerator(output_pdf)
     generator.generate(hkust_logo, quantdiner_logo)
-
