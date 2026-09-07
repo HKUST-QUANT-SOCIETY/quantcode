@@ -1,5 +1,7 @@
 import { For, Show, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Icon } from "@opencode-ai/ui/icon"
+import { userFacingServiceError } from "./workspace-ui"
 
 type Node = { sha: string; message: string; parents: string[] }
 type Repo = { repo: string; default_branch?: string; observed_at: string; sync_status: string; errors: string[]; heads: { branch: string; sha: string; changed?: boolean }[]; commit_nodes: Node[]; dependency_changes: { file: string; old_sha?: string; new_sha?: string }[]; package_changes?: { file: string; package: string; old_value?: string; new_value?: string }[]; dependency_files?: { path: string; version_status?: string }[] }
@@ -81,7 +83,7 @@ export function GitHubWorkspace(props: {
         })
       }
     } catch (error) {
-      if (version === generation) { setState({ error: error instanceof Error ? error.message : "GitHub 同步失败", repos: [], pops: [], cursor: undefined }); props.onUnread(0) }
+      if (version === generation) { setState({ error: userFacingServiceError(error, "GitHub 同步暂不可用。"), repos: [], pops: [], cursor: undefined }); props.onUnread(0) }
     } finally {
       if (version === generation) { running = false; setState("loading", false) }
     }
@@ -121,12 +123,10 @@ export function GitHubWorkspace(props: {
     const timer = setInterval(() => void refresh(version), 60_000)
     onCleanup(() => { clearInterval(timer); generation++ })
   })
-  return <section style={{ display: props.visible ? undefined : "none" }} hidden={!props.visible} class="qc-detail-body" aria-label="GitHub 同步工作台">
-    <h3>GitGraph · 仓库与分支</h3>
-    <p>每分钟同步当前授权范围。首次同步建立基线。图展示各分支最近 30 条提交。</p>
-    <button type="button" disabled={state.loading || !props.ready} onClick={() => void refresh(generation)}>刷新</button>
+  return <section style={{ display: props.visible ? undefined : "none" }} hidden={!props.visible} class="qc-detail-body qc-github-sync" aria-label="GitHub 同步工作台">
+    <div class="qc-view-toolbar"><div><h3>GitGraph · 仓库与分支</h3><p>同步当前授权范围；首次同步建立基线。</p></div><button type="button" class="qc-icon-action" aria-label="刷新" title="刷新 GitGraph" disabled={state.loading || !props.ready} onClick={() => void refresh(generation)}><Icon name="reset" size="normal" /></button></div>
     <Show when={state.loading}><p role="status">正在同步 GitHub…</p></Show>
-    <Show when={state.error}><p role="alert">{state.error}</p></Show>
+    <Show when={state.error}><div class="qc-github-error" role="status"><Icon name="github" size="normal" /><div><strong>GitGraph 暂不可用</strong><p>{state.error}</p><p class="qc-muted">连接 GitHub 身份后，这里会显示授权范围内的仓库、分支和更新。</p></div></div></Show>
     <Show when={!state.loading && !state.error && !state.repos.length}><p>当前身份没有可见仓库。</p></Show>
     <For each={state.repos}>{repo => <details class="qc-detail-section">
       <summary>{repo.repo} · {repo.heads.length} 个分支 · {repo.sync_status}</summary>

@@ -37,6 +37,7 @@
 .qc-view-content h4 { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
 .qc-view-content p { margin: 8px 0; overflow-wrap: anywhere; }
 .qc-view-content [role="alert"] { background: #fff2f0; border-left: 3px solid #b4493c; color: #90362c; padding: 12px 16px; border-radius: 4px; }
+.qc-view-content .qc-service-status { padding: 14px 16px; border: 1px solid #ecd8c0; border-left: 3px solid #b28551; background: #fffaf2; color: #76552f; border-radius: 5px; }
 .qc-view-content pre, .qc-view-content code { max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }
 .qc-view-content pre { padding: 14px; background: #f0f3f5; border: 1px solid var(--qc-line); border-radius: 5px; }
 .qc-view-content button { cursor: pointer; }
@@ -132,6 +133,24 @@
 .qc-setting-row code { display: block; margin-top: 8px; }
 .qc-shell .qc-setting-row strong { font-size: 17px; }
 .qc-account-section, .qc-preferences-section { min-width: 0; }
+.qc-deployment-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: end; }
+.qc-deployment-form label { display: grid; gap: 7px; color: var(--qc-muted); font-size: 12px; }
+.qc-deployment-form .qc-deployment-actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+.qc-admin-console { display: grid; gap: 22px; }
+.qc-admin-console .qc-memory-intro { padding: 0; }
+.qc-admin-query { display: grid !important; gap: 14px !important; padding: 18px !important; border: 1px solid var(--qc-line) !important; border-radius: 6px !important; background: #fff; }
+.qc-admin-query > div { display: flex !important; gap: 10px !important; align-items: center; flex-wrap: wrap; }
+.qc-admin-query input { flex: 1 1 240px; }
+.qc-admin-entries { display: flex; gap: 10px; flex-wrap: wrap; }
+.qc-admin-preset, .qc-admin-filter { min-height: 32px; padding: 6px 10px; border: 1px solid var(--qc-line); border-radius: 4px; background: #fff; font-size: 12px; }
+.qc-admin-preset:hover, .qc-admin-filter:hover { background: #eef6f3; }
+.qc-admin-group, .qc-admin-error-row { border-color: var(--qc-line) !important; background: #fff !important; }
+.qc-github-sync { display: grid; gap: 20px; }
+.qc-github-sync > h3 { margin: 0; }
+.qc-github-sync .qc-github-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.qc-github-sync .qc-github-error { display: flex; align-items: flex-start; gap: 12px; padding: 18px; border: 1px solid #ecd8c0; border-left: 3px solid #b28551; border-radius: 5px; background: #fffaf2; color: #76552f; }
+.qc-github-sync .qc-github-error strong { display: block; color: var(--qc-ink); }
+@media (max-width: 700px) { .qc-deployment-form { grid-template-columns: minmax(0, 1fr); } .qc-deployment-form .qc-deployment-actions { grid-column: auto; } }
 .qc-ssh { display: grid; gap: 12px; min-width: 0; width: 100%; overflow-wrap: anywhere; }
 .qc-ssh .qc-field-label { margin: 10px 0 0; font-size: 12px; }
 .qc-ssh .qc-artifact { width: 100%; font-size: 12px; }

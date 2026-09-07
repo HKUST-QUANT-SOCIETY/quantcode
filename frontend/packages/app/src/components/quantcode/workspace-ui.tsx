@@ -28,6 +28,21 @@ export function navigateViewTabs(event: KeyboardEvent & { currentTarget: HTMLDiv
   tabs[next]?.click()
 }
 
+export function userFacingServiceError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  if (/management request rejected|production executor|deploy.*503/i.test(message)) {
+    return "生产管理通道尚未配置，部署请求保持 STAGING。"
+  }
+  if (/github identity token|github.*token.*not connected/i.test(message)) {
+    return "GitHub 身份尚未连接，GitGraph 暂不可用。"
+  }
+  if (/identity service unavailable|quantcode read-only service/i.test(message)) {
+    return "数据通道暂不可用，请检查研究服务连接。"
+  }
+  if (/^Error:\s*/i.test(message)) return message.replace(/^Error:\s*/i, "")
+  return message || fallback
+}
+
 export function runStatusLabel(status: string) {
   return ({ completed: "已完成", running: "运行中", waiting_for_human: "待审批", rejected: "已拒绝", error: "异常", failed: "失败", stopped_budget: "预算停止", stopped_loop: "循环停止" } as Record<string, string>)[status] ?? status
 }
