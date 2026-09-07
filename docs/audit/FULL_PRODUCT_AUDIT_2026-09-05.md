@@ -19,7 +19,7 @@
 | 检查 | 当前结果 |
 |---|---|
 | 独立依赖安装 | `bun run install:frontend` 冻结锁文件安装成功；未复用旧仓库 node_modules |
-| Python 全量回归 | 2026-09-07：1,154 passed / 4 skipped，36.04 秒；真实 LLM 跳过；Ruff 通过 |
+| Python 全量回归 | 2026-09-07：1,163 passed / 4 skipped，33.34 秒；真实 LLM 跳过；Ruff 通过 |
 | QuantCode 组件 | 2026-09-07：127 passed / 403 assertions；登录/API 相关 17 项在错误处理修复后再次通过 |
 | app / opencode / desktop 类型 | 三个包均通过 |
 | 网页构建 | 从根目录 `bun run build:web` 成功，QuantCode 品牌 |
@@ -237,14 +237,15 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 - Gateway 的三个身份模块已同步 Server C，原 roster/数据库保留，旧模块有备份。MCP 修复位于本仓库；Server C 完整 Agent/MCP 环境尚未部署。
 - 网页组选项与真实退出已补齐：HTTP 接口只接受固定组枚举，宿主和 gateway 都重验 roster；退出失败保留凭据和重试入口，退出成功刷新为未认证，重新打开设置恢复当前身份。修复 SDK 抛出 HTTP 异常时把退出失败误报为主机不可达的问题。
 - Python **1,154 passed / 4 skipped**，Ruff 通过，QuantCode 组件 **127 passed / 403 assertions**，app/opencode 类型通过，网页生产构建通过（保留既有 chunk/sourcemap 警告），Dev Playwright **18 passed**。浏览器业务/身份响应使用 fixture；新增真实宿主 HTTP/CLI/临时 SSH agent/gateway/生产 MCP 联调另验证第二组、并发准入、退出撤销和 MCP 断连，既有宿主 HTTP 回归 7 项通过。
-- Server C 已部署 `/auth/identity` 授权组查询，更新前校验远端文件哈希并备份。独立本机预览 `4196/4544` 已读取正式 roster，并通过宿主登录接口完成真实 Lead 签名及 MCP session_id 一致性核验。它仍不证明 roster 中的服务器研究目录存在或多人远程环境已部署；旧 `4096/4444` 服务未重启。
+- Server C 已部署 `/auth/identity` 授权组查询，更新前校验远端文件哈希并备份。独立本机预览 `4196/4544` 已读取正式 roster，并通过宿主登录接口完成真实 Lead 签名及 MCP session_id 一致性核验。该测试不代表多人远程运行环境已部署；旧 `4096/4444` 服务未重启。
+- Server C 完整 Python 依赖已按源码 `07eacd7` 与 `uv.lock` 冻结安装，共 114 包；运行目录由 root 管理。真实 systemd 沙箱 17 项预检通过，包含私有状态可写、源码不可写、Gateway 数据及其他隔离目录不可读、未认证 MCP 拒绝启动；DynamicUser 和实际研究 UID 两种运行方式均通过。另已为 36 个 actor 创建独立无 sudo 研究账号和 `0700` 个人目录，逐账号 216 项权限检查通过，重复执行开通脚本均返回 EXISTING；Lead 使用本机公钥成功 SSH 登录其新研究账号。新增开通计划 9 项回归后，全量 Python **1,163 passed / 4 skipped**。详情见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
 
 ### 仍阻塞的事项
 
 | 事项 | 实测状态与影响 | 下一步及责任边界 |
 |---|---|---|
 | 剩余人员 | 张博睿、李卓只有指纹而缺完整公钥；叶易涵有共用公钥/邮箱归并问题；这些记录未激活 | 成员补完整公钥；用户确认叶易涵对应记录是否同一人。只影响未激活身份，不阻止其他已审核成员接入 |
-| Server C 完整运行环境 | 目前只托管身份 gateway，虚拟环境缺 LangGraph/LangChain Core；roster 的 36 个工作目录在 Server C 上均不存在（含本机运维路径） | 工程部署完整 Agent/MCP，落实个人目录映射、文件权限和进程隔离；不能让所有成员共用 ubuntu 的 session 文件 |
+| Server C 完整运行环境 | 依赖、36 个独立研究账号和个人目录已落地，真实系统隔离预检通过；常驻研究进程仍为 NOT_CONFIGURED | 接通本机签名到远程 MCP 的会话凭据传递、actor/UID 校验、状态挂载及进程托管；私有状态不能替代共享组 Memory 和组织权威存储 |
 | 成员本机签名 | 当前签名由 OpenCode 宿主执行；宿主迁到 Server C 后不能直接调用成员电脑的 SSH agent | 工程补客户端本机签名到 gateway 的接线及逐成员凭据传递；成员私钥留在本机，不上传服务器 |
 | GitHub/通知 | token 映射仅本机配置；Server C 未配置 broker，`--github-sync-interval 0`；系统通知仅有客户端实现证据 | 用户/组织管理员提供正式授权，工程完成服务端按身份映射与撤销、启用同步、验收客户端通知送达 |
 | Dream/Distill | worker 代码存在；Server C 为 `--dream-interval 0`，没有 QuantCode timer，未验证持续消费和重启恢复 | 工程落实证据数据目录与权限、参数、正式托管和恢复验收；配置定时器不等于完成蒸馏闭环 |
