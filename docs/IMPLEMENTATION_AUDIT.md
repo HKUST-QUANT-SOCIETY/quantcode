@@ -13,7 +13,7 @@
 | 模块 | 功能性 | 完整性 | 可维护性 | 结论 |
 |---|---|---|---|---|
 | Session Group / MCP Tool Catalog | 通过 | 生产 fail-closed；开发降级需显式 `QUANTCODE_ENV` | list/call 共用 effective set | 继续使用 |
-| SSH Identity / Roster | 后端挑战签名、指纹和 SessionContext 已实现；Lens 已接入只读 `ssh_status` | 真正 SSH 私钥认证/网络探测仍需独立 gateway，Desktop E2E 待验 | 私钥不进只读 API；roster 字段版本化 | 外部 gateway 待接 |
+| SSH Identity / Roster | 后端挑战签名、指纹和 SessionContext 已实现；Server C Ubuntu systemd gateway 已接入；Lens 已接入只读 `ssh_status` | 真实成员设备签名和 Desktop E2E 仍需逐人验收 | 私钥不进只读 API；roster 字段版本化 | 成员设备接入待验 |
 | AgentRunner / ReAct | 通过 | Run、Trace、Checkpoint、Resume、Context rebuild 可用 | 删除 risk/budget/loop Gate 分支；状态单一 | 继续使用 |
 | Budget / Loop | 通过 | `stopped_budget` / `stopped_loop` | 不再混入 HumanGate | 继续使用 |
 | HumanGate | 通过 | Schema 仅允许 `merge` / `permission` | 通用 Envelope；风险字段已移除 | 继续使用 |

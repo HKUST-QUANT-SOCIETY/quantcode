@@ -157,11 +157,11 @@ DataAccess
 
 | 编号 | 状态 | 功能性 | 完整性 | 可维护性 | 证据/剩余边界 |
 |---|---|---|---|---|---|
-| F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、frontend `session_context`；真实桌面身份桥待验 |
+| F-01 | PARTIAL | 通过 | Server C gateway 已接；真实成员桌面身份桥待逐人验收 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、frontend `session_context`；多组 actor 登录时选定单一 Session group |
 | F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`/resume、checkpoint、trace contract；恢复阶段也写入 execution trace，本地缓存按 actor/group/workspace 隔离 |
 | F-03 | IMPLEMENTED | 通过 | Admin 部署仍为 STAGING | 通过 | `merge`/`permission` Gate；风险、预算、循环只返回结果/停止状态 |
 | F-04 | IMPLEMENTED | 通过 | 外部组件状态同步和完整 Admin UI 待接 | 通过 | FTS5 Group ACL、`search_memory`、`list_capabilities`、14 张卡；Memory 根为 `<project>/.quantcode` |
-| F-05 | PARTIAL | 后端 challenge/roster 通过 | 本地 Agent/Keychain bridge、网络探测待接 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
+| F-05 | PARTIAL | 后端 challenge/roster 通过 | Server C gateway 已接；成员本地 Agent/Keychain bridge、网络探测和逐人桌面闭环待验 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
 | F-06 | PARTIAL | staging adapter 通过 | canonical DataAccess/QuantEvaluator 生产连接待验 | 通过 | `eval_from_panel` 与契约检查；`UNAVAILABLE` 不生成伪指标 |
 | F-07 | IMPLEMENTED | CI/handoff 通过 | 外部 GitHub/报告平台待验 | 通过 | Model→Risk CI 和 Blackboard 公共契约 |
 | F-08 | PARTIAL | 组内适配可回归 | 各领域 canonical 服务待接 | 通过 | `tools/*` 与 `flows/*` 保留为适配层，不复制业务产品 |
@@ -233,7 +233,7 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 流程为“本地 SSH 身份 → 服务端验证公钥指纹 → roster 匹配 actor/组/角色/个人工作目录 → 建立不可变会话”。私钥只留在本机密钥链或 SSH agent，不进入 LLM、Memory、日志或普通 UI 请求。登录后可读取授权主线、写入个人开发环境；生产环境由独立服务账号运行，不提供研究员直接登录。
 
-**当前实现**：指纹映射、一次性 challenge/signing、SessionContext 和只读状态查询后端已有；Lens 仅接受本地 Agent/Keychain identity，当前没有真实 SSH gateway/网络探测，不能视为完整登录。
+**当前实现**：指纹映射、一次性 challenge/signing、SessionContext、Server C Ubuntu systemd gateway 和只读状态查询后端已有；Lens 仅接受本地 Agent/Keychain identity，成员设备逐人登录与网络探测仍需验收，不能只凭本机 Lead 登录视为全员完成。
 
 **失败状态**至少区分密钥拒绝、主机不可达、roster 未命中、资源权限不足和身份接线未完成。研究员登录后拥有被授权服务器上的个人工作目录；该目录属于研究/开发环境。生产 shell、生产服务账号和生产进程控制不属于此功能。
 
