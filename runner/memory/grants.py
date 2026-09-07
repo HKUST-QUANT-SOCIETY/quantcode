@@ -5,7 +5,10 @@ import re
 
 import yaml
 
-from runner.langgraph_base import PROJECT_ROOT
+
+# Grants are used by the lightweight identity Gateway.  Keep this module
+# independent from the LangGraph execution engine just to locate the repo.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def project_read_grants(ctx: dict, path: Path | None = None) -> list[str]:
