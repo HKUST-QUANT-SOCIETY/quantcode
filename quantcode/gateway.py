@@ -32,16 +32,19 @@ class IdentityGateway:
             conn.execute("CREATE TABLE IF NOT EXISTS identity_sessions (token_hash TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, context TEXT NOT NULL)")
         self.database.chmod(0o600)
 
-    def issue(self, public_key: str, requested_group: str | None = None) -> dict:
+    def describe_identity(self, public_key: str, requested_group: str | None = None) -> dict:
         fingerprint = fingerprint_of_public_key(public_key)
         entry = resolve_identity(fingerprint, self.roster, group=requested_group)
         if not entry:
             raise PermissionError("identity is not in the approved roster")
+        return {"group": requested_group or entry["group"], "groups": entry.get("groups") or [entry["group"]]}
+
+    def issue(self, public_key: str, requested_group: str | None = None) -> dict:
+        identity = self.describe_identity(public_key, requested_group)
+        fingerprint = fingerprint_of_public_key(public_key)
         with self.lock:
-            challenge = self.challenges.issue(fingerprint, group=requested_group or entry["group"])
-        challenge["groups"] = entry.get("groups") or [entry["group"]]
-        challenge["group"] = requested_group or entry["group"]
-        return challenge
+            challenge = self.challenges.issue(fingerprint, group=identity["group"])
+        return {**challenge, **identity}
 
     def verify(self, payload: dict) -> dict:
         requested_group = payload.get("group", payload.get("requested_group"))
@@ -189,6 +192,8 @@ def handler(gateway: IdentityGateway):
                         return self.reply(200, cancel_deployment(payload["deployment_id"], **options))
                     result = submit_deploy(AdminDeployRequest.model_validate(payload), **options)
                     return self.reply(200, result.model_dump(mode="json"))
+                if self.path == "/auth/identity":
+                    return self.reply(200, gateway.describe_identity(payload["public_key"]))
                 if self.path == "/auth/challenge":
                     return self.reply(200, gateway.issue(payload["public_key"], payload.get("group")))
                 if self.path == "/auth/verify":

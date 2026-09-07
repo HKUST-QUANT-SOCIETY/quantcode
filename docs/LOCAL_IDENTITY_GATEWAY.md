@@ -25,7 +25,7 @@ Roster 激活实际需要以下条件同时成立：
 
 同一 actor 可以在 roster 中声明多个授权组，例如 `group: model`、`groups: [model, factor]`。登录时可请求其中一个组（`identity_login --group factor`）；服务端签发的 SessionContext 仍只包含一个固定 `group`，任务参数不能切组。没有指定组时使用 roster 的主组 `group`。
 
-截至 2026-09-07，组选择只接通 CLI/gateway；网页登录表单和宿主登录调用尚未传递目标组，因此网页仍登录主组。网页“断开”按钮目前只重置表单，未接 gateway logout、会话文件清理和 MCP 断连，不能作为已退出身份的证明。
+截至 2026-09-07，网页、宿主和 CLI/gateway 已接通登录前组选择。选项来自 gateway 的正式 roster，登录后显示当前固定组和授权组列表；再次选组须退出后重新登录。网页“断开”会撤销 gateway token、清理宿主会话文件并断连当前工作区的 MCP；撤销失败时保留凭据以便重试，不显示已退出。重新打开设置时会读取真实 gateway 会话并恢复身份展示。
 
 ### 开发端口与旧连接
 
@@ -50,7 +50,9 @@ Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quant
 
 ## 登录路径
 
-设置页 → 本机公钥身份 → 连接 → 宿主调用 SSH agent 签名 → gateway 验证一次性 challenge 与 roster → 本机保存会话凭据 → 重连 QuantCode MCP → 核对同一会话 → 刷新组、角色、工作区和目录。
+设置页 → 本机公钥身份 → 选择授权组 → 连接 → 宿主调用 SSH agent 签名 → gateway 验证一次性 challenge 与 roster → 本机保存会话凭据 → 重连 QuantCode MCP → 核对同一会话 → 刷新组、角色、工作区和目录。
+
+宿主身份列表调用 `/auth/identity`，仅读取该公钥对应的授权组，不创建 challenge 或会话。登录与退出共用进程级互斥准入，覆盖签名、会话文件变更、MCP 重连/断连和身份核对；并发操作被拒绝，可在前一操作完成后重试。CLI 提供 `--inspect`（读取组与真实会话）及 `--logout --session-file /absolute/session.json`（撤销并删除凭据）；输出不包含 token 或签名。直接 CLI 续登也会先撤销即将替换的旧凭据。
 
 界面不接收任意命令、可执行路径、私钥、签名或 token。服务端只执行宿主预先配置的固定命令。gateway 每次查询重验 roster，撤销/角色变化/过期要求重新登录。
 
@@ -60,7 +62,7 @@ Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quant
 
 2026-09-07 新增真实签名的组绑定、单组 Memory scope、撤销第二组后会话失效及生产 MCP 子进程联调回归；同时删除依赖 `PYTEST_CURRENT_TEST` 的认证失败回退。Gateway 身份修复已同步 Server C，既有本机 Lead 公钥经 SSH agent 签名登录成功；这不代替成员设备或远程共享宿主验收。
 
-宿主错误配置、并发登录与 MCP 会话一致性的完整链路，以及浏览器身份选择→签入→工作区更新仍待专项验收。未配置正式 roster 时，`/experimental/quantcode/identities` 会返回结构化的 `identities: []` 与错误，MCP `session_context` 会返回未连接错误；这些是 fail-closed 行为，不是 `/agent` 500的原因。正式人员授权及外部研发 SSH 环境仍需正确配置。
+隔离环境已通过真实宿主 HTTP → Python CLI → 临时 SSH agent → gateway → 生产 MCP 的完整联调，覆盖第二组登录、未授权组拒绝、并发登录拒绝、会话一致性、退出撤销和 MCP 断连。浏览器已验证组选项、重新打开设置、退出失败重试和成功后的未认证状态；本机 Lead 另已通过真实宿主登录接口连到 Server C 并核对 MCP 会话。其他成员设备、共享服务器签名桥及真实工作目录仍待部署验收。未配置正式 roster 时，`/experimental/quantcode/identities` 会返回结构化的 `identities: []` 与错误，MCP `session_context` 会返回未连接错误；这些是 fail-closed 行为，不是 `/agent` 500 的原因。
 
 ## GitHub 凭据绑定
 

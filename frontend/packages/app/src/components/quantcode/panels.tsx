@@ -35,7 +35,7 @@ import { FactorFlowView } from "./factor-screen"
 import { NotificationsBell, NotificationsPanel, pendingNotifications } from "./notifications"
 import { PitValuationView } from "./pit-screen"
 import { SupplierView } from "./settings-supplier"
-import { SshLoginView, type SshConnectFn, type SshIdentity } from "./ssh-login"
+import { SshLoginView, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
 import { CapabilityCatalogView } from "./capability-catalog"
 import { ApprovalQueue } from "./approval-queue"
 import { DeploymentPanel } from "./deployment-panel"
@@ -56,6 +56,7 @@ import {
   searchQuantCodeMemory,
   getQuantCodeSessionContext,
   createLocalIdentityConnect,
+  createLocalIdentityDisconnect,
   type QuantCodeAlgorithm,
   type QuantCodeSkill,
 } from "./api"
@@ -509,6 +510,8 @@ function SettingsPanel(props: {
   /** F-05 SSH 登录视图的 i18n（quantcode.ssh.*），来自 useLanguage().t */
   sshT: (key: string) => string
   sshConnect: SshConnectFn
+  sshDisconnect: SshDisconnectFn
+  sshSession?: SshSession
   sshIdentities: SshIdentity[]
   sshIdentityError: string
 }): JSX.Element {
@@ -559,7 +562,10 @@ function SettingsPanel(props: {
       <div class="qc-detail-section">
         <span class="qc-section-label">SSH LOGIN</span>
         <Show when={props.sshIdentityError}><p role="alert">{props.sshIdentityError}</p></Show>
-        <SshLoginView t={props.sshT} connect={props.sshConnect} identities={props.sshIdentities} />
+        <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
+          {identity => <SshLoginView t={props.sshT} connect={props.sshConnect} disconnect={props.sshDisconnect}
+            identities={identity.identities} session={identity.session} />}
+        </Show>
       </div>
       <SupplierView algorithms={props.algorithms} />
     </div>
@@ -594,6 +600,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     githubUnread: 0,
     identityRevision: 0,
     sshIdentities: [] as SshIdentity[],
+    sshSession: undefined as SshSession | undefined,
     sshIdentityError: "",
     adminHistory: "tasks" as "tasks" | "reports",
     algorithms: [] as QuantCodeAlgorithm[],
@@ -644,7 +651,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     const client = serverSDK().client
     const serverKey = String(server.key)
     let cancelled = false
-    setState({ sshIdentities: [], sshIdentityError: "" })
+    setState({ sshIdentities: [], sshSession: undefined, sshIdentityError: "" })
     void client.quantcode.identity.list().then(response => {
       if (cancelled) return
       const data = response.data
@@ -662,6 +669,12 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         return
       }
       setState("sshIdentities", data.identities as SshIdentity[])
+      if ("session" in data && data.session && typeof data.session === "object"
+        && "status" in data.session && data.session.status === "connected"
+        && "fingerprint" in data.session && typeof data.session.fingerprint === "string"
+        && "group" in data.session && typeof data.session.group === "string") {
+        setState("sshSession", data.session as SshSession)
+      }
       if (!data.identities.length) setState("sshIdentityError", "宿主尚未提供可用公钥身份，请完成本机身份桥配置。")
     }).catch(() => { if (!cancelled) setState("sshIdentityError", "读取本机身份失败，请检查研究服务器连接。") })
     onCleanup(() => { cancelled = true })
@@ -732,6 +745,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
   const serverReady = createMemo(() => server.ready())
   const serverTransport = createMemo(() => (server.isLocal() ? "本地 sidecar" : server.key))
   const sshConnect = createMemo(() => createLocalIdentityConnect(serverSDK().client, () => setState("identityRevision", value => value + 1)))
+  const sshDisconnect = createMemo(() => createLocalIdentityDisconnect(serverSDK().client, () => setState("identityRevision", value => value + 1)))
   const recent = createMemo(() => {
     const history = _threadHistory().slice(0, 3)
     if (history.length) {
@@ -1314,6 +1328,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                     serverTransport={serverTransport()}
                     sshT={language.t as (key: string) => string}
                     sshConnect={sshConnect()}
+                    sshDisconnect={sshDisconnect()}
+                    sshSession={state.sshSession}
                     sshIdentities={state.sshIdentities}
                     sshIdentityError={state.sshIdentityError}
                   />

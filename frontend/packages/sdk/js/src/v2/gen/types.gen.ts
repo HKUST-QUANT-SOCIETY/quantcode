@@ -7942,7 +7942,7 @@ export type QuantcodeIdentityListResponses = {
 
 export type QuantcodeIdentityLoginData = {
   body?: {
-    [key: string]: unknown
+    group?: "factor" | "model" | "risk" | "strategy" | "options" | "fundamental" | "infra" | "agent"
   }
   path?: never
   query?: {
@@ -7962,6 +7962,34 @@ export type QuantcodeIdentityLoginErrors = {
 export type QuantcodeIdentityLoginError = QuantcodeIdentityLoginErrors[keyof QuantcodeIdentityLoginErrors]
 
 export type QuantcodeIdentityLoginResponses = {
+  /**
+   * Success
+   */
+  200: unknown
+}
+
+export type QuantcodeIdentityLogoutData = {
+  body?: {
+    [key: string]: unknown
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/identity/logout"
+}
+
+export type QuantcodeIdentityLogoutErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeIdentityLogoutError = QuantcodeIdentityLogoutErrors[keyof QuantcodeIdentityLogoutErrors]
+
+export type QuantcodeIdentityLogoutResponses = {
   /**
    * Success
    */

@@ -1,10 +1,14 @@
 """Real OpenSSH agent signatures against an isolated gateway/roster database."""
 import hashlib
+import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
+from http.server import ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -17,7 +21,7 @@ from schemas.session_context import SessionContext
 
 
 @pytest.fixture
-def gateway_login(tmp_path):
+def gateway_login(tmp_path, monkeypatch):
     key = tmp_path / "test-key"
     subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, capture_output=True)
     public_key = key.with_suffix(".pub").read_text().strip()
@@ -42,6 +46,7 @@ def gateway_login(tmp_path):
                 time.sleep(0.01)
             env = {**os.environ, "SSH_AUTH_SOCK": str(socket)}
             subprocess.run(["ssh-add", str(key)], env=env, check=True, capture_output=True)
+            monkeypatch.setenv("SSH_AUTH_SOCK", str(socket))
 
             def login():
                 challenge = gateway.issue(public_key)
@@ -56,6 +61,77 @@ def gateway_login(tmp_path):
         finally:
             agent.terminate()
             agent.wait(timeout=5)
+
+
+@pytest.fixture
+def host_gateway(gateway_login):
+    from quantcode.gateway import handler
+
+    gateway, _, roster, entry = gateway_login
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "group": "model", "groups": ["model", "factor"]}]}))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(gateway))
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield gateway, f"http://127.0.0.1:{server.server_port}", roster.parent / "test-key.pub", roster.parent / "host-session.json"
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+def test_host_lists_live_groups_signs_selected_group_and_revokes_on_logout(host_gateway):
+    from quantcode.identity_login import describe_identity, login, logout
+
+    gateway, url, key, session_file = host_gateway
+    identity = describe_identity(gateway=url, public_key=key, session_file=session_file)
+    assert identity == {"group": "model", "groups": ["model", "factor"], "session": None}
+    assert not gateway.challenges._items
+    context = login(gateway=url, public_key=key, session_file=session_file, group="factor")
+    assert context["group"] == "factor"
+    token = json.loads(session_file.read_text())["token"]
+    described = describe_identity(gateway=url, public_key=key, session_file=session_file)
+    assert described["session"]["session_id"] == context["session_id"]
+    assert token not in json.dumps(described)
+    login(gateway=url, public_key=key, session_file=session_file, group="model")
+    with pytest.raises(PermissionError):
+        gateway.session(token)
+    replacement = json.loads(session_file.read_text())["token"]
+    logout(session_file)
+    assert not session_file.exists()
+    with pytest.raises(PermissionError):
+        gateway.session(replacement)
+    logout(session_file)
+
+
+def test_host_logout_does_not_claim_success_when_gateway_is_unreachable(tmp_path):
+    import httpx
+    from quantcode.identity_login import logout
+
+    session_file = tmp_path / "session.json"
+    session_file.write_text(json.dumps({"gateway": "http://127.0.0.1:1", "token": "unrevoked-fixture"}))
+    session_file.chmod(0o600)
+    with pytest.raises(httpx.TransportError):
+        logout(session_file)
+    assert session_file.exists()
+
+
+def test_real_host_http_login_mcp_logout(host_gateway):
+    import sys
+
+    bun = shutil.which("bun")
+    if bun is None:
+        pytest.skip("Bun is required for the real host HTTP integration")
+    _, url, key, session_file = host_gateway
+    root = Path(__file__).resolve().parents[1]
+    env = {key: value for key, value in os.environ.items() if not key.startswith("QUANTCODE_")}
+    env.update(QUANTCODE_IDENTITY_INTEGRATION="1", QUANTCODE_HOST_PYTHON=sys.executable,
+               QUANTCODE_BACKEND_ROOT=str(root), QUANTCODE_PUBLIC_KEY_FILE=str(key),
+               QUANTCODE_IDENTITY_SESSION_FILE=str(session_file), QUANTCODE_GATEWAY_URL=url)
+    result = subprocess.run([bun, "test", "--timeout", "45000", "test/server/quantcode-identity.integration.test.ts"],
+                            cwd=root / "frontend/packages/opencode", env=env, text=True, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr[-6000:]
+    assert not session_file.exists()
 
 
 def test_real_agent_login_persists_only_token_hash_and_rejects_replay(gateway_login):

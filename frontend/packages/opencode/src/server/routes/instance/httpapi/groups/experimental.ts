@@ -283,8 +283,11 @@ export const ExperimentalApi = HttpApi.make("experimental")
           query: WorkspaceRoutingQuery, success: Schema.Unknown, error: HttpApiError.BadRequest,
         }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.list", summary: "Read the host-configured public SSH identity" })),
         HttpApiEndpoint.post("quantcodeIdentityLogin", "/experimental/quantcode/identity/login", {
-          query: WorkspaceRoutingQuery, payload: Schema.Struct({}), success: Schema.Unknown, error: HttpApiError.BadRequest,
+          query: WorkspaceRoutingQuery, payload: Schema.Struct({ group: Schema.optional(Schema.Literals(["factor", "model", "risk", "strategy", "options", "fundamental", "infra", "agent"])) }), success: Schema.Unknown, error: HttpApiError.BadRequest,
         }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.login", summary: "Sign a gateway challenge with the host SSH agent" })),
+        HttpApiEndpoint.post("quantcodeIdentityLogout", "/experimental/quantcode/identity/logout", {
+          query: WorkspaceRoutingQuery, payload: Schema.Struct({}), success: Schema.Unknown, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.logout", summary: "Revoke the host identity session and disconnect QuantCode MCP" })),
         HttpApiEndpoint.get("worktree", ExperimentalPaths.worktree, {
           query: WorkspaceRoutingQuery,
           success: described(WorktreeList, "List of worktree directories"),

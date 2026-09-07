@@ -181,6 +181,8 @@ import type {
   QuantcodeIdentityListResponses,
   QuantcodeIdentityLoginErrors,
   QuantcodeIdentityLoginResponses,
+  QuantcodeIdentityLogoutErrors,
+  QuantcodeIdentityLogoutResponses,
   QuantcodePopUpdateErrors,
   QuantcodePopUpdateResponses,
   QuantcodeReceiptReconcileErrors,
@@ -2012,6 +2014,45 @@ export class Identity extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
+      group?: "factor" | "model" | "risk" | "strategy" | "options" | "fundamental" | "infra" | "agent"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "group" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeIdentityLoginResponses,
+      QuantcodeIdentityLoginErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/identity/login",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Revoke the host identity session and disconnect QuantCode MCP
+   */
+  public logout<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
       body?: {
         [key: string]: unknown
       }
@@ -2031,11 +2072,11 @@ export class Identity extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).post<
-      QuantcodeIdentityLoginResponses,
-      QuantcodeIdentityLoginErrors,
+      QuantcodeIdentityLogoutResponses,
+      QuantcodeIdentityLogoutErrors,
       ThrowOnError
     >({
-      url: "/experimental/quantcode/identity/login",
+      url: "/experimental/quantcode/identity/logout",
       ...options,
       ...params,
       headers: {

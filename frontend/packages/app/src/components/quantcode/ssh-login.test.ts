@@ -87,22 +87,50 @@ describe("SshLoginView", () => {
     view.remove()
   })
 
-  test("injected connect → connected state with fingerprint and group badges, disconnect returns to form", async () => {
-    const view = mount(
-      async () => ({ status: "connected", fingerprint: "SHA256:AbCd1234", groups: ["factor", "risk"] }),
-    )
+  test("selects an authorized group before login and waits for real logout, including failure and retry", async () => {
+    let selected = ""
+    let finish: ((value: { status: "disconnected" } | { status: "error"; reason: string }) => void) | undefined
+    const view = SshLoginView({ t, identities: [{ ...IDENTITIES[0], group: "model", groups: ["model", "factor"] }],
+      connect: async ({ group }) => {
+        selected = group ?? ""
+        return { status: "connected", fingerprint: "SHA256:AbCd1234", group, groups: ["model", "factor"] }
+      },
+      disconnect: () => new Promise(resolve => { finish = resolve }),
+    })
+    document.body.append(view)
     fillForm(view)
+    const group = view.querySelector<HTMLSelectElement>("#qc-ssh-group")!
+    expect([...group.options].map(option => option.value)).toEqual(["model", "factor"])
+    group.value = "factor"
+    group.dispatchEvent(new Event("change"))
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
     await flush()
-
+    expect(selected).toBe("factor")
     expect(view.querySelector(".qc-connection-pill")?.textContent).toContain("已连接")
     expect(view.querySelector(".qc-ssh-fingerprint")?.textContent).toBe("SHA256:AbCd1234")
-    const badges = [...view.querySelectorAll(".qc-ssh-badge")].map((badge) => badge.textContent)
-    expect(badges).toEqual(["factor 组", "risk 组"])
-
+    expect(view.querySelector("[data-session-group]")?.textContent).toBe("factor")
+    expect(view.querySelector("#qc-ssh-group")).toBeNull()
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
+    expect(view.querySelector("#qc-ssh-identity")).toBeNull()
+    expect(view.querySelector<HTMLButtonElement>(".qc-button")!.disabled).toBe(true)
+    finish!({ status: "error", reason: "revocation unavailable" })
+    await flush()
+    expect(view.querySelector("[role=alert]")?.textContent).toBe("revocation unavailable")
+    view.querySelector<HTMLButtonElement>(".qc-button")!.click()
+    finish!({ status: "disconnected" })
+    await flush()
     expect(view.querySelector("#qc-ssh-identity")).toBeTruthy()
     view.remove()
+  })
+
+  test("reopening settings restores the authenticated identity and exposes logout", () => {
+    const view = SshLoginView({ t, identities: IDENTITIES,
+      session: { status: "connected", fingerprint: "SHA256:restored", group: "factor", groups: ["model", "factor"] },
+      disconnect: async () => ({ status: "disconnected" }),
+    })
+    expect(view.querySelector("#qc-ssh-identity")).toBeNull()
+    expect(view.querySelector<HTMLButtonElement>(".qc-button")?.textContent).toBe("断开")
+    expect(view.querySelector("[data-session-group]")?.textContent).toBe("factor")
   })
 
   test("injected connect failure surfaces specific reason (key rejected / host unreachable / raw fallback)", async () => {

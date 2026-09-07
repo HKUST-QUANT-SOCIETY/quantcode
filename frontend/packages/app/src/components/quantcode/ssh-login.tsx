@@ -7,22 +7,25 @@
  * identity id 不写入 localStorage / 任何 store。
  */
 
-export type SshLoginStatus = "form" | "connecting" | "connected" | "error"
+export type SshLoginStatus = "form" | "connecting" | "connected" | "disconnecting" | "error"
 
 export type SshConnectInput = {
   host: string
   user: string
   /** Local SSH Agent/Keychain identity selected by the desktop bridge. */
   identityId: string
+  group?: string
   /** 连接过程中逐行追加日志 */
   log: (line: string) => void
 }
 
 export type SshConnectResult =
-  | { status: "connected"; fingerprint: string; groups?: string[] }
+  | { status: "connected"; fingerprint: string; group?: string; groups?: string[] }
   | { status: "error"; reason: string }
 
 export type SshConnectFn = (input: SshConnectInput) => Promise<SshConnectResult>
+export type SshSession = Extract<SshConnectResult, { status: "connected" }>
+export type SshDisconnectFn = () => Promise<{ status: "disconnected" } | { status: "error"; reason: string }>
 
 export type SshIdentity = {
   id: string
@@ -30,6 +33,8 @@ export type SshIdentity = {
   host: string
   user: string
   fingerprint?: string
+  group?: string
+  groups?: string[]
 }
 
 /**
@@ -55,6 +60,8 @@ export type SshLoginProps = {
   connect?: SshConnectFn
   /** Identities supplied by the local SSH Agent/Keychain bridge. */
   identities?: SshIdentity[]
+  session?: SshSession
+  disconnect?: SshDisconnectFn
 }
 
 export function SshLoginView(props: SshLoginProps): HTMLElement {
@@ -63,14 +70,15 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
   const identities = props.identities ?? []
   const root = document.createElement("div")
   root.className = "qc-ssh"
-  root.style.cssText = "display:grid;gap:10px;justify-items:start;"
+  root.style.cssText = "display:grid;gap:10px;justify-items:start;min-width:0;width:100%;overflow-wrap:anywhere;"
 
-  let status: SshLoginStatus = "form"
+  let status: SshLoginStatus = props.session ? "connected" : "form"
   let identityId = identities[0]?.id ?? ""
   let host = identities[0]?.host ?? ""
   let user = identities[0]?.user ?? ""
-  let fingerprint = ""
-  let groups: string[] = []
+  let group = props.session?.group ?? identities[0]?.group ?? ""
+  let fingerprint = props.session?.fingerprint ?? ""
+  let groups: string[] = props.session?.groups ?? []
   let reason = ""
   let logs: string[] = []
   let logEl: HTMLPreElement | undefined
@@ -112,6 +120,8 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
       const identity = identities.find((item) => item.id === identityId)
       host = identity?.host ?? ""
       user = identity?.user ?? ""
+      group = identity?.group ?? ""
+      render()
     })
 
     const target = document.createElement("code")
@@ -122,10 +132,12 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     submit.type = "button"
     submit.className = "qc-button qc-button-primary"
     submit.textContent = t("quantcode.ssh.connect")
-    submit.disabled = !identityId
+    const authorized = identities.find(identity => identity.id === identityId)?.groups ?? []
+    submit.disabled = !identityId || (authorized.length > 0 && !authorized.includes(group))
 
     submit.addEventListener("click", () => {
       status = "connecting"
+      reason = ""
       logs = [`ssh ${user}@${host}`, t("quantcode.ssh.logWaiting")]
       render()
       void attempt()
@@ -134,11 +146,33 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     const actions = document.createElement("div")
     actions.className = "qc-gate-actions"
     actions.append(submit)
-    root.replaceChildren(identityLabel, identitySelect, target, actions)
+    root.replaceChildren(identityLabel, identitySelect, target)
+    if (authorized.length) {
+      const label = document.createElement("label")
+      label.htmlFor = "qc-ssh-group"
+      label.className = "qc-field-label"
+      label.textContent = t("quantcode.group.label")
+      const select = document.createElement("select")
+      select.id = "qc-ssh-group"
+      select.className = "qc-select-wide"
+      for (const value of authorized) {
+        const option = document.createElement("option")
+        option.value = value
+        option.textContent = value
+        select.append(option)
+      }
+      select.value = group
+      select.addEventListener("change", () => {
+        group = select.value
+        submit.disabled = !authorized.includes(group)
+      })
+      root.append(label, select)
+    }
+    root.append(actions)
   }
 
   const attempt = async () => {
-    const result = await connect({ host, user, identityId, log: appendLog }).catch(
+    const result = await connect({ host, user, identityId, group: group || undefined, log: appendLog }).catch(
       (): SshConnectResult => {
         // 合同外异常（注入实现 throw）按网络不可达处理
         return { status: "error", reason: "host_unreachable" }
@@ -147,6 +181,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     if (result.status === "connected") {
       status = "connected"
       fingerprint = result.fingerprint
+      group = result.group ?? group
       groups = result.groups ?? []
     } else {
       status = "error"
@@ -183,6 +218,15 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     fp.textContent = fingerprint
 
     root.replaceChildren(pill, fpLabel, fp)
+    if (group) {
+      const label = document.createElement("span")
+      label.className = "qc-section-label"
+      label.textContent = t("quantcode.group.label")
+      const active = document.createElement("code")
+      active.dataset.sessionGroup = group
+      active.textContent = group
+      root.append(label, active)
+    }
 
     if (groups.length > 0) {
       const groupLabel = document.createElement("span")
@@ -204,14 +248,35 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     disconnect.type = "button"
     disconnect.className = "qc-button qc-button-secondary"
     disconnect.textContent = t("quantcode.ssh.disconnect")
+    disconnect.disabled = status === "disconnecting" || !props.disconnect
+    disconnect.setAttribute("aria-busy", String(status === "disconnecting"))
     disconnect.addEventListener("click", () => {
-      status = "form"
+      if (!props.disconnect || status === "disconnecting") return
+      status = "disconnecting"
+      reason = ""
       render()
+      void props.disconnect().catch(() => ({ status: "error" as const, reason: t("quantcode.ssh.reason.host_unreachable") })).then(result => {
+        if (result.status === "disconnected") {
+          status = "form"
+          fingerprint = ""
+          groups = []
+        } else {
+          status = "connected"
+          reason = result.reason
+        }
+        render()
+      })
     })
     const actions = document.createElement("div")
     actions.className = "qc-gate-actions"
     actions.append(disconnect)
     root.append(actions)
+    if (reason) {
+      const error = document.createElement("p")
+      error.setAttribute("role", "alert")
+      error.textContent = reason
+      root.append(error)
+    }
   }
 
   const renderFailed = () => {
@@ -242,7 +307,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     logEl = undefined
     if (status === "form") renderForm()
     else if (status === "connecting") renderConnecting()
-    else if (status === "connected") renderConnected()
+    else if (status === "connected" || status === "disconnecting") renderConnected()
     else renderFailed()
   }
 

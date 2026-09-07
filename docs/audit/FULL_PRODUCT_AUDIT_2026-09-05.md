@@ -19,12 +19,12 @@
 | 检查 | 当前结果 |
 |---|---|
 | 独立依赖安装 | `bun run install:frontend` 冻结锁文件安装成功；未复用旧仓库 node_modules |
-| Python 全量回归 | 2026-09-07：1,151 passed / 4 skipped，26.34 秒；真实 LLM 跳过；Ruff 通过 |
-| QuantCode 组件 | 126 passed / 0 failed |
+| Python 全量回归 | 2026-09-07：1,154 passed / 4 skipped，36.04 秒；真实 LLM 跳过；Ruff 通过 |
+| QuantCode 组件 | 2026-09-07：127 passed / 403 assertions；登录/API 相关 17 项在错误处理修复后再次通过 |
 | app / opencode / desktop 类型 | 三个包均通过 |
 | 网页构建 | 从根目录 `bun run build:web` 成功，QuantCode 品牌 |
 | 构建产物 Headless | 12 passed，12.4 秒；静态预览 127.0.0.1:48173 指向本仓库 frontend/packages/app/dist，测试通过保存的服务设置连接现有 4096；业务/身份响应为 fixture，不证明真实接线 |
-| 当前 Dev Headless | 2026-09-07：16 passed，27.1 秒；独立 4196/4544，业务/身份使用 fixture；复核 900×650 与 1440×900 截图 |
+| 当前 Dev Headless | 2026-09-07：18 passed，33.3 秒；独立 4196/4544，浏览器业务/身份使用 fixture；新增两种尺寸的组选项、设置重开及退出失败重试 |
 | 打包路径（历史证据，本阶段暂缓） | 根 workflow 与 composite action YAML、工作目录和本地 action 引用检查通过；仅手动触发，默认不发布；本机曾构建 macOS arm64 unsigned DMG/ZIP；本机 Linux RPM 尝试因缺少 `rpmbuild` 停止；不计为当前阻塞项 |
 
 构建产物测试未执行依赖 Vite 源码模块的 2 项审批/恢复挂载测试；这两项由当前组件测试覆盖，不混算成静态产物的 12 项。静态预览必须通过 `PLAYWRIGHT_TARGET_SERVER` 指向后端，避免把服务选择页误判为产品回归失败。
@@ -77,7 +77,7 @@
 
 | 决策 | 核验结论 |
 |---|---|
-| D-001 单 Session 单组 | 后端 challenge 与会话锁定一个授权组，过滤其他组 Memory scope；多组 CLI/gateway 已接通，网页尚无登录组选项，默认主组；第二组授权撤销也使旧会话失效 |
+| D-001 单 Session 单组 | 后端 challenge 与会话锁定一个授权组，过滤其他组 Memory scope；网页/宿主/CLI/gateway 已接通登录前授权组选择；第二组授权撤销也使旧会话失效 |
 | D-002 长期组 Memory | 组隔离保留，Runtime 检索挤占修复；项目授权不能由组推定 |
 | D-003 先查能力与 Memory | 生产 strict reuse、卡片摘要和缺口流程有回归；真实 LLM 行为测试未启用 |
 | D-004 缺口由用户决定 | 既有 reuse/solution 约束保留；不得把 UNVERIFIED 自动提升为 CONNECTED |
@@ -97,8 +97,8 @@
 
 | 断言 | 当前证据 | 缺口 |
 |---|---|---|
-| U1 登录 | 未认证禁止提交，不把 HTTP 当 SSH，无私钥字段；本机 Lead gateway 登录与隔离生产 MCP 联调已验 | 成员设备/共享服务器签名桥未验；UI 断开只重置表单，尚未撤销凭据或断连 MCP |
-| U2 组路由 | 三角色浏览器 fixture + 八组后端权限回归；多组真实签名与单组 scope 隔离回归 | CLI 可选授权组，网页/宿主尚不传递目标组；成员第二组网页登录未闭环 |
+| U1 登录 | 本机 Lead 宿主登录/MCP、隔离真实 HTTP/签名/MCP 联调已验；退出撤销凭据并断连 MCP，失败可重试；设置重开恢复真实身份 | 其他成员设备/共享服务器签名桥未验；现有连接仍为每宿主一个身份文件，不能当成多人服务隔离 |
+| U2 组路由 | 网页和 CLI 均从授权组中选择登录组；浏览器两尺寸回归、真实宿主第二组签名与单组 scope 隔离已验 | 成员设备登录和个人研究目录的实际映射尚需部署验收 |
 | U3 任务/方案 | 方案面板与后端分级测试 | 真任务冻结/恢复未做浏览器全链 |
 | U4 执行记录 | 新增服务端历史与 checkpoint 只读回放界面；原有当前运行面板保留 | 本地 Headless 验收通过：刷新、隔离、错误状态、产物与未确认回执阻止恢复均有回归；真实长任务恢复仍需真服务 |
 | U5 Memory/能力 | 输入焦点、竞态、503、组 ACL、真实 SQLite、卡片元数据；两种尺寸滚动 | 本地验收通过：项目 grant、知识审核、发布中恢复和能力目录刷新均有回归；真实组件接通状态仍需服务验收 |
@@ -171,7 +171,7 @@ MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 Server C gateway 身份�
 
 ## 本地登录界面接线（本地组件通过，真身份待接）
 
-OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置的 Python/后端目录/公钥/gateway/会话路径，浏览器无任意命令或 URL 输入。设置页使用这些身份，登录成功后重连 QuantCode MCP，核验 gateway 与 MCP 的 session_id 一致再刷新工作区。并发签名请求共用在途操作，有超时边界，不打印签名或 token；HTTP 登录入口另对签名、MCP 重连、会话核对整个流程进行互斥准入。身份查询的配置、连接和载荷错误在设置页明确显示，不再吞掉错误后展示空列表；宿主验证公钥 base64 格式。类型检查与未认证界面测试已通过；Server C gateway 和本机 Lead 登录已实测，其他成员的真实桌面登录/MCP 重连仍需逐人验收。配置步骤见 [LOCAL_IDENTITY_GATEWAY.md](../LOCAL_IDENTITY_GATEWAY.md)。
+OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主配置的 Python/后端目录/公钥/gateway/会话路径，浏览器无任意命令或 URL 输入。设置页从 gateway 读取授权组并在登录前选择，登录成功后重连 QuantCode MCP，核验 gateway 与 MCP 的 session_id 一致再刷新工作区。HTTP 登录/退出共用进程级互斥准入，覆盖签名、凭据变更和 MCP 连接操作；重复请求被拒绝，不共用其他组的签名结果。退出须先确认 gateway 撤销，再删除会话文件和断连 MCP；失败仍可重试。身份查询的配置、连接和载荷错误在设置页明确显示，宿主验证公钥 base64 格式。真实宿主联调、类型检查与浏览器登录回归已通过；其他成员设备仍需逐人验收。配置步骤见 [LOCAL_IDENTITY_GATEWAY.md](../LOCAL_IDENTITY_GATEWAY.md)。
 
 
 ## GitHub 身份凭据接线（本地契约通过，真凭据待接）
@@ -235,14 +235,15 @@ OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置�
 - Server C 的 `quantcode-gateway.service` 为 `active/running`，运行用户 `ubuntu`，启用 `NoNewPrivileges=yes`，仅监听 `127.0.0.1:4097`，最近检查 `NRestarts=0`。本机通过 SSH 隧道登录 Lead 会话成功。
 - 先复现再修复四个身份问题：challenge 组可被更改、多组会话混入另一组 Memory scope、移除第二组后原会话未撤销，以及 `PYTEST_CURRENT_TEST` 导致生产认证失败回退。补齐 Admin 跨组审核时的创建者会话校验，普通 approver 仍受同组限制。
 - Gateway 的三个身份模块已同步 Server C，原 roster/数据库保留，旧模块有备份。MCP 修复位于本仓库；Server C 完整 Agent/MCP 环境尚未部署。
-- Python **1,151 passed / 4 skipped**，Ruff 通过，QuantCode 组件 **126 passed / 394 assertions**，Dev Playwright **16 passed**。浏览器业务/身份响应仍为 fixture；真实 SSH 签名和生产 MCP 子进程联调使用隔离临时身份，不能代替成员设备的完整产品验收。
+- 网页组选项与真实退出已补齐：HTTP 接口只接受固定组枚举，宿主和 gateway 都重验 roster；退出失败保留凭据和重试入口，退出成功刷新为未认证，重新打开设置恢复当前身份。修复 SDK 抛出 HTTP 异常时把退出失败误报为主机不可达的问题。
+- Python **1,154 passed / 4 skipped**，Ruff 通过，QuantCode 组件 **127 passed / 403 assertions**，app/opencode 类型通过，网页生产构建通过（保留既有 chunk/sourcemap 警告），Dev Playwright **18 passed**。浏览器业务/身份响应使用 fixture；新增真实宿主 HTTP/CLI/临时 SSH agent/gateway/生产 MCP 联调另验证第二组、并发准入、退出撤销和 MCP 断连，既有宿主 HTTP 回归 7 项通过。
+- Server C 已部署 `/auth/identity` 授权组查询，更新前校验远端文件哈希并备份。独立本机预览 `4196/4544` 已读取正式 roster，并通过宿主登录接口完成真实 Lead 签名及 MCP session_id 一致性核验。它仍不证明 roster 中的服务器研究目录存在或多人远程环境已部署；旧 `4096/4444` 服务未重启。
 
 ### 仍阻塞的事项
 
 | 事项 | 实测状态与影响 | 下一步及责任边界 |
 |---|---|---|
 | 剩余人员 | 张博睿、李卓只有指纹而缺完整公钥；叶易涵有共用公钥/邮箱归并问题；这些记录未激活 | 成员补完整公钥；用户确认叶易涵对应记录是否同一人。只影响未激活身份，不阻止其他已审核成员接入 |
-| 网页组选项与退出 | UI/宿主登录没有目标组参数，默认主组；“断开”只重置表单，未撤销 gateway token、清理会话文件或断连 MCP | 工程补齐登录前授权组选项和真实退出；一个会话仍只固定一个组 |
 | Server C 完整运行环境 | 目前只托管身份 gateway，虚拟环境缺 LangGraph/LangChain Core；roster 的 36 个工作目录在 Server C 上均不存在（含本机运维路径） | 工程部署完整 Agent/MCP，落实个人目录映射、文件权限和进程隔离；不能让所有成员共用 ubuntu 的 session 文件 |
 | 成员本机签名 | 当前签名由 OpenCode 宿主执行；宿主迁到 Server C 后不能直接调用成员电脑的 SSH agent | 工程补客户端本机签名到 gateway 的接线及逐成员凭据传递；成员私钥留在本机，不上传服务器 |
 | GitHub/通知 | token 映射仅本机配置；Server C 未配置 broker，`--github-sync-interval 0`；系统通知仅有客户端实现证据 | 用户/组织管理员提供正式授权，工程完成服务端按身份映射与撤销、启用同步、验收客户端通知送达 |

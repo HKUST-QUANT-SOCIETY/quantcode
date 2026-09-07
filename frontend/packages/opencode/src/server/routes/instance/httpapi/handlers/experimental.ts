@@ -1,4 +1,4 @@
-import { localIdentity, signInLocalIdentity } from "./quantcode-identity"
+import { localIdentity, signInLocalIdentity, signOutLocalIdentity } from "./quantcode-identity"
 import { quantcodeManagement } from "./quantcode-management"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
@@ -13,7 +13,7 @@ import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
-import { Effect, Option } from "effect"
+import { Effect, Option, Semaphore } from "effect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -36,6 +36,15 @@ import {
   ToolListQuery,
   WorktreeApiError,
 } from "../groups/experimental"
+
+// All workspace routes share the host credential file. Serialize its entire
+// login/logout + MCP transition, not just the signature subprocess.
+const identityOperation = Semaphore.makeUnsafe(1)
+function withIdentityOperation<A, E, R>(operation: Effect.Effect<A, E, R>) {
+  return identityOperation.withPermitsIfAvailable(1)(operation).pipe(Effect.flatMap(Option.match({
+    onNone: () => Effect.fail(new HttpApiError.BadRequest({})), onSome: Effect.succeed,
+  })))
+}
 
 function unwrapQuantCodeResult(result: unknown): unknown {
       if (!result) return { error: "QuantCode MCP is not connected" }
@@ -240,8 +249,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const quantcodeIdentities = () => Effect.tryPromise({
       try: localIdentity, catch: (error) => error,
     }).pipe(Effect.catch((error) => Effect.succeed({ identities: [], error: error instanceof Error ? error.message : "Identity bridge unavailable" })))
-    const quantcodeIdentityLoginWork = Effect.fn("ExperimentalHttpApi.quantcodeIdentityLoginWork")(function* () {
-      const result = yield* Effect.tryPromise({ try: signInLocalIdentity, catch: () => new HttpApiError.BadRequest({}) })
+    const quantcodeIdentityLoginWork = Effect.fn("ExperimentalHttpApi.quantcodeIdentityLoginWork")(function* (group?: string) {
+      const result = yield* Effect.tryPromise({ try: () => signInLocalIdentity(group), catch: () => new HttpApiError.BadRequest({}) })
       yield* mcp.connect("quantcode").pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
       const confirmed = yield* (mcp.callTool ? mcp.callTool("quantcode", "session_context", {}) : Effect.succeed<unknown>(undefined))
       const identity = unwrapQuantCodeResult(confirmed)
@@ -253,16 +262,12 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       }
       return result
     })
-    let identityConnecting = false
-    const quantcodeIdentityLogin = Effect.fn("ExperimentalHttpApi.quantcodeIdentityLogin")(() =>
-      Effect.suspend(() => {
-        if (identityConnecting) return Effect.fail(new HttpApiError.BadRequest({}))
-        identityConnecting = true
-        // Admission covers signing, reconnecting MCP, and confirming its exact
-        // session. Coalescing only the signature still allowed duplicate connects.
-        return quantcodeIdentityLoginWork().pipe(Effect.ensuring(Effect.sync(() => { identityConnecting = false })))
-      }),
-    )
+    const quantcodeIdentityLogin = (ctx: { payload: { group?: string } }) => withIdentityOperation(quantcodeIdentityLoginWork(ctx.payload.group))
+    const quantcodeIdentityLogout = () => withIdentityOperation(Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({ try: signOutLocalIdentity, catch: () => new HttpApiError.BadRequest({}) })
+      yield* mcp.disconnect("quantcode").pipe(Effect.catchTag("MCP.NotFoundError", () => Effect.void))
+      return result
+    }))
 
     const worktree = Effect.fn("ExperimentalHttpApi.worktree")(function* () {
       const ctx = yield* InstanceState.context
@@ -372,6 +377,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("quantcodeDeploymentCancel", quantcodeDeploymentCancel)
       .handle("quantcodeIdentities", quantcodeIdentities)
       .handle("quantcodeIdentityLogin", quantcodeIdentityLogin)
+      .handle("quantcodeIdentityLogout", quantcodeIdentityLogout)
       .handle("worktree", worktree)
       .handle("worktreeCreate", worktreeCreate)
       .handle("worktreeRemove", worktreeRemove)

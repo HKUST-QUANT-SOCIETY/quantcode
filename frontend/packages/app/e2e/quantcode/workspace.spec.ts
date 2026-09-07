@@ -59,6 +59,7 @@ for (const mode of ["approval", "recovery"] as const) {
 // Real branded app and HTTP server, deterministic MCP responses. These prove
 // browser wiring and role presentation, not SSH or production authorization.
 async function mockContext(page: Page, role?: "analyst" | "approver" | "admin", group = "factor") {
+  await page.route("**/experimental/quantcode/identities*", route => route.fulfill({ json: { identities: [], error: "No fixture identity configured" } }))
   await page.route("**/experimental/quantcode/tool?*", async (route) => {
     const tool = new URL(route.request().url()).searchParams.get("tool")
     const payload = tool === "session_context"
@@ -73,6 +74,56 @@ async function mockContext(page: Page, role?: "analyst" | "approver" | "admin", 
       : tool === "list_pending_gates" ? { gates: [], next_cursor: null }
       : { error: "Unavailable fixture service" }
     await route.fulfill({ json: payload })
+  })
+}
+
+for (const viewport of [{ width: 900, height: 650 }, { width: 1440, height: 900 }]) {
+  test(`identity group selection, reopen and logout retry at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await mockContext(page)
+    let active: string | undefined
+    let logoutAttempts = 0
+    const session = () => active ? { status: "connected", session_id: "fixture-session", fingerprint: "SHA256:browser-fixture",
+      group: active, groups: ["model", "factor"] } : null
+    await page.route("**/experimental/quantcode/identities*", route => route.fulfill({ json: {
+      identities: [{ id: "host-default", label: "Fixture identity", fingerprint: "SHA256:browser-fixture", host: "fixture.local",
+        user: "SSH agent", group: "model", groups: ["model", "factor"] }], session: session(),
+    } }))
+    await page.route("**/experimental/quantcode/identity/login*", route => {
+      active = route.request().postDataJSON().group
+      expect(active).toBe("factor")
+      return route.fulfill({ json: session() })
+    })
+    await page.route("**/experimental/quantcode/identity/logout*", route => {
+      if (++logoutAttempts === 1) return route.fulfill({ status: 400, json: { error: "Fixture revocation failure" } })
+      active = undefined
+      return route.fulfill({ json: { status: "disconnected" } })
+    })
+    await page.route("**/experimental/quantcode/tool?*", route => {
+      if (new URL(route.request().url()).searchParams.get("tool") !== "session_context") return route.fallback()
+      return route.fulfill({ json: active ? { session_id: "fixture-session", actor_id: "browser-fixture", group: active,
+        authorized_groups: ["model", "factor"], role: "analyst", workspace_id: "audit" } : { error: "Authentication required" } })
+    })
+    await page.goto("/")
+    await page.getByRole("button", { name: "QuantCode 设置", exact: true }).click()
+    await expect(page.locator("#qc-ssh-group")).toHaveValue("model")
+    await page.locator("#qc-ssh-group").selectOption("factor")
+    await page.locator(".qc-ssh").getByRole("button", { name: /^(连接|Connect)$/ }).click()
+    await expect(page.locator(".qc-ssh [data-session-group]")).toHaveText("factor")
+    await page.getByRole("button", { name: "关闭详情", exact: true }).click()
+    await page.getByRole("button", { name: "QuantCode 设置", exact: true }).click()
+    await expect(page.locator("#qc-ssh-group")).toHaveCount(0)
+    const disconnect = page.locator(".qc-ssh").getByRole("button", { name: /^(断开|Disconnect)$/ })
+    await disconnect.scrollIntoViewIfNeeded()
+    await expect(disconnect).toBeInViewport()
+    await page.screenshot({ path: `e2e/test-results/quantcode/identity-${viewport.width}.png` })
+    await disconnect.click()
+    await expect(page.locator(".qc-ssh [role=alert]")).toContainText("退出未完成")
+    await expect(page.locator("#qc-ssh-group")).toHaveCount(0)
+    await disconnect.click()
+    await expect(page.locator("#qc-ssh-group")).toBeVisible()
+    await expect(page.locator(".qc-setting-row").first()).toContainText("未认证")
+    await expect(page.locator(".qc-ssh [data-session-group]")).toHaveCount(0)
   })
 }
 
