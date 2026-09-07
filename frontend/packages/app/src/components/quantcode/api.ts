@@ -83,6 +83,7 @@ export type QuantCodeSshStatus = {
 export type QuantCodeSessionContext = {
   session_id?: string
   group?: string
+  authorized_groups?: string[]
   role?: string
   actor_id?: string
   workspace_id?: string

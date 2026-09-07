@@ -77,25 +77,29 @@ def authenticate(
     public_key: str,
     signature: str,
     roster_path: str | Path | None = None,
+    requested_group: str | None = None,
     session_ttl_minutes: int = 60,
 ) -> SessionContext:
     """Verify proof of key possession and return the server-owned Session Context."""
     fingerprint = fingerprint_of_public_key(public_key)
     nonce = store.consume(challenge_id, fingerprint)
     verify_ssh_signature(public_key, signature, nonce)
-    entry = resolve_identity(fingerprint, roster_path)
+    entry = resolve_identity(fingerprint, roster_path, group=requested_group)
     required = ("actor_id", "group", "role", "workspace_id", "workspace_path")
     if entry is None or any(not entry.get(key) for key in required):
         raise IdentityChallengeError("roster entry is missing required Session Context fields")
     now = datetime.now(timezone.utc)
+    selected_group = requested_group or entry["group"]
+    authorized_groups = entry.get("groups") or [entry["group"]]
     return SessionContext(
         session_id=uuid.uuid4().hex,
         actor_id=entry["actor_id"],
-        group=entry["group"],
+        group=selected_group,
         role=entry["role"],
         workspace_id=entry["workspace_id"],
         workspace_path=entry["workspace_path"],
         github_subject=entry.get("github_subject"),
+        authorized_groups=authorized_groups,
         resource_scopes=entry.get("resource_scopes", []),
         issued_at=now,
         expires_at=now + timedelta(minutes=session_ttl_minutes),

@@ -18,6 +18,7 @@ class SessionContext(BaseModel):
     workspace_id: str = Field(min_length=1)
     workspace_path: str = Field(min_length=1)
     github_subject: str | None = None
+    authorized_groups: list[GroupId] = Field(default_factory=list)
     resource_scopes: list[str] = Field(default_factory=list)
     issued_at: datetime
     expires_at: datetime

@@ -479,6 +479,7 @@ def _session_context_execute(args: SessionContextArgs, ctx: dict) -> dict:
     return {
         "session_id": context.get("session_id") or _SESSION_ID,
         "group": group,
+        "authorized_groups": context.get("authorized_groups") or ([group] if group else []),
         "role": role,
         "actor_id": context.get("actor_id"),
         "workspace_id": context.get("workspace_id"),

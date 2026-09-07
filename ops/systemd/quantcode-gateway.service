@@ -1,0 +1,23 @@
+[Unit]
+Description=QuantCode SSH identity gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/quantcode-gateway-src
+Environment=PYTHONPATH=/home/ubuntu/quantcode-gateway-src
+ExecStart=/home/ubuntu/quantcode-gateway-src/.venv/bin/python -m quantcode.gateway --roster /home/ubuntu/quantcode-gateway-src/.opencode/authorized_groups.yaml --database /home/ubuntu/quantcode-gateway-data/identity-gateway.db --port 4097 --github-sync-interval 0 --dream-interval 0
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/quantcode-gateway-data
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

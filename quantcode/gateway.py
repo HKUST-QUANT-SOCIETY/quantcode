@@ -32,24 +32,32 @@ class IdentityGateway:
             conn.execute("CREATE TABLE IF NOT EXISTS identity_sessions (token_hash TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, context TEXT NOT NULL)")
         self.database.chmod(0o600)
 
-    def issue(self, public_key: str) -> dict:
+    def issue(self, public_key: str, requested_group: str | None = None) -> dict:
         fingerprint = fingerprint_of_public_key(public_key)
-        if not resolve_identity(fingerprint, self.roster):
+        entry = resolve_identity(fingerprint, self.roster, group=requested_group)
+        if not entry:
             raise PermissionError("identity is not in the approved roster")
         with self.lock:
-            return self.challenges.issue(fingerprint)
+            challenge = self.challenges.issue(fingerprint)
+        challenge["groups"] = entry.get("groups") or [entry["group"]]
+        challenge["group"] = requested_group or entry["group"]
+        return challenge
 
     def verify(self, payload: dict) -> dict:
+        requested_group = payload.get("group") or payload.get("requested_group")
+        if requested_group is not None and not isinstance(requested_group, str):
+            raise ValueError("invalid requested group")
         with self.lock:
             context = authenticate(self.challenges, challenge_id=payload["challenge_id"],
                                    public_key=payload["public_key"], signature=payload["signature"],
-                                   roster_path=self.roster)
+                                   roster_path=self.roster, requested_group=requested_group)
         token = secrets.token_urlsafe(48)
         fingerprint = fingerprint_of_public_key(payload["public_key"])
         with sqlite3.connect(self.database) as conn:
             conn.execute("INSERT INTO identity_sessions VALUES(?,?,?)", (
                 hashlib.sha256(token.encode()).hexdigest(), fingerprint, context.model_dump_json()))
-        return {"token": token, "session": context.model_dump(mode="json")}
+        return {"token": token, "session": context.model_dump(mode="json"),
+                "groups": context.authorized_groups or [context.group]}
 
     def session(self, token: str) -> SessionContext:
         if not token or len(token) > 512:
@@ -70,13 +78,16 @@ class IdentityGateway:
             raise PermissionError("session expired or revoked")
         # A changed role/group/workspace requires a new login, never an in-place
         # privilege change to an existing immutable session.
-        for field in ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject"):
+        for field in ("actor_id", "role", "workspace_id", "workspace_path", "github_subject"):
             if entry.get(field) != getattr(context, field):
                 self.revoke_digest(digest)
                 raise PermissionError("roster changed; sign in again")
         if set(entry.get("resource_scopes") or []) != set(context.resource_scopes):
             self.revoke_digest(digest)
             raise PermissionError("permissions changed; sign in again")
+        if context.group not in set(entry.get("groups") or [entry["group"]]):
+            self.revoke_digest(digest)
+            raise PermissionError("group authorization changed; sign in again")
         return context
 
     def logout(self, token: str) -> None:
@@ -102,10 +113,12 @@ class IdentityGateway:
         entry = resolve_identity(row[0], self.roster)
         if entry is None or creator.expires_at <= datetime.now(timezone.utc):
             raise PermissionError("task creator session expired or revoked")
-        fields = ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject")
+        fields = ("actor_id", "role", "workspace_id", "workspace_path", "github_subject")
         if any(saved.get(field) != getattr(creator, field) or entry.get(field) != getattr(creator, field)
                for field in fields):
             raise PermissionError("task creator authorization changed")
+        if saved.get("group") != creator.group or creator.group not in set(entry.get("groups") or [entry["group"]]):
+            raise PermissionError("task creator group authorization changed")
         if (set(saved.get("resource_scopes") or []) != set(creator.resource_scopes)
                 or set(entry.get("resource_scopes") or []) != set(creator.resource_scopes)):
             raise PermissionError("task creator permissions changed")
@@ -182,7 +195,7 @@ def handler(gateway: IdentityGateway):
                     result = submit_deploy(AdminDeployRequest.model_validate(payload), **options)
                     return self.reply(200, result.model_dump(mode="json"))
                 if self.path == "/auth/challenge":
-                    return self.reply(200, gateway.issue(payload["public_key"]))
+                    return self.reply(200, gateway.issue(payload["public_key"], payload.get("group")))
                 if self.path == "/auth/verify":
                     return self.reply(200, gateway.verify(payload))
                 if self.path == "/auth/logout":

@@ -98,6 +98,22 @@ def test_load_bindings_dedupes_identical_fingerprint(tmp_path):
     assert identity.load_bindings(p) == {TEST_FP: "factor"}
 
 
+def test_multigroup_roster_entry_resolves_each_authorized_group(tmp_path):
+    p = _write_bindings(tmp_path, [{
+        "fingerprint": TEST_FP,
+        "group": "model",
+        "groups": ["model", "factor"],
+        "actor_id": "member-test",
+        "role": "analyst",
+        "workspace_id": "workspace-test",
+        "workspace_path": "/srv/research/member-test",
+        "resource_scopes": ["memory:model", "memory:factor"],
+    }])
+    assert identity.resolve_identity(TEST_FP, p)["group"] == "model"
+    assert identity.resolve_identity(TEST_FP, p, group="factor")["group"] == "model"
+    assert identity.resolve_identity(TEST_FP, p, group="risk") is None
+
+
 def test_resolve_group_hit_and_miss():
     bindings = {TEST_FP: "factor"}
     assert identity.resolve_group(TEST_FP, bindings) == "factor"

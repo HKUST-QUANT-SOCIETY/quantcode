@@ -108,6 +108,25 @@ def test_review_required_roster_never_issues_challenge(gateway_login):
         gateway.issue(roster.parent.joinpath("test-key.pub").read_text())
 
 
+def test_multigroup_gateway_issues_selected_group_and_revalidates_membership(gateway_login):
+    gateway, login, roster, entry = gateway_login
+    multi = {**entry, "group": "model", "groups": ["model", "factor"],
+             "resource_scopes": ["memory:model", "memory:factor"]}
+    roster.write_text(yaml.safe_dump({"bindings": [multi]}))
+    public_key = Path(roster.parent / "test-key.pub").read_text()
+    challenge = gateway.issue(public_key, requested_group="factor")
+    assert challenge["groups"] == ["model", "factor"]
+    signed = subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-n", "quantcode", "-f", str(roster.parent / "test-key" )],
+        input=challenge["nonce"], text=True, capture_output=True, check=True,
+    )
+    result = gateway.verify({"challenge_id": challenge["challenge_id"], "public_key": public_key,
+                             "signature": signed.stdout, "group": "factor"})
+    assert result["session"]["group"] == "factor"
+    assert result["groups"] == ["model", "factor"]
+    assert gateway.session(result["token"]).group == "factor"
+
+
 def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(gateway_login, tmp_path):
     gateway, login, roster, creator_entry = gateway_login
     creator, _ = login()

@@ -48,6 +48,6 @@ python -m quantcode.roster /path/to/roster.xlsx \
 4. 实际研发服务器 workspace 根及 SSH gateway 入口。候选路径不是已部署路径。
 5. GitHub subject 与授权 token 的服务端绑定，不以邮箱代替用户名。
 
-对应人员与原 Excel 行号只在 `.quantcode/roster-import-20260905/review.md` 中保存。当前已将 37 条组别唯一、公钥完整且无冲突的绑定激活到受保护的 `.opencode/authorized_groups.yaml`，另加入 1 条本机 Lead/Admin 运维身份；张博睿、李卓的指纹-only 记录和叶易涵的共用公钥记录仍未放行。F-01 标记为“部分激活，生产人员授权待确认”，不能把整张人员表标记完成。
+对应人员与原 Excel 行号只在 `.quantcode/roster-import-20260905/review.md` 中保存。当前已将 37 条组别唯一、公钥完整且无冲突的绑定激活到受保护的 `.opencode/authorized_groups.yaml`，另加入 1 条本机 Lead/Admin 运维身份；张佳音现登记为 `model` 主组并授权 `factor`（QuantCode 对应 Mining），Session 每次仍只选择一个固定组；张博睿、李卓的指纹-only 记录和叶易涵的共用公钥记录仍未放行。F-01 标记为“部分激活，生产人员授权待确认”，不能把整张人员表标记完成。
 
 最终后端回归：2026-09-05，Python 3.12，**1,142 passed / 4 skipped**，4 项真实 LLM 未启用；ToolDef 外部 `schema` 契约通过 alias 保留，字段遮蔽告警已消除。

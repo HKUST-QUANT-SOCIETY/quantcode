@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 
 
-def login(*, gateway: str, public_key: Path, session_file: Path) -> dict:
+def login(*, gateway: str, public_key: Path, session_file: Path, group: str | None = None) -> dict:
     parsed = urlparse(gateway)
     if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}):
         raise ValueError("identity gateway requires HTTPS or loopback HTTP")
@@ -20,7 +20,10 @@ def login(*, gateway: str, public_key: Path, session_file: Path) -> dict:
     if "PRIVATE KEY" in key or len(key.split()) < 2:
         raise ValueError("public SSH key required")
     with httpx.Client(base_url=gateway, timeout=15, follow_redirects=False, trust_env=False) as client:
-        response = client.post("/auth/challenge", json={"public_key": key})
+        challenge_payload = {"public_key": key}
+        if group:
+            challenge_payload["group"] = group
+        response = client.post("/auth/challenge", json=challenge_payload)
         response.raise_for_status()
         challenge = response.json()
         with tempfile.TemporaryDirectory(prefix="quantcode-sign-") as folder:
@@ -33,7 +36,10 @@ def login(*, gateway: str, public_key: Path, session_file: Path) -> dict:
             subprocess.run(["ssh-keygen", "-Y", "sign", "-U", "-f", str(pub), "-n", "quantcode", str(nonce)],
                            check=True, capture_output=True, timeout=30)
             signature = (root / "challenge.sig").read_text(encoding="utf-8")
-        response = client.post("/auth/verify", json={"challenge_id": challenge["challenge_id"], "public_key": key, "signature": signature})
+        verify_payload = {"challenge_id": challenge["challenge_id"], "public_key": key, "signature": signature}
+        if group:
+            verify_payload["group"] = group
+        response = client.post("/auth/verify", json=verify_payload)
         response.raise_for_status()
         result = response.json()
     session_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -55,9 +61,12 @@ def main():
     parser.add_argument("--gateway", default="http://127.0.0.1:4097")
     parser.add_argument("--public-key", type=Path, required=True)
     parser.add_argument("--session-file", type=Path, default=Path(".quantcode/identity-session.json"))
+    parser.add_argument("--group", default=None, help="选择 roster 已授权的业务组；不传使用主组")
     args = parser.parse_args()
-    session = login(gateway=args.gateway, public_key=args.public_key, session_file=args.session_file)
-    print(json.dumps({"session_id": session["session_id"], "actor_id": session["actor_id"], "group": session["group"], "expires_at": session["expires_at"]}))
+    session = login(gateway=args.gateway, public_key=args.public_key, session_file=args.session_file, group=args.group)
+    print(json.dumps({"session_id": session["session_id"], "actor_id": session["actor_id"],
+                      "group": session["group"], "groups": session.get("authorized_groups") or [session["group"]],
+                      "expires_at": session["expires_at"]}))
 
 
 if __name__ == "__main__":

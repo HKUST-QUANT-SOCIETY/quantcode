@@ -90,6 +90,30 @@ def test_reviewed_roster_authenticates_real_signature_and_rejects_replay(key, tm
         authenticate(store, **args)
 
 
+def test_multigroup_roster_authenticates_selected_group(key, tmp_path):
+    entry = {**compile_records([record(key)], "/srv/research")["bindings"][0],
+             "group": "model", "groups": ["model", "factor"],
+             "resource_scopes": ["memory:model", "memory:factor"]}
+    roster = tmp_path / "authorized-multi.yaml"
+    roster.write_text(yaml.safe_dump({"bindings": [entry]}))
+    store = ChallengeStore()
+    challenge = store.issue(entry["fingerprint"])
+    message = tmp_path / "multi-challenge"
+    message.write_text(challenge["nonce"])
+    subprocess.run(["ssh-keygen", "-Y", "sign", "-n", "quantcode", "-f", str(key), str(message)],
+                   check=True, capture_output=True)
+    session = authenticate(
+        store,
+        challenge_id=challenge["challenge_id"],
+        public_key=entry["public_key"],
+        signature=message.with_suffix(".sig").read_text(),
+        roster_path=roster,
+        requested_group="factor",
+    )
+    assert session.group == "factor"
+    assert session.authorized_groups == ["model", "factor"]
+
+
 def test_production_stdio_uses_reviewed_roster_and_rejects_group_override(key, tmp_path):
     import json
     import os

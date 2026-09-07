@@ -45,8 +45,8 @@ async function signIn() {
   try {
     const output = await new Response(child.stdout).text()
     if (await child.exited !== 0) throw new Error("SSH agent 登录失败：请检查 agent 是否载入密钥、gateway 连通性及正式 roster")
-    const context = JSON.parse(output) as { actor_id?: string; group?: string; session_id?: string }
+    const context = JSON.parse(output) as { actor_id?: string; group?: string; groups?: string[]; session_id?: string }
     if (!context.actor_id || !context.group || !context.session_id) throw new Error("身份桥返回无效会话")
-    return { status: "connected", actor_id: context.actor_id, session_id: context.session_id, fingerprint: identities.identities[0].fingerprint, groups: [context.group] }
+    return { status: "connected", actor_id: context.actor_id, session_id: context.session_id, fingerprint: identities.identities[0].fingerprint, groups: Array.isArray(context.groups) ? context.groups : [context.group] }
   } finally { clearTimeout(timeout) }
 }

@@ -14,7 +14,7 @@ OpenCode 后端与它启动的 QuantCode MCP 需要继承以下环境配置。�
 | QUANTCODE_IDENTITY_SESSION_FILE | 登录后写入的 0600 会话凭据文件；MCP 使用同一路径 |
 | QUANTCODE_GATEWAY_URL | 本地 `http://127.0.0.1:4097` 或受信任的 HTTPS gateway |
 
-正式 roster 必须包含 actor_id、group、role、workspace_id、workspace_path；REVIEW_REQUIRED 候选会被拒绝。不得通过修改状态字段跳过人员冲突审核。
+正式 roster 必须包含 actor_id、group、role、workspace_id、workspace_path；可选 `groups` 列表表示同一 actor 的多组授权。REVIEW_REQUIRED 候选会被拒绝。不得通过修改状态字段跳过人员冲突审核。
 
 Roster 激活实际需要以下条件同时成立：
 
@@ -22,6 +22,8 @@ Roster 激活实际需要以下条件同时成立：
 2. 绑定指纹对应的公钥文件可读，对应私钥已由本机 SSH agent 或 Keychain 加载。
 3. Gateway 使用同一份已审核 roster 启动，宿主传入五个 `QUANTCODE_*` 变量，并且 MCP 与 gateway 使用同一个 `QUANTCODE_IDENTITY_SESSION_FILE` 。
 4. 入门身份条目必须包含 `actor_id`、`role`、`workspace_id` 和 `workspace_path`；只有 fingerprint/group 的简化条目可用于本地分组诊断，不足以签发 SessionContext。
+
+同一 actor 可以在 roster 中声明多个授权组，例如 `group: model`、`groups: [model, factor]`。登录时可请求其中一个组（`identity_login --group factor`）；服务端签发的 SessionContext 仍只包含一个固定 `group`，任务参数不能切组。没有指定组时使用 roster 的主组 `group`。
 
 ### 开发端口与旧连接
 
@@ -34,13 +36,13 @@ QUANTCODE_BACKEND_PORT=4196 QUANTCODE_APP_PORT=4544 bun run dev:quantcode
 
 开始后检查界面上的“服务”应为 `127.0.0.1:4196`。`GET /agent?directory=...` 是 OpenCode 的基础 Agent 列表路由，对当前仓库会返回 JSON；如果它返回 500，先确认请求是否发到旧工作区的 `4096`。QuantCode 身份路由是 `/experimental/quantcode/identities` 、`/experimental/quantcode/identity/login` 和 `/experimental/quantcode/tool?tool=session_context`。前端不提供 `/api/auth/me`；该路由返回前端 SPA HTML 是预期的，不用它判断 roster 或 MCP 状态。
 
-启动独立本地 gateway 的命令模板：
+启动独立 gateway 的命令模板（Server C 可用 Ubuntu 账号托管）：
 
 ```sh
 python -m quantcode.gateway --roster /absolute/approved-roster.yaml --database /absolute/private/identity-gateway.db --port 4097
 ```
 
-此服务默认仅监听回环地址；远程使用需要受控 TLS 入口。本轮已写入本机正式 roster，但没有代用户启动 gateway 或重启现有 Dev 服务。
+Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quantcode-gateway.service`，服务只监听 `127.0.0.1:4097`；客户端通过 `ssh -L 4197:127.0.0.1:4097 qs-gpu` 访问。正式生产仍建议将 `User=ubuntu` 替换为无 sudo 权限的专用 `quantcode-gateway` 服务账号；Ubuntu 账号可用于当前受控部署和验证。
 
 ## 登录路径
 

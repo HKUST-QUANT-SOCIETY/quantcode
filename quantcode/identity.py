@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from schemas.groups import GROUP_IDS
 
 # 默认绑定文件：相对仓库根（本模块位于 <root>/quantcode/ 下），与 CWD 无关。
 # 测试通过 monkeypatch 本模块属性指向 tmp 路径。
@@ -70,7 +71,18 @@ def _load_entries(path: Path | str | None = None) -> list[dict]:
         fp = str(item.get("fingerprint", "")).strip()
         group = str(item.get("group", "")).strip()
         if fp and group:
+            raw_groups = item.get("groups")
+            if raw_groups is None:
+                groups = [group]
+            elif isinstance(raw_groups, list) and all(isinstance(value, str) for value in raw_groups):
+                groups = list(dict.fromkeys([group, *[value.strip() for value in raw_groups]]))
+            else:
+                raise ValueError("invalid roster groups")
+            if any(value not in GROUP_IDS for value in groups):
+                raise ValueError("invalid roster group")
             entry: dict = {"fingerprint": fp, "group": group}
+            if len(groups) > 1:
+                entry["groups"] = groups
             for key in (
                 "actor_id",
                 "role",
@@ -116,11 +128,18 @@ def resolve_group(fingerprint: str, bindings: dict[str, str]) -> str | None:
     return bindings.get(fingerprint.strip())
 
 
-def resolve_identity(fingerprint: str, path: Path | str | None = None) -> dict | None:
-    """Return the full roster entry for a fingerprint, or ``None``."""
+def resolve_identity(
+    fingerprint: str,
+    path: Path | str | None = None,
+    *,
+    group: str | None = None,
+) -> dict | None:
+    """Return a roster entry, optionally constrained to an authorized group."""
     target = fingerprint.strip()
     for entry in _load_entries(path):
         if entry["fingerprint"] == target:
+            if group is not None and group not in entry.get("groups", [entry["group"]]):
+                return None
             return dict(entry)
     return None
 
