@@ -56,7 +56,7 @@
 | F-02 执行记录与恢复 | 服务端分页历史、checkpoint 消息/产物回放、普通恢复协议与 MCP 单任务进程锁；认证任务默认持久事件，恢复权限重验 | 本地验收通过：事件分页、损坏提示、身份权限变更拒绝和未知回执恢复均有回归；跨机器和真实长任务副作用恢复仍待真服务验证 |
 | F-03 HumanGate | permission/merge 白名单、拒绝路径、审批 evidence；同组持久队列支持游标分页，提交绑定 Gate/checkpoint；跨人审批重验创建者身份 | 本地验收通过：长队列、创建者撤销/过期、失败重试和跨人证据路径已覆盖；真实 interrupt→审批→resume 仍待 gateway/MCP 验证。风险/预算/CI 不扩充 Gate |
 | F-04 Memory/能力目录 | `runner/memory`、`runner/distill`；修复 LIMIT 前排除 Runtime State、坏索引报错、搜索竞态与输入失焦；Admin 跨组/项目读取留痕；卡片补输入输出依赖与别名 | 本地验收通过：项目 roster scope、可撤销/过期 ACL、候选评审和卡片刷新均有回归；外部组件状态同步仍需真服务 |
-| F-05 SSH | challenge/roster/session 后端及单测存在；UI 区分 HTTP 服务连通和身份认证，移除默认供应商“已配置”假象 | 待接入：本地 agent/keychain 签名、真实 SSH gateway、主机/密钥/roster 各失败状态的桌面闭环未完成 |
+| F-05 SSH | challenge/roster/session 后端及单测存在；Server C Ubuntu systemd gateway 已接入，UI 区分 HTTP 服务连通和身份认证 | 待验收：真实成员本机 agent/keychain 签名、桌面 MCP 重连和各失败状态的完整闭环 |
 | F-06 组件适配 | `tools/factor`、FactorPanel、QuantEvaluator adapter 与状态契约；12 个主链组件已登记；移除 PIT 前端私算估值 | 部分、待接入：目录存在不代表组件已接通；DataAccess→FE→QE 等真实输入/输出/版本/artifact 尚需服务验收；不自建替代组件 |
 | F-07 跨组协同 | Blackboard、Model→Risk CI、事务/去重及 handoff 测试存在；领域 verdict 不创建 Gate | 已有本地证据；真实 GitHub Actions/报告平台交付链未验收，维持 CI 基建定位 |
 | F-08 领域工具 | 六组 flows 和 strategy/options/fundamental/portfolio 回归存在 | 部分、待接入：stub/proxy/本地引擎不能冒充 canonical；保留组内适配，不增加统一业务产品 |
@@ -76,7 +76,7 @@
 
 | 决策 | 核验结论 |
 |---|---|
-| D-001 单 Session 单组 | 后端强制、UI 无自由切组；真实 gateway 待接 |
+| D-001 单 Session 单组 | 后端强制、UI 无自由切组；多组 actor 由 roster 授权，登录时选定一个组并锁定，Server C gateway 已接入 |
 | D-002 长期组 Memory | 组隔离保留，Runtime 检索挤占修复；项目授权不能由组推定 |
 | D-003 先查能力与 Memory | 生产 strict reuse、卡片摘要和缺口流程有回归；真实 LLM 行为测试未启用 |
 | D-004 缺口由用户决定 | 既有 reuse/solution 约束保留；不得把 UNVERIFIED 自动提升为 CONNECTED |
@@ -158,7 +158,7 @@ Dev 工作台存活且身份就绪时每分钟同步。GitGraph 可开启/关闭
 
 新增 `quantcode.gateway` 本地 HTTP 服务：challenge/verify/session/logout，签名仍由既有 OpenSSH verifier 验证，token 仅存哈希，会话每次查询重验正式 roster。旧 SSH 指纹接入也已补缓存上下文的逐次 roster 核验，指纹、角色、工作区或资源权限变化均要求重连，撤销后不得继续沿用缓存授权。新增 `quantcode.identity_login` 宿主 CLI，使用 `ssh-keygen -Y sign -U` 要求 SSH agent 签名，仅读公钥；会话凭据以 0600 文件保存，不打印 token。
 
-MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 gateway 身份，每次调用重新验证会话，拒绝到期/撤销或上下文变化，不回退指纹猜测。隔离临时 roster/数据库与真实 SSH agent 的 7 项测试已通过，未启动正式 gateway 或激活人员授权；桌面登录按钮已接宿主固定 CLI，MCP 重连后核对同一 session_id，待真实 gateway/roster 验证。已向用户询问真实 gateway/roster/部署服务配置，凭据不通过聊天接收。
+MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 Server C gateway 身份，每次调用重新验证会话，拒绝到期/撤销或上下文变化，不回退指纹猜测。隔离临时 roster/数据库与真实 SSH agent 的 7 项测试已通过；Server C Ubuntu systemd gateway、SSH 隧道和本机 Lead session 已实测，成员真实私钥签名和桌面 MCP 重连仍需各成员设备验收。桌面登录按钮已接宿主固定 CLI，MCP 重连后核对同一 session_id。
 
 
 ## Admin 部署管理接线（本地验收通过，生产待接）
@@ -170,7 +170,7 @@ MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 gateway 身份，每次�
 
 ## 本地登录界面接线（本地组件通过，真身份待接）
 
-OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置的 Python/后端目录/公钥/gateway/会话路径，浏览器无任意命令或 URL 输入。设置页使用这些身份，登录成功后重连 QuantCode MCP，核验 gateway 与 MCP 的 session_id 一致再刷新工作区。并发签名请求共用在途操作，有超时边界，不打印签名或 token；HTTP 登录入口另对签名、MCP 重连、会话核对整个流程进行互斥准入。身份查询的配置、连接和载荷错误在设置页明确显示，不再吞掉错误后展示空列表；宿主验证公钥 base64 格式。类型检查与未认证界面测试已通过；完整宿主登录/MCP 重连尚未实测。配置步骤见 [LOCAL_IDENTITY_GATEWAY.md](../LOCAL_IDENTITY_GATEWAY.md)。当前未启动正式 gateway、未签入真实人员；隔离签名与 gateway 会话测试已通过。
+OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置的 Python/后端目录/公钥/gateway/会话路径，浏览器无任意命令或 URL 输入。设置页使用这些身份，登录成功后重连 QuantCode MCP，核验 gateway 与 MCP 的 session_id 一致再刷新工作区。并发签名请求共用在途操作，有超时边界，不打印签名或 token；HTTP 登录入口另对签名、MCP 重连、会话核对整个流程进行互斥准入。身份查询的配置、连接和载荷错误在设置页明确显示，不再吞掉错误后展示空列表；宿主验证公钥 base64 格式。类型检查与未认证界面测试已通过；Server C gateway 和本机 Lead 登录已实测，其他成员的真实桌面登录/MCP 重连仍需逐人验收。配置步骤见 [LOCAL_IDENTITY_GATEWAY.md](../LOCAL_IDENTITY_GATEWAY.md)。
 
 
 ## GitHub 身份凭据接线（本地契约通过，真凭据待接）
