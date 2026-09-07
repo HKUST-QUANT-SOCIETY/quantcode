@@ -201,8 +201,16 @@ def handler(gateway: IdentityGateway):
 
 def main():
     parser = argparse.ArgumentParser()
-    from runner.config_loader import read_yaml
-    dream_defaults = read_yaml("dream_consumer")
+    # Keep the identity gateway lightweight: importing runner would pull the
+    # full LangGraph/LLM runtime onto Server C just to read two scheduler
+    # defaults.  The gateway itself only needs the identity dependencies.
+    try:
+        import yaml
+        dream_defaults = yaml.safe_load(
+            (Path(__file__).resolve().parent.parent / "configs" / "dream_consumer.yaml").read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, ValueError):
+        dream_defaults = {}
     parser.add_argument("--roster", type=Path, required=True)
     parser.add_argument("--database", type=Path, default=Path(".quantcode/identity-gateway.db"))
     parser.add_argument("--port", type=int, default=4097)
