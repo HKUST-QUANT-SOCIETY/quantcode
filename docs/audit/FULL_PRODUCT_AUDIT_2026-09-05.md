@@ -19,7 +19,7 @@
 | 检查 | 当前结果 |
 |---|---|
 | 独立依赖安装 | `bun run install:frontend` 冻结锁文件安装成功；未复用旧仓库 node_modules |
-| Python 全量回归 | 2026-09-07：1,163 passed / 4 skipped，33.34 秒；真实 LLM 跳过；Ruff 通过 |
+| Python 全量回归 | 2026-09-07：1,177 passed / 4 skipped，31.05 秒；真实 LLM 跳过；Ruff 通过 |
 | QuantCode 组件 | 2026-09-07：127 passed / 403 assertions；登录/API 相关 17 项在错误处理修复后再次通过 |
 | app / opencode / desktop 类型 | 三个包均通过 |
 | 网页构建 | 从根目录 `bun run build:web` 成功，QuantCode 品牌 |
@@ -242,11 +242,13 @@ OpenCode 新增宿主身份查询和固定登录/退出操作；仅接受宿主�
 
 ### 仍阻塞的事项
 
+远程运行补充验收：源码 `272ab3b` 已安装到 Server C，36 个账号注册为 AVAILABLE_ON_DEMAND。Lead 本机签名会话经 SSH stdio 传递，远端校验 actor/UID/workspace 后由 systemd 用户服务运行；42 个工具发现、存活进程会话撤销拒绝、EOF 清理均通过。最终用户级启动方式的 17 项隔离检查通过，真实本地网页已通过宿主连接远程 MCP 并显示 Lead 的组和角色。全量 Python **1,177 passed / 4 skipped**。未把实际系统不支持的 BindPaths/PrivateDevices 属性当作生效隔离；采用 root 管理的每 UID 代码视图和私有状态目录，详见 [Server C 运行环境](../SERVER_C_RUNTIME.md)。
+
 | 事项 | 实测状态与影响 | 下一步及责任边界 |
 |---|---|---|
 | 剩余人员 | 张博睿、李卓只有指纹而缺完整公钥；叶易涵有共用公钥/邮箱归并问题；这些记录未激活 | 成员补完整公钥；用户确认叶易涵对应记录是否同一人。只影响未激活身份，不阻止其他已审核成员接入 |
-| Server C 完整运行环境 | 依赖、36 个独立研究账号和个人目录已落地，真实系统隔离预检通过；常驻研究进程仍为 NOT_CONFIGURED | 接通本机签名到远程 MCP 的会话凭据传递、actor/UID 校验、状态挂载及进程托管；私有状态不能替代共享组 Memory 和组织权威存储 |
-| 成员本机签名 | 当前签名由 OpenCode 宿主执行；宿主迁到 Server C 后不能直接调用成员电脑的 SSH agent | 工程补客户端本机签名到 gateway 的接线及逐成员凭据传递；成员私钥留在本机，不上传服务器 |
+| Server C 完整运行环境 | 依赖、36 个独立研究账号、个人目录与 SSH MCP 按需 systemd 运行已落地；Lead 身份、42 工具发现、撤销和清理及最终运行方式隔离检查通过 | 私有状态不能替代共享组 Memory、跨人审批和组织权威存储；正式模型与外部服务未配置 |
+| 成员本机签名 | 本机 OpenCode 宿主签名，短期会话经 SSH stdio 传到对应远程 MCP；私钥留本机且不转发 SSH agent | 其他成员逐设备配置 host/public key/agent 并验收；浏览器公共多租户登录不在当前证据内 |
 | GitHub/通知 | token 映射仅本机配置；Server C 未配置 broker，`--github-sync-interval 0`；系统通知仅有客户端实现证据 | 用户/组织管理员提供正式授权，工程完成服务端按身份映射与撤销、启用同步、验收客户端通知送达 |
 | Dream/Distill | worker 代码存在；Server C 为 `--dream-interval 0`，没有 QuantCode timer，未验证持续消费和重启恢复 | 工程落实证据数据目录与权限、参数、正式托管和恢复验收；配置定时器不等于完成蒸馏闭环 |
 | 长期模型配置 | 早先临时 Qwen 凭据仅用于限时联调，不能作为常驻服务配置 | 用户提供正式 provider 接入/授权，工程配置并执行真实请求回归；不复用已过期临时凭据 |

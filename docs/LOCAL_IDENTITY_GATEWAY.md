@@ -46,7 +46,9 @@ python -m quantcode.gateway --roster /absolute/approved-roster.yaml --database /
 
 Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quantcode-gateway.service`，服务只监听 `127.0.0.1:4097`；客户端通过 `ssh -L 4197:127.0.0.1:4097 qs-gpu` 访问。正式生产仍建议将 `User=ubuntu` 替换为无 sudo 权限的专用 `quantcode-gateway` 服务账号；Ubuntu 账号可用于当前受控部署和验证。
 
-2026-09-07 实测该 unit 为 `active/running`，启用 `NoNewPrivileges=yes`，GitHub/Dream 两个 interval 均为 0。它仍仅托管身份 gateway；完整 Python Agent/MCP 依赖已另按冻结锁文件安装到 `/opt/quantcode/runtime/07eacd752b4bcb8063b89b5687b44e2fb7168e12`，由 root 管理。Roster 的 36 个工作目录现已创建，分别归属无 sudo 的独立 `qc-<actor_id>` 研究账号，权限为 `0700`。真实 systemd 隔离预检通过，但成员远程 MCP 凭据传递和常驻研究进程尚未接线。上述五项变量目前仍是本机宿主配置，不能作为多人共享配置；签名须留在成员本机，会话文件按成员隔离。完整证据与操作边界见 [Server C 运行环境](SERVER_C_RUNTIME.md)。
+2026-09-07 实测该 unit 为 `active/running`，启用 `NoNewPrivileges=yes`，GitHub/Dream 两个 interval 均为 0。它仍仅托管身份 gateway；完整 Python Agent/MCP 运行目录另由 root 管理，`/opt/quantcode/runtime/current` 指向版本 `272ab3b`。Roster 的 36 个工作目录已创建，分别归属无 sudo 的独立 `qc-<actor_id>` 研究账号，权限为 `0700`。本机签名到 SSH 远程 MCP 的凭据传递及 systemd 按需运行已接通，Lead 真实验证了身份一致、撤销拒绝和断连清理。上述五项变量仍是每位成员本机宿主配置，不能作为多人共享配置；签名留在本机，会话文件按成员隔离。完整证据与操作边界见 [Server C 运行环境](SERVER_C_RUNTIME.md)。
+
+远程运行再配置 `QUANTCODE_REMOTE_SSH_HOST=qs-gpu`，MCP command 使用 `python -m quantcode.mcp_host`。未配置该变量时使用原本的本机 MCP。`qs-gpu` 必须是本机已配置且已核验 host key 的 Server C SSH host；用户名由认证 actor 推导，不能从浏览器改写。身份 gateway 仍可通过既有 `4197` 隧道访问。
 
 ## 登录路径
 
