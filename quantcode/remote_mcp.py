@@ -79,18 +79,25 @@ def private_directory(path: Path, uid: int, *, create: bool = False) -> Path:
 def sandbox_command(root: Path, workspace: Path, credential: Path, unit: str, ttl: int) -> list[str]:
     return ["/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--pipe", "--collect", f"--unit={unit}",
             "--property=NoNewPrivileges=yes", "--property=PrivateUsers=yes", "--property=ProtectSystem=strict",
-            "--property=ProtectHome=yes", "--property=PrivateTmp=yes", "--property=PrivateDevices=yes",
-            "--property=CapabilityBoundingSet=", "--property=RestrictSUIDSGID=yes", "--property=UMask=0077",
+            "--property=ProtectHome=read-only", "--property=InaccessiblePaths=/home /root", "--property=PrivateTmp=yes",
+            "--property=RestrictSUIDSGID=yes", "--property=UMask=0077",
             "--property=KillMode=control-group", "--property=TimeoutStopSec=10", f"--property=RuntimeMaxSec={ttl}",
             "--property=MemoryMax=2G", "--property=TasksMax=128", "--property=CPUQuota=200%",
-            f"--property=WorkingDirectory={workspace}", f"--property=ReadWritePaths={workspace} {root}/.quantcode",
-            f"--property=BindPaths={workspace}/.quantcode:{root}/.quantcode",
-            f"--property=BindReadOnlyPaths={credential.parent}",
+            f"--property=WorkingDirectory={workspace}", f"--property=ReadWritePaths={workspace}",
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", f"HOME={workspace}", "LANG=C.UTF-8",
             "PYTHONDONTWRITEBYTECODE=1", "QUANTCODE_ENV=production",
             f"QUANTCODE_IDENTITY_SESSION_FILE={credential}",
             str(root / ".venv/bin/python"), "-I", "-c",
-            "import sys; sys.path.insert(0, sys.argv[1]); from quantcode.mcp_server import main; main()", str(root)]
+            "import sys; sys.path.insert(0, sys.argv[1]); from quantcode.remote_mcp import serve_runtime; serve_runtime()", str(root)]
+
+
+def serve_runtime() -> None:
+    status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)
+    if (os.geteuid() == 0 or status.get("NoNewPrivs", "").strip() != "1"
+            or int(status.get("CapEff", "1").strip(), 16) != 0):
+        raise PermissionError("research runtime requires an unprivileged sandbox")
+    from quantcode.mcp_server import main
+    main()
 
 
 def serve() -> int:
@@ -99,7 +106,7 @@ def serve() -> int:
     user = pwd.getpwuid(os.getuid())
     config = json.loads(trusted_path(CONFIG).read_text())
     enrollment = json.loads(trusted_path(ENROLLMENTS / f"{user.pw_uid}.json").read_text())
-    root = trusted_path(Path(config["runtime_root"]))
+    root = trusted_path(Path(config["runtime_root"]) / "users" / str(user.pw_uid))
     if config["gateway"] != "http://127.0.0.1:4097":
         raise PermissionError("remote gateway must be the local identity authority")
     if os.getgrouplist(user.pw_name, user.pw_gid) != [user.pw_gid]:
@@ -116,6 +123,8 @@ def serve() -> int:
                          session_id=header["session_id"])
         workspace = private_directory(Path(user.pw_dir), user.pw_uid)
         private_directory(workspace / ".quantcode", user.pw_uid, create=True)
+        if not (root / ".quantcode").is_symlink() or (root / ".quantcode").resolve() != workspace / ".quantcode":
+            raise PermissionError("runtime state is not mapped to the enrolled workspace")
         expiry = datetime.fromisoformat(context["expires_at"])
         ttl = int((expiry - datetime.now(timezone.utc)).total_seconds())
         if ttl < 1:

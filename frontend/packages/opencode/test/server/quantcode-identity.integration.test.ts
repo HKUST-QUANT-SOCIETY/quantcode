@@ -43,7 +43,7 @@ live("real host selects one group, rejects concurrent login and revokes logout",
   expect(again.status).toBe(200)
 }), { config: { formatter: false, lsp: false, mcp: { quantcode: {
   type: "local", enabled: false,
-  command: [process.env.QUANTCODE_HOST_PYTHON ?? "python", "-m", "quantcode.mcp_server"],
+  command: [process.env.QUANTCODE_HOST_PYTHON ?? "python", "-m", "quantcode.mcp_host"],
   environment: { PYTHONPATH: process.env.QUANTCODE_BACKEND_ROOT ?? "", QUANTCODE_ENV: "production",
     QUANTCODE_IDENTITY_SESSION_FILE: process.env.QUANTCODE_IDENTITY_SESSION_FILE ?? "" },
 } } } })

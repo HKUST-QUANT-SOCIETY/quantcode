@@ -93,7 +93,8 @@ def test_sandbox_runs_production_mcp_with_bounded_lifetime_and_private_state():
     command = sandbox_command(root, Path("/srv/quant/users/person"), Path("/run/user/1234/session/identity.json"), "unit", 60)
     assert "--property=RuntimeMaxSec=60" in command
     assert "--property=NoNewPrivileges=yes" in command
-    assert "--property=BindPaths=/srv/quant/users/person/.quantcode:/opt/quantcode/runtime/revision/.quantcode" in command
+    assert "--property=ReadWritePaths=/srv/quant/users/person" in command
+    assert "--property=InaccessiblePaths=/home /root" in command
     assert "QUANTCODE_ENV=production" in command
     assert "QUANTCODE_ALLOW_UNAUTH=1" not in command
 
