@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from quantcode.identity import fingerprint_of_public_key, resolve_identity
+from quantcode.identity import fingerprint_of_public_key, resolve_identity, session_fields
 from quantcode.identity_challenge import ChallengeStore, authenticate
 from schemas.session_context import SessionContext
 
@@ -38,13 +38,13 @@ class IdentityGateway:
         if not entry:
             raise PermissionError("identity is not in the approved roster")
         with self.lock:
-            challenge = self.challenges.issue(fingerprint)
+            challenge = self.challenges.issue(fingerprint, group=requested_group or entry["group"])
         challenge["groups"] = entry.get("groups") or [entry["group"]]
         challenge["group"] = requested_group or entry["group"]
         return challenge
 
     def verify(self, payload: dict) -> dict:
-        requested_group = payload.get("group") or payload.get("requested_group")
+        requested_group = payload.get("group", payload.get("requested_group"))
         if requested_group is not None and not isinstance(requested_group, str):
             raise ValueError("invalid requested group")
         with self.lock:
@@ -76,18 +76,20 @@ class IdentityGateway:
         if context.expires_at <= datetime.now(timezone.utc) or entry is None:
             self.revoke_digest(digest)
             raise PermissionError("session expired or revoked")
-        # A changed role/group/workspace requires a new login, never an in-place
-        # privilege change to an existing immutable session.
-        for field in ("actor_id", "role", "workspace_id", "workspace_path", "github_subject"):
-            if entry.get(field) != getattr(context, field):
+        try:
+            expected = session_fields(entry, context.group)
+        except PermissionError:
+            self.revoke_digest(digest)
+            raise PermissionError("group authorization changed; sign in again") from None
+        # Compare the same projection used at login, including secondary grants.
+        for field, value in expected.items():
+            current = getattr(context, field)
+            if field == "authorized_groups":
+                current = current or [context.group]  # sessions created before multi-group support
+            changed = set(value) != set(current) if isinstance(value, list) else value != current
+            if changed:
                 self.revoke_digest(digest)
                 raise PermissionError("roster changed; sign in again")
-        if set(entry.get("resource_scopes") or []) != set(context.resource_scopes):
-            self.revoke_digest(digest)
-            raise PermissionError("permissions changed; sign in again")
-        if context.group not in set(entry.get("groups") or [entry["group"]]):
-            self.revoke_digest(digest)
-            raise PermissionError("group authorization changed; sign in again")
         return context
 
     def logout(self, token: str) -> None:
@@ -100,27 +102,20 @@ class IdentityGateway:
     def validate_checkpoint(self, token: str, saved: dict) -> dict:
         """Validate the creator's still-live session without exposing its identity record."""
         reviewer = self.session(token)
-        if reviewer.role not in {"approver", "admin"} or reviewer.group != saved.get("group"):
+        if reviewer.role not in {"approver", "admin"} or (reviewer.role != "admin" and reviewer.group != saved.get("group")):
             raise PermissionError("same-group approver required")
         with sqlite3.connect(self.database) as conn:
             row = conn.execute(
-                "SELECT fingerprint,context FROM identity_sessions WHERE json_extract(context, '$.session_id')=?",
+                "SELECT token_hash FROM identity_sessions WHERE json_extract(context, '$.session_id')=?",
                 (saved.get("session_id"),),
             ).fetchone()
         if row is None:
             raise PermissionError("task creator session expired or revoked")
-        creator = SessionContext.model_validate_json(row[1])
-        entry = resolve_identity(row[0], self.roster)
-        if entry is None or creator.expires_at <= datetime.now(timezone.utc):
-            raise PermissionError("task creator session expired or revoked")
-        fields = ("actor_id", "role", "workspace_id", "workspace_path", "github_subject")
-        if any(saved.get(field) != getattr(creator, field) or entry.get(field) != getattr(creator, field)
-               for field in fields):
+        creator = self.session_digest(row[0])
+        fields = ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject")
+        if any(saved.get(field) != getattr(creator, field) for field in fields):
             raise PermissionError("task creator authorization changed")
-        if saved.get("group") != creator.group or creator.group not in set(entry.get("groups") or [entry["group"]]):
-            raise PermissionError("task creator group authorization changed")
-        if (set(saved.get("resource_scopes") or []) != set(creator.resource_scopes)
-                or set(entry.get("resource_scopes") or []) != set(creator.resource_scopes)):
+        if set(saved.get("resource_scopes") or []) != set(creator.resource_scopes):
             raise PermissionError("task creator permissions changed")
         return {"valid": True}
 

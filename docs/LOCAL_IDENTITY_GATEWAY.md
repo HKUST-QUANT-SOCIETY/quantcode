@@ -25,6 +25,8 @@ Roster 激活实际需要以下条件同时成立：
 
 同一 actor 可以在 roster 中声明多个授权组，例如 `group: model`、`groups: [model, factor]`。登录时可请求其中一个组（`identity_login --group factor`）；服务端签发的 SessionContext 仍只包含一个固定 `group`，任务参数不能切组。没有指定组时使用 roster 的主组 `group`。
 
+截至 2026-09-07，组选择只接通 CLI/gateway；网页登录表单和宿主登录调用尚未传递目标组，因此网页仍登录主组。网页“断开”按钮目前只重置表单，未接 gateway logout、会话文件清理和 MCP 断连，不能作为已退出身份的证明。
+
 ### 开发端口与旧连接
 
 QuantCode 单仓库的网页启动器默认使用后端 `4096`、前端 `4444`。如果这两个端口已被另一个 OpenCode 工作区占用，请使用独立端口：
@@ -44,6 +46,8 @@ python -m quantcode.gateway --roster /absolute/approved-roster.yaml --database /
 
 Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quantcode-gateway.service`，服务只监听 `127.0.0.1:4097`；客户端通过 `ssh -L 4197:127.0.0.1:4097 qs-gpu` 访问。正式生产仍建议将 `User=ubuntu` 替换为无 sudo 权限的专用 `quantcode-gateway` 服务账号；Ubuntu 账号可用于当前受控部署和验证。
 
+2026-09-07 实测该 unit 为 `active/running`，启用 `NoNewPrivileges=yes`，GitHub/Dream 两个 interval 均为 0。它仅托管身份 gateway；当前虚拟环境未安装完整 Agent/MCP 所需的 LangGraph/LangChain Core。Roster 的 36 个工作目录在 Server C 上均不存在，其中包含本机运维身份路径，须先落实个人目录映射和隔离，再部署完整运行环境。上述五项变量目前是本机宿主配置，不能直接复用为 Server C 多人配置。宿主移到服务器后仍须保留成员本机签名，并按成员隔离凭据和会话文件。
+
 ## 登录路径
 
 设置页 → 本机公钥身份 → 连接 → 宿主调用 SSH agent 签名 → gateway 验证一次性 challenge 与 roster → 本机保存会话凭据 → 重连 QuantCode MCP → 核对同一会话 → 刷新组、角色、工作区和目录。
@@ -53,6 +57,8 @@ Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quant
 ## 验收证据与剩余接入
 
 `tests/test_identity_gateway.py` 已用独立临时 SSH agent 和临时密钥执行真实签名，验证一次性 challenge、会话哈希持久化、退出/过期、角色/组/权限/工作区变更撤销，以及待审核 roster 拒绝签入。当前全量结果见 [功能验收台账](audit/FULL_PRODUCT_AUDIT_2026-09-05.md)，避免在接入指南重复维护滚动数字。没有修改或加载用户实际密钥。
+
+2026-09-07 新增真实签名的组绑定、单组 Memory scope、撤销第二组后会话失效及生产 MCP 子进程联调回归；同时删除依赖 `PYTEST_CURRENT_TEST` 的认证失败回退。Gateway 身份修复已同步 Server C，既有本机 Lead 公钥经 SSH agent 签名登录成功；这不代替成员设备或远程共享宿主验收。
 
 宿主错误配置、并发登录与 MCP 会话一致性的完整链路，以及浏览器身份选择→签入→工作区更新仍待专项验收。未配置正式 roster 时，`/experimental/quantcode/identities` 会返回结构化的 `identities: []` 与错误，MCP `session_context` 会返回未连接错误；这些是 fail-closed 行为，不是 `/agent` 500的原因。正式人员授权及外部研发 SSH 环境仍需正确配置。
 
@@ -64,7 +70,7 @@ Server C 当前使用 `ubuntu` 账号的 systemd 验收模板 `ops/systemd/quant
 {"subjects":{"github-login":{"token_file":"/absolute/private/github-token"}}}
 ```
 
-token 文件同样要求 0600、服务账号所有，内容为已有账号凭据。映射按正式 roster 的 github_subject（小写）读取，不从浏览器或 Agent 参数选择身份。每次查询重读，便于撤销或轮换；不把 token 写入 SessionContext、checkpoint 或日志。GitGraph/Pop 和已认证 PR 读取还会验证实际账号与 Team/repo 权限，映射存在本身不授予仓库权限。当前没有创建或导入任何真实凭据。
+token 文件同样要求 0600、服务账号所有，内容为已有账号凭据。映射按正式 roster 的 github_subject（小写）读取，不从浏览器或 Agent 参数选择身份。每次查询重读，便于撤销或轮换；不把 token 写入 SessionContext、checkpoint 或日志。GitGraph/Pop 和已认证 PR 读取还会验证实际账号与 Team/repo 权限，映射存在本身不授予仓库权限。目前仅本机宿主配置了真实凭据映射；Server C 的 token broker/成员凭据映射尚未配置。
 
 ## Gateway 后台 GitHub 同步
 
@@ -74,7 +80,7 @@ gateway 启动时默认运行后台同步循环，每轮完成后等待 60 秒�
 
 同步复用 GitGraph 的 SQLite 基线与 Pop，不在浏览器关闭时发送 OS 通知。认证 `GET /github-sync` 返回当前身份的最近一次尝试状态和起止时间；STARTED 只表示曾开始，不能据此证明进程仍运行。失败记录只保存异常类型，避免泄漏传输凭据。worker 与手动刷新并发时，较早开始的响应不能覆盖已提交的更新基线。
 
-当前 GitHub worker、Pop 持久化和系统通知已经接入 gateway；启动时默认每 60 秒同步，发现新 Pop 后发送一条不含仓库详情的系统摘要通知。生产仍需配置 GitHub 凭据映射并由 systemd/launchd 等进程托管。
+GitHub worker 和 Pop 持久化已接入 gateway，默认同步间隔为 60 秒，但 Server C 部署显式禁用了同步。系统通知由在线客户端消费新 Pop 后调用本机通知接口，仅发送不含仓库详情的摘要；后台 gateway 不直接向已关闭的客户端推送系统通知。真实后台同步和系统通知送达仍待部署联调。
 
 ## 量化组件的本地 checkout 模式
 

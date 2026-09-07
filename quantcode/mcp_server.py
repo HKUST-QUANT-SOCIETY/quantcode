@@ -82,11 +82,6 @@ _ADMIN_ONLY_META_TOOLS = frozenset(
 _APPROVER_META_TOOLS = frozenset({"review_distill_candidate", "list_distill_candidates", "list_pending_gates"})
 
 
-def _test_unscoped_fallback() -> bool:
-    """Permit legacy unscoped registry tests without weakening real runtimes."""
-    return bool(os.environ.get("PYTEST_CURRENT_TEST")) and not _env_group() and _get_ssh_fingerprint() is None
-
-
 def _get_ssh_fingerprint() -> str | None:
     """读取宿主注入的 SSH 公钥指纹 env（主名 + 兼容别名）。"""
     fp = (
@@ -185,15 +180,7 @@ def _get_mcp_group() -> str | None:
     bindings = identity.load_bindings()
     if bindings:
         # 有绑定配置但本会话未提供指纹 → 默认 fail-closed
-        # Pytest/MCP contract smoke runs in the explicit test environment;
-        # it may use QUANTCODE_GROUP fixtures without a real SSH agent.
-        # Development still requires an explicit opt-in, and production
-        # always fails closed.
-        test_fixture = (
-            os.environ.get("QUANTCODE_ENV", "").strip().lower() == "test"
-            and bool(_env_group())
-        )
-        if test_fixture or (_development_mode() and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1"):
+        if _development_mode() and os.environ.get("QUANTCODE_ALLOW_UNAUTH", "").strip() == "1":
             g = _validate_group(_env_group())
             if g:
                 _SESSION_GROUP = g
@@ -792,11 +779,17 @@ def _validate_cached_roster_context(context: dict[str, Any]) -> None:
         raise RuntimeError("AUTHENTICATION_REQUIRED: roster unavailable") from exc
     if not entry:
         raise RuntimeError("AUTHENTICATION_REQUIRED: SSH identity revoked")
-    fields = ("actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject")
-    if any(entry.get(field) != context.get(field) for field in fields):
-        raise RuntimeError("AUTHENTICATION_REQUIRED: roster authorization changed; reconnect")
-    if set(entry.get("resource_scopes") or []) != set(context.get("resource_scopes") or []):
-        raise RuntimeError("AUTHENTICATION_REQUIRED: resource permissions changed; reconnect")
+    try:
+        expected = identity.session_fields(entry, context.get("group"))
+    except PermissionError as exc:
+        raise RuntimeError("AUTHENTICATION_REQUIRED: group authorization changed; reconnect") from exc
+    for field, value in expected.items():
+        current = context.get(field)
+        if field == "authorized_groups":
+            current = current or [context.get("group")]
+        changed = set(value) != set(current or []) if isinstance(value, list) else value != current
+        if changed:
+            raise RuntimeError("AUTHENTICATION_REQUIRED: roster authorization changed; reconnect")
 
 
 def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
@@ -837,12 +830,8 @@ def _session_context_for_call(group: str | None = None) -> dict[str, Any]:
                 {
                     "identity": fingerprint,
                     "ssh_fingerprint": fingerprint,
-                    "actor_id": entry.get("actor_id"),
+                    **identity.session_fields(entry, mcp_group),
                     "role": str(entry.get("role") or "analyst").strip(),
-                    "workspace_id": entry.get("workspace_id"),
-                    "workspace_path": entry.get("workspace_path"),
-                    "github_subject": entry.get("github_subject"),
-                    "resource_scopes": list(entry.get("resource_scopes") or []),
                     "identity_source": "ssh_roster",
                 }
             )
@@ -894,16 +883,7 @@ def list_tools() -> dict:
     Day 4 俞高磊: 在列表末尾附加 run_agent meta tool（若存在），
     让 OpenCode compose agent 能发现并调用它。
     """
-    try:
-        _mcp_group = _get_mcp_group()
-    except RuntimeError:
-        # Legacy registry tests intentionally exercise the unscoped catalog in
-        # an explicit test process.  Production and development still surface
-        # the roster error instead of widening visibility.
-        if _test_unscoped_fallback():
-            _mcp_group = ""
-        else:
-            raise
+    _mcp_group = _get_mcp_group()
     tools = _tools_for_session(_mcp_group, _session_role(_mcp_group))
     logger.info(
         "list_tools: group=%s admin=%s → %d tools",
@@ -933,13 +913,7 @@ def call_tool(name: str, arguments: dict) -> dict:
     供 run_agent 等需要完整 AgentRunner 上下文的 tool 使用。
     """
     try:
-        try:
-            mcp_group = _get_mcp_group()
-        except RuntimeError:
-            if _test_unscoped_fallback():
-                mcp_group = ""
-            else:
-                raise
+        mcp_group = _get_mcp_group()
         session_context = _session_context_for_call(mcp_group)
         session_role = str(session_context.get("role") or "analyst")
         allowed_tools = {tool.id for tool in _tools_for_session(mcp_group, session_role)}

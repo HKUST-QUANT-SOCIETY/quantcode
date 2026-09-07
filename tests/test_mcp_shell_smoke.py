@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("group", ["factor", "model", "risk", "strategy", "options", "fundamental", "infra", "agent"])
-def test_mcp_stdio_catalog_and_deploy_boundary(group):
+def test_mcp_stdio_catalog_and_deploy_boundary(group, tmp_path):
     env = {key: value for key, value in os.environ.items() if not key.startswith("QUANTCODE_")}
     env.update(PYTHONPATH=str(ROOT), QUANTCODE_ENV="test", QUANTCODE_GROUP=group)
     requests = [
@@ -24,7 +24,9 @@ def test_mcp_stdio_catalog_and_deploy_boundary(group):
         {"jsonrpc": "2.0", "id": 4, "method": "ping"},
     ]
     result = subprocess.run(
-        [sys.executable, "-m", "quantcode.mcp_server"],
+        [sys.executable, "-c",
+         "from quantcode import identity; import runpy,sys; identity.DEFAULT_BINDINGS_PATH=sys.argv[1]; "
+         "runpy.run_module('quantcode.mcp_server',run_name='__main__')", str(tmp_path / "test-roster.yaml")],
         input="".join(json.dumps(request) + "\n" for request in requests),
         text=True, encoding="utf-8", capture_output=True, env=env, cwd=ROOT, timeout=30,
     )

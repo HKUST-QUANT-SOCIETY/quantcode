@@ -127,7 +127,101 @@ def test_multigroup_gateway_issues_selected_group_and_revalidates_membership(gat
     assert gateway.session(result["token"]).group == "factor"
 
 
-def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(gateway_login, tmp_path):
+def _signed_group_payload(gateway, roster, group):
+    public_key = (roster.parent / "test-key.pub").read_text()
+    challenge = gateway.issue(public_key, requested_group=group)
+    signed = subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-n", "quantcode", "-f", str(roster.parent / "test-key")],
+        input=challenge["nonce"], text=True, capture_output=True, check=True, timeout=10,
+    )
+    return {"challenge_id": challenge["challenge_id"], "public_key": public_key,
+            "signature": signed.stdout, "group": group}
+
+
+def test_challenge_cannot_change_to_another_authorized_group(gateway_login):
+    gateway, _, roster, entry = gateway_login
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "groups": ["factor", "model"]}]}))
+    payload = _signed_group_payload(gateway, roster, "factor")
+    with pytest.raises(PermissionError, match="group"):
+        gateway.verify({**payload, "group": "model"})
+    with pytest.raises(PermissionError, match="already used"):
+        gateway.verify(payload)
+
+
+def test_multigroup_session_has_only_selected_group_memory_scope(gateway_login):
+    gateway, _, roster, entry = gateway_login
+    multi = {**entry, "group": "model", "groups": ["model", "factor"],
+             "resource_scopes": ["memory:model", "memory:factor", "repo:fixture", "memory:project:shared:read"]}
+    roster.write_text(yaml.safe_dump({"bindings": [multi]}))
+    result = gateway.verify(_signed_group_payload(gateway, roster, "factor"))
+    session = gateway.session(result["token"])
+    assert session.group == "factor"
+    assert session.resource_scopes == ["memory:factor", "repo:fixture", "memory:project:shared:read"]
+
+
+def test_removing_secondary_membership_revokes_primary_session(gateway_login):
+    gateway, _, roster, entry = gateway_login
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "groups": ["factor", "model"]}]}))
+    result = gateway.verify(_signed_group_payload(gateway, roster, "factor"))
+    roster.write_text(yaml.safe_dump({"bindings": [entry]}))
+    with pytest.raises(PermissionError):
+        gateway.session(result["token"])
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "groups": ["factor", "model"]}]}))
+    with pytest.raises(PermissionError, match="revoked"):
+        gateway.session(result["token"])
+
+
+def test_production_mcp_uses_live_multigroup_gateway_context(gateway_login, tmp_path):
+    import json
+    import sys
+    import threading
+    from http.server import ThreadingHTTPServer
+    from quantcode.gateway import handler
+
+    gateway, _, roster, entry = gateway_login
+    multi = {**entry, "group": "model", "groups": ["model", "factor"],
+             "resource_scopes": ["memory:model", "memory:factor"]}
+    roster.write_text(yaml.safe_dump({"bindings": [multi]}))
+    login = gateway.verify(_signed_group_payload(gateway, roster, "factor"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(gateway))
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    session_file = tmp_path / "host-session.json"
+    session_file.write_text(json.dumps({"gateway": f"http://127.0.0.1:{server.server_port}", "token": login["token"]}))
+    session_file.chmod(0o600)
+    root = Path(__file__).resolve().parents[1]
+    env = {key: value for key, value in os.environ.items() if not key.startswith("QUANTCODE_")}
+    env.update(QUANTCODE_ENV="production", QUANTCODE_IDENTITY_SESSION_FILE=str(session_file), PYTHONPATH=str(root))
+    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "session_context", "arguments": {}}}
+    wrong_group = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run_agent", "arguments": {"task": "read only", "group": "model"}}}
+    try:
+        result = subprocess.run([sys.executable, "-m", "quantcode.mcp_server"], cwd=root, env=env,
+                                input=json.dumps(request) + "\n" + json.dumps(wrong_group) + "\n",
+                                text=True, capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stderr[-1000:]
+        responses = [json.loads(line)["result"] for line in result.stdout.splitlines()]
+        context = json.loads(responses[0]["content"][0]["text"])
+        assert context["session_id"] == login["session"]["session_id"]
+        assert context["group"] == "factor"
+        assert context["authorized_groups"] == ["model", "factor"]
+        assert context["resource_scopes"] == ["memory:factor"]
+        rejected = json.loads(responses[1]["content"][0]["text"])
+        assert rejected["status"] == "error" and "group mismatch" in rejected["error"]
+        assert login["token"] not in result.stdout + result.stderr
+
+        roster.write_text(yaml.safe_dump({"bindings": [{**multi, "groups": ["model"]}]}))
+        revoked = subprocess.run([sys.executable, "-m", "quantcode.mcp_server"], cwd=root, env=env,
+                                 input=json.dumps(request) + "\n", text=True, capture_output=True, timeout=30)
+        assert revoked.returncode != 0
+        assert "AUTHENTICATION_REQUIRED" in revoked.stderr
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+@pytest.mark.parametrize("reviewer_role,reviewer_group", [("approver", "factor"), ("admin", "agent")])
+def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(gateway_login, tmp_path, reviewer_role, reviewer_group):
     gateway, login, roster, creator_entry = gateway_login
     creator, _ = login()
 
@@ -141,7 +235,8 @@ def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(g
         **creator_entry,
         "fingerprint": fingerprint_of_public_key(approver_key.with_suffix(".pub").read_text().strip()),
         "actor_id": "fixture-approver",
-        "role": "approver",
+        "role": reviewer_role,
+        "group": reviewer_group,
     }
     roster.write_text(yaml.safe_dump({"bindings": [creator_entry, approver_entry]}))
     now = datetime.now(timezone.utc)
@@ -169,6 +264,8 @@ def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(g
         )
 
     assert gateway.validate_checkpoint(approver_token, creator["session"]) == {"valid": True}
+    with pytest.raises(PermissionError):
+        gateway.validate_checkpoint(approver_token, {**creator["session"], "group": "model"})
     gateway.logout(creator["token"])
     with pytest.raises(PermissionError, match="creator session expired or revoked"):
         gateway.validate_checkpoint(approver_token, creator["session"])

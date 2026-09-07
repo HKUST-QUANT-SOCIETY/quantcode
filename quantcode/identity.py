@@ -144,6 +144,23 @@ def resolve_identity(
     return None
 
 
+def session_fields(entry: dict, group: str | None = None) -> dict:
+    """Project one roster grant into a single-group session, without unioning Memory scopes."""
+    selected = entry["group"] if group is None else group
+    groups = entry.get("groups") or [entry["group"]]
+    if selected not in groups:
+        raise PermissionError("group is not authorized by roster")
+    other_memory_scopes = {f"memory:{item}" for item in GROUP_IDS if item != selected}
+    return {
+        **{field: entry.get(field) for field in
+           ("actor_id", "role", "workspace_id", "workspace_path", "github_subject")},
+        "group": selected,
+        "authorized_groups": list(groups),
+        "resource_scopes": [scope for scope in entry.get("resource_scopes", [])
+                            if scope not in other_memory_scopes],
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

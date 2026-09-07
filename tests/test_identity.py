@@ -55,6 +55,15 @@ def test_fingerprint_accepts_fingerprint_string():
     assert identity.fingerprint_of_public_key(TEST_FP) == TEST_FP
 
 
+def test_pytest_marker_cannot_bypass_production_authentication(monkeypatch):
+    monkeypatch.setenv("QUANTCODE_ENV", "production")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "inherited-marker")
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
+    with pytest.raises(RuntimeError, match="AUTHENTICATION_REQUIRED"):
+        mcp_server.list_tools()
+    assert mcp_server.call_tool("session_context", {})["isError"] is True
+
+
 def test_fingerprint_invalid_line_raises():
     with pytest.raises(ValueError):
         identity.fingerprint_of_public_key("not-a-key")

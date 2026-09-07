@@ -6,7 +6,7 @@
 
 本文件是当前状态台账，后续实现直接更新本表，不以追加旧批次结论代替状态维护。
 
-本阶段目标为本地 Dev 可初步使用。用户明确暂不验收 Mac/Windows 安装包，且要求先完成全部功能修复，再统一 pytest，最后 Headless UI 验收。本地功能增量已进入统一验收：后端全量 pytest → 前端类型/组件 → Headless UI 按顺序执行。当前自动回归通过，但真实身份、MCP 与外部服务闭环尚未通过。
+本阶段目标为本地 Dev 可初步使用，并推进 Server C 服务部署。用户明确暂不验收安装包、签名和跨平台发行；量化组件暂按成员本地 checkout 与 Agent 预学习接入，组件 API 等上线后再联调。当前自动回归、真实本机 Lead gateway 登录及隔离环境的生产 MCP 身份链已通过；多人远程使用与外部服务闭环尚未通过。
 
 产品源码统一在 `quantcode` 仓库：Python 后端在根目录，UI/桌面/宿主工作区在 `frontend/`。此前双仓库测试证据保留其执行范围；迁移检查独立记录如下。后续代码统一在 quantcode/main 交付，真实服务接通仍须单独验收。未修改用户的 `AI_Agent_Group_未来发展思考.md`。
 
@@ -19,12 +19,13 @@
 | 检查 | 当前结果 |
 |---|---|
 | 独立依赖安装 | `bun run install:frontend` 冻结锁文件安装成功；未复用旧仓库 node_modules |
-| Python 全量回归 | 1,142 passed / 4 skipped；真实 LLM 跳过 |
+| Python 全量回归 | 2026-09-07：1,151 passed / 4 skipped，26.34 秒；真实 LLM 跳过；Ruff 通过 |
 | QuantCode 组件 | 126 passed / 0 failed |
 | app / opencode / desktop 类型 | 三个包均通过 |
 | 网页构建 | 从根目录 `bun run build:web` 成功，QuantCode 品牌 |
 | 构建产物 Headless | 12 passed，12.4 秒；静态预览 127.0.0.1:48173 指向本仓库 frontend/packages/app/dist，测试通过保存的服务设置连接现有 4096；业务/身份响应为 fixture，不证明真实接线 |
-| 打包路径 | 根 workflow 与 composite action YAML、工作目录和本地 action 引用检查通过；仅手动触发，默认不发布；本机已构建 macOS arm64 unsigned DMG/ZIP；本机 Linux RPM 尝试因缺少 `rpmbuild` 停止，正式 Linux x64 矩阵由 Ubuntu CI 构建 |
+| 当前 Dev Headless | 2026-09-07：16 passed，27.1 秒；独立 4196/4544，业务/身份使用 fixture；复核 900×650 与 1440×900 截图 |
+| 打包路径（历史证据，本阶段暂缓） | 根 workflow 与 composite action YAML、工作目录和本地 action 引用检查通过；仅手动触发，默认不发布；本机曾构建 macOS arm64 unsigned DMG/ZIP；本机 Linux RPM 尝试因缺少 `rpmbuild` 停止；不计为当前阻塞项 |
 
 构建产物测试未执行依赖 Vite 源码模块的 2 项审批/恢复挂载测试；这两项由当前组件测试覆盖，不混算成静态产物的 12 项。静态预览必须通过 `PLAYWRIGHT_TARGET_SERVER` 指向后端，避免把服务选择页误判为产品回归失败。
 
@@ -76,7 +77,7 @@
 
 | 决策 | 核验结论 |
 |---|---|
-| D-001 单 Session 单组 | 后端强制、UI 无自由切组；多组 actor 由 roster 授权，登录时选定一个组并锁定，Server C gateway 已接入 |
+| D-001 单 Session 单组 | 后端 challenge 与会话锁定一个授权组，过滤其他组 Memory scope；多组 CLI/gateway 已接通，网页尚无登录组选项，默认主组；第二组授权撤销也使旧会话失效 |
 | D-002 长期组 Memory | 组隔离保留，Runtime 检索挤占修复；项目授权不能由组推定 |
 | D-003 先查能力与 Memory | 生产 strict reuse、卡片摘要和缺口流程有回归；真实 LLM 行为测试未启用 |
 | D-004 缺口由用户决定 | 既有 reuse/solution 约束保留；不得把 UNVERIFIED 自动提升为 CONNECTED |
@@ -96,8 +97,8 @@
 
 | 断言 | 当前证据 | 缺口 |
 |---|---|---|
-| U1 登录 | 未认证禁止提交，不把 HTTP 当 SSH，无私钥字段 | 真 SSH 三方联动与失败分类未验 |
-| U2 组路由 | 三角色浏览器 fixture + 八组后端权限回归 | 实际 roster 会话未端到端运行 |
+| U1 登录 | 未认证禁止提交，不把 HTTP 当 SSH，无私钥字段；本机 Lead gateway 登录与隔离生产 MCP 联调已验 | 成员设备/共享服务器签名桥未验；UI 断开只重置表单，尚未撤销凭据或断连 MCP |
+| U2 组路由 | 三角色浏览器 fixture + 八组后端权限回归；多组真实签名与单组 scope 隔离回归 | CLI 可选授权组，网页/宿主尚不传递目标组；成员第二组网页登录未闭环 |
 | U3 任务/方案 | 方案面板与后端分级测试 | 真任务冻结/恢复未做浏览器全链 |
 | U4 执行记录 | 新增服务端历史与 checkpoint 只读回放界面；原有当前运行面板保留 | 本地 Headless 验收通过：刷新、隔离、错误状态、产物与未确认回执阻止恢复均有回归；真实长任务恢复仍需真服务 |
 | U5 Memory/能力 | 输入焦点、竞态、503、组 ACL、真实 SQLite、卡片元数据；两种尺寸滚动 | 本地验收通过：项目 grant、知识审核、发布中恢复和能力目录刷新均有回归；真实组件接通状态仍需服务验收 |
@@ -158,7 +159,7 @@ Dev 工作台存活且身份就绪时每分钟同步。GitGraph 可开启/关闭
 
 新增 `quantcode.gateway` 本地 HTTP 服务：challenge/verify/session/logout，签名仍由既有 OpenSSH verifier 验证，token 仅存哈希，会话每次查询重验正式 roster。旧 SSH 指纹接入也已补缓存上下文的逐次 roster 核验，指纹、角色、工作区或资源权限变化均要求重连，撤销后不得继续沿用缓存授权。新增 `quantcode.identity_login` 宿主 CLI，使用 `ssh-keygen -Y sign -U` 要求 SSH agent 签名，仅读公钥；会话凭据以 0600 文件保存，不打印 token。
 
-MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 Server C gateway 身份，每次调用重新验证会话，拒绝到期/撤销或上下文变化，不回退指纹猜测。隔离临时 roster/数据库与真实 SSH agent 的 7 项测试已通过；Server C Ubuntu systemd gateway、SSH 隧道和本机 Lead session 已实测，成员真实私钥签名和桌面 MCP 重连仍需各成员设备验收。桌面登录按钮已接宿主固定 CLI，MCP 重连后核对同一 session_id。
+MCP 可配置 `QUANTCODE_IDENTITY_SESSION_FILE` 使用 Server C gateway 身份，每次调用重新验证会话，拒绝到期/撤销或上下文变化，不回退指纹猜测。隔离临时 roster/数据库与真实 SSH agent 的身份回归已通过；Server C Ubuntu systemd gateway、SSH 隧道和本机 Lead session 已实测，成员真实私钥签名和桌面 MCP 重连仍需各成员设备验收。桌面登录按钮已接宿主固定 CLI，MCP 重连后核对同一 session_id。
 
 
 ## Admin 部署管理接线（本地验收通过，生产待接）
@@ -216,7 +217,7 @@ OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置�
 
 本次完整前端套件的 38 项测试必须按 channel 分组运行：QuantCode 页面运行 16 项，原生 OpenCode regression/smoke 运行 22 项。把原生测试直接指向 QuantCode channel 会出现 `Notification server not found` 或缺少原生导航，这是测试环境错配，不是产品回归。
 
-当前仍未实现或未能在本机完成验收的功能：
+以下为 2026-09-06 当时的缺口记录，当前状态及用户暂缓范围以文末 2026-09-07 复核为准：
 
 1. **真实身份链路**：正式 `.opencode/authorized_groups.yaml`、SSH agent/Keychain、公钥 roster、gateway、MCP 重连和真实跨人审批尚未接入。
 2. **真实量化组件**：ReturnsDataset/DataAccess、QuantEvaluator、VectorBT-QS、Riskfolio-QS 及其他 canonical 服务的真实输入输出、版本、artifact 和权限闭环仍为 `STAGING`/`UNAVAILABLE`。
@@ -224,4 +225,32 @@ OpenCode 新增宿主身份查询和固定登录操作；仅接受宿主配置�
 4. **GitHub 与通知运营**：真实 GitHub subject/token、后台同步、系统通知送达和外部报告平台消费未验收。
 5. **安装包正式发行**：本机只验证 macOS arm64 unsigned 包；Windows x64、macOS Intel、Linux x64 需 CI 构建和 packaged smoke，正式外发还需要 Apple Developer ID/公证、Azure Trusted Signing、发布环境审批。安装包不会内置 Python QuantCode MCP、成员私钥或 GitHub token，安装后的研究链路必须连接已部署的 Server B/gateway。
 
-因此当前结论是：**代码、网页和桌面壳已达到“可构建、可做 unsigned QA”的程度；尚未达到“配置齐全、签名完成、外部服务接通后可直接正式部署”的程度。**
+当时结论为代码、网页和桌面壳可构建并做 unsigned QA，但未完成真实服务部署。安装包与签名现按用户要求暂缓。
+
+## 2026-09-07 Roster 与 Server C 阻塞复核
+
+### 已完成及证据
+
+- 正式 roster 为 38 条公钥绑定、36 个 actor，包含 37 条组员绑定和 1 条 Lead/Admin 运维绑定。本地与 Server C 文件 SHA-256 完全一致。杨欣琳为 `model` 主组、`agent` 第二授权；张佳音为 `model` 主组、`factor`（Mining）第二授权，均为 analyst。登记完成不代表成员设备已登录验收。
+- Server C 的 `quantcode-gateway.service` 为 `active/running`，运行用户 `ubuntu`，启用 `NoNewPrivileges=yes`，仅监听 `127.0.0.1:4097`，最近检查 `NRestarts=0`。本机通过 SSH 隧道登录 Lead 会话成功。
+- 先复现再修复四个身份问题：challenge 组可被更改、多组会话混入另一组 Memory scope、移除第二组后原会话未撤销，以及 `PYTEST_CURRENT_TEST` 导致生产认证失败回退。补齐 Admin 跨组审核时的创建者会话校验，普通 approver 仍受同组限制。
+- Gateway 的三个身份模块已同步 Server C，原 roster/数据库保留，旧模块有备份。MCP 修复位于本仓库；Server C 完整 Agent/MCP 环境尚未部署。
+- Python **1,151 passed / 4 skipped**，Ruff 通过，QuantCode 组件 **126 passed / 394 assertions**，Dev Playwright **16 passed**。浏览器业务/身份响应仍为 fixture；真实 SSH 签名和生产 MCP 子进程联调使用隔离临时身份，不能代替成员设备的完整产品验收。
+
+### 仍阻塞的事项
+
+| 事项 | 实测状态与影响 | 下一步及责任边界 |
+|---|---|---|
+| 剩余人员 | 张博睿、李卓只有指纹而缺完整公钥；叶易涵有共用公钥/邮箱归并问题；这些记录未激活 | 成员补完整公钥；用户确认叶易涵对应记录是否同一人。只影响未激活身份，不阻止其他已审核成员接入 |
+| 网页组选项与退出 | UI/宿主登录没有目标组参数，默认主组；“断开”只重置表单，未撤销 gateway token、清理会话文件或断连 MCP | 工程补齐登录前授权组选项和真实退出；一个会话仍只固定一个组 |
+| Server C 完整运行环境 | 目前只托管身份 gateway，虚拟环境缺 LangGraph/LangChain Core；roster 的 36 个工作目录在 Server C 上均不存在（含本机运维路径） | 工程部署完整 Agent/MCP，落实个人目录映射、文件权限和进程隔离；不能让所有成员共用 ubuntu 的 session 文件 |
+| 成员本机签名 | 当前签名由 OpenCode 宿主执行；宿主迁到 Server C 后不能直接调用成员电脑的 SSH agent | 工程补客户端本机签名到 gateway 的接线及逐成员凭据传递；成员私钥留在本机，不上传服务器 |
+| GitHub/通知 | token 映射仅本机配置；Server C 未配置 broker，`--github-sync-interval 0`；系统通知仅有客户端实现证据 | 用户/组织管理员提供正式授权，工程完成服务端按身份映射与撤销、启用同步、验收客户端通知送达 |
+| Dream/Distill | worker 代码存在；Server C 为 `--dream-interval 0`，没有 QuantCode timer，未验证持续消费和重启恢复 | 工程落实证据数据目录与权限、参数、正式托管和恢复验收；配置定时器不等于完成蒸馏闭环 |
+| 长期模型配置 | 早先临时 Qwen 凭据仅用于限时联调，不能作为常驻服务配置 | 用户提供正式 provider 接入/授权，工程配置并执行真实请求回归；不复用已过期临时凭据 |
+| Admin 生产执行 | 有暂存/取消及可选提交 adapter，生产队列、服务账号、结果状态和回滚没有完成闭环 | 生产负责人提供受控接口及服务凭据，工程接入 Admin 管理面；普通研究 Agent 不获得生产账号或 shell |
+| 可复现发布 | 本轮身份修复、回归测试和验收台账纳入同一提交；尚无覆盖完整 Server C 运行环境、配置模板和验收证据的 release tag | 工程完成部署清单及全链验收后再形成 release；不把身份 gateway 更新当作全产品发布 |
+
+量化组件 API、安装包、签名及跨平台发行属于用户明确暂缓事项，不计入本阶段阻塞。组件本地 checkout 路径和版本仍需核对；目录存在检查只证明目录存在，不证明 canonical 组件已接通。
+
+`scripts/verify_deployment_readiness.sh` 的 PASS 仅是配置/可达性预检：它接受未认证 `/session` 的 401，也不验证完整运行环境、有效成员会话、后台 worker 或生产执行。因此不能据此宣称生产可用。当前结论是 **roster 主体及身份 gateway 已落地，Server C 多人工作流和正式生产链仍未完成**。
