@@ -16,6 +16,29 @@ MODEL = "qwen3.7-flash"
 URL = "http://127.0.0.1:6201/v1"
 
 
+def verify_existing(config_file: Path, auth_file: Path):
+    values = []
+    for path in (config_file, auth_file):
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as file:
+            info = os.fstat(file.fileno())
+            if info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 2_000_000:
+                raise PermissionError("Existing bootstrap files must be private and member-owned")
+            values.append(json.load(file))
+    config, auth = values
+    if set(auth) != {PROVIDER}:
+        raise ValueError("Existing model credentials are not this installation's bootstrap")
+    credential = auth[PROVIDER]
+    token = credential.get("key", "")
+    if credential != {"type": "api", "key": token, "metadata": {"quantcode_base_url": URL}} or not re.fullmatch(r"qcv1_[A-Za-z0-9_-]{43}", token):
+        raise ValueError("Existing credential is not a Test V1 member proxy token")
+    connection = config.get("provider", {}).get(PROVIDER, {})
+    if (set(config.get("provider", {})) != {PROVIDER} or connection.get("npm") != "@ai-sdk/openai-compatible"
+            or connection.get("options") != {"baseURL": URL} or set(connection.get("models", {})) != {MODEL}
+            or config.get("model") != f"{PROVIDER}/{MODEL}" or config.get("small_model") != f"{PROVIDER}/{MODEL}"):
+        raise ValueError("Existing model configuration changed; refusing to overwrite it")
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def bootstrap(config_file: Path, auth_file: Path, expected: str, token: str):
     if not re.fullmatch(r"qcv1_[A-Za-z0-9_-]{43}", token):
         raise ValueError("Only an installation-generated member proxy token is accepted")
@@ -63,7 +86,8 @@ def bootstrap(config_file: Path, auth_file: Path, expected: str, token: str):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, required=True)
-    parser.add_argument("--expected-config-sha256", required=True)
+    parser.add_argument("--expected-config-sha256")
+    parser.add_argument("--verify-existing", action="store_true")
     args = parser.parse_args()
     user = pwd.getpwuid(os.getuid())
     if os.getuid() == 0 or not user.pw_name.startswith("qc-"):
@@ -73,10 +97,15 @@ def main():
         raise PermissionError("Host state does not belong to this enrolled actor")
     if (args.state / "identity/session.json").exists():
         raise PermissionError("Model bootstrap cannot modify an already authenticated host")
-    token = sys.stdin.read(4097).strip()
-    bootstrap(args.state / "config/quantcode/opencode.json", args.state / "data/quantcode/auth.json",
-              args.expected_config_sha256, token)
-    print(json.dumps({"status": "BOOTSTRAPPED", "username": user.pw_name, "provider": PROVIDER, "model": MODEL}))
+    config, auth = args.state / "config/quantcode/opencode.json", args.state / "data/quantcode/auth.json"
+    if not args.verify_existing:
+        if not args.expected_config_sha256:
+            raise ValueError("Fresh bootstrap requires the reviewed config digest")
+        token = sys.stdin.read(4097).strip()
+        bootstrap(config, auth, args.expected_config_sha256, token)
+    digest = verify_existing(config, auth)
+    print(json.dumps({"status": "VERIFIED", "username": user.pw_name, "provider": PROVIDER, "model": MODEL,
+                      "token_sha256": digest}))
 
 
 if __name__ == "__main__":

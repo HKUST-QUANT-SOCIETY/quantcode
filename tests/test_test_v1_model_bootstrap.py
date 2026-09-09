@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.bootstrap_test_v1_model import bootstrap
+from scripts.bootstrap_test_v1_model import bootstrap, verify_existing
 
 
 def fixture(tmp_path):
@@ -25,6 +25,9 @@ def test_bootstrap_preserves_mcp_and_writes_only_member_proxy_token(tmp_path):
     assert token not in config.read_text()
     assert credentials["organization-qwen"]["key"] == token
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in (config, auth))
+    before = (config.read_bytes(), auth.read_bytes())
+    assert verify_existing(config, auth) == hashlib.sha256(token.encode()).hexdigest()
+    assert (config.read_bytes(), auth.read_bytes()) == before
     with pytest.raises((ValueError, FileExistsError)):
         bootstrap(config, auth, hashlib.sha256(config.read_bytes()).hexdigest(), token)
 
@@ -45,3 +48,13 @@ def test_existing_auth_is_never_overwritten(tmp_path):
     with pytest.raises(FileExistsError):
         bootstrap(config, auth, expected, "qcv1_" + "a" * 43)
     assert auth.read_text() == "existing"
+
+
+def test_changed_proxy_connection_is_not_resumed(tmp_path):
+    config, auth, expected = fixture(tmp_path)
+    bootstrap(config, auth, expected, "qcv1_" + "a" * 43)
+    value = json.loads(config.read_text())
+    value["provider"]["organization-qwen"]["options"]["baseURL"] = "http://localhost:9999/v1"
+    config.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="changed"):
+        verify_existing(config, auth)

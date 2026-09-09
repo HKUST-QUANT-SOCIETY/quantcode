@@ -4,12 +4,14 @@ from contextlib import contextmanager
 import hashlib
 import json
 import socket
+import stat
 import threading
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from quantcode.model_gateway import MODEL, UPSTREAM, ModelGateway, load_credentials
+from quantcode.model_gateway import MODEL, UPSTREAM, ModelGateway, _read_credential_file, load_credentials
 
 
 KEY = "unit-upstream-credential"
@@ -57,6 +59,19 @@ def test_load_private_systemd_credentials_with_member_hashes(tmp_path, monkeypat
     assert key == KEY
     assert members[hashlib.sha256(TOKENS["two"].encode()).hexdigest()] == "two"
     assert all(token not in members for token in TOKENS.values())
+
+
+def test_systemd_mount_accepts_only_root_owned_0440_files(monkeypatch, tmp_path):
+    path = tmp_path / "credential"
+    path.write_text("value")
+    path.chmod(0o440)
+    info = path.stat()
+    monkeypatch.setattr("quantcode.model_gateway.os.fstat", lambda _: info)
+    with pytest.raises(ValueError, match="credential must be"):
+        _read_credential_file(path, systemd_mount=True, max_bytes=100)
+    monkeypatch.setattr("quantcode.model_gateway.os.fstat", lambda _: SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o440, st_uid=0, st_size=info.st_size))
+    assert _read_credential_file(path, systemd_mount=True, max_bytes=100) == b"value"
 
 
 @pytest.mark.parametrize("mode", ["public", "symlink", "duplicate", "plaintext"])

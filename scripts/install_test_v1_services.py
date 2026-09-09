@@ -30,6 +30,7 @@ GATEWAY_USER = "quantcode-test-v1"
 MODEL_USER = "quantcode-model-v1"
 PROVIDER = "organization-qwen"
 MODEL = "qwen3.7-flash"
+CLIENT_PORT = 48196
 
 
 def infrastructure_file(path, data, mode, *, uid=0, gid=0):
@@ -135,8 +136,7 @@ def install_hosts(spec, layout):
         dropin.mkdir(mode=0o755)
         text = ("[Unit]\nStartLimitIntervalSec=60\nStartLimitBurst=3\n[Service]\n"
             "AppArmorProfile=quantcode-test-v1-native\nRestart=on-failure\nRestartSec=3\nMemoryMax=1G\nCPUQuota=100%\nTasksMax=256\n"
-            f"Environment=QUANTCODE_PUBLIC_KEY_FILE={public_files[0]}\n"
-            f"Environment=QUANTCODE_PUBLIC_KEY_FILES={','.join(public_files)}\n")
+            f"Environment=QUANTCODE_PUBLIC_KEY_FILES={','.join(public_files[1:])}\n")
         write_new(dropin / "90-test-v1.conf", text.encode(), 0o644)
         print(json.dumps({"stage": "hosts", "actor": args.actor, "port": args.port,
                           "key_count": len(entries), "status": result["status"], "binary_shared": True}), flush=True)
@@ -153,42 +153,54 @@ def configure(spec, layout):
     tokens = {}
     for item in layout["members"]:
         running = subprocess.run(["systemctl", "is-active", "--quiet", item["unit"]]).returncode == 0
-        if running:
-            raise ValueError("Model bootstrap requires a newly installed inactive host")
-        token = "qcv1_" + secrets.token_urlsafe(32)
         config_file = Path(item["state"]) / "config/quantcode/opencode.json"
         config_digest = hashlib.sha256(config_file.read_bytes()).hexdigest()
         command = ["runuser", "-u", item["username"], "--", "/usr/bin/python3", "-B",
-                   str(Path(spec["runtime_root"]) / "scripts/bootstrap_test_v1_model.py"),
-                   "--state", item["state"], "--expected-config-sha256", config_digest]
-        initialized = subprocess.run(command, input=token, text=True, capture_output=True)
+                   spec.get("model_bootstrap", str(Path(spec["runtime_root"]) / "scripts/bootstrap_test_v1_model.py")),
+                   "--state", item["state"]]
+        if (Path(item["state"]) / "data/quantcode/auth.json").exists():
+            initialized = subprocess.run([*command, "--verify-existing"], text=True, capture_output=True)
+        else:
+            if running:
+                raise ValueError("Fresh model bootstrap requires an inactive host")
+            token = "qcv1_" + secrets.token_urlsafe(32)
+            initialized = subprocess.run([*command, "--expected-config-sha256", config_digest], input=token, text=True, capture_output=True)
         if initialized.returncode:
             raise RuntimeError("Offline model bootstrap failed for " + item["actor_id"])
+        token_digest = json.loads(initialized.stdout)["token_sha256"]
         subprocess.run(["systemctl", "enable", "--now", item["unit"]], check=True, capture_output=True)
         with host_client(item) as client:
             deadline = time.monotonic() + 45
+            attempts = 0
             while True:
+                attempts += 1
                 try:
-                    response = client.get("/experimental/quantcode/identities")
-                    if response.status_code == 200:
+                    response = client.get("/global/health", timeout=3)
+                    if response.status_code == 200 and response.json().get("healthy") is True:
                         break
-                except httpx.TransportError:
-                    pass
+                    print(json.dumps({"stage": "readiness", "actor": item["actor_id"], "attempt": attempts,
+                                      "http_status": response.status_code}), flush=True)
+                except httpx.TransportError as error:
+                    print(json.dumps({"stage": "readiness", "actor": item["actor_id"], "attempt": attempts,
+                                      "transport_error": type(error).__name__}), flush=True)
                 if time.monotonic() >= deadline:
                     raise RuntimeError("Native host failed to become ready: " + item["actor_id"])
                 time.sleep(0.2)
+            response = client.get("/experimental/quantcode/identities")
+            if response.status_code != 200:
+                raise RuntimeError(f"Host identity readiness failed: HTTP {response.status_code}")
             identities = response.json()
             if identities.get("session") is not None or len(identities["identities"]) != item["public_key_count"]:
                 raise ValueError("Fresh host identity list does not match enrollment")
             if any(identity["group"] != item["group"] for identity in identities["identities"]):
                 raise ValueError("Host group differs from enrollment")
             config = client.get("/global/config")
-            if config.status_code != 200 or config.json().get("model") != f"{PROVIDER}/{MODEL}" or token in config.text:
+            if config.status_code != 200 or config.json().get("model") != f"{PROVIDER}/{MODEL}" or "qcv1_" in config.text:
                 raise ValueError("Public model configuration is unavailable or disclosed a credential")
             providers = client.get("/provider")
             if providers.status_code != 200 or PROVIDER not in providers.json().get("connected", []):
                 raise ValueError("Bootstrapped provider is not connected in the native host")
-            tokens[item["actor_id"]] = hashlib.sha256(token.encode()).hexdigest()
+            tokens[item["actor_id"]] = token_digest
         print(json.dumps({"stage": "configure", "actor": item["actor_id"], "status": "configured", "key_count": item["public_key_count"]}), flush=True)
     write_new(CONFIG / "credentials/member-tokens.json", (json.dumps({"token_sha256": tokens}, indent=2) + "\n").encode(), 0o600)
     subprocess.run(["systemctl", "enable", "quantcode-test-v1-model.service"], check=True, capture_output=True)
@@ -204,8 +216,8 @@ def deliver(spec, layout):
             raise ValueError("Reviewed tool catalog is incomplete")
         password = (Path(item["install"]) / "access.env").read_text().strip().split("=", 1)[1]
         profile = {"version": 1, "release": layout["release"], "ssh_host": spec["ssh_host"], "ssh_port": 22,
-                   "ssh_user": item["username"], "remote_port": item["native_port"], "local_port": item["native_port"],
-                   "url": item["native_url"], "username": "quantcode", "password": password}
+                   "ssh_user": item["username"], "remote_port": item["native_port"], "local_port": CLIENT_PORT,
+                   "url": f"http://127.0.0.1:{CLIENT_PORT}", "username": "quantcode", "password": password}
         command = ["runuser", "-u", item["username"], "--", "/usr/bin/python3", "-B", spec["connection_writer"]]
         result = subprocess.run(command, input=json.dumps(profile), text=True, capture_output=True)
         if result.returncode:

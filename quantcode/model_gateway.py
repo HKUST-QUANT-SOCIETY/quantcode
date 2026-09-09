@@ -27,25 +27,47 @@ def reject_constant(value):
     raise ValueError("non-finite JSON is not permitted")
 
 
+def _is_systemd_credentials_directory(directory: Path) -> bool:
+    """Recognize only systemd's private read-only LoadCredential mount."""
+    if directory.parent.parent != Path("/run") or directory.parent.name != "credentials" or not directory.name:
+        return False
+    try:
+        if directory != Path(os.path.normpath(str(directory))) or directory.resolve() != directory:
+            return False
+        info = directory.stat()
+        mount = os.statvfs(directory)
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022 and bool(mount.f_flag & os.ST_RDONLY)
+
+
+def _read_credential_file(path: Path, *, systemd_mount: bool, max_bytes: int) -> bytes:
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != (0 if systemd_mount else os.getuid()) or info.st_size > max_bytes:
+            raise ValueError("credential must be a private bounded regular file")
+        if systemd_mount:
+            if (info.st_mode & 0o777) != 0o440:
+                raise ValueError("systemd credential mount has unsafe permissions")
+        elif info.st_mode & 0o077:
+            raise ValueError("credential must be owner-only")
+        return source.read(max_bytes + 1)
+
+
 def load_credentials(directory: Path | None = None) -> tuple[str, dict[str, str]]:
     configured = directory or os.environ.get("CREDENTIALS_DIRECTORY")
     if not configured or not Path(configured).is_absolute():
         raise ValueError("an absolute systemd credentials directory is required")
-    with os.fdopen(os.open(Path(configured) / "dashscope-api-key", os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
-        info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 4096:
-            raise ValueError("upstream credential must be a private bounded regular file")
-        key = source.read(4097).decode("ascii").strip()
+    directory = Path(configured)
+    systemd_mount = _is_systemd_credentials_directory(directory)
+    key = _read_credential_file(directory / "dashscope-api-key", systemd_mount=systemd_mount, max_bytes=4096).decode("ascii").strip()
     if not key or len(key) > 4096 or any(not 33 <= ord(char) <= 126 for char in key):
         raise ValueError("invalid upstream credential")
-    with os.fdopen(os.open(Path(configured) / "member-tokens.json", os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
-        info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 131072:
-            raise ValueError("member credentials must be a private bounded regular file")
-        try:
-            config = json.loads(source.read(131073))
-        except (ValueError, UnicodeError):
-            raise ValueError("invalid member credential configuration") from None
+    try:
+        config = json.loads(_read_credential_file(directory / "member-tokens.json", systemd_mount=systemd_mount, max_bytes=131072))
+    except (ValueError, UnicodeError):
+        raise ValueError("invalid member credential configuration") from None
     if not isinstance(config, dict) or set(config) != {"token_sha256"}:
         raise ValueError("member credential configuration requires token_sha256")
     members = config["token_sha256"]
