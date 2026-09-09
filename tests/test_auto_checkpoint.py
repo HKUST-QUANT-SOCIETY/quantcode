@@ -11,10 +11,9 @@ from __future__ import annotations
 import os
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
-import runner.agent_nodes as an
 from runner.agent_nodes import (
     AgentState,
     CONTEXT_REBUILD_RATIO,
@@ -206,7 +205,6 @@ def test_engine_rebuild_over_90pct_shrinks_messages(tmp_path):
     assert "rebuild" in kinds
     assert "snapshot" in kinds
     # 每条事件带 thread_id + ratio + time
-    rebuild = kinds.index("rebuild")
     ev = next(
         e
         for e in final["execution_trace"]

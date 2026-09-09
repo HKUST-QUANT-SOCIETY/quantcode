@@ -10,6 +10,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -39,11 +40,12 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
-      const all = yield* ModelsDev.Service.use((s) => s.get())
+      const all: Record<string, ModelsDev.Provider> = QuantCodeIdentity.enabled() ? {} : yield* ModelsDev.Service.use((s) => s.get())
       const disabled = new Set(config.disabled_providers ?? [])
       const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
       const filtered: Record<string, (typeof all)[string]> = {}
       for (const [key, value] of Object.entries(all)) {
+        if (process.env.OPENCODE_CHANNEL === "quantcode") continue
         if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) filtered[key] = value
       }
       const connected = yield* provider.list()
@@ -59,6 +61,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     })
 
     const auth = Effect.fn("ProviderHttpApi.auth")(function* () {
+      if (process.env.OPENCODE_CHANNEL === "quantcode") return {}
       return yield* svc.methods()
     })
 
@@ -66,6 +69,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       params: { providerID: ProviderV2.ID }
       payload: ProviderAuth.AuthorizeInput
     }) {
+      if (process.env.OPENCODE_CHANNEL === "quantcode") return yield* Effect.fail(new ProviderAuthApiError({ name: "BadRequest", data: {} }))
       return yield* mapProviderAuthError(
         svc.authorize({
           providerID: ctx.params.providerID,
@@ -94,6 +98,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       params: { providerID: ProviderV2.ID }
       payload: ProviderAuth.CallbackInput
     }) {
+      if (process.env.OPENCODE_CHANNEL === "quantcode") return yield* Effect.fail(new ProviderAuthApiError({ name: "BadRequest", data: {} }))
       yield* mapProviderAuthError(
         svc.callback({
           providerID: ctx.params.providerID,

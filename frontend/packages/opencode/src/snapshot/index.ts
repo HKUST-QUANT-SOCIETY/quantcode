@@ -10,6 +10,10 @@ import { Hash } from "@opencode-ai/core/util/hash"
 import { Config } from "@/config/config"
 import { Global } from "@opencode-ai/core/global"
 import { Info } from "@opencode-ai/schema/file-diff"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeSnapshotAccess } from "@/quantcode/snapshot-access"
+import { Database } from "@opencode-ai/core/database/database"
+import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Patch = Schema.Struct({
   hash: Schema.String,
@@ -38,20 +42,21 @@ export interface Interface {
   readonly cleanup: () => Effect.Effect<void>
   readonly track: () => Effect.Effect<string | undefined>
   readonly patch: (hash: string) => Effect.Effect<Patch>
-  readonly restore: (snapshot: string) => Effect.Effect<void>
-  readonly revert: (patches: Patch[]) => Effect.Effect<void>
+  readonly restore: (snapshot: string, sessionID?: string) => Effect.Effect<void>
+  readonly revert: (patches: Patch[], sessionID?: string) => Effect.Effect<void>
   readonly diff: (hash: string) => Effect.Effect<string>
   readonly diffFull: (from: string, to: string) => Effect.Effect<FileDiff[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Snapshot") {}
 
-const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service> = Layer.effect(
+const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service | Database.Service | EventV2Bridge.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
+    const governed = yield* QuantCodeSnapshotAccess.make()
     const locks = new Map<string, Semaphore.Semaphore>()
 
     const lock = (key: string) => {
@@ -771,27 +776,35 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 
     return Service.of({
       init: Effect.fn("Snapshot.init")(function* () {
+        if (QuantCodeIdentity.enabled()) return
         yield* InstanceState.get(state)
       }),
       cleanup: Effect.fn("Snapshot.cleanup")(function* () {
+        if (QuantCodeIdentity.enabled()) return yield* governed.cleanup()
         return yield* InstanceState.useEffect(state, (s) => s.cleanup())
       }),
       track: Effect.fn("Snapshot.track")(function* () {
+        if (QuantCodeIdentity.enabled()) return yield* governed.track()
         return yield* InstanceState.useEffect(state, (s) => s.track())
       }),
       patch: Effect.fn("Snapshot.patch")(function* (hash: string) {
+        if (QuantCodeIdentity.enabled()) return yield* governed.patch(hash)
         return yield* InstanceState.useEffect(state, (s) => s.patch(hash))
       }),
-      restore: Effect.fn("Snapshot.restore")(function* (snapshot: string) {
+      restore: Effect.fn("Snapshot.restore")(function* (snapshot: string, sessionID?: string) {
+        if (QuantCodeIdentity.enabled()) return yield* governed.restore(snapshot, sessionID)
         return yield* InstanceState.useEffect(state, (s) => s.restore(snapshot))
       }),
-      revert: Effect.fn("Snapshot.revert")(function* (patches: Patch[]) {
+      revert: Effect.fn("Snapshot.revert")(function* (patches: Patch[], sessionID?: string) {
+        if (QuantCodeIdentity.enabled()) return yield* governed.revert(patches, sessionID)
         return yield* InstanceState.useEffect(state, (s) => s.revert(patches))
       }),
       diff: Effect.fn("Snapshot.diff")(function* (hash: string) {
+        if (QuantCodeIdentity.enabled()) return yield* governed.diff(hash)
         return yield* InstanceState.useEffect(state, (s) => s.diff(hash))
       }),
       diffFull: Effect.fn("Snapshot.diffFull")(function* (from: string, to: string) {
+        if (QuantCodeIdentity.enabled()) return yield* governed.diffFull(from, to)
         return yield* InstanceState.useEffect(state, (s) => s.diffFull(from, to))
       }),
     })
@@ -801,7 +814,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, AppProcess.node, Config.node],
+  deps: [FSUtil.node, AppProcess.node, Config.node, Database.node, EventV2Bridge.node],
 })
 
 export * as Snapshot from "."

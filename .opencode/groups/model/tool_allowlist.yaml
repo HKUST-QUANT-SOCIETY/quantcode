@@ -1,11 +1,12 @@
 # model 组 tool 白名单 — Day 4 俞高磊
-# ★ run_agent 是 meta tool，不在此 allowlist；AgentRunner 内部 agent 只看到下方单步 tool + 共享工具
+# 旧 Python 兼容入口不在此 allowlist；统一 QuantCode session 直接使用原生工具与共享工具。
 allowlist:
-  # 单步 tool（AgentRunner 内部使用）
+  # 兼容执行器的单步工具（统一 session 也复用相同目录）
   - read_pr
   - extract_metadata
   - generate_model_spec
   - write_blackboard
+  - read_blackboard  # Native shared model-entry value and version lookup
   - trigger_risk_flow
   # 共享工具
   - search_memory  # openai 内建（平台侧提供，QuantCode registry 无此 tool）

@@ -21,6 +21,7 @@ import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { isQuantCode } from "@/brand"
 
 type GlobalStore = {
   ready: boolean
@@ -192,7 +193,9 @@ export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sd
 export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk: OpencodeClient) =>
   queryOptions<Path>({
     queryKey: [scope, directory, "path"],
-    queryFn: () => retry(() => sdk.path.get().then((x) => x.data!)),
+    queryFn: () => isQuantCode && directory === null
+      ? Promise.resolve({ home: "", state: "", config: "", worktree: "", directory: "" })
+      : retry(() => sdk.path.get().then((x) => x.data!)),
   })
 
 export async function bootstrapDirectory(input: {

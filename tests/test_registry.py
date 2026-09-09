@@ -17,7 +17,6 @@ from tools.registry import (
     GROUPS_DIR,
     PROJECT_ROOT,
     ToolDef,
-    ToolRegistry,
     load_group_config,
     register_tool,
     registry,
@@ -83,6 +82,8 @@ def test_tool_def_constructs_with_required_fields():
     assert tool.id == "read_pr"
     assert tool.description == "Read a PR"
     assert tool.schema is MockArgs
+    assert tool.model_dump(by_alias=True)["schema"] is MockArgs
+    assert "schema_" not in tool.model_dump(by_alias=True)
     assert tool.execute is _mock_execute
     assert tool.format_validation_error is None
 

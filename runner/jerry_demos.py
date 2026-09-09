@@ -6,8 +6,6 @@
 from __future__ import annotations
 
 import json
-from datetime import date
-from pathlib import Path
 from typing import Any
 
 from schemas.fundamental import PITResult, ResearchResult

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from schemas.risk_profile import RiskProfile, RiskThresholds
+from tools.risk.statistics_stub import calc_risk_stub
 from tools.risk.risk_tools import (
     calc_risk,
     risk_verdict,
@@ -90,6 +91,29 @@ def test_calc_risk_high_risk_scenario():
 def test_calc_risk_rejects_unknown_scenario():
     with pytest.raises(ValueError, match="Unknown scenario"):
         calc_risk(_sample_model_spec(), scenario="unknown")
+
+
+def test_risk_stub_rejects_empty_scenario():
+    with pytest.raises(ValueError, match="Unknown scenario"):
+        calc_risk_stub("")
+
+
+@pytest.mark.parametrize("scenario", ["normal", "high_risk"])
+def test_risk_stub_preserves_required_fields(scenario):
+    metrics = calc_risk_stub(scenario)
+    assert {"strategy_id", "as_of_date", "max_drawdown", "position_limit",
+            "correlation_with_existing", "capacity_estimate_usd", "tail_risk_var_99",
+            "volatility", "thresholds"} <= metrics.keys()
+
+
+def test_risk_stub_threshold_snapshot_matches_schema_authority():
+    limits = RiskThresholds()
+    assert calc_risk_stub("normal")["thresholds"] == {
+        "max_drawdown": limits.max_drawdown,
+        "position_limit_usage": limits.position_limit_usage,
+        "tail_risk_var_99": limits.tail_risk_var_99,
+        "correlation_limit": limits.correlation_limit,
+    }
 
 
 def test_generate_risk_profile_from_stub_metrics():

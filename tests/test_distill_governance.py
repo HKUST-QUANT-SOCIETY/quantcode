@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,43 @@ import pytest
 from runner.distill.governance import review_candidate
 from runner.distill.governance import read_governed_skill
 import runner.distill.governance as governance
+
+
+def _review_in_process(candidates_dir: str, publish_root: str, start, output) -> None:
+    start.wait()
+    try:
+        result = review_candidate(
+            "factor-flow",
+            "promote",
+            reviewer_id="factor-lead",
+            reviewer_role="approver",
+            reviewer_group="factor",
+            candidates_dir=candidates_dir,
+            publish_root=publish_root,
+        )
+        output.put(("ok", result["status"]))
+    except Exception as exc:
+        output.put(("error", str(exc)))
+
+
+def _pause_before_install(candidates_dir: str, publish_root: str, ready, hold) -> None:
+    original_link = governance.os.link
+
+    def link(source, target):
+        ready.set()
+        hold.wait(30)
+        original_link(source, target)
+
+    governance.os.link = link
+    review_candidate(
+        "factor-flow",
+        "promote",
+        reviewer_id="factor-lead",
+        reviewer_role="approver",
+        reviewer_group="factor",
+        candidates_dir=candidates_dir,
+        publish_root=publish_root,
+    )
 
 
 def _candidate(root: Path, *, content: str = "---\nstatus: draft\n---\n\n# reviewed\n") -> None:
@@ -165,3 +204,61 @@ def test_changed_or_expired_skill_is_rejected_on_next_read(tmp_path, change):
         (tmp_path / "index.json").write_text(json.dumps(index))
     with pytest.raises(PermissionError):
         read_governed_skill(published)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="execution_lock currently uses POSIX flock")
+def test_candidate_promotion_is_single_writer_across_processes(tmp_path):
+    _candidate(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    output = context.Queue()
+    processes = [
+        context.Process(
+            target=_review_in_process,
+            args=(str(tmp_path), str(tmp_path / "published"), start, output),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    results = [output.get(timeout=15) for _ in processes]
+    for process in processes:
+        process.join(timeout=15)
+        assert process.exitcode == 0
+
+    assert sum(status == "ok" for status, _ in results) == 1
+    assert any("RUN_BUSY" in value or "already promoted" in value for status, value in results if status == "error")
+    published = tmp_path / "published" / "groups" / "factor" / "skills" / "factor-flow" / "SKILL.md"
+    assert "status: accepted" in read_governed_skill(published)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="execution_lock currently uses POSIX flock")
+def test_candidate_publication_recovers_after_process_kill(tmp_path):
+    _candidate(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    ready = context.Event()
+    hold = context.Event()
+    process = context.Process(
+        target=_pause_before_install,
+        args=(str(tmp_path), str(tmp_path / "published"), ready, hold),
+    )
+    process.start()
+    assert ready.wait(timeout=15)
+    process.terminate()
+    process.join(timeout=15)
+    assert process.exitcode is not None and process.exitcode != 0
+
+    pending = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))["candidates"][0]
+    assert pending["status"] == "publishing"
+    resumed = review_candidate(
+        "factor-flow",
+        "promote",
+        reviewer_id="factor-lead",
+        reviewer_role="approver",
+        reviewer_group="factor",
+        candidates_dir=tmp_path,
+        publish_root=tmp_path / "published",
+    )
+    assert resumed["status"] == "promoted"
+    assert "status: accepted" in read_governed_skill(resumed["published_skill_path"])

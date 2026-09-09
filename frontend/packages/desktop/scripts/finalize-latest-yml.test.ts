@@ -5,9 +5,9 @@ import path from "node:path"
 
 const script = path.join(import.meta.dir, "finalize-latest-yml.ts")
 
-const metadataFor = (files: Array<{ filename: string; content: string }>) =>
+const metadataFor = (files: Array<{ filename: string; content: string }>, version = "1.2.3") =>
   [
-    "version: 1.2.3",
+    `version: ${version}`,
     "files:",
     ...files.flatMap((file) => [
       `  - url: ${file.filename}`,
@@ -169,6 +169,48 @@ test("refuses a publish manifest unless the release path was signed", async () =
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test("verifies complete Test V1.0 installers without claiming production signatures", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "quantcode-internal-test-"))
+  const version = "1.0.0-test.1"
+  const targets = [
+    { target: "aarch64-apple-darwin", suffixes: ["mac-arm64.zip", "mac-arm64.dmg"], metadata: "latest-mac.yml" },
+    { target: "x86_64-apple-darwin", suffixes: ["mac-x64.zip", "mac-x64.dmg"], metadata: "latest-mac.yml" },
+    { target: "x86_64-pc-windows-msvc", suffixes: ["win-x64.exe"], metadata: "latest.yml" },
+  ]
+  try {
+    for (const target of targets) {
+      const files = target.suffixes.map(suffix => ({ filename: `quantcode-${version}-${suffix}`, content: `fixture:${suffix}` }))
+      await mkdir(path.join(root, "metadata", `latest-yml-${target.target}`), { recursive: true })
+      for (const file of files) {
+        await Bun.write(path.join(root, "assets", file.filename), file.content)
+        await Bun.write(path.join(root, "assets", `${file.filename}.blockmap`), "blockmap")
+      }
+      await Bun.write(path.join(root, "metadata", `latest-yml-${target.target}`, target.metadata), metadataFor(files, version))
+    }
+    const env = { ...process.env, LATEST_YML_DIR: path.join(root, "metadata"), RELEASE_ASSET_DIR: path.join(root, "assets"),
+      FINALIZED_YML_DIR: path.join(root, "finalized"), UPLOAD_RELEASE_METADATA: "false", OPENCODE_VERSION: version,
+      RELEASE_TAG: `quantcode-v${version}`, RELEASE_INTERNAL_TEST: "true", RELEASE_SIGNED: "false", PUBLISH_REQUESTED: "true",
+      RELEASE_UPDATE_FEED: "disabled", REQUIRED_TARGETS: targets.map(item => item.target).join(",") }
+    const run = Bun.spawn(["bun", script], { env, stdout: "pipe", stderr: "pipe" })
+    const [code, stderr] = await Promise.all([run.exited, new Response(run.stderr).text()])
+    expect(code, stderr).toBe(0)
+    const manifest = await Bun.file(path.join(root, "finalized", "release-manifest.json")).json()
+    expect(manifest).toMatchObject({ version, release: { tag: `quantcode-v${version}`, prerelease: true }, distribution: {
+      releaseClass: "internal-test", publishRequested: true, updateFeed: "disabled",
+      platformTrust: { macos: "unsigned-test", windows: "unsigned-test", linux: "not-included" },
+    } })
+    expect(manifest.assets).toHaveLength(12)
+    expect(await Bun.file(path.join(root, "finalized", "SHA256SUMS")).text()).toContain(`quantcode-${version}-win-x64.exe`)
+    for (const override of [{ OPENCODE_VERSION: "1.0.0" }, { RELEASE_SIGNED: "true" }, { RELEASE_UPDATE_FEED: "public" },
+      { REQUIRED_TARGETS: "aarch64-apple-darwin" }, { RELEASE_TAG: "quantcode-v1.0.0-test.2" }]) {
+      const invalid = Bun.spawn(["bun", script], { env: { ...env, ...override }, stdout: "pipe", stderr: "pipe" })
+      const [exit, error] = await Promise.all([invalid.exited, new Response(invalid.stderr).text()])
+      expect(exit).not.toBe(0)
+      expect(error).toContain("Internal tests")
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test("validates the complete installer set and writes SHA256SUMS before upload", async () => {

@@ -1,7 +1,7 @@
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { createQuery } from "@tanstack/solid-query"
 import { useNavigate, useSearchParams } from "@solidjs/router"
-import { type Accessor, createMemo } from "solid-js"
+import { type Accessor, createMemo, onCleanup } from "solid-js"
 import type { PromptInputControls } from "@/components/prompt-input"
 import type { PromptProjectControls } from "@/components/prompt-project-selector"
 import { useDirectoryPicker } from "@/components/directory-picker"
@@ -17,6 +17,10 @@ import { useSync } from "@/context/sync"
 import { useTabs } from "@/context/tabs"
 import { useProviders } from "@/hooks/use-providers"
 import { pathKey } from "@/utils/path-key"
+import { isQuantCode } from "@/brand"
+import { prepareResearchWorkspace } from "@/components/quantcode/workspaces"
+import { showToast } from "@/utils/toast"
+import { errorMessage } from "@/pages/layout/helpers"
 
 export function createPromptInputController(input: {
   sessionKey: Accessor<string>
@@ -69,6 +73,9 @@ export function createPromptProjectControls() {
   const [search] = useSearchParams<{ draftId?: string }>()
   const projectServer = () => serverSDK().server
   const projectServerCtx = createMemo(() => global.ensureServerCtx(projectServer()))
+  let selection = 0
+  let disposed = false
+  onCleanup(() => { disposed = true; selection += 1 })
   const projects = createMemo(() => {
     if (server.list.length <= 1) {
       return search.draftId ? projectServerCtx().projects.list() : layout.projects.list()
@@ -81,10 +88,32 @@ export function createPromptProjectControls() {
         .map((project) => ({ ...project, server: item }))
     })
   })
-  const selectProject = (worktree: string, serverKey?: string) => {
+  const selectProject = async (worktree: string, serverKey?: string) => {
     const conn = serverKey ? server.list.find((conn) => ServerConnection.key(conn) === serverKey) : projectServer()
+    if (!conn) return
+    const request = ++selection
+    const origin = { server: server.key, directory: sdk().directory, draft: search.draftId, connection: JSON.stringify(conn) }
+    const current = () => !disposed && selection === request && server.key === origin.server && sdk().directory === origin.directory &&
+      search.draftId === origin.draft && server.list.some(item => ServerConnection.key(item) === ServerConnection.key(conn) && JSON.stringify(item) === origin.connection)
+    if (isQuantCode) {
+      try {
+        const client = global.ensureServerCtx(conn).sdk.client
+        const capabilities = await client.experimental.capabilities.get()
+        if (!current()) return
+        if (capabilities.error || !capabilities.data) throw new Error("无法确认研究宿主的运行模式，请检查连接。")
+        if (capabilities.data.quantcodeUnifiedRuntime === true) {
+          const workspace = await prepareResearchWorkspace(client, { preferred: worktree, current })
+          // An explicitly selected cached project must not silently become a
+          // different directory when its old authorization has been revoked.
+          worktree = await workspace.validate(worktree)
+        }
+      } catch (error) {
+        if (current()) showToast({ variant: "error", title: "无法切换研究项目", description: errorMessage(error, "研究项目切换失败，请重试。") })
+        return
+      }
+    }
+    if (!current()) return
     if (search.draftId) {
-      if (!conn) return
       const target = global.ensureServerCtx(conn)
       target.projects.open(worktree)
       target.projects.touch(worktree)

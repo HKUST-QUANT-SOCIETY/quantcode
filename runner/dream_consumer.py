@@ -169,17 +169,14 @@ def _load_index(candidates_dir: Path) -> dict[str, Any]:
     return {"candidates": []}
 
 
-def _candidate_key(name: str, tool_sequence: list[str]) -> str:
-    """去重键：name + tool 序列相同视为同一候选（跨轮幂等）。"""
-    return f"{name}|{'>'.join(tool_sequence)}"
-
-
 def distill_new_runs(
     runs: list[dict[str, Any]],
     *,
     candidates_dir: str | Path = CANDIDATES_DIR,
     work_path: str | Path | None = None,
     min_occurrences: int = 1,
+    native_source: dict[str, Any] | None = None,
+    before_commit: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """把新 run 的记录喂既有 ``run_distill`` → 候选草案 + index.json 登记。
 
@@ -187,49 +184,40 @@ def distill_new_runs(
     min_occurrences 默认 1：consumer 按轮喂增量，序列出现 1 次即登记候选，
     人工审核仍是转正闸门（候选本身 status: draft）。
 
-    去重：候选 key 已在 index.json 的情况跳过（不重写草案、不重复登记）。
+    去重与落盘复用候选审核的进程锁和 index.json。先计算候选，再登记；
+    不改写已有草案。native_source 仅供宿主调用，返回本来源关联候选。
     """
     records: list[dict[str, Any]] = []
     for run in runs:
         records.extend(run.get("_records") or [])
-    if not records:
+    if not records and native_source is None:
         return []
 
     from dream.distill_prototype import run_distill  # 延迟 import：只消费不改
+    from runner.distill.governance import store_candidates
+    import os
+    import tempfile
 
     candidates_dir = Path(candidates_dir)
     candidates_dir.mkdir(parents=True, exist_ok=True)
-    work = Path(work_path) if work_path is not None else candidates_dir / ".work-rlhf.jsonl"
-    work.write_text(
-        "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
-        encoding="utf-8",
-    )
-    produced = run_distill(
-        rlhf_path=work,
-        output_dir=candidates_dir,
-        min_occurrences=min_occurrences,
-    )
-
-    index = _load_index(candidates_dir)
-    known = {
-        _candidate_key(c.get("name", ""), c.get("tool_sequence", []))
-        for c in index["candidates"]
-    }
-    run_ids = [r["run_id"] for r in runs]
-    fresh: list[dict[str, Any]] = []
-    for c in produced:
-        key = _candidate_key(c["name"], c["tool_sequence"])
-        if key in known:
-            continue
-        known.add(key)
-        fresh.append({**c, "run_ids": run_ids})
-        index["candidates"].append(fresh[-1])
-    if fresh:
-        index["updated_at"] = datetime.now(UTC).isoformat()
-        (candidates_dir / "index.json").write_text(
-            json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    fd, temporary = tempfile.mkstemp(prefix=".distill-input-", suffix=".jsonl", dir=candidates_dir)
+    work = Path(work_path) if work_path is not None else Path(temporary)
+    try:
+        os.close(fd)
+        work.write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
+            encoding="utf-8",
         )
-    return fresh
+        produced = run_distill(
+            rlhf_path=work, output_dir=candidates_dir,
+            min_occurrences=min_occurrences, write_files=False,
+        )
+        return store_candidates(
+            produced, candidates_dir=candidates_dir, run_ids=[r["run_id"] for r in runs],
+            native_source=native_source, before_commit=before_commit,
+        )
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

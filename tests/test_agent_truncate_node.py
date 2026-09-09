@@ -128,7 +128,6 @@ def test_truncate_node_truncates_middle_message_only():
             f"head[{i}] 应保持原样,被改成 {truncated_msgs[i].content[:30]}"
         )
     # 尾 6 条不变
-    n = len(state["messages"])
     for i in range(6):
         assert truncated_msgs[-(i + 1)].content == state["messages"][-(i + 1)].content, (
             f"tail[{i}] 应保持原样"

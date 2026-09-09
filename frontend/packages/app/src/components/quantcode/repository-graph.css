@@ -1,0 +1,101 @@
+.qc-github-sync { container-type: inline-size; }
+.qc-repo-browser-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.qc-repo-browser-toolbar label { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--qc-line); border-radius: 6px; background: #fff; width: min(360px, 80%); }
+.qc-repo-browser-toolbar input { border: 0; background: none; width: 100%; outline: none; font-size: 13px; }
+.qc-repo-browser-toolbar span { font-size: 12px; color: var(--qc-muted); }
+.qc-repo-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; align-items: start; }
+.qc-repo-card { min-width: 0; overflow: hidden; background: #fff; border: 1px solid #dce3e7; border-radius: 9px; transition: border-color .15s, box-shadow .15s; }
+.qc-repo-card:hover { border-color: #96b2b0; box-shadow: 0 4px 16px #203e4210; }
+.qc-repo-heading { display: flex; width: 100%; gap: 12px; align-items: center; text-align: left; padding: 18px 20px 14px; background: none; border: 0; cursor: pointer; }
+.qc-repo-heading > span:nth-child(2) { min-width: 0; flex: 1; }
+.qc-repo-heading h3 { margin: 4px 0 0; font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-repo-heading small, .qc-repo-dialog-header small { font-size: 10px; color: #78868d; }
+.qc-repo-symbol { display: grid; place-items: center; width: 34px; height: 38px; color: #397c77; background: #edf5f3; border-radius: 6px; flex: none; }
+.qc-repo-summary { display: flex; gap: 14px; padding: 0 20px 14px; font-size: 11px; color: #66767c; border-bottom: 1px solid #e9eef0; }
+.qc-repo-summary > :last-child { margin-left: auto; color: #357b68; }
+.qc-repo-summary .is-pending { color: #8b713e; }
+.qc-repo-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; border: 0; border-top: 1px solid #e9eef0; padding: 13px 20px; background: #fafcfc; color: #647379; font-size: 11px; cursor: pointer; }
+.qc-repo-footer span:last-child { display: flex; align-items: center; gap: 8px; color: #166b60; }
+.qc-graph-body { display: grid; min-width: 0; position: relative; }
+.qc-lane-canvas { overflow: hidden; border-right: 1px solid #edf0f2; }
+.qc-graph-scroll { overflow: auto; max-height: 480px; }
+.qc-commit-row { height: 48px; width: 100%; display: flex; align-items: center; gap: 14px; border: 0; border-bottom: 1px solid #f0f3f4; background: transparent; text-align: left; padding: 0 16px; cursor: pointer; font-size: 12px; }
+.qc-commit-row:hover { background: #f2f7f6; }
+.qc-commit-row.is-selected { background: #eaf3f1; box-shadow: inset 2px 0 #277a6e; }
+.qc-commit-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.qc-commit-message { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.qc-commit-message > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-commit-copy small { font-size: 10px; color: #79888e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-branch-tag { border: 1px solid #dce4e7; background: #f7f9fa; border-radius: 4px; padding: 2px 5px; font-size: 10px; max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
+.qc-commit-row time { width: 95px; color: #7a858a; flex: none; font-size: 11px; }
+.qc-commit-author { width: 100px; color: #748086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-commit-row code { width: 64px; color: #7a858a; font-size: 11px; }
+.qc-commit-graph.is-compact { height: 216px; overflow: hidden; }
+.qc-commit-graph.is-compact .qc-commit-row { padding: 0 12px; height: 36px; }
+.qc-graph-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 240px; color: #809097; gap: 12px; }
+.qc-graph-empty p { margin: 0; }
+.qc-branch-list { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 0; }
+.qc-branch-list button { display: flex; align-items: center; gap: 5px; padding: 5px 8px; font-size: 11px; border: 1px solid #dce3e7; border-radius: 4px; cursor: pointer; background: #f8fafb; max-width: 100%; overflow-wrap: anywhere; }
+.qc-graph-pagination { display: flex; align-items: center; gap: 12px; padding: 14px 0 0; color: #6b777e; font-size: 12px; }
+.qc-graph-pagination span { margin-right: auto; }
+.qc-graph-pagination button { background: white; border: 1px solid #dce3e7; border-radius: 4px; padding: 6px 10px; }
+.qc-graph-pagination button:disabled { opacity: .4; }
+.qc-graph-boundary { font-size: 11px; color: #7c888e; line-height: 1.7; margin: 10px 0; }
+.qc-repo-dialog { color: #263237; background: #fff; width: min(1200px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid #dae2e5; border-radius: 12px; margin: auto; box-shadow: 0 24px 80px #10242638; }
+.qc-repo-dialog::backdrop { background: #14252d80; backdrop-filter: blur(3px); }
+.qc-repo-dialog-header { position: sticky; top: 0; z-index: 3; background: #fff; display: flex; justify-content: space-between; align-items: center; padding: 20px 28px; border-bottom: 1px solid #e2e8eb; }
+.qc-repo-dialog-header h2 { margin: 5px 0 0; font-size: 21px; font-weight: 650; overflow-wrap: anywhere; }
+.qc-repo-dialog-header button { padding: 8px; background: none; border: 1px solid #e1e7e9; border-radius: 5px; cursor: pointer; }
+.qc-repo-dialog-content { padding: 12px 28px 28px; }
+.qc-repo-description { font-size: 13px; line-height: 1.7; }
+.qc-repo-dialog .qc-graph-body { min-width: 800px; }
+.qc-commit-detail { border-top: 1px solid #dce3e7; margin-top: 22px; padding-top: 22px; }
+.qc-commit-detail-heading { display: flex; gap: 18px; justify-content: space-between; align-items: baseline; }
+.qc-commit-detail h3 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.qc-commit-detail a { color: #166b60; font-size: 12px; flex: none; }
+.qc-commit-detail > p { color: #748189; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.qc-commit-description { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.8; }
+.qc-diff-file { border: 1px solid #dce3e7; border-radius: 6px; overflow: hidden; margin: 16px 0; }
+.qc-diff-file summary { display: flex; gap: 12px; padding: 12px 14px; cursor: pointer; background: #f5f8f9; font-size: 12px; }
+.qc-diff-file strong { flex: 1; overflow-wrap: anywhere; }
+.qc-diff-file pre { overflow: auto; margin: 0; padding: 14px 0; background: #fcfdfd; font: 12px/1.8 ui-monospace, monospace; }
+.qc-diff-file pre span { display: block; padding: 0 16px; min-height: 21px; white-space: pre; }
+.qc-diff-file p { padding: 14px; font-size: 12px; }
+.qc-diff-file .is-addition { color: #277146; background: #eaf6ee; }
+.qc-diff-file .is-deletion { color: #a34545; background: #fbeeee; }
+.qc-diff-file .is-hunk { color: #3477a5; background: #edf5fa; }
+.qc-github-account > summary { display: flex; align-items: center; gap: 8px; color: #607379; cursor: pointer; font-size: 12px; }
+.qc-github-account .qc-github-connection { margin-top: 12px; }
+.qc-repo-dependencies { margin-top: 20px; font-size: 12px; }
+@container (max-width: 999px) { .qc-repo-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@container (max-width: 600px) { .qc-repo-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@container (max-width: 360px) { .qc-repo-grid { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 600px) { .qc-repo-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); } .qc-repo-dialog-content { padding: 12px; } .qc-repo-dialog-header { padding: 16px; } .qc-commit-detail-heading { flex-direction: column; } }
+
+.qc-shell .qc-repo-browser-toolbar input { padding: 0; border: 0; box-shadow: none; min-height: 24px; }
+.qc-repo-browser-toolbar label:focus-within { outline: 2px solid #3478cf; outline-offset: 2px; }
+.qc-commit-graph.is-compact .qc-commit-copy { gap: 2px; }
+.qc-commit-graph.is-compact .qc-commit-message { font-size: 12px; line-height: 16px; }
+.qc-commit-graph.is-compact .qc-commit-copy small { line-height: 12px; }
+.qc-commit-graph.is-compact .qc-branch-tag { padding: 0 4px; line-height: 16px; }
+.qc-repo-dialog .qc-branch-list { flex-wrap: nowrap; overflow-x: auto; padding: 10px 0 14px; }
+.qc-repo-dialog .qc-branch-list button { flex: none; white-space: nowrap; }
+.qc-shell .qc-repo-browser-toolbar input[type="search"] { border: 0 !important; padding: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0; }
+
+/* Dense project thumbnails; full metadata and branch labels remain in the detail view. */
+.qc-repo-card .qc-repo-heading { gap: 8px; padding: 12px 10px; }
+.qc-repo-card .qc-repo-heading h3 { font-size: 12px; }
+.qc-repo-card .qc-repo-heading small { display: none; }
+.qc-repo-card .qc-repo-symbol { width: 24px; height: 28px; }
+.qc-repo-card .qc-repo-heading > svg { display: none; }
+.qc-repo-card .qc-repo-summary { flex-wrap: wrap; gap: 4px 8px; padding: 0 10px 10px; font-size: 10px; }
+.qc-repo-card .qc-repo-summary > :last-child { margin-left: 0; }
+.qc-repo-card .qc-repo-footer { padding: 10px; font-size: 10px; }
+.qc-repo-card .qc-repo-footer > span:first-child { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-repo-card .qc-commit-row { padding: 0 6px; }
+.qc-repo-card .qc-commit-message { font-size: 11px; }
+.qc-repo-card .qc-commit-message .qc-branch-tag { display: none; }
+.qc-repo-card .qc-commit-copy small { font-size: 9px; }
+.qc-repo-card .qc-commit-graph.is-compact { height: 144px; }
+.qc-repo-card .qc-graph-empty { height: 144px; font-size: 11px; padding: 10px; text-align: center; }
+.qc-repo-card .qc-graph-empty small { font-size: 10px; }

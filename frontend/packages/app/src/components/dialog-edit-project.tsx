@@ -4,25 +4,46 @@ import { Dialog } from "@opencode-ai/ui/dialog"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { useMutation } from "@tanstack/solid-query"
 import { Icon } from "@opencode-ai/ui/icon"
-import { createMemo, For, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { type LocalProject, getAvatarColors } from "@/context/layout"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { Avatar } from "@opencode-ai/ui/avatar"
 import { useLanguage } from "@/context/language"
 import { getProjectAvatarSource } from "@/pages/layout/helpers"
-import { ServerConnection } from "@/context/server"
+import { ServerConnection, useServer } from "@/context/server"
 import { useGlobal } from "@/context/global"
+import { isQuantCode } from "@/brand"
+import { projectRuntime, saveProjectAppearance } from "./quantcode/project-actions"
+import { errorMessage } from "@/pages/layout/helpers"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 
 export function DialogEditProject(props: { project: LocalProject; server: ServerConnection.Any }) {
   const dialog = useDialog()
   const global = useGlobal()
+  const server = useServer()
   const language = useLanguage()
-  const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
-  const serverSDK = () => serverCtx().sdk
-  const serverSync = () => serverCtx().sync
+  // The form describes this project on this host, even if a different host
+  // later exposes a project with the same ID. Capture before any interaction.
+  const host = global.ensureServerCtx(props.server)
+  const client = host.sdk.client
+  const connection = JSON.stringify(props.server)
+  const selectedServer = server.key
+  const project = { id: props.project.id, directory: props.project.worktree }
+  const [connectionState, setConnectionState] = createStore({ stale: false })
+  let disposed = false
+  const current = () => !disposed && !connectionState.stale && server.key === selectedServer &&
+    JSON.stringify(props.server) === connection && global.ensureServerCtx(props.server).sdk.client === client &&
+    props.project.id === project.id && props.project.worktree === project.directory
+  createEffect(() => {
+    if (!current()) setConnectionState("stale", true)
+  })
+  onCleanup(() => { disposed = true })
+  const [runtime] = createResource(() => isQuantCode && current() ? client : undefined,
+    async client => ({ client, mode: await projectRuntime(client) }))
+  const mode = () => !current() ? undefined : !isQuantCode ? "legacy" : !runtime.loading && !runtime.error && runtime()?.client === client ? runtime()?.mode : undefined
+  const requireCurrent = () => { if (!current()) throw new Error("研究宿主或项目已变化，请重新打开项目设置。") }
 
   const folderName = createMemo(() => getFilename(props.project.worktree))
   const defaultName = createMemo(() => props.project.name || folderName())
@@ -42,6 +63,7 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
     if (!file.type.startsWith("image/")) return
     const reader = new FileReader()
     reader.onload = (e) => {
+      if (!current()) return
       setStore("iconOverride", e.target?.result as string)
       setStore("iconHover", false)
     }
@@ -76,26 +98,30 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
 
   const saveMutation = useMutation(() => ({
     mutationFn: async () => {
+      requireCurrent()
+      const currentMode = isQuantCode ? await projectRuntime(client) : "legacy"
+      requireCurrent()
       const name = store.name.trim() === folderName() ? "" : store.name.trim()
       const start = store.startup.trim()
 
-      if (props.project.id && props.project.id !== "global") {
-        await serverSDK().client.project.update({
-          projectID: props.project.id,
-          directory: props.project.worktree,
+      if (project.id && project.id !== "global") {
+        await saveProjectAppearance(client, {
+          projectID: project.id,
+          directory: project.directory,
           name,
           icon: { color: store.color || "", override: store.iconOverride || "" },
-          commands: { start },
-        })
-        serverSync().project.icon(props.project.worktree, store.iconOverride || undefined)
+          start,
+        }, currentMode)
+        if (!current()) return
+        host.sync.project.icon(project.directory, store.iconOverride || undefined)
         dialog.close()
         return
       }
 
-      serverSync().project.meta(props.project.worktree, {
+      host.sync.project.meta(project.directory, {
         name,
         icon: { color: store.color || undefined, override: store.iconOverride || undefined },
-        commands: { start: start || undefined },
+        ...(currentMode === "legacy" ? { commands: { start: start || undefined } } : {}),
       })
       dialog.close()
     },
@@ -103,7 +129,7 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
 
   function handleSubmit(e: SubmitEvent) {
     e.preventDefault()
-    if (saveMutation.isPending) return
+    if (saveMutation.isPending || !mode()) return
     saveMutation.mutate()
   }
 
@@ -241,7 +267,7 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
             </div>
           </Show>
 
-          <TextField
+          <Show when={mode() === "legacy"}><TextField
             multiline
             label={language.t("dialog.project.edit.worktree.startup")}
             description={language.t("dialog.project.edit.worktree.startup.description")}
@@ -250,14 +276,18 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
             onChange={(v) => setStore("startup", v)}
             spellcheck={false}
             class="max-h-14 w-full overflow-y-auto font-mono text-xs"
-          />
+          /></Show>
+          <Show when={!mode()}><p role="status" class="text-12-regular text-text-weak">
+            {connectionState.stale ? "研究宿主或项目已变化，请关闭后重新打开项目设置。" : runtime.loading ? "正在确认研究宿主…" : "无法确认研究宿主，请关闭后重试。"}
+          </p></Show>
+          <Show when={saveMutation.error}><p role="alert" class="text-12-regular text-text-critical-base">{errorMessage(saveMutation.error, "保存项目设置失败，请重试。")}</p></Show>
         </div>
 
         <div class="flex justify-end gap-2">
           <Button type="button" variant="ghost" size="large" onClick={() => dialog.close()}>
             {language.t("common.cancel")}
           </Button>
-          <Button type="submit" variant="primary" size="large" disabled={saveMutation.isPending}>
+          <Button type="submit" variant="primary" size="large" disabled={saveMutation.isPending || !mode()}>
             {saveMutation.isPending ? language.t("common.saving") : language.t("common.save")}
           </Button>
         </div>

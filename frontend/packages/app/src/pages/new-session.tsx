@@ -20,6 +20,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
+import { isQuantCode } from "@/brand"
 
 const showWorkspaceBar = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 
@@ -37,6 +38,9 @@ export default function NewSessionPage() {
   const language = useLanguage()
   const route = useSessionKey()
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string; submit?: string }>()
+  const [runtime] = createResource(() => isQuantCode ? sdk().client : undefined,
+    client => client.experimental.capabilities.get().then(result => result.error ? undefined : result.data).catch(() => undefined))
+  const allowWorktrees = () => !isQuantCode || runtime()?.quantcodeUnifiedRuntime === false
 
   useComposerCommands()
   useSettingsCommand()
@@ -75,6 +79,7 @@ export default function NewSessionPage() {
   }
 
   const newSessionWorktree = createMemo(() => {
+    if (!allowWorktrees()) return sdk().directory
     if (store.worktree) return store.worktree
     const project = sync().project
     if (project && sdk().directory !== project.worktree) return sdk().directory
@@ -165,6 +170,7 @@ export default function NewSessionPage() {
                             projectRoot={projectRoot()}
                             workspaces={sync().project?.sandboxes ?? []}
                             branch={selectedBranch()}
+                            allowWorktrees={allowWorktrees()}
                             onChange={(value) =>
                               setStore(
                                 "worktree",

@@ -1,5 +1,12 @@
 import { AccountID, OrgID } from "@/account/schema"
 import { MCP } from "@/mcp"
+import { QuantCodeGovernance } from "@opencode-ai/schema/quantcode-governance"
+import { QuantCodeBudgetEvent } from "@opencode-ai/schema/quantcode-budget"
+import { QuantCodeNativeGate } from "@opencode-ai/schema/quantcode-native-gate"
+import { QuantCodeTaskIndex } from "@opencode-ai/schema/quantcode-task-index"
+import { QuantCodeLegacy } from "@opencode-ai/schema/quantcode-legacy"
+import { QuantCodePublication } from "@opencode-ai/schema/quantcode-publication"
+import { QuantCodeGitHub } from "@opencode-ai/schema/quantcode-github"
 
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
@@ -28,7 +35,52 @@ const ConsoleStateResponse = Schema.Struct({
 
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
+  quantcodeUnifiedRuntime: Schema.Boolean,
 }).annotate({ identifier: "ExperimentalCapabilities" })
+
+export class QuantCodeReuseError extends Schema.TaggedErrorClass<QuantCodeReuseError>()("QuantCodeReuseError", {
+  message: Schema.String,
+}, { httpApiStatus: 400 }) {}
+
+export class QuantCodeTaskError extends Schema.TaggedErrorClass<QuantCodeTaskError>()("QuantCodeTaskError", {
+  message: Schema.String,
+}, { httpApiStatus: 400 }) {}
+
+export class QuantCodeIdentityApiError extends Schema.TaggedErrorClass<QuantCodeIdentityApiError>()("QuantCodeIdentityApiError", {
+  message: Schema.String,
+}, { httpApiStatus: 400 }) {}
+
+export class QuantCodeWorkspaceApiError extends Schema.TaggedErrorClass<QuantCodeWorkspaceApiError>()("QuantCodeWorkspaceApiError", {
+  message: Schema.String,
+}, { httpApiStatus: 400 }) {}
+
+export const QuantCodeWorkspacesQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  preferred: Schema.optional(Schema.String),
+  expected_session_id: Schema.optional(Schema.String),
+})
+
+const QuantCodeWorkspaces = Schema.Struct({
+  login_session_id: Schema.String,
+  roots: Schema.Array(Schema.Struct({ directory: Schema.String, access: Schema.Literals(["read", "write"]) })),
+  preferred: Schema.optionalKey(Schema.String),
+}).annotate({ identifier: "QuantCodeWorkspaces" })
+
+export const QuantCodeIdentityVerifyPayload = Schema.Struct({ challenge_id: Schema.String, signature: Schema.String })
+export const QuantCodeIdentityChallengePayload = Schema.Struct({ identity_id: Schema.optional(Schema.String) })
+export const QuantCodeIdentityLoginPayload = Schema.Struct({ identity_id: Schema.optional(Schema.String), group: Schema.optional(Schema.String) })
+
+const QuantCodeIdentityChallenge = Schema.Struct({
+  challenge_id: Schema.String, public_key: Schema.String, fingerprint: Schema.String,
+  nonce: Schema.String, ttl_seconds: Schema.Number, gateway_origin: Schema.String,
+}).annotate({ identifier: "QuantCodeIdentityChallenge" })
+
+const QuantCodeIdentitySession = Schema.Struct({
+  status: Schema.Literal("connected"), actor_id: Schema.String, session_id: Schema.String,
+  fingerprint: Schema.String, group: Schema.String, groups: Schema.Array(Schema.String),
+  expires_at: Schema.String,
+  execution_status: Schema.Literal("disconnected"),
+}).annotate({ identifier: "QuantCodeIdentitySession" })
 
 const ConsoleOrgOption = Schema.Struct({
   accountID: Schema.String,
@@ -240,7 +292,7 @@ export const ExperimentalApi = HttpApi.make("experimental")
         HttpApiEndpoint.get("quantcodeTool", ExperimentalPaths.quantcodeTool, {
           query: QuantCodeToolQuery,
           success: described(Schema.Unknown, "QuantCode read-only tool result"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, QuantCodeTaskError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "quantcode.tool.readOnly",
@@ -262,7 +314,7 @@ export const ExperimentalApi = HttpApi.make("experimental")
           query: WorkspaceRoutingQuery,
           payload: QuantCodeCandidatePayload,
           success: described(Schema.Unknown, "Candidate review result"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, QuantCodeTaskError],
         }).annotateMerge(OpenApi.annotations({
           identifier: "quantcode.candidate.review",
           summary: "Review a knowledge candidate using the authenticated reviewer",
@@ -279,12 +331,169 @@ export const ExperimentalApi = HttpApi.make("experimental")
         HttpApiEndpoint.post("quantcodeDeploymentCancel", "/experimental/quantcode/deployments/cancel", {
           query: WorkspaceRoutingQuery, payload: QuantCodeDeploymentCancelPayload, success: Schema.Unknown, error: HttpApiError.BadRequest,
         }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.deployment.cancel", summary: "Cancel a staged deployment request" })),
+        HttpApiEndpoint.get("quantcodeSolution", "/experimental/quantcode/session/:sessionID/solution", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeGovernance.SolutionState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.solution.status", summary: "Read the authenticated native task's current solution" })),
+        HttpApiEndpoint.post("quantcodeSolutionProposal", "/experimental/quantcode/session/:sessionID/solution", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({ goal: Schema.String, acceptance_criteria: Schema.Array(Schema.String), file_impact: Schema.Array(Schema.String),
+            expected_hash: Schema.optional(Schema.String), expected_version: Schema.optional(Schema.Number) }),
+          success: QuantCodeGovernance.SolutionState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.solution.propose", summary: "Save a draft solution without granting execution permission" })),
+        HttpApiEndpoint.post("quantcodeSolutionReview", "/experimental/quantcode/session/:sessionID/solution/review", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeGovernance.SolutionReview,
+          success: QuantCodeGovernance.SolutionState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.solution.review", summary: "User confirmation of the exact solution version; not a model tool" })),
+        HttpApiEndpoint.get("quantcodeReuse", "/experimental/quantcode/session/:sessionID/reuse", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeGovernance.ReuseState, error: QuantCodeReuseError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.reuse.status", summary: "Read task-bound capability inspection and coverage decisions" })),
+        HttpApiEndpoint.post("quantcodeReuseReview", "/experimental/quantcode/session/:sessionID/reuse/review", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeGovernance.ReuseReview, success: QuantCodeGovernance.ReuseState,
+          error: QuantCodeReuseError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.reuse.review", summary: "Record the user's decision on one exact capability gap proposal" })),
+        HttpApiEndpoint.get("quantcodeWriteReceipts", "/experimental/quantcode/session/:sessionID/write-receipts", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeGovernance.ReceiptState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.writeReceipt.status", summary: "Read unresolved native task write receipts" })),
+        HttpApiEndpoint.post("quantcodeWriteReceiptReview", "/experimental/quantcode/session/:sessionID/write-receipts/review", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeGovernance.ReceiptReview, success: QuantCodeGovernance.ReceiptState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.writeReceipt.review", summary: "Record verified external outcome without executing or retrying a tool" })),
+        HttpApiEndpoint.get("quantcodeTaskLock", "/experimental/quantcode/session/:sessionID/execution-lock", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeGovernance.TaskLockState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.taskLock.status", summary: "Inspect current native task execution lock" })),
+        HttpApiEndpoint.post("quantcodeTaskLockRecovery", "/experimental/quantcode/session/:sessionID/execution-lock/recover", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeGovernance.TaskLockRecovery, success: QuantCodeGovernance.TaskLockState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.taskLock.recover", summary: "Recover an exact dead local executor lock after process-stop attestation" })),
+        HttpApiEndpoint.get("quantcodeBudget", "/experimental/quantcode/session/:sessionID/budget", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeBudgetEvent.State, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.budget.status", summary: "Read confirmed and reserved usage for the native task tree" })),
+        HttpApiEndpoint.get("quantcodePublicationStatus", "/experimental/quantcode/task-publication", {
+          query: WorkspaceRoutingQuery, success: QuantCodePublication.Status, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.publication.status", summary: "Read current member's organization delivery status" })),
+        HttpApiEndpoint.get("quantcodeTaskIndex", "/experimental/quantcode/tasks", {
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, limit: Schema.optional(Schema.NumberFromString), cursor: Schema.optional(Schema.String) }),
+          success: QuantCodeTaskIndex.List, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.taskIndex.list", summary: "List authorized native QuantCode tasks" })),
+        HttpApiEndpoint.get("quantcodeTaskIndexRead", "/experimental/quantcode/session/:sessionID/task-index", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeTaskIndex.Read, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.taskIndex.read", summary: "Read one authorized native task and its artifact references" })),
+        HttpApiEndpoint.get("quantcodeOrganizationTasks", "/experimental/quantcode/organization-tasks", {
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, limit: Schema.optional(Schema.NumberFromString), cursor: Schema.optional(Schema.String),
+            source_id: Schema.optional(Schema.String), root_session_id: Schema.optional(Schema.String) }),
+          success: QuantCodeTaskIndex.List, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.organizationTasks.list", summary: "Read the gateway's authorized cross-member task projection" })),
+        HttpApiEndpoint.get("quantcodeOrganizationTask", "/experimental/quantcode/organization-tasks/:source_id/:sessionID", {
+          params: Schema.Struct({ source_id: Schema.String, sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeTaskIndex.Read, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.organizationTasks.read", summary: "Read one organization task and authorized artifact previews without executing on its host" })),
+        HttpApiEndpoint.get("quantcodeTaskArtifacts", "/experimental/quantcode/session/:sessionID/artifacts", {
+          params: Schema.Struct({ sessionID: SessionID }), query: Schema.Struct({ ...WorkspaceRoutingQueryFields,
+            source_revision: Schema.NumberFromString, limit: Schema.optional(Schema.NumberFromString), cursor: Schema.optional(Schema.String) }),
+          success: QuantCodeTaskIndex.ArtifactList, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.artifacts.list", summary: "List artifact references from an exact native task revision" })),
+        HttpApiEndpoint.get("quantcodeTaskArtifact", "/experimental/quantcode/session/:sessionID/artifacts/:artifact_id", {
+          params: Schema.Struct({ sessionID: SessionID, artifact_id: Schema.String }), query: Schema.Struct({ ...WorkspaceRoutingQueryFields,
+            source_revision: Schema.NumberFromString, offset: Schema.optional(Schema.NumberFromString) }),
+          success: QuantCodeTaskIndex.ArtifactRead, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.artifacts.read", summary: "Read one verified chunk of a captured task artifact" })),
+        HttpApiEndpoint.get("quantcodeOrganizationArtifacts", "/experimental/quantcode/organization-tasks/:source_id/:sessionID/artifacts", {
+          params: Schema.Struct({ source_id: Schema.String, sessionID: SessionID }), query: Schema.Struct({ ...WorkspaceRoutingQueryFields,
+            source_revision: Schema.NumberFromString, limit: Schema.optional(Schema.NumberFromString), cursor: Schema.optional(Schema.String) }),
+          success: QuantCodeTaskIndex.ArtifactList, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.organizationArtifacts.list", summary: "List authorized organization artifact references" })),
+        HttpApiEndpoint.get("quantcodeOrganizationArtifact", "/experimental/quantcode/organization-tasks/:source_id/:sessionID/artifacts/:artifact_id", {
+          params: Schema.Struct({ source_id: Schema.String, sessionID: SessionID, artifact_id: Schema.String }), query: Schema.Struct({ ...WorkspaceRoutingQueryFields,
+            source_revision: Schema.NumberFromString, offset: Schema.optional(Schema.NumberFromString) }),
+          success: QuantCodeTaskIndex.ArtifactRead, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.organizationArtifacts.read", summary: "Read a verified organization artifact chunk under current authorization" })),
+        HttpApiEndpoint.get("quantcodeLegacyTasks", "/experimental/quantcode/legacy/tasks", {
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, limit: Schema.optional(Schema.NumberFromString), cursor: Schema.optional(Schema.String),
+            organization: Schema.optional(QueryBoolean), reports_only: Schema.optional(QueryBoolean), group_filter: Schema.optional(Schema.String) }),
+          success: QuantCodeLegacy.List, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.legacy.list", summary: "Read retained Python checkpoint history without starting execution" })),
+        HttpApiEndpoint.get("quantcodeLegacyDetail", "/experimental/quantcode/legacy/tasks/:thread_id", {
+          params: Schema.Struct({ thread_id: Schema.String }), query: Schema.Struct({ ...WorkspaceRoutingQueryFields,
+            checkpoint_id: Schema.optional(Schema.String), trace_cursor: Schema.optional(Schema.NumberFromString), organization: Schema.optional(QueryBoolean) }),
+          success: QuantCodeLegacy.Detail, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.legacy.detail", summary: "Inspect exact legacy checkpoint ownership and executor provenance" })),
+        HttpApiEndpoint.post("quantcodeLegacyResume", "/experimental/quantcode/legacy/resume", {
+          query: WorkspaceRoutingQuery, payload: QuantCodeLegacy.ResumeInput,
+          success: QuantCodeLegacy.Resume, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.legacy.resume", summary: "Resume an exact archived checkpoint through the controlled host Provider" })),
+        HttpApiEndpoint.post("quantcodeLegacyRequestApproval", "/experimental/quantcode/legacy/request-approval", {
+          query: WorkspaceRoutingQuery, payload: QuantCodeLegacy.ApprovalInput,
+          success: QuantCodeNativeGate.View, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.legacy.requestApproval", summary: "Submit the owner's exact archived operation to the existing organization approval queue" })),
+        HttpApiEndpoint.get("quantcodeBudgetReviewState", "/experimental/quantcode/session/:sessionID/budget/review", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeBudgetEvent.ReviewState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.budget.reviewState", summary: "Read unconfirmed provider usage and accounting lock state" })),
+        HttpApiEndpoint.post("quantcodeBudgetReview", "/experimental/quantcode/session/:sessionID/budget/review", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeBudgetEvent.Review, success: QuantCodeBudgetEvent.ReviewState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.budget.review", summary: "Record evidence-backed usage without repeating a provider request" })),
+        HttpApiEndpoint.post("quantcodeBudgetRecoverLock", "/experimental/quantcode/session/:sessionID/budget/lock/recover", {
+          params: Schema.Struct({ sessionID: SessionID }), query: WorkspaceRoutingQuery,
+          payload: QuantCodeBudgetEvent.LockRecovery, success: QuantCodeBudgetEvent.ReviewState, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.budget.recoverLock", summary: "Recover a dead accounting lock while retaining all usage and reservations" })),
+        HttpApiEndpoint.get("quantcodeNativeGates", "/experimental/quantcode/native-gates", {
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, cursor: Schema.optional(Schema.String) }),
+          success: QuantCodeNativeGate.List, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.nativeGate.list", summary: "List authorized cross-member organization approvals" })),
+        HttpApiEndpoint.get("quantcodeNativeGateRead", "/experimental/quantcode/native-gates/:gateID", {
+          params: Schema.Struct({ gateID: QuantCodeNativeGate.ID }), query: WorkspaceRoutingQuery,
+          success: QuantCodeNativeGate.View, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.nativeGate.read", summary: "Read an authorized exact approval or the current reviewer's own recorded decision" })),
+        HttpApiEndpoint.post("quantcodeNativeGateDecision", "/experimental/quantcode/native-gates/decide", {
+          query: WorkspaceRoutingQuery, payload: QuantCodeNativeGate.Review,
+          success: QuantCodeNativeGate.View, error: QuantCodeTaskError,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.nativeGate.decide", summary: "Decide one exact organization request as its authorized reviewer" })),
+        HttpApiEndpoint.get("quantcodeGitHubCommit", "/experimental/quantcode/github/commit", {
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, repo: Schema.String, sha: Schema.String }), success: Schema.Unknown, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.github.commit", summary: "Read authorized commit metadata and file patches" })),
+        HttpApiEndpoint.get("quantcodeGitHubStatus", "/experimental/quantcode/github", {
+          query: WorkspaceRoutingQuery, success: Schema.Unknown, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.github.status", summary: "Read GitHub connection status for the authenticated host identity" })),
+        HttpApiEndpoint.get("quantcodeGitHubCredentialPrepare", "/experimental/quantcode/github/credential/prepare", {
+          query: WorkspaceRoutingQuery, success: QuantCodeGitHub.CredentialPreparation, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.github.prepareCredential", summary: "Prepare an exact owner-bound desktop GitHub credential connection" })),
+        HttpApiEndpoint.post("quantcodeGitHubCredentialImport", "/experimental/quantcode/github/credential/import", {
+          query: WorkspaceRoutingQuery, payload: QuantCodeGitHub.CredentialImport,
+          success: QuantCodeGitHub.Connection, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.github.importCredential", summary: "Accept a desktop main-process credential for the prepared owner" })),
+        HttpApiEndpoint.post("quantcodeGitHubConnect", "/experimental/quantcode/github", {
+          query: WorkspaceRoutingQuery, payload: Schema.Struct({ mode: Schema.Literals(["local", "browser", "cancel"]) }), success: Schema.Unknown, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.github.connect", summary: "Connect GitHub using local credentials or browser authorization" })),
         HttpApiEndpoint.get("quantcodeIdentities", "/experimental/quantcode/identities", {
           query: WorkspaceRoutingQuery, success: Schema.Unknown, error: HttpApiError.BadRequest,
         }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.list", summary: "Read the host-configured public SSH identity" })),
+        HttpApiEndpoint.get("quantcodeWorkspaces", "/experimental/quantcode/workspaces", {
+          query: QuantCodeWorkspacesQuery, success: QuantCodeWorkspaces,
+          error: [QuantCodeWorkspaceApiError, HttpApiError.BadRequest],
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.workspaces.list", summary: "Discover the current member's authorized directories on this research host" })),
+        HttpApiEndpoint.post("quantcodeIdentityChallenge", "/experimental/quantcode/identity/challenge", {
+          query: WorkspaceRoutingQuery, payload: [HttpApiSchema.NoContent, QuantCodeIdentityChallengePayload], success: QuantCodeIdentityChallenge,
+          error: [QuantCodeIdentityApiError, HttpApiError.BadRequest],
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.challenge", summary: "Prepare a roster-bound challenge for desktop SSH signing" })),
+        HttpApiEndpoint.post("quantcodeIdentityVerify", "/experimental/quantcode/identity/verify", {
+          query: WorkspaceRoutingQuery, payload: QuantCodeIdentityVerifyPayload, success: QuantCodeIdentitySession,
+          error: [QuantCodeIdentityApiError, HttpApiError.BadRequest],
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.verify", summary: "Verify a desktop signature and retain the member credential on the trusted host" })),
         HttpApiEndpoint.post("quantcodeIdentityLogin", "/experimental/quantcode/identity/login", {
-          query: WorkspaceRoutingQuery, payload: Schema.Struct({}), success: Schema.Unknown, error: HttpApiError.BadRequest,
+          query: WorkspaceRoutingQuery, payload: [HttpApiSchema.NoContent, QuantCodeIdentityLoginPayload], success: Schema.Unknown, error: HttpApiError.BadRequest,
         }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.login", summary: "Sign a gateway challenge with the host SSH agent" })),
+        HttpApiEndpoint.post("quantcodeIdentityLogout", "/experimental/quantcode/identity/logout", {
+          query: WorkspaceRoutingQuery, success: Schema.Unknown, error: HttpApiError.BadRequest,
+        }).annotateMerge(OpenApi.annotations({ identifier: "quantcode.identity.logout", summary: "Revoke the host identity session and disconnect QuantCode MCP" })),
         HttpApiEndpoint.get("worktree", ExperimentalPaths.worktree, {
           query: WorkspaceRoutingQuery,
           success: described(WorktreeList, "List of worktree directories"),

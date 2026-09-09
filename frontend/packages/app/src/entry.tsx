@@ -110,6 +110,9 @@ const getCurrentUrl = () => {
 }
 
 const getDefaultUrl = () => {
+  // QuantCode's branded Dev launcher owns the local backend port. A stale
+  // persisted URL must not redirect a fresh checkout to another workspace.
+  if (import.meta.env.DEV && import.meta.env.VITE_OPENCODE_CHANNEL === "quantcode") return getCurrentUrl()
   const lsDefault = readDefaultServerUrl()
   if (lsDefault) return lsDefault
   return getCurrentUrl()

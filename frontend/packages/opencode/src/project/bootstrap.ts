@@ -10,6 +10,9 @@ import { ShareNext } from "@/share/share-next"
 import { Effect, Layer } from "effect"
 import { Config } from "@/config/config"
 import { Service } from "./bootstrap-service"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeTaskPublisher } from "@/quantcode/task-publisher"
 
 export { Service } from "./bootstrap-service"
 export type { Interface } from "./bootstrap-service"
@@ -28,9 +31,12 @@ const layer = Layer.effect(
     const shareNext = yield* ShareNext.Service
     const snapshot = yield* Snapshot.Service
     const vcs = yield* Vcs.Service
+    const publisher = yield* QuantCodeTaskPublisher.Service
 
     const run = Effect.gen(function* () {
       const ctx = yield* InstanceState.context
+      yield* publisher.init()
+      const grant = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory)) : undefined
       yield* Effect.logInfo("bootstrapping", { directory: ctx.directory })
       // everything depends on config so eager load it for nice traces
       yield* config.get()
@@ -43,6 +49,7 @@ const layer = Layer.effect(
         (s) => s.init().pipe(Effect.catchCause((cause) => Effect.logWarning("init failed", { cause }))),
         { concurrency: "unbounded", discard: true },
       ).pipe(Effect.withSpan("InstanceBootstrap.init"))
+      if (grant) yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
     }).pipe(Effect.withSpan("InstanceBootstrap"))
 
     return Service.of({ run })
@@ -52,7 +59,7 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
-  deps: [Config.node, Format.node, LSP.node, Plugin.node, Project.node, ShareNext.node, Snapshot.node, Vcs.node],
+  deps: [Config.node, Format.node, LSP.node, Plugin.node, Project.node, ShareNext.node, Snapshot.node, Vcs.node, QuantCodeTaskPublisher.node],
 })
 
 export * as InstanceBootstrap from "./bootstrap"

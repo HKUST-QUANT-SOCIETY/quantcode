@@ -15,10 +15,7 @@
 """
 from __future__ import annotations
 
-import logging
-import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -29,14 +26,10 @@ from flows.factor_evaluation_adapter import (
     FactorEvaluationState,
     _memory,
     build_workflow as build_factor_evaluation_workflow,
-    call_quant_evaluator,
-    validate_factor_spec,
 )
 from runner import langgraph_base
 from runner.compose_executor import (
     FLOW_REGISTRY,
-    PRE_INVOKE_HOOKS,
-    aexecute_compose_flow,
     clear_memory_registry,
     clear_pre_invoke_hooks,
     execute_compose_flow,
@@ -53,7 +46,6 @@ from runner.langgraph_base import (
     default_compose_edges,
     get_checkpointer,
 )
-from runner.memory.fts import file_exists_and_initialized
 from runner.memory.service import MemoryPermissionError, MemoryService
 
 
@@ -133,7 +125,6 @@ class TestExecuteComposeFlowBasics:
     """execute_compose_flow 基础行为 + register_flow 协议。"""
 
     def test_register_and_invoke_returns_standardized_dict(self, _isolate):
-        tmp = _isolate
         app = _two_node_app("echo")
         register_flow("factor", "factor:smoke", app)
         result = execute_compose_flow(
@@ -322,8 +313,10 @@ class TestMemoryInjection:
     def test_concurrent_invocations_isolated_by_tid(self, _isolate):
         """两个不同 thread_id 各自有自己的 svc。"""
         tmp = _isolate
-        db1 = tmp / "m1.db"; root1 = tmp / "r1"
-        db2 = tmp / "m2.db"; root2 = tmp / "r2"
+        db1 = tmp / "m1.db"
+        root1 = tmp / "r1"
+        db2 = tmp / "m2.db"
+        root2 = tmp / "r2"
         svc1 = MemoryService(db_path=db1, root=root1, requester_group="factor")
         svc2 = MemoryService(db_path=db2, root=root2, requester_group="model")
 

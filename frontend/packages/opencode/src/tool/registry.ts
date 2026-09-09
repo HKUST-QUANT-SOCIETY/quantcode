@@ -1,3 +1,7 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { OrganizationSolutionTool } from "./organization-solution"
+import { OrganizationReuseTool } from "./organization-reuse"
+import { AppProcess } from "@opencode-ai/core/process"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
@@ -58,18 +62,20 @@ export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false
 
 type TaskDef = Tool.InferDef<typeof TaskTool>
 type ReadDef = Tool.InferDef<typeof ReadTool>
+type ShellDef = Tool.InferDef<typeof ShellTool>
 
 type State = {
   custom: Tool.Def[]
   builtin: Tool.Def[]
   task: TaskDef
   read: ReadDef
+  shell: ShellDef
 }
 
 export interface Interface {
   readonly ids: () => Effect.Effect<string[]>
   readonly all: () => Effect.Effect<Tool.Def[]>
-  readonly named: () => Effect.Effect<{ task: TaskDef; read: ReadDef }>
+  readonly named: () => Effect.Effect<{ task: TaskDef; read: ReadDef; shell: ShellDef }>
   readonly tools: (model: {
     providerID: ProviderV2.ID
     modelID: ModelV2.ID
@@ -104,6 +110,8 @@ const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const solutiontool = yield* OrganizationSolutionTool
+    const reusetool = yield* OrganizationReuseTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -168,7 +176,7 @@ const layer = Layer.effect(
           }
         }
 
-        const dirs = yield* config.directories()
+        const dirs = QuantCodeIdentity.enabled() ? [] : yield* config.directories()
         const matches = dirs.flatMap((dir) =>
           Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
         )
@@ -211,12 +219,15 @@ const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          solution: Tool.init(solutiontool),
+          reuse: Tool.init(reusetool),
         })
 
         return {
           custom,
           builtin: [
             tool.invalid,
+            ...(QuantCodeIdentity.enabled() ? [tool.solution, tool.reuse] : []),
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
             tool.read,
@@ -235,6 +246,7 @@ const layer = Layer.effect(
           ],
           task: tool.task,
           read: tool.read,
+          shell: tool.shell,
         }
       }),
     )
@@ -307,7 +319,7 @@ const layer = Layer.effect(
 
     const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {
       const s = yield* InstanceState.get(state)
-      return { task: s.task, read: s.read }
+      return { task: s.task, read: s.read, shell: s.shell }
     })
 
     return Service.of({ ids, all, named, tools })
@@ -413,6 +425,7 @@ export const node = LayerNode.make({
     Truncate.node,
     RuntimeFlags.node,
     Database.node,
+    AppProcess.node,
     Ripgrep.node,
   ],
 })

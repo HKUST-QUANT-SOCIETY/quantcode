@@ -79,10 +79,15 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     const perm = permissionRequest()
     if (!perm) return
     if (store.responding === perm.id) return
+    const gate = perm.metadata.quantcodeExactGate
+    const digest = gate && typeof gate === "object" && "digest" in gate && typeof gate.digest === "string" ? gate.digest : undefined
+    if (digest && response === "always") return
 
     setStore("responding", perm.id)
-    sdk()
-      .client.permission.respond({ sessionID: perm.sessionID, permissionID: perm.id, response })
+    const result = digest
+      ? sdk().client.permission.reply({ requestID: perm.id, reply: response, expected_digest: digest })
+      : sdk().client.permission.respond({ sessionID: perm.sessionID, permissionID: perm.id, response })
+    result
       .catch((err: unknown) => {
         const description = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description })

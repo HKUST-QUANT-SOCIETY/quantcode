@@ -1,4 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
+import "./src/test-native-response"
 
 GlobalRegistrator.register()
 

@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import importlib
+import sys
+import threading
 import time
 
 import pytest
@@ -110,7 +112,7 @@ def tmp_db(tmp_path):
 
 
 @pytest.fixture
-def reg(monkeypatch):
+def reg(monkeypatch, tmp_db, sub_tools):
     """fresh SubagentRegistry 并顶替全局单例（工具层 executes 每次调用时动态
     import``runner.parallel_registry.parallel_registry``，monkeypatch 恢复原物）。"""
     import runner.parallel_registry as pr
@@ -118,6 +120,14 @@ def reg(monkeypatch):
     fresh = pr.SubagentRegistry()
     monkeypatch.setattr(pr, "parallel_registry", fresh)
     yield fresh
+    with fresh._lock:
+        entries = list(fresh._entries.values())
+    for entry in entries:
+        fresh.kill(entry["subagent_id"], reason="test teardown")
+    for entry in entries:
+        worker = entry["thread"]
+        if worker is not None:
+            worker.join()
 
 
 @pytest.fixture
@@ -192,6 +202,33 @@ def test_spawn_via_tooldef_registry_route(reg, sub_tools, tmp_db, subagent_tools
     assert "list_subagents" in global_registry.list_ids()
 
 
+def test_registry_workers_finish_before_checkpoint_fixture_closes(reg, tmp_db, monkeypatch):
+    entered = threading.Event()
+
+    def model(messages, tools=None):
+        entered.set()
+        entry = next(iter(reg._entries.values()))
+        assert entry["cancel_event"].wait(10), "fixture did not cancel its test worker"
+        return AIMessage(content="finished")
+
+    entry = reg.create_subagent("wait for test teardown", "factor", model=model, checkpoint_db=tmp_db)
+    assert entered.wait(5), "test worker did not enter its model call"
+    worker = reg._entries[entry["subagent_id"]]["thread"]
+    close = clear_checkpointer_cache
+
+    def checked_close():
+        was_running = worker.is_alive()
+        # Keep the regression safe on the old fixture: drain SQLite writes
+        # before reporting that it tried to close a live worker's connection.
+        reg.kill(entry["subagent_id"], reason="regression cleanup")
+        worker.join(timeout=10)
+        assert not worker.is_alive(), "test worker did not finish"
+        close()
+        assert not was_running, "checkpoint fixture closed before its registry worker finished"
+
+    monkeypatch.setattr(sys.modules[__name__], "clear_checkpointer_cache", checked_close)
+
+
 # ---------------------------------------------------------------------------
 # 2. 死循环子任务 → kill <1s 且 trace 记 abort
 # ---------------------------------------------------------------------------
@@ -258,7 +295,6 @@ def test_task_tree_list_children_parent_child_relation(
     reg, sub_tools, tmp_db, subagent_tools
 ):
     """同 parent spawn 两个子任务 → list_subagents 返回两条 children；别家 parent 查不到。"""
-    model = ScriptedLLM([_ai("task_done", "s1")])
     for _ in range(2):
         subagent_tools._spawn_subagent_execute(
             subagent_tools.SpawnSubagentArgs(task="child", group="factor"),
@@ -312,7 +348,6 @@ def test_spawn_depth_guard_blocks_beyond_max_tree_depth(reg, sub_tools, tmp_db):
 
     model = ScriptedLLM([AIMessage(content="leaf")])
     # 造一条深度 4 的链：p0 → s1 → s2 → s3 → s4（s4 是第 4 层，允许）
-    parent = ""
     tid = "chain-root-0"
     ids = []
     for i in range(MAX_TREE_DEPTH):

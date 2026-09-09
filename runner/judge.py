@@ -12,7 +12,7 @@
 judge 模型读取遵守 AG-01 收敛的 env 规范（与 quantcode/mcp_server._get_model 同约定）：
 
 - ``QUANTCODE_API_KEY``            — 唯一 API key 入口（必填）
-- ``QUANTCODE_MODEL_PROVIDER``     — deepseek | anthropic | stepfun（默认 deepseek）
+- ``QUANTCODE_MODEL_PROVIDER``     — deepseek | anthropic | stepfun | qwen（默认 deepseek）
 - ``QUANTCODE_MODEL_NAME``         — 模型名（默认按 provider）
 - ``QUANTCODE_MODEL_BASE_URL``     — 自定义 base URL
 
@@ -61,10 +61,12 @@ def _get_judge_llm() -> Callable[..., Any] | None:
         "deepseek": "deepseek-chat",
         "anthropic": "claude-sonnet-4-5",
         "stepfun": "step-3.7-flash",
+        "qwen": "qwen3.7-flash",
     }
     default_base_urls = {
         "deepseek": "https://api.deepseek.com/v1",
         "stepfun": "https://api.stepfun.com/step_plan/v1",
+        "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     }
     model_name = os.environ.get("QUANTCODE_MODEL_NAME", "").strip() or default_models.get(provider, default_models["deepseek"])
     base_url = os.environ.get("QUANTCODE_MODEL_BASE_URL", "").strip() or default_base_urls.get(provider, "")
@@ -363,10 +365,10 @@ def _solution_semantic_pass(
     user_prompt = (
         f"# 方案目标\n{doc.goal}\n\n"
         f"# 验收标准\n" + ("\n".join(f"- {c}" for c in doc.acceptance_criteria) or "(未填写)") + "\n\n"
-        f"# 方案预期改动文件\n" + ("\n".join(f"- {f}" for f in doc.file_impact) or "(未填写)") + "\n\n"
-        f"# 实际改动文件\n" + ("\n".join(f"- {f}" for f in changed_files) or "(无)") + "\n\n"
-        f"# 确定性偏离清单（file_impact 之外）\n" + ("\n".join(f"- {d}" for d in deviations) or "(无)") + "\n\n"
-        f"# 计划内未落地文件\n" + ("\n".join(f"- {m}" for m in missing) or "(无)") + "\n"
+        "# 方案预期改动文件\n" + ("\n".join(f"- {f}" for f in doc.file_impact) or "(未填写)") + "\n\n"
+        "# 实际改动文件\n" + ("\n".join(f"- {f}" for f in changed_files) or "(无)") + "\n\n"
+        "# 确定性偏离清单（file_impact 之外）\n" + ("\n".join(f"- {d}" for d in deviations) or "(无)") + "\n\n"
+        "# 计划内未落地文件\n" + ("\n".join(f"- {m}" for m in missing) or "(无)") + "\n"
     )
     try:
         response = llm([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])

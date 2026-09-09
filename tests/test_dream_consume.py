@@ -25,7 +25,6 @@ from runner.dream_consumer import (
     consume_once,
     consume_status,
     run_records_from_events,
-    scan_completed_runs,
 )
 
 
@@ -128,7 +127,7 @@ def test_second_run_dedupes(evidence_dir, candidates_dir):
     assert second["candidates"] == []
 
     # 二次强制重扫同 run → 同名候选被 index 去重
-    rerun = consume_once(evidence_dir=evidence_dir, candidates_dir=candidates_dir, group="risk")
+    consume_once(evidence_dir=evidence_dir, candidates_dir=candidates_dir, group="risk")
     index = json.loads((candidates_dir / "index.json").read_text(encoding="utf-8"))
     keys = [f"{c['name']}|{'>'.join(c['tool_sequence'])}" for c in index["candidates"]]
     assert len(keys) == len(set(keys)), "index 内候选键不得重复"
@@ -282,7 +281,7 @@ def test_judge_new_runs_writes_rlhf(monkeypatch, tmp_path):
     assert len(reports) == 1
     assert reports[0]["verdict"] == "met"
     assert reports[0]["mode"] == "judge"
-    records = [json.loads(l) for l in rlhf_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    records = [json.loads(line) for line in rlhf_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert any(r.get("label") == 1 for r in records), "met verdict 应回填 label=1"
 
 

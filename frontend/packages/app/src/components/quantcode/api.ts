@@ -1,5 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import type { SshConnectFn } from "./ssh-login"
+import type { SshConnectFn, SshDisconnectFn } from "./ssh-login"
+import { QUANTCODE_GROUPS, type QuantCodeGroup } from "./instructions"
 import type { CapabilityCard } from "./capability-catalog"
 
 export type ReceiptReconciliation = {
@@ -83,6 +84,7 @@ export type QuantCodeSshStatus = {
 export type QuantCodeSessionContext = {
   session_id?: string
   group?: string
+  authorized_groups?: string[]
   role?: string
   actor_id?: string
   workspace_id?: string
@@ -205,14 +207,27 @@ export async function reviewQuantCodeCandidate(client: OpencodeClient, candidate
 
 export function createLocalIdentityConnect(client: OpencodeClient, onConnected: () => void): SshConnectFn {
   return async ({ identityId, log }) => {
-    if (identityId !== "host-default") return { status: "error", reason: "未知本机身份" }
+    if (!identityId) return { status: "error", reason: "请选择本机 SSH 公钥身份" }
     log("正在请求 SSH agent 签名并验证正式 roster…")
-    const response = await client.quantcode.identity.login({})
-    const result = response.data
-    if (response.error || !result || typeof result !== "object" || !("status" in result) || result.status !== "connected" || !("fingerprint" in result) || typeof result.fingerprint !== "string") {
+    const response = await client.quantcode.identity.login({}).catch(() => undefined)
+    const result = response?.data
+    if (!response || response.error || !result || typeof result !== "object" || !("status" in result) || result.status !== "connected" || !("fingerprint" in result) || typeof result.fingerprint !== "string"
+      || !("group" in result) || typeof result.group !== "string" || !QUANTCODE_GROUPS.includes(result.group as QuantCodeGroup)) {
       return { status: "error", reason: "身份认证未完成，请检查本机 SSH agent、gateway 和 roster 配置" }
     }
     onConnected()
-    return { status: "connected", fingerprint: result.fingerprint, groups: "groups" in result && Array.isArray(result.groups) ? result.groups : [] }
+    return { status: "connected", fingerprint: result.fingerprint, group: result.group, groups: "groups" in result && Array.isArray(result.groups) ? result.groups : [] }
+  }
+}
+
+export function createLocalIdentityDisconnect(client: OpencodeClient, onDisconnected: () => void): SshDisconnectFn {
+  return async () => {
+    const response = await client.quantcode.identity.logout({}).catch(() => undefined)
+    const result = response?.data
+    if (!response || response.error || !result || typeof result !== "object" || !("status" in result) || result.status !== "disconnected") {
+      return { status: "error", reason: "退出未完成，请检查 gateway 连接后重试。" }
+    }
+    onDisconnected()
+    return { status: "disconnected" }
   }
 }

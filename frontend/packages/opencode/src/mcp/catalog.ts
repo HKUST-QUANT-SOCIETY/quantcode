@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { dynamicTool, jsonSchema, type JSONSchema7, type Tool } from "ai"
 import { Effect } from "effect"
+import { QuantCodeMcpContext } from "@/quantcode/mcp-context"
 
 const DEFAULT_TIMEOUT = 30_000
 const MAX_LIST_PAGES = 1_000
@@ -55,6 +56,7 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
         {
           name: mcpTool.name,
           arguments: (args || {}) as Record<string, unknown>,
+          ...(QuantCodeMcpContext.read(options) ? { _meta: { quantcode: QuantCodeMcpContext.read(options) } } : {}),
         },
         CallToolResultSchema,
         {

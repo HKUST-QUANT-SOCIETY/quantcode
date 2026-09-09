@@ -1,3 +1,6 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeAccess } from "@/quantcode/access"
 import path from "path"
 import { Effect } from "effect"
 import { InstanceState } from "@/effect/instance-state"
@@ -8,6 +11,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 type Kind = "file" | "directory"
 
 type Options = {
+  access?: "read" | "write"
   bypass?: boolean
   kind?: Kind
 }
@@ -18,6 +22,14 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   options?: Options,
 ) {
   if (!target) return false
+
+  if (QuantCodeIdentity.enabled()) {
+    const owner = yield* QuantCodeAccess.requireSession(ctx.sessionID)
+    if (!owner) throw new QuantCodeIdentity.IdentityError()
+    const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(owner.directory, options?.access ?? "read", owner.identity))
+    yield* Effect.promise(() => QuantCodeWorkspace.target(grant, target, options?.access ?? "read"))
+    return false
+  }
 
   if (options?.bypass) return false
 
@@ -43,7 +55,3 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   })
   return true
 })
-
-export async function assertExternalDirectory(ctx: Tool.Context, target?: string, options?: Options) {
-  return Effect.runPromise(assertExternalDirectoryEffect(ctx, target, options))
-}

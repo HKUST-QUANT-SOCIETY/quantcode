@@ -5,6 +5,8 @@ import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { mkdir, readdir, stat } from "node:fs/promises"
 import path from "path"
+import { internalTestTargets, isInternalTestVersion } from "./release-plan"
+import { parseReleaseVersion } from "./release-version"
 
 const dir = process.env.LATEST_YML_DIR!
 if (!dir) throw new Error("LATEST_YML_DIR is required")
@@ -16,12 +18,17 @@ const releaseAssetDir = process.env.RELEASE_ASSET_DIR
 const upload = process.env.UPLOAD_RELEASE_METADATA !== "false"
 const tag = process.env.RELEASE_TAG || `v${version}`
 const releaseSigned = booleanEnvironment("RELEASE_SIGNED", false)
+const internalTest = booleanEnvironment("RELEASE_INTERNAL_TEST", false)
 const publishRequested = booleanEnvironment("PUBLISH_REQUESTED", false)
 const updateFeed = process.env.RELEASE_UPDATE_FEED ?? "disabled"
 if (updateFeed !== "public" && updateFeed !== "disabled") {
   throw new Error(`Invalid RELEASE_UPDATE_FEED: ${updateFeed}`)
 }
-if (publishRequested && !releaseSigned) throw new Error("Publishing requires RELEASE_SIGNED=true")
+if (internalTest) {
+  if (!isInternalTestVersion(version) || tag !== `quantcode-v${version}`) throw new Error("Internal tests require a matching quantcode-vX.Y.Z-test.N tag")
+  if (releaseSigned || updateFeed !== "disabled") throw new Error("Internal tests must be unsigned with automatic updates disabled")
+  if (!releaseAssetDir || upload) throw new Error("Internal tests require local asset verification and a separate prerelease publisher")
+} else if (publishRequested && !releaseSigned) throw new Error("Publishing requires RELEASE_SIGNED=true")
 
 type FileEntry = {
   url: string
@@ -154,6 +161,9 @@ const requiredTargets = (process.env.REQUIRED_TARGETS ?? "")
   .split(",")
   .map((target) => target.trim())
   .filter(Boolean)
+if (internalTest && (requiredTargets.length !== internalTestTargets.length || internalTestTargets.some(target => !requiredTargets.includes(target)))) {
+  throw new Error("Internal tests require both macOS architectures and Windows x64")
+}
 const targetIsActive = (target: string) => requiredTargets.length === 0 || requiredTargets.includes(target)
 
 const requiredMetadata = new Map<string, LatestYml>()
@@ -297,15 +307,16 @@ if (releaseAssetDir) {
     release: {
       repository: process.env.TARGET_REPOSITORY ?? process.env.GH_REPO ?? "HKUST-QUANT-SOCIETY/quantcode",
       tag,
+      prerelease: parseReleaseVersion(version)?.prerelease ?? false,
     },
     distribution: {
-      releaseClass: releaseSigned ? "approved-release" : "qa-unsigned",
+      releaseClass: internalTest ? "internal-test" : releaseSigned ? "approved-release" : "qa-unsigned",
       publishRequested,
       updateFeed,
       platformTrust: {
-        macos: releaseSigned ? "developer-id-notarized" : "unsigned-qa",
-        windows: releaseSigned ? "azure-trusted-signing" : "unsigned-qa",
-        linux: releaseSigned ? "approved-platform-unsigned" : "unsigned-qa",
+        macos: internalTest ? "unsigned-test" : releaseSigned ? "developer-id-notarized" : "unsigned-qa",
+        windows: internalTest ? "unsigned-test" : releaseSigned ? "azure-trusted-signing" : "unsigned-qa",
+        linux: internalTest ? "not-included" : releaseSigned ? "approved-platform-unsigned" : "unsigned-qa",
       },
     },
     assets: await Promise.all(

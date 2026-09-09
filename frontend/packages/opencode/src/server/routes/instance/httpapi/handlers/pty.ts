@@ -1,3 +1,7 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeProcessSandbox } from "@/quantcode/process-sandbox"
+import { QuantCodeTerminalAccess } from "@/quantcode/terminal-access"
 import * as InstanceState from "@/effect/instance-state"
 import { registerDisposer } from "@/effect/instance-registry"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
@@ -16,7 +20,7 @@ import {
   PTY_CONNECT_TOKEN_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@/server/shared/pty-ticket"
-import { Effect, Layer, Option, Queue, Schema } from "effect"
+import { Effect, Exit, Layer, Option, Queue, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -63,11 +67,37 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
 
     const list = Effect.fn("PtyHttpApi.list")(function* () {
       const sessions = yield* pty(Pty.Service.use((service) => service.list()))
-      return sessions.filter((info) => info.status === "running")
+      const running = sessions.filter((info) => info.status === "running")
+      if (!QuantCodeIdentity.enabled()) return running
+      const directory = (yield* InstanceState.context).directory
+      const permitted = yield* Effect.forEach(running, info => Effect.promise(async () =>
+        await QuantCodeTerminalAccess.visible(info.id, directory) ? info : undefined))
+      return permitted.filter((info): info is (typeof running)[number] => info !== undefined)
     })
 
     const create = Effect.fn("PtyHttpApi.create")(function* (ctx: { payload: typeof Pty.CreateInput.Type }) {
       const cwd = ctx.payload.cwd || (yield* InstanceState.context).directory
+      if (QuantCodeIdentity.enabled()) {
+        const directory = (yield* InstanceState.context).directory
+        const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory, "write"))
+        const target = yield* Effect.promise(() => QuantCodeWorkspace.target(grant, cwd, "write"))
+        const executable = Shell.acceptable(ctx.payload.command)
+        const sandbox = yield* Effect.promise(() => QuantCodeProcessSandbox.prepare({
+          grant: { ...grant, directory: target }, command: executable,
+          args: ctx.payload.args ? [...ctx.payload.args] : [], writePaths: [grant.root],
+        }))
+        const service = yield* pty(Pty.Service)
+        const info = yield* service.create({ command: sandbox.command, args: sandbox.args,
+          cwd: sandbox.cwd, env: sandbox.env, title: ctx.payload.title }).pipe(
+            Effect.onExit(exit => Exit.isFailure(exit) ? Effect.promise(() => sandbox.dispose()) : Effect.void),
+          )
+        // Capture the Location-bound service now. Timer callbacks cannot look
+        // up a potentially different workspace's service after an account switch.
+        QuantCodeTerminalAccess.attach(info.id, { ...grant, directory: target }, sandbox,
+          () => Effect.runPromise(service.remove(info.id).pipe(Effect.catchTag("Pty.NotFoundError", () => Effect.void))), grant.directory,
+          () => Effect.runPromise(service.get(info.id).pipe(Effect.map(value => value.status === "running"), Effect.catchTag("Pty.NotFoundError", () => Effect.succeed(false)))))
+        return info
+      }
       const shell = yield* plugin.trigger("shell.env", { cwd }, { env: {} as Record<string, string> })
       return yield* pty(
         Pty.Service.use((service) =>
@@ -82,6 +112,10 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     })
 
     const get = Effect.fn("PtyHttpApi.get")(function* (ctx: { params: { ptyID: PtyID } }) {
+      if (QuantCodeIdentity.enabled()) {
+        const directory = (yield* InstanceState.context).directory
+        yield* Effect.promise(() => QuantCodeTerminalAccess.requireTerminal(ctx.params.ptyID, directory))
+      }
       return yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
         Effect.catchTag(
           "Pty.NotFoundError",
@@ -138,6 +172,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
             }),
         ),
       )
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeTerminalAccess.release(ctx.params.ptyID))
       return true
     })
 
@@ -184,6 +219,11 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         params: { ptyID: PtyID }
         request: HttpServerRequest.HttpServerRequest
       }) {
+        const directory = (yield* InstanceState.context).directory
+        const checkAccess = () => QuantCodeIdentity.enabled()
+          ? Effect.promise(() => QuantCodeTerminalAccess.requireTerminal(ctx.params.ptyID, directory)).pipe(Effect.asVoid)
+          : Effect.void
+        yield* checkAccess()
         const exists = yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
           Effect.map((info) => info.status === "running"),
           Effect.catchTag("Pty.NotFoundError", () => Effect.succeed(false)),
@@ -248,6 +288,7 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         const drain = Effect.gen(function* () {
           while (true) {
             const item = yield* Queue.take(outbox)
+            if (!(item instanceof Socket.CloseEvent)) yield* checkAccess()
             yield* write(item)
             if (item instanceof Socket.CloseEvent) return
           }
@@ -259,7 +300,8 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
           drain,
           socket.runRaw((message) => {
             const decoded = PtyProtocol.decodeInput(message)
-            if (decoded !== undefined) attachment.write(decoded)
+            if (decoded === undefined) return Effect.void
+            return checkAccess().pipe(Effect.andThen(Effect.sync(() => attachment.write(decoded))))
           }),
         ).pipe(
           Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),

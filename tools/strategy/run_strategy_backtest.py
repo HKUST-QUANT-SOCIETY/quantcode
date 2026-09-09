@@ -18,6 +18,7 @@ tools/strategy/backtest_engine.py 的真回测引擎（A 股约束自研 interna
 from __future__ import annotations
 
 import math
+import os
 from datetime import date, timedelta
 
 from pydantic import BaseModel, Field
@@ -67,6 +68,19 @@ def _synthetic_prices(assets: list[str], n: int) -> dict[str, list[float]]:
 
 
 def run_strategy_backtest_execute(args: RunStrategyBacktestArgs, ctx: dict) -> dict:
+    # The local engine is retained only for deterministic tests.  Development
+    # and production runs must wait for the canonical VectorBT-QS checkout/API
+    # instead of presenting synthetic prices as research evidence.
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if environment not in {"test"} and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1":
+        return {
+            "status": "STAGING",
+            "result_status": "UNAVAILABLE",
+            "source": "vectorbt_qs",
+            "environment": environment or "production",
+            "error": "VectorBT-QS canonical component is not connected; clone the repository locally or configure its API before backtesting.",
+            "strategy_name": args.strategy_name,
+        }
     assets = sorted(args.weights.keys())
 
     # 交易日序列（自然日近似 D3b 合成口径；行情表接入后换交易日历）
@@ -129,7 +143,8 @@ run_strategy_backtest_tool = ToolDef(
     description=(
         "Run a daily-frequency portfolio backtest (internal_v1 engine: commission "
         "double-sided 0.0003, stamp tax 0.0005 sell-only, T+1, 10% price limit) for "
-        "combined signal weights, driven by deterministic synthetic prices. "
+        "combined signal weights through the canonical VectorBT-QS component. "
+        "A deterministic synthetic fixture is available only in explicit tests. "
         "Input: strategy_name, as_of_date, weights{signal_id: weight}. "
         "Returns StrategyReport JSON (selected_signals, weights, backtest, verdict) "
         "with top-level engine marker."

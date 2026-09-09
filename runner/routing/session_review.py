@@ -19,7 +19,6 @@ from __future__ import annotations
 __all__ = ["apply_session_verdict", "apply_judged_session", "reviewer_review_session"]
 
 import json
-import os
 from typing import Any, Callable
 
 from .rlhf_logger import RLHF_PATH, rewrite_session_records

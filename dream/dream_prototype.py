@@ -357,7 +357,7 @@ def run_dream(
         f"## Repetitions\n\n"
         + "\n".join(f"- {r}" for r in summary.repetitions)
         + "\n\n## Lessons\n\n"
-        + "\n".join(f"- {l}" for l in summary.lessons)
+        + "\n".join(f"- {lesson}" for lesson in summary.lessons)
         + "\n\n## Hotspots\n\n"
         + "\n".join(f"- {h}" for h in summary.hotspots)
         + "\n"

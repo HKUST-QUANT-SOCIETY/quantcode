@@ -4,6 +4,10 @@ import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { lstat } from "node:fs/promises"
+import { readPrivateFile } from "@/quantcode/private-file"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeConfigPolicy } from "@/quantcode/config-policy"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
@@ -56,6 +60,21 @@ const layer = Layer.effect(
     const decode = Schema.decodeUnknownOption(Info)
 
     const all = Effect.fn("Auth.all")(function* () {
+      if (QuantCodeIdentity.enabled()) {
+        const data = yield* Effect.tryPromise({
+          try: async () => {
+            const exists = await lstat(file).catch(error => {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+              throw error
+            })
+            if (!exists) return {}
+            const value: unknown = JSON.parse(await readPrivateFile(file, 262144))
+            if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid auth file")
+            return value as Record<string, unknown>
+          }, catch: () => new AuthError({ message: "无法读取 QuantCode 私有模型凭据。" }),
+        })
+        return Record.filterMap(data, value => Result.fromOption(decode(value), () => undefined))
+      }
       if (process.env.OPENCODE_AUTH_CONTENT) {
         try {
           return JSON.parse(process.env.OPENCODE_AUTH_CONTENT)
@@ -71,6 +90,14 @@ const layer = Layer.effect(
     })
 
     const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+      if (QuantCodeIdentity.enabled()) {
+        yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        if (!QuantCodeConfigPolicy.validProviderID(key) || info.type !== "api" || !info.key.trim() ||
+            /\{(?:env|file):|\$\{/i.test(info.key) || info.key.length > 16384 ||
+            !QuantCodeConfigPolicy.credentialMatches(info, info.metadata?.quantcode_base_url)) {
+          return yield* new AuthError({ message: "QuantCode 的 API Key 必须绑定到对应的自定义接口 URL。" })
+        }
+      }
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       if (norm !== key) delete data[key]
@@ -81,6 +108,7 @@ const layer = Layer.effect(
     })
 
     const remove = Effect.fn("Auth.remove")(function* (key: string) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       delete data[key]

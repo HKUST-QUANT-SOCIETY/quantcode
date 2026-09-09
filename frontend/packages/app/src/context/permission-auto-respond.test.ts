@@ -15,6 +15,14 @@ const permission = (sessionID: string) =>
   }) as Pick<PermissionRequest, "sessionID">
 
 describe("autoRespondsPermission", () => {
+  test("exact organization gates ignore directory and ancestor auto-accept", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const autoAccept = { root: true, child: true, [`${base64Encode(directory)}/*`]: true }
+    expect(autoRespondsPermission(autoAccept, sessions, {
+      sessionID: "child", metadata: { quantcodeExactGate: { kind: "permission", digest: "a".repeat(64) } },
+    }, directory)).toBe(false)
+  })
   test("uses a parent session's directory-scoped auto-accept", () => {
     const directory = "/tmp/project"
     const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]

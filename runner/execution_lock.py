@@ -6,20 +6,27 @@ new callers must agree on the same inode. Checkpoints remain the durable state.
 from contextlib import contextmanager
 import hashlib
 from pathlib import Path
+import time
 
 
 @contextmanager
-def execution_lock(db_path: Path, thread_id: str):
+def execution_lock(db_path: Path, thread_id: str, *, wait_seconds: float = 0):
     import fcntl
 
     directory = Path(db_path).parent / "run-locks"
     directory.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(f"{Path(db_path).resolve()}:{thread_id}".encode()).hexdigest()
     with (directory / f"{key}.lock").open("a") as handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("RUN_BUSY: this task is already executing") from exc
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("RUN_BUSY: this task is already executing") from exc
+                time.sleep(min(0.01, remaining))
         try:
             yield
         finally:

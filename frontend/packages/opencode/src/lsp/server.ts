@@ -2,16 +2,13 @@ import type { ChildProcessWithoutNullStreams } from "child_process"
 import path from "path"
 import os from "os"
 import { Global } from "@opencode-ai/core/global"
-import { text } from "node:stream/consumers"
 import fs from "fs/promises"
 import { Filesystem } from "@/util/filesystem"
 import type { InstanceContext } from "../project/instance-context"
 import { Archive } from "@/util/archive"
 import { Process } from "@/util/process"
-import { which } from "@opencode-ai/core/util/which"
-import { Module } from "@opencode-ai/core/util/module"
-import { spawn } from "./launch"
-import { Npm } from "@opencode-ai/core/npm"
+import { spawn, LspLaunch } from "./launch"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 
 const pathExists = async (p: string) =>
@@ -19,8 +16,8 @@ const pathExists = async (p: string) =>
     .stat(p)
     .then(() => true)
     .catch(() => false)
-const run = (cmd: string[], opts: Process.RunOptions = {}) => Process.run(cmd, { ...opts, nothrow: true })
-const output = (cmd: string[], opts: Process.RunOptions = {}) => Process.text(cmd, { ...opts, nothrow: true })
+const run = (cmd: string[], opts: Process.RunOptions = {}) => LspLaunch.probe(cmd, opts)
+const output = (cmd: string[], opts: Process.RunOptions = {}) => LspLaunch.probe(cmd, opts)
 
 export interface Handle {
   process: ChildProcessWithoutNullStreams
@@ -100,12 +97,12 @@ export const Deno: Info = {
   },
   extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs"],
   async spawn(root) {
-    const deno = which("deno")
+    const deno = LspLaunch.findBinary("deno")
     if (!deno) {
       return
     }
     return {
-      process: spawn(deno, ["lsp"], {
+      process: await spawn(deno, ["lsp"], {
         cwd: root,
       }),
     }
@@ -120,11 +117,11 @@ export const Typescript: Info = {
   ),
   extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"],
   async spawn(root, ctx) {
-    const tsserver = Module.resolve("typescript/lib/tsserver.js", ctx.directory)
+    const tsserver = await LspLaunch.resolveModule("typescript/lib/tsserver.js", ctx.directory)
     if (!tsserver) return
-    const bin = await Npm.which("typescript-language-server")
+    const bin = await LspLaunch.packageBinary("typescript-language-server")
     if (!bin) return
-    const proc = spawn(bin, ["--stdio"], {
+    const proc = await spawn(bin, ["--stdio"], {
       cwd: root,
       env: {
         ...process.env,
@@ -146,16 +143,16 @@ export const Vue: Info = {
   extensions: [".vue"],
   root: NearestRoot(["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("vue-language-server")
+    let binary = LspLaunch.findBinary("vue-language-server")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("@vue/language-server")
+      const resolved = await LspLaunch.packageBinary("@vue/language-server")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -175,7 +172,12 @@ export const ESLint: Info = {
   root: NearestRoot(["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]),
   extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".vue"],
   async spawn(root, ctx, flags) {
-    const eslint = Module.resolve("eslint", ctx.directory)
+    if (QuantCodeIdentity.enabled()) {
+      const installed = LspLaunch.findBinary("vscode-eslint-language-server")
+      if (!installed) return
+      return { process: await spawn(installed, ["--stdio"], { cwd: root }) }
+    }
+    const eslint = await LspLaunch.resolveModule("eslint", ctx.directory)
     if (!eslint) return
     const serverPath = path.join(Global.Path.bin, "vscode-eslint", "server", "out", "eslintServer.js")
     if (!(await Filesystem.exists(serverPath))) {
@@ -208,7 +210,7 @@ export const ESLint: Info = {
       await Process.run([npmCmd, "run", "compile"], { cwd: finalPath })
     }
 
-    const proc = spawn("node", [serverPath, "--stdio"], {
+    const proc = await spawn("node", [serverPath, "--stdio"], {
       cwd: root,
       env: {
         ...process.env,
@@ -257,18 +259,17 @@ export const Oxlint: Info = {
 
     let lintBin = await resolveBin(lintTarget)
     if (!lintBin) {
-      const found = which("oxlint")
+      const found = LspLaunch.findBinary("oxlint")
       if (found) lintBin = found
     }
 
     if (lintBin) {
-      const proc = spawn(lintBin, ["--help"])
-      await proc.exited
-      if (proc.stdout) {
-        const help = await text(proc.stdout)
+      const proc = await output([lintBin, "--help"], { cwd: root })
+      if (proc.code === 0) {
+        const help = proc.text
         if (help.includes("--lsp")) {
           return {
-            process: spawn(lintBin, ["--lsp"], {
+            process: await spawn(lintBin, ["--lsp"], {
               cwd: root,
             }),
           }
@@ -278,12 +279,12 @@ export const Oxlint: Info = {
 
     let serverBin = await resolveBin(serverTarget)
     if (!serverBin) {
-      const found = which("oxc_language_server")
+      const found = LspLaunch.findBinary("oxc_language_server")
       if (found) serverBin = found
     }
     if (serverBin) {
       return {
-        process: spawn(serverBin, [], {
+        process: await spawn(serverBin, [], {
           cwd: root,
         }),
       }
@@ -328,21 +329,21 @@ export const Biome: Info = {
     let bin: string | undefined
     if (await Filesystem.exists(localBin)) bin = localBin
     if (!bin) {
-      const found = which("biome")
+      const found = LspLaunch.findBinary("biome")
       if (found) bin = found
     }
 
     let args = ["lsp-proxy", "--stdio"]
 
     if (!bin) {
-      const resolved = Module.resolve("biome", root)
+      const resolved = await LspLaunch.resolveModule("biome", root)
       if (!resolved) return
-      bin = await Npm.which("biome")
+      bin = await LspLaunch.packageBinary("biome")
       if (!bin) return
       args = ["lsp-proxy", "--stdio"]
     }
 
-    const proc = spawn(bin, args, {
+    const proc = await spawn(bin, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -364,9 +365,9 @@ export const Gopls: Info = {
   },
   extensions: [".go"],
   async spawn(root, _ctx, flags) {
-    let bin = which("gopls")
+    let bin = LspLaunch.findBinary("gopls")
     if (!bin) {
-      if (!which("go")) return
+      if (!LspLaunch.findBinary("go")) return
       if (flags.disableLspDownload) return
 
       const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
@@ -382,7 +383,7 @@ export const Gopls: Info = {
       bin = path.join(Global.Path.bin, "gopls" + (process.platform === "win32" ? ".exe" : ""))
     }
     return {
-      process: spawn(bin!, {
+      process: await spawn(bin!, {
         cwd: root,
       }),
     }
@@ -394,10 +395,10 @@ export const Rubocop: Info = {
   root: NearestRoot(["Gemfile"]),
   extensions: [".rb", ".rake", ".gemspec", ".ru"],
   async spawn(root, _ctx, flags) {
-    let bin = which("rubocop")
+    let bin = LspLaunch.findBinary("rubocop")
     if (!bin) {
-      const ruby = which("ruby")
-      const gem = which("gem")
+      const ruby = LspLaunch.findBinary("ruby")
+      const gem = LspLaunch.findBinary("gem")
       if (!ruby || !gem) {
         return
       }
@@ -414,7 +415,7 @@ export const Rubocop: Info = {
       bin = path.join(Global.Path.bin, "rubocop" + (process.platform === "win32" ? ".exe" : ""))
     }
     return {
-      process: spawn(bin!, ["--lsp"], {
+      process: await spawn(bin!, ["--lsp"], {
         cwd: root,
       }),
     }
@@ -438,11 +439,11 @@ export const Ty: Info = {
       return undefined
     }
 
-    let binary = which("ty")
+    let binary = LspLaunch.findBinary("ty")
 
     const initialization: Record<string, string> = {}
 
-    const potentialVenvPaths = [process.env["VIRTUAL_ENV"], path.join(root, ".venv"), path.join(root, "venv")].filter(
+    const potentialVenvPaths = [(QuantCodeIdentity.enabled() ? undefined : process.env["VIRTUAL_ENV"]), path.join(root, ".venv"), path.join(root, "venv")].filter(
       (p): p is string => p !== undefined,
     )
     for (const venvPath of potentialVenvPaths) {
@@ -471,7 +472,7 @@ export const Ty: Info = {
       return
     }
 
-    const proc = spawn(binary, ["server"], {
+    const proc = await spawn(binary, ["server"], {
       cwd: root,
     })
 
@@ -487,11 +488,11 @@ export const Pyright: Info = {
   extensions: [".py", ".pyi"],
   root: NearestRoot(["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("pyright-langserver")
+    let binary = LspLaunch.findBinary("pyright-langserver")
     const args = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("pyright", "pyright-langserver")
+      const resolved = await LspLaunch.packageBinary("pyright", "pyright-langserver")
       if (!resolved) return
       binary = resolved
     }
@@ -499,7 +500,7 @@ export const Pyright: Info = {
 
     const initialization: Record<string, string> = {}
 
-    const potentialVenvPaths = [process.env["VIRTUAL_ENV"], path.join(root, ".venv"), path.join(root, "venv")].filter(
+    const potentialVenvPaths = [(QuantCodeIdentity.enabled() ? undefined : process.env["VIRTUAL_ENV"]), path.join(root, ".venv"), path.join(root, "venv")].filter(
       (p): p is string => p !== undefined,
     )
     for (const venvPath of potentialVenvPaths) {
@@ -513,7 +514,7 @@ export const Pyright: Info = {
       }
     }
 
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -531,7 +532,7 @@ export const ElixirLS: Info = {
   extensions: [".ex", ".exs"],
   root: NearestRoot(["mix.exs", "mix.lock"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("elixir-ls")
+    let binary = LspLaunch.findBinary("elixir-ls")
     if (!binary) {
       const elixirLsPath = path.join(Global.Path.bin, "elixir-ls")
       binary = path.join(
@@ -542,7 +543,7 @@ export const ElixirLS: Info = {
       )
 
       if (!(await Filesystem.exists(binary))) {
-        const elixir = which("elixir")
+        const elixir = LspLaunch.findBinary("elixir")
         if (!elixir) {
           return
         }
@@ -575,7 +576,7 @@ export const ElixirLS: Info = {
     }
 
     return {
-      process: spawn(binary, {
+      process: await spawn(binary, {
         cwd: root,
       }),
     }
@@ -587,10 +588,10 @@ export const Zls: Info = {
   extensions: [".zig", ".zon"],
   root: NearestRoot(["build.zig"]),
   async spawn(root, _ctx, flags) {
-    let bin = which("zls")
+    let bin = LspLaunch.findBinary("zls")
 
     if (!bin) {
-      const zig = which("zig")
+      const zig = LspLaunch.findBinary("zig")
       if (!zig) {
         return
       }
@@ -677,7 +678,7 @@ export const Zls: Info = {
     }
 
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -693,7 +694,7 @@ export const CSharp: Info = {
     if (!bin) return
 
     return {
-      process: spawn(bin, ["--stdio", "--autoLoadProjects"], {
+      process: await spawn(bin, ["--stdio", "--autoLoadProjects"], {
         cwd: root,
       }),
     }
@@ -714,7 +715,7 @@ export const Razor: Info = {
     }
 
     return {
-      process: spawn(
+      process: await spawn(
         bin,
         [
           "--stdio",
@@ -735,7 +736,7 @@ export const Razor: Info = {
 let roslynLanguageServerInstall: Promise<string | undefined> | undefined
 
 async function getRoslynLanguageServer(disableLspDownload: boolean) {
-  const existing = which("roslyn-language-server")
+  const existing = LspLaunch.findBinary("roslyn-language-server")
   if (existing) return existing
 
   const global = await roslynLanguageServerGlobalPath()
@@ -748,7 +749,7 @@ async function getRoslynLanguageServer(disableLspDownload: boolean) {
 }
 
 async function installRoslynLanguageServer(disableLspDownload: boolean) {
-  if (!which("dotnet")) {
+  if (!LspLaunch.findBinary("dotnet")) {
     return
   }
 
@@ -763,7 +764,7 @@ async function installRoslynLanguageServer(disableLspDownload: boolean) {
     return
   }
 
-  const resolved = which("roslyn-language-server")
+  const resolved = LspLaunch.findBinary("roslyn-language-server")
   if (resolved) {
     return resolved
   }
@@ -775,6 +776,7 @@ async function installRoslynLanguageServer(disableLspDownload: boolean) {
 }
 
 async function roslynLanguageServerGlobalPath() {
+  if (QuantCodeIdentity.enabled()) return
   const bin = path.join(
     process.env.DOTNET_CLI_HOME ?? os.homedir(),
     ".dotnet",
@@ -785,6 +787,7 @@ async function roslynLanguageServerGlobalPath() {
 }
 
 async function findVscodeRazorExtension() {
+  if (QuantCodeIdentity.enabled()) return
   const roots = [
     process.env.VSCODE_EXTENSIONS,
     path.join(os.homedir(), ".vscode", "extensions"),
@@ -825,9 +828,9 @@ export const FSharp: Info = {
   root: NearestRoot([".slnx", ".sln", ".fsproj", "global.json"]),
   extensions: [".fs", ".fsi", ".fsx", ".fsscript"],
   async spawn(root, _ctx, flags) {
-    let bin = which("fsautocomplete")
+    let bin = LspLaunch.findBinary("fsautocomplete")
     if (!bin) {
-      if (!which("dotnet")) {
+      if (!LspLaunch.findBinary("dotnet")) {
         return
       }
 
@@ -846,7 +849,7 @@ export const FSharp: Info = {
     }
 
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -860,10 +863,10 @@ export const SourceKit: Info = {
   async spawn(root) {
     // Check if sourcekit-lsp is available in the PATH
     // This is installed with the Swift toolchain
-    const sourcekit = which("sourcekit-lsp")
+    const sourcekit = LspLaunch.findBinary("sourcekit-lsp")
     if (sourcekit) {
       return {
-        process: spawn(sourcekit, {
+        process: await spawn(sourcekit, {
           cwd: root,
         }),
       }
@@ -871,7 +874,7 @@ export const SourceKit: Info = {
 
     // If sourcekit-lsp not found, check if xcrun is available
     // This is specific to macOS where sourcekit-lsp is typically installed with Xcode
-    if (!which("xcrun")) return
+    if (!LspLaunch.findBinary("xcrun")) return
 
     const lspLoc = await output(["xcrun", "--find", "sourcekit-lsp"])
 
@@ -880,7 +883,7 @@ export const SourceKit: Info = {
     const bin = lspLoc.text.trim()
 
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -900,7 +903,7 @@ export const RustAnalyzer: Info = {
       // Stop at filesystem root
       const cargoTomlPath = path.join(currentDir, "Cargo.toml")
       try {
-        const cargoTomlContent = await Filesystem.readText(cargoTomlPath)
+        const cargoTomlContent = await LspLaunch.readText(cargoTomlPath)
         if (cargoTomlContent.includes("[workspace]")) {
           return currentDir
         }
@@ -913,19 +916,19 @@ export const RustAnalyzer: Info = {
       currentDir = parentDir
 
       // Stop if we've gone above the app root
-      if (!currentDir.startsWith(ctx.worktree)) break
+      if (path.relative(ctx.worktree, currentDir).startsWith("..")) break
     }
 
     return crateRoot
   },
   extensions: [".rs"],
   async spawn(root) {
-    const bin = which("rust-analyzer")
+    const bin = LspLaunch.findBinary("rust-analyzer")
     if (!bin) {
       return
     }
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -938,10 +941,10 @@ export const Clangd: Info = {
   extensions: [".c", ".cpp", ".cc", ".cxx", ".c++", ".h", ".hpp", ".hh", ".hxx", ".h++"],
   async spawn(root, _ctx, flags) {
     const args = ["--background-index", "--clang-tidy"]
-    const fromPath = which("clangd")
+    const fromPath = LspLaunch.findBinary("clangd")
     if (fromPath) {
       return {
-        process: spawn(fromPath, args, {
+        process: await spawn(fromPath, args, {
           cwd: root,
         }),
       }
@@ -951,7 +954,7 @@ export const Clangd: Info = {
     const direct = path.join(Global.Path.bin, "clangd" + ext)
     if (await Filesystem.exists(direct)) {
       return {
-        process: spawn(direct, args, {
+        process: await spawn(direct, args, {
           cwd: root,
         }),
       }
@@ -964,7 +967,7 @@ export const Clangd: Info = {
       const candidate = path.join(Global.Path.bin, entry.name, "bin", "clangd" + ext)
       if (await Filesystem.exists(candidate)) {
         return {
-          process: spawn(candidate, args, {
+          process: await spawn(candidate, args, {
             cwd: root,
           }),
         }
@@ -1059,7 +1062,7 @@ export const Clangd: Info = {
     await fs.symlink(bin, path.join(Global.Path.bin, "clangd")).catch(() => {})
 
     return {
-      process: spawn(bin, args, {
+      process: await spawn(bin, args, {
         cwd: root,
       }),
     }
@@ -1071,16 +1074,16 @@ export const Svelte: Info = {
   extensions: [".svelte"],
   root: NearestRoot(["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("svelteserver")
+    let binary = LspLaunch.findBinary("svelteserver")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("svelte-language-server")
+      const resolved = await LspLaunch.packageBinary("svelte-language-server")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1098,22 +1101,22 @@ export const Astro: Info = {
   extensions: [".astro"],
   root: NearestRoot(["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]),
   async spawn(root, ctx, flags) {
-    const tsserver = Module.resolve("typescript/lib/tsserver.js", ctx.directory)
+    const tsserver = await LspLaunch.resolveModule("typescript/lib/tsserver.js", ctx.directory)
     if (!tsserver) {
       return
     }
     const tsdk = path.dirname(tsserver)
 
-    let binary = which("astro-ls")
+    let binary = LspLaunch.findBinary("astro-ls")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("@astrojs/language-server")
+      const resolved = await LspLaunch.packageBinary("@astrojs/language-server")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1168,7 +1171,7 @@ export const JDTLS: Info = {
       for (let i = 1; i < pomFiles.length; i++) {
         const parentDir = path.dirname(pomFiles[i])
         const rel = path.relative(parentDir, root)
-        const content = await fs.readFile(pomFiles[i], "utf-8").catch(() => null)
+        const content = await LspLaunch.readText(pomFiles[i]).catch(() => null)
         if (content && isModuleOf(content, rel)) {
           root = parentDir
         } else {
@@ -1186,7 +1189,12 @@ export const JDTLS: Info = {
   },
   extensions: [".java"],
   async spawn(root, _ctx, flags) {
-    const java = which("java")
+    if (QuantCodeIdentity.enabled()) {
+      const installed = LspLaunch.findBinary("jdtls")
+      if (!installed) return
+      return { process: await spawn(installed, { cwd: root }) }
+    }
+    const java = LspLaunch.findBinary("java")
     if (!java) {
       return
     }
@@ -1245,7 +1253,7 @@ export const JDTLS: Info = {
     )
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-jdtls-data"))
     return {
-      process: spawn(
+      process: await spawn(
         java,
         [
           "-jar",
@@ -1287,6 +1295,11 @@ export const KotlinLS: Info = {
     return NearestRoot(["pom.xml"])(file, ctx)
   },
   async spawn(root, _ctx, flags) {
+    if (QuantCodeIdentity.enabled()) {
+      const installed = LspLaunch.findBinary("kotlin-lsp")
+      if (!installed) return
+      return { process: await spawn(installed, ["--stdio"], { cwd: root }) }
+    }
     const distPath = path.join(Global.Path.bin, "kotlin-ls")
     const launcherScript =
       process.platform === "win32" ? path.join(distPath, "kotlin-lsp.cmd") : path.join(distPath, "kotlin-lsp.sh")
@@ -1351,7 +1364,7 @@ export const KotlinLS: Info = {
       return
     }
     return {
-      process: spawn(launcherScript, ["--stdio"], {
+      process: await spawn(launcherScript, ["--stdio"], {
         cwd: root,
       }),
     }
@@ -1363,16 +1376,16 @@ export const YamlLS: Info = {
   extensions: [".yaml", ".yml"],
   root: NearestRoot(["package-lock.json", "bun.lockb", "bun.lock", "pnpm-lock.yaml", "yarn.lock"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("yaml-language-server")
+    let binary = LspLaunch.findBinary("yaml-language-server")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("yaml-language-server")
+      const resolved = await LspLaunch.packageBinary("yaml-language-server")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1397,7 +1410,7 @@ export const LuaLS: Info = {
   ]),
   extensions: [".lua"],
   async spawn(root, _ctx, flags) {
-    let bin = which("lua-language-server")
+    let bin = LspLaunch.findBinary("lua-language-server")
 
     if (!bin) {
       if (flags.disableLspDownload) return
@@ -1505,7 +1518,7 @@ export const LuaLS: Info = {
     }
 
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -1517,16 +1530,16 @@ export const PHPIntelephense: Info = {
   extensions: [".php"],
   root: NearestRoot(["composer.json", "composer.lock", ".php-version"]),
   async spawn(root, _ctx, flags) {
-    let binary = which("intelephense")
+    let binary = LspLaunch.findBinary("intelephense")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("intelephense")
+      const resolved = await LspLaunch.packageBinary("intelephense")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1548,12 +1561,12 @@ export const Prisma: Info = {
   extensions: [".prisma"],
   root: NearestRoot(["schema.prisma", "prisma/schema.prisma", "prisma"], ["package.json"]),
   async spawn(root) {
-    const prisma = which("prisma")
+    const prisma = LspLaunch.findBinary("prisma")
     if (!prisma) {
       return
     }
     return {
-      process: spawn(prisma, ["language-server"], {
+      process: await spawn(prisma, ["language-server"], {
         cwd: root,
       }),
     }
@@ -1565,12 +1578,12 @@ export const Dart: Info = {
   extensions: [".dart"],
   root: NearestRoot(["pubspec.yaml", "analysis_options.yaml"]),
   async spawn(root) {
-    const dart = which("dart")
+    const dart = LspLaunch.findBinary("dart")
     if (!dart) {
       return
     }
     return {
-      process: spawn(dart, ["language-server", "--lsp"], {
+      process: await spawn(dart, ["language-server", "--lsp"], {
         cwd: root,
       }),
     }
@@ -1582,12 +1595,12 @@ export const Ocaml: Info = {
   extensions: [".ml", ".mli"],
   root: NearestRoot(["dune-project", "dune-workspace", ".merlin", "opam"]),
   async spawn(root) {
-    const bin = which("ocamllsp")
+    const bin = LspLaunch.findBinary("ocamllsp")
     if (!bin) {
       return
     }
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -1598,16 +1611,16 @@ export const BashLS: Info = {
   extensions: [".sh", ".bash", ".zsh", ".ksh"],
   root: async (_file, ctx) => ctx.directory,
   async spawn(root, _ctx, flags) {
-    let binary = which("bash-language-server")
+    let binary = LspLaunch.findBinary("bash-language-server")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("bash-language-server")
+      const resolved = await LspLaunch.packageBinary("bash-language-server")
       if (!resolved) return
       binary = resolved
     }
     args.push("start")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1624,7 +1637,7 @@ export const TerraformLS: Info = {
   extensions: [".tf", ".tfvars"],
   root: NearestRoot([".terraform.lock.hcl", "terraform.tfstate", "*.tf"]),
   async spawn(root, _ctx, flags) {
-    let bin = which("terraform-ls")
+    let bin = LspLaunch.findBinary("terraform-ls")
 
     if (!bin) {
       if (flags.disableLspDownload) return
@@ -1679,7 +1692,7 @@ export const TerraformLS: Info = {
     }
 
     return {
-      process: spawn(bin, ["serve"], {
+      process: await spawn(bin, ["serve"], {
         cwd: root,
       }),
       initialization: {
@@ -1697,7 +1710,7 @@ export const TexLab: Info = {
   extensions: [".tex", ".bib"],
   root: NearestRoot([".latexmkrc", "latexmkrc", ".texlabroot", "texlabroot"]),
   async spawn(root, _ctx, flags) {
-    let bin = which("texlab")
+    let bin = LspLaunch.findBinary("texlab")
 
     if (!bin) {
       if (flags.disableLspDownload) return
@@ -1764,7 +1777,7 @@ export const TexLab: Info = {
     }
 
     return {
-      process: spawn(bin, {
+      process: await spawn(bin, {
         cwd: root,
       }),
     }
@@ -1776,16 +1789,16 @@ export const DockerfileLS: Info = {
   extensions: [".dockerfile", "Dockerfile"],
   root: async (_file, ctx) => ctx.directory,
   async spawn(root, _ctx, flags) {
-    let binary = which("docker-langserver")
+    let binary = LspLaunch.findBinary("docker-langserver")
     const args: string[] = []
     if (!binary) {
       if (flags.disableLspDownload) return
-      const resolved = await Npm.which("dockerfile-language-server-nodejs")
+      const resolved = await LspLaunch.packageBinary("dockerfile-language-server-nodejs")
       if (!resolved) return
       binary = resolved
     }
     args.push("--stdio")
-    const proc = spawn(binary, args, {
+    const proc = await spawn(binary, args, {
       cwd: root,
       env: {
         ...process.env,
@@ -1802,12 +1815,12 @@ export const Gleam: Info = {
   extensions: [".gleam"],
   root: NearestRoot(["gleam.toml"]),
   async spawn(root) {
-    const gleam = which("gleam")
+    const gleam = LspLaunch.findBinary("gleam")
     if (!gleam) {
       return
     }
     return {
-      process: spawn(gleam, ["lsp"], {
+      process: await spawn(gleam, ["lsp"], {
         cwd: root,
       }),
     }
@@ -1819,15 +1832,15 @@ export const Clojure: Info = {
   extensions: [".clj", ".cljs", ".cljc", ".edn"],
   root: NearestRoot(["deps.edn", "project.clj", "shadow-cljs.edn", "bb.edn", "build.boot"]),
   async spawn(root) {
-    let bin = which("clojure-lsp")
+    let bin = LspLaunch.findBinary("clojure-lsp")
     if (!bin && process.platform === "win32") {
-      bin = which("clojure-lsp.exe")
+      bin = LspLaunch.findBinary("clojure-lsp.exe")
     }
     if (!bin) {
       return
     }
     return {
-      process: spawn(bin, ["listen"], {
+      process: await spawn(bin, ["listen"], {
         cwd: root,
       }),
     }
@@ -1849,12 +1862,12 @@ export const Nixd: Info = {
     return ctx.directory
   },
   async spawn(root) {
-    const nixd = which("nixd")
+    const nixd = LspLaunch.findBinary("nixd")
     if (!nixd) {
       return
     }
     return {
-      process: spawn(nixd, [], {
+      process: await spawn(nixd, [], {
         cwd: root,
         env: {
           ...process.env,
@@ -1869,7 +1882,7 @@ export const Tinymist: Info = {
   extensions: [".typ", ".typc"],
   root: NearestRoot(["typst.toml"]),
   async spawn(root, _ctx, flags) {
-    let bin = which("tinymist")
+    let bin = LspLaunch.findBinary("tinymist")
 
     if (!bin) {
       if (flags.disableLspDownload) return
@@ -1943,7 +1956,7 @@ export const Tinymist: Info = {
     }
 
     return {
-      process: spawn(bin, { cwd: root }),
+      process: await spawn(bin, { cwd: root }),
     }
   },
 }
@@ -1953,12 +1966,12 @@ export const HLS: Info = {
   extensions: [".hs", ".lhs"],
   root: NearestRoot(["stack.yaml", "cabal.project", "hie.yaml", "*.cabal"]),
   async spawn(root) {
-    const bin = which("haskell-language-server-wrapper")
+    const bin = LspLaunch.findBinary("haskell-language-server-wrapper")
     if (!bin) {
       return
     }
     return {
-      process: spawn(bin, ["--lsp"], {
+      process: await spawn(bin, ["--lsp"], {
         cwd: root,
       }),
     }
@@ -1970,12 +1983,12 @@ export const JuliaLS: Info = {
   extensions: [".jl"],
   root: NearestRoot(["Project.toml", "Manifest.toml", "*.jl"]),
   async spawn(root) {
-    const julia = which("julia")
+    const julia = LspLaunch.findBinary("julia")
     if (!julia) {
       return
     }
     return {
-      process: spawn(julia, ["--startup-file=no", "--history-file=no", "-e", "using LanguageServer; runserver()"], {
+      process: await spawn(julia, ["--startup-file=no", "--history-file=no", "-e", "using LanguageServer; runserver()"], {
         cwd: root,
       }),
     }

@@ -1,89 +1,40 @@
-# QuantCode 桌面端安装与升级
+# QuantCode Test V1.0 安装与连接
 
-QuantCode 桌面端复用 OpenCode 的 Electron 桌面壳，并使用 QuantCode 自己的产品身份、界面和发布通道。普通组员安装正式包后不需要安装 Bun、Node.js 或完整 OpenCode 源码。
+成员的完整教程见 [README 首次使用](../README.md#首次使用)，下载入口为 [Test V1.0 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.0.0-test.1)。
 
-> 当前状态（2026-08-24）：[GitHub Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981) 已通过 macOS Apple Silicon、macOS Intel、Windows x64、Linux x64 四目标构建、packaged launch smoke 和最终 release bundle 校验；Linux 产物包括 AppImage、DEB、RPM。它们均为 unsigned 测试 artifact，正式 Release 尚未发布。正式外发仍需 Apple Developer ID 签名与公证、Azure Trusted Signing，以及私有 Release 仓库的自动更新访问方案。当前测试包不能当作正式安装包外发。Linux ARM64 尚未纳入正式矩阵。
+## 安装包
 
-正式安装包完成验收后将发布在 [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases)。当前发行矩阵覆盖 macOS、Windows 和 Linux x64：
+| 平台 | 文件 |
+| --- | --- |
+| macOS Apple Silicon | `quantcode-1.0.0-test.1-mac-arm64.dmg` |
+| macOS Intel | `quantcode-1.0.0-test.1-mac-x64.dmg` |
+| Windows x64 | `quantcode-1.0.0-test.1-win-x64.exe` |
 
-| 平台 | 安装文件 | 适用场景 |
-| --- | --- | --- |
-| macOS Apple Silicon | `quantcode-<version>-mac-arm64.dmg` | M1/M2/M3/M4/M5 Mac |
-| macOS Intel | `quantcode-<version>-mac-x64.dmg` | Intel Mac |
-| Windows x64 | `quantcode-<version>-win-x64.exe` | Windows 10/11 64 位 |
-| Linux x64 | `quantcode-<version>-linux-x86_64.AppImage` | 便携运行；生成完整性 metadata，自动更新当前关闭 |
-| Linux x64 | `quantcode-<version>-linux-amd64.deb` | Debian/Ubuntu 手动安装 |
-| Linux x64 | `quantcode-<version>-linux-x86_64.rpm` | Fedora/RHEL 系手动安装 |
+这是公开仓库中的内部测试预发布，安装包未做平台代码签名，自动更新关闭。下载后使用同一 Release 的 `SHA256SUMS` 和 `release-manifest.json` 核对来源、版本和平台信任状态。正式签名版的发布门槛保持独立，详见 [发布说明](../frontend/packages/desktop/QUANTCODE_RELEASE.md)。
 
-## 源码与构建入口
+Mac 打开 DMG 并将 QuantCode 拖入应用程序；Windows 运行当前用户安装器。成员不需要安装 Python、Bun、Node.js 或另一套 OpenCode。
 
-前端、Electron 桌面壳和后端现统一在 quantcode 仓库。源码位于 `frontend/packages/app`、`frontend/packages/desktop`；根目录提供 `bun run dev:quantcode`、`bun run dev:desktop` 与 `bun run package:desktop`。构建工作流在本仓库 `.github/workflows/quantcode-desktop.yml`，仅手动触发；当前不执行 Mac/Windows 安装包验收。迁移指南见 [REPOSITORY_LAYOUT.md](REPOSITORY_LAYOUT.md)。
+## 服务端
 
-## 安装前准备
+Test V1.0 需要 Server C 上的常驻组织网关和个人研究宿主。每位成员使用已有 SSH 公钥登记，由名册绑定组、角色和工作目录；个人宿主的状态与访问凭据相互隔离。桌面中的本机服务不能替代组织的身份、共享 Memory 和远程工作区。
 
-组员需要：
+模型由组织测试服务统一提供。模型 Key 不随安装包分发；成员如需自定义模型，可以在个人宿主的模型设置中保存一份 URL/API Key 配置。
 
-1. Agent Group 分配的组别与 Server B 账户。
-2. 已登记公钥对应的 SSH 私钥；私钥只保存在成员设备上，不提交到 Git，也不上传到 QuantCode Release。
-3. 如需直接调用模型，按组内规范准备对应 API 凭据。
+## 第一次连接
 
-QuantCode 桌面端包含 Electron 运行时和本地 OpenCode 服务，不会在每次启动时重新创建 Python virtual environment，也不会重复安装 OpenCode。研究任务所需的集中式运行环境由 Server B 维护。
+1. 准备已登记私钥，并加载到本机 SSH Agent。Windows 需先启用系统 SSH Authentication Agent 服务。
+2. 用管理员分配的 SSH 用户名登录 Server C，读取本人 `~/.quantcode/test-v1/connection.json`。
+3. 按 README 建立 SSH 隧道，保持窗口开启。
+4. 在 QuantCode“设置与登录 → 管理服务器”添加本机隧道地址和个人访问凭据。
+5. 选择对应公钥连接，确认身份、组和授权目录。
+6. 新建任务，按方案面板确认后使用“继续执行”。
 
-## macOS
+连接文件包含个人访问凭据，不应提交 GitHub。私钥正文不上传给研究宿主或模型。
 
-1. 根据 CPU 下载 `arm64.dmg` 或 `x64.dmg`。
-2. 打开 DMG，将 `QuantCode.app` 拖入“应用程序”。
-3. 从“应用程序”启动 QuantCode。
+## 任务与升级
 
-正式版本必须经过 Developer ID 签名和 Apple 公证。内部未签名测试包只用于开发验收，出现 Gatekeeper 提示时不要向外部分发。
+任务、文件和产物由研究宿主持久保存。重新连接后可查看自己的历史任务；停止执行使用任务的停止操作，退出登录撤销当前会话。
 
-## Windows
+测试版采用手动升级：退出应用，下载同架构新包并核对后安装。不要在没有备份的情况下用旧版本覆盖新版本。桌面产品数据使用独立身份 `org.hkust.quantcode`，不与 OpenCode 共用更新状态。
 
-1. 下载 `quantcode-<version>-win-x64.exe`。
-2. 运行安装程序。QuantCode 默认安装到当前用户，无需管理员权限。
-3. 从开始菜单启动 QuantCode。
-
-正式版本必须使用 Azure Trusted Signing，并校验签名证书 Subject 与 updater 的 `publisherName` 一致。未签名的内部测试包可能触发 Microsoft Defender SmartScreen，不应作为正式版本传播。
-
-## Linux x64
-
-1. AppImage 可直接赋予执行权限后运行。`latest-linux.yml` 会记录 SHA-512 完整性信息，但它不是独立的来源签名；在客户端实现签名 metadata 或等价信任锚之前，Linux 自动更新保持关闭。
-2. Debian/Ubuntu 使用 `.deb`，Fedora/RHEL 系使用 `.rpm`；这两类包作为手动安装资产发布，升级时重新安装新包。
-3. 当前正式矩阵只覆盖 x86_64；ARM64 包仍需独立 runner 和桌面会话验收。
-
-## 首次启动
-
-1. 连接已配置的研究服务器。
-2. 在设置页选择宿主提供的公钥身份，由本机 SSH agent 签名。私钥不输入界面。
-3. 服务端 roster 自动绑定人员、组、角色与工作区。
-4. 确认身份认证及 MCP 会话均已就绪，再新建研究任务。
-
-应用数据与 OpenCode 隔离保存：
-
-- macOS：`~/Library/Application Support/org.hkust.quantcode`
-- Windows：`%APPDATA%\org.hkust.quantcode`
-- Linux：`~/.config/org.hkust.quantcode`
-
-## 自动升级
-
-macOS/Windows 升级代码已配置为每十分钟检查一次 QuantCode GitHub Release 的 `latest*.yml`，并在用户确认后下载和重启。这个能力目前尚未完成生产验收：Release 仓库是 Private，浏览器登录不会自动把 GitHub 权限交给桌面 updater。正式启用前必须将更新资产公开，或实现不内置长期 PAT 的受控更新服务/用户授权方案。Linux 即使以后使用公开 feed，也必须先增加独立的签名 metadata 或等价信任锚，不能只依赖可与安装包一起被替换的 SHA-512 文件。
-
-以下情况需要手动下载安装包：
-
-- 从未签名的内部测试版切换到正式签名版。
-- 自动更新元数据尚未发布。
-- Release 仓库仍为 Private，桌面 updater 没有读取权限。
-- 企业网络阻止访问 GitHub Release。
-
-## 开发者源码运行
-
-只有参与桌面端开发的人才需要 Bun 和 OpenCode fork：
-
-```bash
-git clone https://github.com/HKUST-QUANT-SOCIETY/opencode.git
-cd opencode
-bun install
-bun run dev:desktop
-```
-
-源码开发模式与正式安装包使用不同的数据目录，不应拿开发模式替代组员安装验收。
+Test V1.0 的实际验收范围和已知限制见 [验收摘要](TEST_V1_ACCEPTANCE.md)。真实量化数据和组件仍需对应服务及权限，界面显示未连接时不会伪造业务结果。

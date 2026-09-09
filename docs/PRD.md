@@ -3,16 +3,16 @@
 > **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
 
 
-> **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
+> **版本**：v5.2（2026-09-08，单执行引擎与源码内化决策）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
-> **唯一功能基线**：[FUNCTIONAL_SPEC.md](/Users/hendrixchen/Desktop/私募/QUANTcode/specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围。旧版 PRD 与 Day1-5 任务表是历史材料；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。
+> **唯一功能基线**：[FUNCTIONAL_SPEC.md](../specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。归档内容不作为当前行为或验收依据。
 
 > **2026-09-05 实现核验摘要**：`session_context` 是组/角色唯一来源；普通 UI 不提供自由切组、私钥文本输入或 `/deploy` 命令；Memory 通过只读 `search_memory` 接入，空库和未连接明确返回状态。PR、实验和领域数据输入统一经过仓库路径边界校验，生产拒绝仓库外路径。P-07 已有候选评审审计，生产运行时 strict reuse 默认启用，消费脚本支持定时消费；生产 timer 启用、真实 SSH gateway、ReturnsDataset/生产部署队列仍未完成，见 `docs/BUG_VERIFICATION_2026-09-05.md` 和 `docs/IMPLEMENTATION_AUDIT.md`。
 
 ## 0. 产品定义
 
-QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建立在 OpenCode 桌面端和 MimoCode 工作流设计之上。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
+QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢。它内化已经纳入本仓库的 OpenCode 执行引擎源码，并吸收 MimoCode 的工作流设计，由 QuantCode 统一维护桌面、会话、模型和任务执行。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
 
 各研究组和外部平台维护业务真相：报告平台汇总研究成果和策略表现，各组维护算法、回测、组合、期权和基本面业务，生产系统负责实际运行。QuantCode 把这些系统接入研究工作流，提供编排、契约、可观测和组织协作。
 
@@ -24,7 +24,9 @@ QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建
 | MimoCode | Compose ReAct、通用 Skill、Memory/FTS5、Task、Checkpoint/Replay、Subagent、Goal/Judge、Dream/Distill 的工作流设计 |
 | QuantCode | SSH roster 自动绑定组、组内 Memory、动态 Tool Catalog、组件能力卡、Blackboard handoff、Admin、GitGraph/Pop、P-10 和量化组件适配 |
 
-OpenCode 负责桌面和会话底座，MimoCode 提供可移植的工作流设计，QuantCode 负责组织规则和量化接入。三者的职责在设计、实现和验收中分开记录。
+OpenCode 表示源码来源，MimoCode 表示设计参考，用户使用的是一个 QuantCode 产品。QuantCode 维护同仓执行引擎、组织规则与量化接入；保留来源和许可证，不要求另装或配置 OpenCode。
+
+**2026-09-08 已确认目标，迁移未完成**：新任务以统一模型和会话引擎执行，Compose 与普通研究/工程任务共享执行机制。Python 提供身份、Memory、能力目录、Blackboard、契约、审批和审计服务，不再作为第二套通用 Agent。原生工具和子任务也必须受组织规则约束。实现阶段与退出条件见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
 
 ## 1. 要解决的问题
 
@@ -124,9 +126,9 @@ Admin 以自然语言询问组织状态，例如：
 
 固定面板仍保留，用于快速浏览；语义查询用于跨资源组合和解释。所有跨组查询和审批均需可追踪。
 
-### 3.5 六组 Compose 配置
+### 3.5 八组 Compose 配置
 
-六个组共享 OpenCode 的桌面、session、工具调用和状态流，也共享 MimoCode 的 Compose ReAct、Memory、Task、Checkpoint、Subagent、Goal/Judge、Dream/Distill 语义。每个组只通过登录会话、Skill、Memory scope 和当前生效工具目录获得差异。
+八个组共享 OpenCode 的桌面、session、工具调用和状态流，也共享 MimoCode 的 Compose ReAct、Memory、Task、Checkpoint、Subagent、Goal/Judge、Dream/Distill 语义。六个领域组保持各自的业务 Compose 流，`infra` 和 `agent` 组承载工程与平台任务。每个组只通过登录会话、Skill、Memory scope 和当前生效工具目录获得差异。
 
 | 流 | 主要步骤 | QuantCode 保留内容 | 业务边界 |
 |---|---|---|---|
@@ -197,7 +199,7 @@ AlphaProbe、CogAlpha、FactorMiner、Factor Research DB、Sentinel、PaperRAG�
 - 组身份、角色和权限边界；
 - Skill、能力目录和组内 Memory；
 - Agent 任务编排、上下文注入、Checkpoint、trace、回放和错误记录；
-- 组件发现、调用、契约检查和适配；
+- 组件发现、调用、契约检查和适配；当前量化组件按组员本地 checkout + Agent 预学习运行，服务 API 上线后再接入；
 - 方案先行工作流；
 - Admin 中枢、GitGraph、Pop 和运行治理；
 - Admin 专属生产部署黑盒入口和部署审计；
@@ -211,7 +213,7 @@ AlphaProbe、CogAlpha、FactorMiner、Factor Research DB、Sentinel、PaperRAG�
 - MCP、Provider、Workspace、Permission、插件、命令和工具结果回流；
 - Compose ReAct、15 个通用 Compose Skill、Memory FTS5/BM25、Task 树、Checkpoint/Replay、Context 重建、Subagent、Goal/Judge、Dream/Distill；
 - Pydantic/JSON Schema 契约、动态 Schema、Blackboard、trace、metrics、evidence、幂等键和副作用去重；
-- LangGraph AgentRunner 的迭代上限、循环检测、预算、降级、恢复和回放。
+- 统一执行引擎的迭代上限、循环检测、预算、降级、恢复和回放；现有 LangGraph AgentRunner 的行为按兼容要求迁移，不保留第二套新任务循环。
 
 QuantCode 在这些能力之上增加 roster 组绑定、组内 Memory、动态 Tool Catalog、量化组件能力卡、Admin、GitGraph、Pop、跨组 handoff 和 P-10 方案分级。
 
@@ -261,7 +263,7 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 
 ### 8.1 近期
 
-- 六个组都能完成登录、组绑定和组内 Memory 访问；
+- 八个组都能完成登录、组绑定和组内 Memory 访问；
 - Agent 在典型任务中优先命中 canonical 组件；
 - 目标收益和关键数据契约不再被业务仓重复计算；
 - 复杂开发任务能留下方案、实现和一致性证据；
@@ -278,12 +280,14 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 
 ### 8.3 里程碑与质量要求
 
+下表保留产品建设路线的 M1～M5，描述产品能力范围，不是本次执行引擎内化的实施顺序。其中旧 AgentRunner 的实现方式已被 2026-09-08 决策替代，不能据此继续为新任务运行 Python 通用循环。本次迁移严格按 [内化决策的 M0 → M1 → M2 → M3 → M4](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md) 推进，阶段状态以 [内化进度](decisions/RUNTIME_INTERNALIZATION_PROGRESS.md) 为准；两套编号不能互相作为完成证明。
+
 | 里程碑 | 达成标准 |
 |---|---|
-| M1 地基 | OpenCode/MimoCode 底座接入；ComposeTask、BlackboardState、HumanGate 和领域 Schema 完成评审；六组 Skill 可加载；AgentRunner 可运行 |
+| M1 地基 | OpenCode/MimoCode 底座接入；ComposeTask、BlackboardState、HumanGate 和领域 Schema 完成评审；八组 Skill 可加载；AgentRunner 可运行 |
 | M2 端到端 | 至少一条研究链完成任务、组件调用、artifact、trace、Memory 和回放；GitHub Actions 风控基建保持可运行 |
 | M3 横向接入 | 因子、模型、风控、基本面至少三组使用同一运行时；跨组 handoff、数据契约和权限审计可验证 |
-| M4 组织闭环 | 六组登录和组内 Memory 可用；Admin 查询、GitGraph、Pop、能力目录和错误聚合进入日常工作台 |
+| M4 组织闭环 | 八组登录和组内 Memory 可用；Admin 查询、GitGraph、Pop、能力目录和错误聚合进入日常工作台 |
 | M5 生产交接 | Admin 管理面通过生产服务账号完成受控部署；部署结果、artifact、版本和证据可回放；普通研究 Agent 无生产 shell |
 
 运行质量要求：一次因子评估（CSI 1000、三年回溯）目标 P95 小于 30 秒；PIT 检索目标 P95 小于 500 毫秒；研报 PDF 目标小于 5 分钟；Admin 跨组查询目标 P95 小于 15 秒；方案首轮输出目标小于 5 分钟。指标必须标注环境、数据规模、观察时间和降级状态。

@@ -63,11 +63,12 @@ else
     python3 -m pip install -e ".[dev]"
 fi
 
-# 5. 创建配置文件
-info "创建配置文件..."
-if [ ! -f "config.json" ]; then
-    cp config.example.json config.json
-    warn "⚠️ 请配置 QUANTCODE_API_KEY（MCP 只读环境变量，不从 config.json 读取）"
+# 5. 检查可选运行配置
+info "检查运行配置..."
+if [ -n "${QUANTCODE_API_KEY:-}" ]; then
+    info "✓ 已检测 QUANTCODE_API_KEY"
+else
+    warn "未配置 QUANTCODE_API_KEY；安装仍可完成，Agent 运行前请通过环境变量或桌面 Providers 设置模型。"
 fi
 
 # 6. 完成
@@ -77,9 +78,9 @@ info "✓ 安装完成！"
 echo "========================================="
 echo ""
 echo "下一步："
-echo "  1. 编辑 config.json，填入API keys"
-echo "     - DeepSeek API: https://platform.deepseek.com"
-echo "     - AutoEval API: 联系Agent组获取"
+echo "  1. 配置模型（任选其一）"
+echo "     - 环境变量：QUANTCODE_API_KEY / QUANTCODE_MODEL_PROVIDER / QUANTCODE_MODEL_NAME"
+echo "     - 桌面端 Settings → Providers"
 echo ""
 echo "  2. 启动QuantCode:"
 echo "     ./scripts/start-quantcode.sh"

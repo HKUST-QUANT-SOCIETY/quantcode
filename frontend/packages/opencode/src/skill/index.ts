@@ -17,6 +17,13 @@ import { Glob } from "@opencode-ai/core/util/glob"
 import { Discovery } from "./discovery"
 import { isRecord } from "@/util/record"
 import { escapeHtml } from "@/util/html"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeReadAccess } from "@/quantcode/read-access"
+import { readHostFile } from "@/quantcode/private-file"
+import { AppProcess } from "@opencode-ai/core/process"
+import { parseOption } from "@opencode-ai/core/config/markdown"
+import { lstat, readdir, realpath } from "node:fs/promises"
 
 const CLAUDE_EXTERNAL_DIR = ".claude"
 const AGENTS_EXTERNAL_DIR = ".agents"
@@ -100,6 +107,8 @@ export interface Interface {
   readonly all: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
+  readonly files: (name: string) => Effect.Effect<string[]>
+  readonly readDocument: (name: string, file: string) => Effect.Effect<string>
 }
 
 const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
@@ -256,6 +265,72 @@ const layer = Layer.effect(
     const fsys = yield* FSUtil.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
+    const processes = yield* AppProcess.Service
+
+    const hostDocuments = async (root: string, target = root): Promise<string[]> => {
+      const info = await lstat(target).catch(() => undefined)
+      if (!info || info.isSymbolicLink()) return []
+      const actual = await realpath(target)
+      if (!QuantCodeWorkspace.contains(root, actual) || (process.platform !== "win32" &&
+        ((info.mode & 0o022) || (process.getuid && info.uid !== process.getuid() && info.uid !== 0)))) return []
+      if (info.isFile()) return actual.endsWith(".md") && info.nlink === 1 ? [actual] : []
+      if (!info.isDirectory()) return []
+      const result: string[] = []
+      for (const name of await readdir(actual)) {
+        result.push(...await hostDocuments(root, path.join(actual, name)))
+        if (result.length > 1000) throw new Error("宿主 Skill 文档目录超过限制，请缩小发布范围。")
+      }
+      return result
+    }
+
+    const authorized = Effect.fn("Skill.authorized")(function* () {
+      const directory = yield* InstanceState.directory
+      const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory))
+      const cfg = yield* config.getGlobal()
+      const skills: Record<string, Info> = {}
+      const host = new Set<string>()
+      const trustedRoots = [path.join(global.config, "skills"), ...(process.env.QUANTCODE_BACKEND_ROOT
+        ? [path.join(process.env.QUANTCODE_BACKEND_ROOT, ".opencode", "groups", grant.identity.group, "skills")] : [])]
+      const roots: string[] = []
+      for (const root of trustedRoots) {
+        const info = yield* Effect.promise(() => lstat(root).catch(() => undefined))
+        if (!info?.isDirectory() || info.isSymbolicLink()) continue
+        const actual = yield* Effect.promise(() => realpath(root).catch(() => undefined))
+        if (actual && !QuantCodeWorkspace.contains(grant.root, actual)) roots.push(actual)
+      }
+      const addText = (file: string, text: string, trusted: boolean) => {
+        const md = parseOption(text)
+        if (!md || !isSkillFrontmatter(md.data)) return
+        if (skills[md.data.name]) throw new Error(`Skill 名称重复：${md.data.name}，请由维护员明确来源。`)
+        skills[md.data.name] = { name: md.data.name, description: md.data.description, location: file, content: md.content }
+        if (trusted) host.add(file)
+      }
+      for (const root of roots) {
+        const files = yield* Effect.promise(() => hostDocuments(root))
+        for (const file of files.filter(file => path.basename(file) === "SKILL.md")) {
+          addText(file, yield* Effect.promise(() => readHostFile(file)), true)
+        }
+      }
+      const workspaceRoots = new Set(["skills", "skill", ".agents/skills", ...(!flags.disableClaudeCodeSkills ? [".claude/skills"] : [])]
+        .map(item => path.join(grant.directory, item)))
+      for (const item of cfg.skills?.paths ?? []) {
+        const expanded = item.startsWith("~/") ? path.join(global.home, item.slice(2)) : path.resolve(grant.directory, item)
+        if (roots.some(root => QuantCodeWorkspace.contains(root, expanded))) continue
+        workspaceRoots.add(yield* Effect.promise(() => QuantCodeWorkspace.target(grant, expanded)))
+      }
+      for (const root of workspaceRoots) {
+        if (!(yield* Effect.promise(() => QuantCodeReadAccess.visible(grant, root)))) continue
+        const files = yield* QuantCodeReadAccess.search(grant, processes,
+          service => service.glob({ cwd: root, pattern: "**/SKILL.md", hidden: true, limit: 1000 })).pipe(Effect.orDie)
+        for (const file of files) {
+          const actual = path.resolve(root, file.path)
+          if (!(yield* Effect.promise(() => QuantCodeReadAccess.visible(grant, actual)))) continue
+          addText(actual, yield* Effect.promise(() => QuantCodeReadAccess.contextText(grant, actual)), false)
+        }
+      }
+      yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
+      return { grant, skills, host, roots }
+    })
     const discovered = yield* InstanceState.make(
       Effect.fn("Skill.discovery")(function* (ctx) {
         return yield* discoverSkills(
@@ -287,11 +362,17 @@ const layer = Layer.effect(
     )
 
     const get = Effect.fn("Skill.get")(function* (name: string) {
+      if (QuantCodeIdentity.enabled()) return (yield* authorized()).skills[name]
       const s = yield* InstanceState.get(state)
       return s.skills[name]
     })
 
     const require = Effect.fn("Skill.require")(function* (name: string) {
+      if (QuantCodeIdentity.enabled()) {
+        const selected = yield* authorized()
+        if (selected.skills[name]) return selected.skills[name]
+        return yield* new NotFoundError({ name, available: Object.keys(selected.skills).toSorted() })
+      }
       const s = yield* InstanceState.get(state)
       const info = s.skills[name]
       if (info) return info
@@ -299,22 +380,64 @@ const layer = Layer.effect(
     })
 
     const all = Effect.fn("Skill.all")(function* () {
+      if (QuantCodeIdentity.enabled()) return Object.values((yield* authorized()).skills)
       const s = yield* InstanceState.get(state)
       return Object.values(s.skills)
     })
 
     const dirs = Effect.fn("Skill.dirs")(function* () {
+      if (QuantCodeIdentity.enabled()) {
+        const selected = yield* authorized()
+        // Host public Markdown is read through Skill, never a general file/Shell grant.
+        return Object.values(selected.skills).filter(skill => !selected.host.has(skill.location)).map(skill => path.dirname(skill.location))
+      }
       return (yield* InstanceState.get(discovered)).dirs
     })
 
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
-      const s = yield* InstanceState.get(state)
+      const s = QuantCodeIdentity.enabled() ? yield* authorized() : yield* InstanceState.get(state)
       const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
 
-    return Service.of({ get, require, all, dirs, available })
+    const files = Effect.fn("Skill.files")(function* (name: string) {
+      if (!QuantCodeIdentity.enabled()) return []
+      const selected = yield* authorized()
+      const info = selected.skills[name]
+      if (!info) return []
+      const directory = path.dirname(info.location)
+      if (selected.host.has(info.location)) {
+        const result = yield* Effect.promise(() => hostDocuments(directory))
+        yield* Effect.promise(() => QuantCodeWorkspace.revalidate(selected.grant))
+        return result.filter(file => file !== info.location).slice(0, 10)
+      }
+      const result = yield* QuantCodeReadAccess.search(selected.grant, processes,
+        service => service.glob({ cwd: directory, pattern: "**/*.md", limit: 10 })).pipe(Effect.orDie)
+      const visible = yield* Effect.forEach(result, file => Effect.promise(async () => {
+        const target = path.resolve(directory, file.path)
+        return target !== info.location && await QuantCodeReadAccess.visible(selected.grant, target) ? target : undefined
+      }))
+      yield* Effect.promise(() => QuantCodeWorkspace.revalidate(selected.grant))
+      return visible.filter(file => file !== undefined)
+    })
+    const readDocument = Effect.fn("Skill.readDocument")(function* (name: string, file: string) {
+      if (!QuantCodeIdentity.enabled()) throw new Error("此入口仅用于组织 Skill 文档。")
+      const selected = yield* authorized()
+      const info = selected.skills[name]
+      if (!info) throw new Error("当前身份无法访问该 Skill。")
+      const directory = path.dirname(info.location)
+      const target = path.resolve(directory, file)
+      if (!QuantCodeWorkspace.contains(directory, target) || !target.endsWith(".md")) throw new Error("仅可读取该 Skill 内的 Markdown 文档。")
+      const text = selected.host.has(info.location) ? yield* Effect.promise(async () => {
+        const actual = await realpath(target)
+        if (!QuantCodeWorkspace.contains(directory, actual)) throw new Error("Skill 文档路径越界。")
+        return readHostFile(actual)
+      }) : yield* Effect.promise(() => QuantCodeReadAccess.contextText(selected.grant, target))
+      yield* Effect.promise(() => QuantCodeWorkspace.revalidate(selected.grant))
+      return text
+    })
+    return Service.of({ get, require, all, dirs, available, files, readDocument })
   }),
 )
 
@@ -328,8 +451,8 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
         .toSorted((a, b) => a.name.localeCompare(b.name))
         .flatMap((skill) => [
           "  <skill>",
-          `    <name>${skill.name}</name>`,
-          `    <description>${skill.description}</description>`,
+          `    <name>${escapeHtml(skill.name)}</name>`,
+          `    <description>${escapeHtml(skill.description ?? "")}</description>`,
           `    <location>${escapeHtml(skill.location)}</location>`,
           "  </skill>",
         ]),
@@ -348,7 +471,7 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Discovery.node, Config.node, EventV2Bridge.node, FSUtil.node, Global.node, RuntimeFlags.node],
+  deps: [Discovery.node, Config.node, EventV2Bridge.node, FSUtil.node, Global.node, RuntimeFlags.node, AppProcess.node],
 })
 
 export * as Skill from "."

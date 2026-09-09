@@ -7,22 +7,25 @@
  * identity id 不写入 localStorage / 任何 store。
  */
 
-export type SshLoginStatus = "form" | "connecting" | "connected" | "error"
+export type SshLoginStatus = "form" | "connecting" | "connected" | "disconnecting" | "error"
 
 export type SshConnectInput = {
   host: string
   user: string
   /** Local SSH Agent/Keychain identity selected by the desktop bridge. */
   identityId: string
+  group?: string
   /** 连接过程中逐行追加日志 */
   log: (line: string) => void
 }
 
 export type SshConnectResult =
-  | { status: "connected"; fingerprint: string; groups?: string[] }
+  | { status: "connected"; fingerprint: string; group?: string; groups?: string[] }
   | { status: "error"; reason: string }
 
 export type SshConnectFn = (input: SshConnectInput) => Promise<SshConnectResult>
+export type SshSession = Extract<SshConnectResult, { status: "connected" }>
+export type SshDisconnectFn = () => Promise<{ status: "disconnected" } | { status: "error"; reason: string }>
 
 export type SshIdentity = {
   id: string
@@ -30,6 +33,8 @@ export type SshIdentity = {
   host: string
   user: string
   fingerprint?: string
+  group?: string
+  groups?: string[]
 }
 
 /**
@@ -55,6 +60,9 @@ export type SshLoginProps = {
   connect?: SshConnectFn
   /** Identities supplied by the local SSH Agent/Keychain bridge. */
   identities?: SshIdentity[]
+  session?: SshSession
+  disconnect?: SshDisconnectFn
+  importKey?: () => Promise<{ fingerprint: string } | null>
 }
 
 export function SshLoginView(props: SshLoginProps): HTMLElement {
@@ -63,14 +71,14 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
   const identities = props.identities ?? []
   const root = document.createElement("div")
   root.className = "qc-ssh"
-  root.style.cssText = "display:grid;gap:10px;justify-items:start;"
 
-  let status: SshLoginStatus = "form"
+  let status: SshLoginStatus = props.session ? "connected" : "form"
   let identityId = identities[0]?.id ?? ""
   let host = identities[0]?.host ?? ""
   let user = identities[0]?.user ?? ""
-  let fingerprint = ""
-  let groups: string[] = []
+  let group = props.session?.group ?? ""
+  let fingerprint = props.session?.fingerprint ?? ""
+  let groups: string[] = props.session?.groups ?? []
   let reason = ""
   let logs: string[] = []
   let logEl: HTMLPreElement | undefined
@@ -87,8 +95,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
       status.textContent = t("quantcode.ssh.reason.unavailable")
       const hint = document.createElement("p")
       hint.className = "qc-ssh-hint"
-      hint.style.cssText = "margin:0;color:var(--qc-muted);font-size:10px;"
-      hint.textContent = "Connect with the local SSH Agent or Keychain identity provided by the desktop host."
+      hint.textContent = "未发现可用的本机 SSH 身份。"
       root.replaceChildren(status, hint)
       return
     }
@@ -96,7 +103,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     const identityLabel = document.createElement("label")
     identityLabel.className = "qc-field-label"
     identityLabel.htmlFor = "qc-ssh-identity"
-    identityLabel.textContent = "SSH identity"
+    identityLabel.textContent = "登录身份"
     const identitySelect = document.createElement("select")
     identitySelect.id = "qc-ssh-identity"
     identitySelect.className = "qc-select-wide"
@@ -112,11 +119,13 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
       const identity = identities.find((item) => item.id === identityId)
       host = identity?.host ?? ""
       user = identity?.user ?? ""
+      group = ""
+      render()
     })
 
     const target = document.createElement("code")
     target.className = "qc-artifact"
-    target.textContent = `${user}@${host}`
+    target.textContent = host
 
     const submit = document.createElement("button")
     submit.type = "button"
@@ -126,7 +135,8 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
 
     submit.addEventListener("click", () => {
       status = "connecting"
-      logs = [`ssh ${user}@${host}`, t("quantcode.ssh.logWaiting")]
+      reason = ""
+      logs = [t("quantcode.ssh.logWaiting")]
       render()
       void attempt()
     })
@@ -134,7 +144,26 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     const actions = document.createElement("div")
     actions.className = "qc-gate-actions"
     actions.append(submit)
-    root.replaceChildren(identityLabel, identitySelect, target, actions)
+    if (props.importKey) {
+      const importButton = document.createElement("button")
+      importButton.type = "button"
+      importButton.className = "qc-button qc-button-secondary"
+      importButton.textContent = "从文件导入 SSH 私钥"
+      importButton.addEventListener("click", () => {
+        importButton.disabled = true
+        void props.importKey!().then(() => render()).catch(error => {
+          reason = error instanceof Error ? error.message : "SSH 私钥导入失败，请重试。"
+          status = "error"
+          render()
+        })
+      })
+      actions.append(importButton)
+    }
+    root.replaceChildren(identityLabel, identitySelect, target)
+    const hint = document.createElement("p")
+    hint.className = "qc-ssh-hint"
+    hint.textContent = "登录后自动识别组织身份与业务组，无需选择。"
+    root.append(hint, actions)
   }
 
   const attempt = async () => {
@@ -147,6 +176,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     if (result.status === "connected") {
       status = "connected"
       fingerprint = result.fingerprint
+      group = result.group ?? group
       groups = result.groups ?? []
     } else {
       status = "error"
@@ -183,35 +213,50 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     fp.textContent = fingerprint
 
     root.replaceChildren(pill, fpLabel, fp)
-
-    if (groups.length > 0) {
-      const groupLabel = document.createElement("span")
-      groupLabel.className = "qc-section-label"
-      groupLabel.textContent = t("quantcode.ssh.groups")
-      const badgeRow = document.createElement("div")
-      badgeRow.className = "qc-ssh-badges"
-      badgeRow.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;"
-      for (const group of groups) {
-        const badge = document.createElement("span")
-        badge.className = "qc-connection-pill qc-ssh-badge"
-        badge.textContent = `${group} ${t("quantcode.ssh.groupSuffix")}`
-        badgeRow.append(badge)
-      }
-      root.append(groupLabel, badgeRow)
+    if (group) {
+      const label = document.createElement("span")
+      label.className = "qc-section-label"
+      label.textContent = t("quantcode.group.label")
+      const active = document.createElement("code")
+      active.dataset.sessionGroup = group
+      active.textContent = group
+      root.append(label, active)
     }
 
     const disconnect = document.createElement("button")
     disconnect.type = "button"
     disconnect.className = "qc-button qc-button-secondary"
     disconnect.textContent = t("quantcode.ssh.disconnect")
+    disconnect.disabled = status === "disconnecting" || !props.disconnect
+    disconnect.setAttribute("aria-busy", String(status === "disconnecting"))
     disconnect.addEventListener("click", () => {
-      status = "form"
+      if (!props.disconnect || status === "disconnecting") return
+      status = "disconnecting"
+      reason = ""
       render()
+      void props.disconnect().catch(() => ({ status: "error" as const, reason: t("quantcode.ssh.reason.host_unreachable") })).then(result => {
+        if (result.status === "disconnected") {
+          status = "form"
+          fingerprint = ""
+          groups = []
+          group = ""
+        } else {
+          status = "connected"
+          reason = result.reason
+        }
+        render()
+      })
     })
     const actions = document.createElement("div")
     actions.className = "qc-gate-actions"
     actions.append(disconnect)
     root.append(actions)
+    if (reason) {
+      const error = document.createElement("p")
+      error.setAttribute("role", "alert")
+      error.textContent = reason
+      root.append(error)
+    }
   }
 
   const renderFailed = () => {
@@ -221,7 +266,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
 
     const detail = document.createElement("p")
     detail.className = "qc-ssh-reason"
-    detail.style.cssText = "margin:0;font-size:11px;"
+    detail.setAttribute("role", "alert")
     detail.textContent = REASON_KEYS[reason] ? t(REASON_KEYS[reason]) : reason
 
     const retry = document.createElement("button")
@@ -242,7 +287,7 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     logEl = undefined
     if (status === "form") renderForm()
     else if (status === "connecting") renderConnecting()
-    else if (status === "connected") renderConnected()
+    else if (status === "connected" || status === "disconnecting") renderConnected()
     else renderFailed()
   }
 

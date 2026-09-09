@@ -1,3 +1,4 @@
+import { AppProcess } from "@opencode-ai/core/process"
 import { afterEach, describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
@@ -36,7 +37,7 @@ const ref = {
 
 const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
-    LayerNode.group([
+    LayerNode.group([AppProcess.node,
       Agent.node,
       BackgroundJob.node,
       EventV2Bridge.node,

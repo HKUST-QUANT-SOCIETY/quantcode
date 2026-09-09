@@ -34,7 +34,7 @@
   "mcp": {
     "quantcode": {
       "type": "local",
-      "command": ["python3", "-m", "quantcode.mcp_server"],
+      "command": ["python3", "-m", "quantcode.mcp_host"],
       "cwd": "{env:QUANTCODE_ROOT}",
       "environment": {
         "PYTHONPATH": "{env:QUANTCODE_ROOT}"

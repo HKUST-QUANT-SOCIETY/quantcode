@@ -7,7 +7,7 @@ import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
 
-const app = "opencode"
+const app = process.env.OPENCODE_CHANNEL === "quantcode" ? "quantcode" : "opencode"
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)
@@ -33,13 +33,8 @@ export const Path = paths
 Flock.setGlobal({ state })
 
 await Promise.all([
-  fs.mkdir(Path.data, { recursive: true }),
-  fs.mkdir(Path.config, { recursive: true }),
-  fs.mkdir(Path.state, { recursive: true }),
-  fs.mkdir(Path.tmp, { recursive: true }),
-  fs.mkdir(Path.log, { recursive: true }),
-  fs.mkdir(Path.bin, { recursive: true }),
-  fs.mkdir(Path.repos, { recursive: true }),
+  ...[Path.data, Path.config, Path.state, Path.tmp, Path.log, Path.bin, Path.repos].map(directory =>
+    fs.mkdir(directory, { recursive: true, ...(app === "quantcode" ? { mode: 0o700 } : {}) })),
 ])
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Global") {}

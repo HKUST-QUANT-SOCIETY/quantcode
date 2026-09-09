@@ -58,8 +58,34 @@ def submit_deploy(request: AdminDeployRequest, *, session_role: str, actor_id: s
             ))
     finally:
         conn.close()
-    return AdminDeployResult(status=AdminDeployStatus.STAGING, artifact_ref=request.artifact_ref,
-                             record_hash=digest, deployment_id=deployment_id)
+    # Optional external handoff.  Without a configured service the durable
+    # record remains STAGING; this is the truthful local-development state.
+    from runner.deployment_executor import submit as submit_external
+    external = submit_external({
+        "deployment_id": deployment_id,
+        "request_id": request_id,
+        "artifact_ref": request.artifact_ref,
+        "target": request.target,
+        "manifest": request.manifest,
+        "record_hash": digest,
+        "actor_id": actor_id,
+    })
+    if external is None:
+        return AdminDeployResult(status=AdminDeployStatus.STAGING, artifact_ref=request.artifact_ref,
+                                 record_hash=digest, deployment_id=deployment_id)
+    status = str(external.get("status") or "FAILED")
+    if status not in {item.value for item in AdminDeployStatus}:
+        status = AdminDeployStatus.FAILED.value
+    conn = _connection(database)
+    try:
+        with conn:
+            conn.execute("UPDATE deployments SET status=?, updated_at=? WHERE deployment_id=?", (
+                status, datetime.now(timezone.utc).isoformat(), deployment_id))
+    finally:
+        conn.close()
+    return AdminDeployResult(status=status, artifact_ref=request.artifact_ref,
+                             record_hash=digest, deployment_id=deployment_id,
+                             error=external.get("error"))
 
 
 def list_deployments(*, session_role: str, actor_id: str, database: Path | None = None,

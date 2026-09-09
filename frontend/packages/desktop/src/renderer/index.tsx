@@ -200,6 +200,8 @@ const createPlatform = (): Platform => {
       check: () => window.api.updater.check(),
       install: () => window.api.updater.install(),
     },
+    github: window.api.github,
+    identity: window.api.identity,
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
 from schemas.strategy import StrategyReport
 from tools.strategy.backtest_engine import (
@@ -252,7 +251,6 @@ def test_verdict_fail_when_drawdown_exceeds():
 # ---------------------------------------------------------------------------
 
 def test_run_strategy_backtest_tool_engine_mark():
-    import importlib
 
     import tools.strategy._register  # noqa: F401
     from tools.registry import registry

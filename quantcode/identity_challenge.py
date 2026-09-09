@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+import json
 import subprocess
 import tempfile
 import time
@@ -9,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from quantcode.identity import fingerprint_of_public_key, resolve_identity
+from quantcode.identity import fingerprint_of_public_key, resolve_identity, session_fields
 from schemas.session_context import SessionContext
 
 
@@ -22,27 +23,31 @@ class ChallengeStore:
 
     def __init__(self, ttl_seconds: int = 60) -> None:
         self.ttl_seconds = ttl_seconds
-        self._items: dict[str, tuple[str, str, float]] = {}
+        self._items: dict[str, tuple[str, str, float, str | None]] = {}
 
-    def issue(self, fingerprint: str) -> dict[str, str | int]:
+    def issue(self, fingerprint: str, *, group: str | None = None) -> dict[str, str | int]:
         now = time.monotonic()
         self._items = {key: value for key, value in self._items.items() if value[2] > now}
         if len(self._items) >= 1000:
             raise IdentityChallengeError("too many outstanding challenges")
         challenge_id = uuid.uuid4().hex
         nonce = secrets.token_urlsafe(32)
-        self._items[challenge_id] = (fingerprint, nonce, time.monotonic() + self.ttl_seconds)
+        if group is not None:
+            nonce = json.dumps({"purpose": "quantcode-login", "group": group, "nonce": nonce}, sort_keys=True)
+        self._items[challenge_id] = (fingerprint, nonce, time.monotonic() + self.ttl_seconds, group)
         return {"challenge_id": challenge_id, "nonce": nonce, "ttl_seconds": self.ttl_seconds}
 
-    def consume(self, challenge_id: str, fingerprint: str) -> str:
+    def consume(self, challenge_id: str, fingerprint: str, *, group: str | None = None) -> str:
         item = self._items.pop(challenge_id, None)
         if item is None:
             raise IdentityChallengeError("challenge not found or already used")
-        expected, nonce, expires = item
+        expected, nonce, expires, expected_group = item
         if time.monotonic() > expires:
             raise IdentityChallengeError("challenge expired")
         if not secrets.compare_digest(expected, fingerprint):
             raise IdentityChallengeError("challenge fingerprint mismatch")
+        if expected_group is not None and expected_group != group:
+            raise IdentityChallengeError("challenge group mismatch")
         return nonce
 
 
@@ -77,26 +82,22 @@ def authenticate(
     public_key: str,
     signature: str,
     roster_path: str | Path | None = None,
+    requested_group: str | None = None,
     session_ttl_minutes: int = 60,
 ) -> SessionContext:
     """Verify proof of key possession and return the server-owned Session Context."""
     fingerprint = fingerprint_of_public_key(public_key)
-    nonce = store.consume(challenge_id, fingerprint)
-    verify_ssh_signature(public_key, signature, nonce)
     entry = resolve_identity(fingerprint, roster_path)
+    selected_group = requested_group if requested_group is not None else (entry or {}).get("group")
+    nonce = store.consume(challenge_id, fingerprint, group=selected_group)
+    verify_ssh_signature(public_key, signature, nonce)
     required = ("actor_id", "group", "role", "workspace_id", "workspace_path")
     if entry is None or any(not entry.get(key) for key in required):
         raise IdentityChallengeError("roster entry is missing required Session Context fields")
     now = datetime.now(timezone.utc)
     return SessionContext(
         session_id=uuid.uuid4().hex,
-        actor_id=entry["actor_id"],
-        group=entry["group"],
-        role=entry["role"],
-        workspace_id=entry["workspace_id"],
-        workspace_path=entry["workspace_path"],
-        github_subject=entry.get("github_subject"),
-        resource_scopes=entry.get("resource_scopes", []),
+        **session_fields(entry, selected_group),
         issued_at=now,
         expires_at=now + timedelta(minutes=session_ttl_minutes),
     )

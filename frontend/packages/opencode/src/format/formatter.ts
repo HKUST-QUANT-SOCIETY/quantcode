@@ -6,6 +6,8 @@ import { which } from "@opencode-ai/core/util/which"
 
 export interface Context extends Pick<InstanceContext, "directory" | "worktree"> {
   experimentalOxfmt: boolean
+  packageBinary?: (pkg: string) => Promise<string | undefined>
+  probe?: (command: string[]) => Promise<Process.TextResult>
 }
 
 export interface Info {
@@ -76,7 +78,7 @@ export const prettier: Info = {
         devDependencies?: Record<string, string>
       }>(item)
       if (json.dependencies?.prettier || json.devDependencies?.prettier) {
-        const bin = await Npm.which("prettier")
+        const bin = await (context.packageBinary ? context.packageBinary("prettier") : Npm.which("prettier"))
         if (bin) return [bin, "--write", "$FILE"]
       }
     }
@@ -99,7 +101,7 @@ export const oxfmt: Info = {
         devDependencies?: Record<string, string>
       }>(item)
       if (json.dependencies?.oxfmt || json.devDependencies?.oxfmt) {
-        const bin = await Npm.which("oxfmt")
+        const bin = await (context.packageBinary ? context.packageBinary("oxfmt") : Npm.which("oxfmt"))
         if (bin) return [bin, "$FILE"]
       }
     }
@@ -145,7 +147,7 @@ export const biome: Info = {
     for (const config of configs) {
       const found = await Filesystem.findUp(config, context.directory, context.worktree)
       if (found.length > 0) {
-        const bin = await Npm.which("@biomejs/biome")
+        const bin = await (context.packageBinary ? context.packageBinary("@biomejs/biome") : Npm.which("@biomejs/biome"))
         if (bin) return [bin, "format", "--write", "$FILE"]
       }
     }
@@ -218,11 +220,11 @@ export const ruff: Info = {
 export const rlang: Info = {
   name: "air",
   extensions: [".R"],
-  async enabled() {
+  async enabled(context) {
     const air = which("air")
     if (air == null) return false
 
-    const output = await Process.text([air, "--help"], { nothrow: true })
+    const output = await (context.probe ? context.probe([air, "--help"]) : Process.text([air, "--help"], { nothrow: true }))
 
     // Check for "Air: An R language server and formatter"
     const firstLine = output.text.split("\n")[0]
@@ -240,7 +242,7 @@ export const uvformat: Info = {
     if (await ruff.enabled(context)) return false
     const uv = which("uv")
     if (uv == null) return false
-    const output = await Process.run([uv, "format", "--help"], { nothrow: true })
+    const output = await (context.probe ? context.probe([uv, "format", "--help"]) : Process.run([uv, "format", "--help"], { nothrow: true }))
     if (output.code === 0) return [uv, "format", "--", "$FILE"]
     return false
   },

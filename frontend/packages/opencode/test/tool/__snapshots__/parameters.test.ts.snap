@@ -1,5 +1,25 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
+exports[`tool parameters JSON Schema (wire shape) skill 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "file": {
+      "description": "Optional supporting Markdown file within this organization skill. Omit to load SKILL.md.",
+      "type": "string",
+    },
+    "name": {
+      "description": "The name of the skill from available_skills",
+      "type": "string",
+    },
+  },
+  "required": [
+    "name",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool parameters JSON Schema (wire shape) apply_patch 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -276,22 +296,6 @@ exports[`tool parameters JSON Schema (wire shape) read 1`] = `
   },
   "required": [
     "filePath",
-  ],
-  "type": "object",
-}
-`;
-
-exports[`tool parameters JSON Schema (wire shape) skill 1`] = `
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "properties": {
-    "name": {
-      "description": "The name of the skill from available_skills",
-      "type": "string",
-    },
-  },
-  "required": [
-    "name",
   ],
   "type": "object",
 }

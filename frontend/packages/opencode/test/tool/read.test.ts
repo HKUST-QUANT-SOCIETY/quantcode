@@ -1,3 +1,5 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { afterEach, describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -15,6 +17,7 @@ import { Permission } from "../../src/permission"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { Instruction } from "../../src/session/instruction"
 import { ReadTool } from "../../src/tool/read"
+import { AppProcess } from "@opencode-ai/core/process"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
 import { Filesystem } from "@/util/filesystem"
@@ -46,9 +49,10 @@ const ctx = {
 
 const readLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
-    LayerNode.group([
+    LayerNode.group([Database.node, EventV2Bridge.node,
       Agent.node,
       FSUtil.node,
+      AppProcess.node,
       CrossSpawnSpawner.node,
       Instruction.node,
       LSP.node,

@@ -37,9 +37,11 @@ def read_status(database: Path, context: dict) -> dict:
 
 
 def sync_once(gateway, *, sync=None, stop=None) -> None:
+    uses_default_sync = sync is None
     if sync is None:
         from runner.github_sync import sync_graph
         sync = sync_graph
+    pops_db = gateway.database.parent / "pops.db"
     with sqlite3.connect(gateway.database) as conn:
         digests = [row[0] for row in conn.execute("SELECT token_hash FROM identity_sessions")]
     observed = set()
@@ -57,8 +59,25 @@ def sync_once(gateway, *, sync=None, stop=None) -> None:
         attempt = {"started_at": datetime.now(timezone.utc).isoformat(), "last_attempt_status": "STARTED"}
         _save(gateway.database, context, attempt)
         try:
-            result = sync(context)
+            before = set()
+            try:
+                from runner.pop_service import PopService
+                before = {item.pop_id for item in PopService(pops_db).list(limit=1000)}
+            except Exception:
+                pass
+            result = sync(context, db_path=pops_db) if uses_default_sync else sync(context)
             attempt.update(last_attempt_status=result["sync_status"], repositories=len(result.get("repos", [])))
+            try:
+                from runner.pop_service import PopService
+                after = {item.pop_id for item in PopService(pops_db).list(limit=1000)}
+                fresh = len(after - before)
+                if fresh:
+                    from runner.system_notifications import notify
+                    notify("QuantCode · GitHub 更新", f"发现 {fresh} 条新更新，请在 GitGraph 中查看。")
+                    attempt["notifications"] = fresh
+            except Exception:
+                # Persistent Pops remain the source of truth if OS delivery is unavailable.
+                pass
         except Exception as exc:
             # Raw transport exceptions can contain request credentials. Persist
             # only the class; detailed repo errors remain in the scoped graph API.

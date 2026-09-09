@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,10 @@ DEFAULT_SESSION_ID = PROJECT_SESSION_ID
 
 class BlackboardPermissionError(PermissionError):
     """Raised when a caller crosses a hard GROUP-scope boundary."""
+
+
+class BlackboardVersionConflict(ValueError):
+    """The approved version no longer names the current shared entry."""
 
 
 def _utc_now() -> datetime:
@@ -179,11 +184,15 @@ class BlackboardService:
         entry: BlackboardEntry,
         *,
         requester_group: GroupName | str | None = None,
+        expected_version: int | None = None,
+        validate_before_write: Callable[[], None] | None = None,
     ) -> BlackboardEntry:
         """Insert or update an entry, incrementing version on overwrite."""
 
         effective_group = self._effective_group(requester_group)
         self._assert_write_allowed(entry, effective_group)
+        if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
+            raise ValueError("expected_version must be a non-negative integer")
         json.dumps(entry.value)
 
         entry_key = self._entry_key(entry.scope, entry.group, entry.key)
@@ -194,6 +203,12 @@ class BlackboardService:
                 (self.session_id, entry_key),
             ).fetchone()
             existing = BlackboardEntry.model_validate_json(row["entry_json"]) if row else None
+            if expected_version is not None and expected_version != (existing.version if existing else 0):
+                raise BlackboardVersionConflict("Blackboard version changed; read the current entry and obtain approval again")
+            if validate_before_write is not None:
+                # Recheck admission after waiting for the existing DB write
+                # transaction. The callback must not write to this same DB.
+                validate_before_write()
             data = entry.model_dump()
             now = _utc_now()
             if existing is not None:
@@ -240,6 +255,8 @@ class BlackboardService:
         group: GroupName | str | None = None,
         write_policy: WritePolicy | str = WritePolicy.OWNER,
         requester_group: GroupName | str | None = None,
+        expected_version: int | None = None,
+        validate_before_write: Callable[[], None] | None = None,
     ) -> BlackboardEntry:
         """Convenience wrapper for writing a JSON-serializable value."""
 
@@ -257,7 +274,8 @@ class BlackboardService:
             written_by_task_id=written_by_task_id,
             written_by_group=resolved_written_by,
         )
-        return self.put(entry, requester_group=requester_group)
+        return self.put(entry, requester_group=requester_group, expected_version=expected_version,
+                        validate_before_write=validate_before_write)
 
     def get_entry(
         self,
@@ -316,6 +334,7 @@ class BlackboardService:
 
 __all__ = [
     "BlackboardPermissionError",
+    "BlackboardVersionConflict",
     "BlackboardService",
     "DEFAULT_BLACKBOARD_DB",
     "DEFAULT_SESSION_ID",

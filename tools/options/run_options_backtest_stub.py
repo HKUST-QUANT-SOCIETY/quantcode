@@ -11,7 +11,8 @@ expiry_offset_days, quantity} 每期全量给（换仓语义同 weights）。
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta
+import os
+from datetime import date
 
 from pydantic import BaseModel, Field
 
@@ -49,6 +50,17 @@ def _synthetic_prices(underlying: str, n: int) -> list[float]:
 
 
 def run_options_backtest_execute(args: RunOptionsBacktestArgs, ctx: dict) -> dict:
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if environment not in {"test"} and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1":
+        return {
+            "status": "STAGING",
+            "result_status": "UNAVAILABLE",
+            "source": "vectorbt_qs",
+            "environment": environment or "production",
+            "error": "canonical options/backtest component is not connected; provide local component checkout or its API.",
+            "strategy_name": args.strategy_name,
+            "underlying": args.underlying,
+        }
     days = (args.end_date - args.start_date).days
     if days <= 0:
         report = OptionsBacktestReport(

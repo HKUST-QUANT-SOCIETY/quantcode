@@ -1,66 +1,59 @@
-/**
- * F-05 供应商设置只读视图：纯 DOM 构建（沿 metric-cards 模式，bun test 兼容）。
- * 浏览器无法读取进程 env，因此这里只展示配置名清单与默认值，
- * 实际取值经 MCP mcp.environment 注入（v0 静态展示，接 list_algorithms 数据另批）。
- */
+import { getOwner, onCleanup } from "solid-js"
+import type { QuantCodeAlgorithm } from "./api"
+import { viewEmpty } from "./workspace-ui"
 
-export type SupplierProps = {
-  provider?: string
-  model?: string
-  baseUrl?: string
-  algorithms?: (string | { id: string; description?: string })[]
-}
-
-const ROWS: { key: keyof Omit<SupplierProps, "algorithms">; label: string; env: string; fallback: string }[] = [
-  { key: "provider", label: "Provider", env: "QUANTCODE_MODEL_PROVIDER", fallback: "未读取" },
-  { key: "model", label: "Model", env: "QUANTCODE_MODEL_NAME", fallback: "未读取" },
-  { key: "baseUrl", label: "BaseURL", env: "QUANTCODE_MODEL_BASE_URL", fallback: "未读取" },
-]
-
-export function SupplierView(props: SupplierProps): HTMLElement {
-  const root = document.createElement("div")
-  root.className = "qc-supplier"
-  for (const row of ROWS) {
-    const line = document.createElement("div")
-    line.className = "qc-supplier-row"
-    const label = document.createElement("span")
-    label.className = "qc-supplier-label"
-    label.textContent = row.label
-    const name = document.createElement("code")
-    name.textContent = row.env
-    const value = document.createElement("strong")
-    value.textContent = props[row.key] ?? row.fallback
-    line.append(label, name, value)
-    root.append(line)
-  }
-  const hint = document.createElement("p")
-  hint.className = "qc-supplier-hint"
-  hint.textContent = "运行配置由 mcp.environment 管理；未读取时不推断 Provider 或模型。"
-  root.append(hint)
-  const algorithms = props.algorithms ?? []
-  const section = document.createElement("div")
-  section.className = "qc-supplier-algorithms"
-  const title = document.createElement("span")
-  title.className = "qc-section-label"
-  title.textContent = "ALGORITHMS"
-  section.append(title)
-  if (algorithms.length === 0) {
-    const empty = document.createElement("p")
-    empty.className = "qc-supplier-empty"
-    empty.textContent = "算法目录将随 list_algorithms 联动"
-    section.append(empty)
-  } else {
-    const list = document.createElement("ul")
-    list.className = "qc-supplier-algorithm-list"
-    for (const algorithm of algorithms) {
-      const item = document.createElement("li")
-      const id = typeof algorithm === "string" ? algorithm : algorithm.id
-      const description = typeof algorithm === "string" ? "" : algorithm.description
-      item.textContent = description ? `${id} · ${description}` : id
-      list.append(item)
+/** Published algorithm metadata only; algorithm execution remains in research tasks. */
+export function AlgorithmCatalogView(props: { fetcher: () => Promise<QuantCodeAlgorithm[]> }): HTMLElement {
+  const root = document.createElement("section")
+  root.className = "qc-algorithm-catalog"
+  root.setAttribute("aria-label", "已发布算法")
+  let revision = 0
+  if (getOwner()) onCleanup(() => { revision++ })
+  const load = async () => {
+    const current = ++revision
+    root.replaceChildren(viewEmpty("正在加载算法目录…", "brain"))
+    try {
+      const algorithms = await props.fetcher()
+      if (current !== revision) return
+      const intro = document.createElement("p")
+      intro.className = "qc-catalog-intro"
+      intro.textContent = "维护员发布的算法，可在研究任务中引用。演示与占位实现请以算法说明为准。"
+      const refresh = document.createElement("button")
+      refresh.type = "button"
+      refresh.className = "qc-button qc-button-secondary"
+      refresh.textContent = "刷新算法目录"
+      refresh.onclick = () => void load()
+      root.replaceChildren(intro, refresh)
+      if (!algorithms.length) root.append(viewEmpty("暂无已发布算法", "brain"))
+      for (const algorithm of algorithms) {
+        const item = document.createElement("article")
+        item.className = "qc-algorithm-entry"
+        const title = document.createElement("h3")
+        title.textContent = algorithm.id.replaceAll("_", " ")
+        const id = document.createElement("code")
+        id.textContent = algorithm.id
+        const details = document.createElement("details")
+        const summary = document.createElement("summary")
+        summary.textContent = "查看算法说明"
+        const description = document.createElement("p")
+        description.textContent = algorithm.description || "维护员尚未提供说明。"
+        details.append(summary, description)
+        item.append(title, id, details)
+        root.append(item)
+      }
+    } catch {
+      if (current !== revision) return
+      const error = viewEmpty("算法目录暂不可用", "brain")
+      error.setAttribute("role", "alert")
+      const retry = document.createElement("button")
+      retry.type = "button"
+      retry.className = "qc-button qc-button-secondary"
+      retry.textContent = "重试"
+      retry.onclick = () => void load()
+      error.append(retry)
+      root.replaceChildren(error)
     }
-    section.append(list)
   }
-  root.append(section)
+  void load()
   return root
 }

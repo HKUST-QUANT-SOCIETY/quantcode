@@ -1,3 +1,6 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Cause, Effect, Exit, Schema } from "effect"
@@ -7,7 +10,7 @@ import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Truncate.node, Agent.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([Database.node, AppProcess.node, EventV2Bridge.node, Truncate.node, Agent.node])))
 
 const params = Schema.Struct({ input: Schema.String })
 

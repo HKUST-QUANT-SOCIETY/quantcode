@@ -1,3 +1,5 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
 import { afterEach, describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
@@ -33,7 +35,7 @@ afterEach(async () => {
 
 const it = testEffect(
   LayerNode.compile(
-    LayerNode.group([
+    LayerNode.group([Database.node, AppProcess.node,
       LSP.node,
       FSUtil.node,
       EventV2Bridge.node,

@@ -26,6 +26,6 @@ Agent 必须先查 Capability Catalog、Group Memory 和数据契约。QuantCode
 3. 检查统一 ComponentCallResult；
 4. `SUCCEEDED` 时展示组件返回的 Artifact；
 5. `UNAVAILABLE`、`PARTIAL`、`MOCK`、`PROXY` 或 `STAGING` 时原样显示状态，不宣称生产评估成功；
-6. 真实共享资产写入仅由 `merge_to_main` 创建 `merge` Gate。
+6. 真实共享资产写入仅通过已接入当前精确 `merge` 审批和回执的公布工具；旧适配器未接入时明确报告，不自行放行。
 
-CI 兼容 Flow 为 `flows.factor_evaluation_adapter` / `factor:evaluation`，产品主路径仍是 ReAct。
+CI 兼容 Flow 为 `flows.factor_evaluation_adapter` / `factor:evaluation`，新任务始终使用当前 QuantCode 原生执行器。上列工具仅在服务端目录实际公布时调用。

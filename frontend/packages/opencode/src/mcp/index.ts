@@ -1,3 +1,5 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeToolCatalog } from "@/quantcode/tool-catalog"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -29,7 +31,7 @@ import { McpAuth } from "./auth"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { TuiEvent } from "@/server/tui-event"
 import open from "open"
-import { Cause, Effect, Exit, Layer, Context, Schema, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Context, Schema, Semaphore, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -351,6 +353,7 @@ const layer = Layer.effect(
           ...process.env,
           ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
           ...mcp.environment,
+          ...(QuantCodeIdentity.enabled() ? { OPENCODE_CHANNEL: "quantcode", QUANTCODE_UNIFIED_RUNTIME: "1" } : {}),
         },
       })
 
@@ -487,6 +490,7 @@ const layer = Layer.effect(
       }
     }
 
+    const readConnections = yield* Semaphore.make(1)
     const state = yield* InstanceState.make<State>(
       Effect.fn("MCP.state")(function* () {
         const cfg = yield* cfgSvc.get()
@@ -612,6 +616,37 @@ const layer = Layer.effect(
 
     const instructions = Effect.fn("MCP.instructions")(function* () {
       const s = yield* InstanceState.get(state)
+      if (QuantCodeIdentity.enabled()) {
+        const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        const cfg = yield* cfgSvc.get()
+        const catalogDigest = yield* Effect.promise(async () => QuantCodeToolCatalog.digest(await QuantCodeToolCatalog.load()))
+        const configDigest = QuantCodeToolCatalog.digest({ configured: cfg.mcp, connected: s.config })
+        const result: { name: string; instructions: string; tools: string[] }[] = []
+        for (const [name, item] of Object.entries(s.instructions)) {
+          if (s.status[name]?.status !== "connected") continue
+          const client = s.clients[name]
+          const config = s.config[name] ?? cfg.mcp?.[name]
+          const published: string[] = []
+          for (const tool of s.defs[name] ?? []) {
+            if (yield* Effect.promise(() => QuantCodeToolCatalog.allowed({ server: name, tool: tool.name, config, schema: tool.inputSchema }, identity))) {
+              published.push(McpCatalog.toolName(name, tool.name))
+            }
+          }
+          const content = yield* Effect.promise(() => Promise.all((["resource", "resource_template", "prompt"] as const)
+            .map(kind => QuantCodeToolCatalog.content(name, config, kind, identity))))
+          if (!published.length && content.every(entry => !entry.selectors.size)) continue
+          if (client !== s.clients[name] || s.status[name]?.status !== "connected") throw new Error("MCP 连接已变化。")
+          result.push({ name, instructions: item, tools: published })
+        }
+        const current = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        const latestConfig = yield* cfgSvc.get()
+        if (catalogDigest !== (yield* Effect.promise(async () => QuantCodeToolCatalog.digest(await QuantCodeToolCatalog.load()))) ||
+            configDigest !== QuantCodeToolCatalog.digest({ configured: latestConfig.mcp, connected: s.config })) throw new Error("工具说明发布版本已变化，请刷新。")
+        if (identity.session_id !== current.session_id || JSON.stringify(QuantCodeIdentity.ownerOf(identity)) !== JSON.stringify(QuantCodeIdentity.ownerOf(current))) {
+          throw new QuantCodeIdentity.IdentityError("读取工具说明时身份已变化。")
+        }
+        return result.sort((a, b) => a.name.localeCompare(b.name))
+      }
       return Object.entries(s.instructions)
         .filter(([name]) => s.status[name]?.status === "connected")
         .sort(([a], [b]) => a.localeCompare(b))
@@ -663,6 +698,7 @@ const layer = Layer.effect(
 
     const tools = Effect.fn("MCP.tools")(function* () {
       const result: Record<string, Tool> = {}
+      const identity = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeIdentity.currentIdentity()) : undefined
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
@@ -671,7 +707,7 @@ const layer = Layer.effect(
 
       for (const [clientName, client] of Object.entries(s.clients)) {
         if (s.status[clientName]?.status !== "connected") continue
-        const mcpConfig = config[clientName]
+        const mcpConfig = s.config[clientName] ?? config[clientName]
         const listed = s.defs[clientName]
         if (!listed) {
           yield* Effect.logWarning("missing cached tools for connected server", { clientName })
@@ -680,7 +716,16 @@ const layer = Layer.effect(
         const timeout = requestTimeout(s, clientName, mcpConfig, defaultTimeout)
         for (const mcpTool of listed) {
           const key = McpCatalog.toolName(clientName, mcpTool.name)
-          result[key] = McpCatalog.convertTool(mcpTool, client, timeout)
+          if (key in result) throw new Error("MCP 工具名称发生规范化冲突，拒绝覆盖已加载工具。")
+          const serverConfigHash = QuantCodeToolCatalog.digest(mcpConfig)
+          const schemaHash = QuantCodeToolCatalog.digest(mcpTool.inputSchema)
+          const origin = { server: clientName, tool: mcpTool.name, config: structuredClone(mcpConfig), schema: structuredClone(mcpTool.inputSchema),
+            current: () => s.clients[clientName] === client && s.status[clientName]?.status === "connected" &&
+              QuantCodeToolCatalog.digest(s.config[clientName] ?? config[clientName]) === serverConfigHash &&
+              QuantCodeToolCatalog.digest(s.defs[clientName]?.find(item => item.name === mcpTool.name)?.inputSchema) === schemaHash,
+          }
+          if (identity && !(yield* Effect.promise(() => QuantCodeToolCatalog.allowed(origin, identity)))) continue
+          result[key] = QuantCodeToolCatalog.bind(McpCatalog.convertTool(mcpTool, client, timeout), origin)
         }
       }
       return result
@@ -712,11 +757,54 @@ const layer = Layer.effect(
       })
     }
 
+    const contentRead = Effect.fnUntraced(function* <A>(clientName: string, kind: "resource" | "resource_template" | "prompt",
+      read: (client: MCPClient, timeout: number | undefined, selectors: Set<string>) => Promise<A>) {
+      const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+      const current = yield* InstanceState.get(state)
+      const config = yield* cfgSvc.get()
+      const client = current.clients[clientName]
+      const configured = current.config[clientName] ?? config.mcp?.[clientName]
+      if (!client || current.status[clientName]?.status !== "connected" || !configured) return undefined
+      const admitted = yield* Effect.promise(() => QuantCodeToolCatalog.content(clientName, configured, kind, identity))
+      if (!admitted.selectors.size) return undefined
+      const configDigest = QuantCodeToolCatalog.digest(configured)
+      const result = yield* Effect.promise(() => read(client,
+        requestTimeout(current, clientName, configured, config.experimental?.mcp_timeout), admitted.selectors))
+      const after = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+      const latest = yield* cfgSvc.get()
+      const latestConfig = current.config[clientName] ?? latest.mcp?.[clientName]
+      const permission = yield* Effect.promise(() => QuantCodeToolCatalog.content(clientName, latestConfig, kind, after))
+      if (identity.session_id !== after.session_id || JSON.stringify(QuantCodeIdentity.ownerOf(identity)) !== JSON.stringify(QuantCodeIdentity.ownerOf(after)) ||
+          current.clients[clientName] !== client || current.status[clientName]?.status !== "connected" ||
+          configDigest !== QuantCodeToolCatalog.digest(latestConfig) || admitted.digest !== permission.digest) throw new Error("资源授权、连接或登录已变化。")
+      return result
+    })
+
+    const contentList = Effect.fnUntraced(function* <T extends { name: string }>(kind: "resource" | "resource_template" | "prompt",
+      fetch: (client: MCPClient, timeout?: number) => Promise<T[]>, selector: (item: T) => string, requested?: string) {
+      const current = yield* InstanceState.get(state)
+      const result: Record<string, T & { client: string }> = {}
+      for (const server of requested ? [requested] : Object.keys(current.clients)) {
+        const entries = yield* contentRead(server, kind, async (client, timeout, selectors) => {
+          return (await fetch(client, timeout)).filter(entry => selectors.has(selector(entry)))
+        })
+        for (const entry of entries ?? []) {
+          const key = kind === "prompt" ? `${McpCatalog.sanitize(server)}:${McpCatalog.sanitize(entry.name)}`
+            : `${server.replaceAll("%", "%25").replaceAll(":", "%3A")}:${selector(entry)}`
+          if (result[key]) throw new Error("资源名称冲突，拒绝覆盖。")
+          result[key] = { ...entry, client: server }
+        }
+      }
+      return result
+    })
+
     const prompts = Effect.fn("MCP.prompts")(function* () {
+      if (QuantCodeIdentity.enabled()) return yield* contentList("prompt", McpCatalog.prompts, item => item.name)
       return yield* collectFromConnected(yield* InstanceState.get(state), McpCatalog.prompts, "prompts")
     })
 
     const resources = Effect.fn("MCP.resources")(function* (clientName?: string) {
+      if (QuantCodeIdentity.enabled()) return yield* contentList("resource", McpCatalog.resources, item => item.uri, clientName)
       return yield* collectFromConnected(
         yield* InstanceState.get(state),
         McpCatalog.resources,
@@ -727,6 +815,7 @@ const layer = Layer.effect(
     })
 
     const resourceTemplates = Effect.fn("MCP.resourceTemplates")(function* (clientName?: string) {
+      if (QuantCodeIdentity.enabled()) return yield* contentList("resource_template", McpCatalog.resourceTemplates, item => item.uriTemplate, clientName)
       return yield* collectFromConnected(
         yield* InstanceState.get(state),
         McpCatalog.resourceTemplates,
@@ -769,6 +858,10 @@ const layer = Layer.effect(
       name: string,
       args?: Record<string, string>,
     ) {
+      if (QuantCodeIdentity.enabled()) return yield* contentRead(clientName, "prompt", (client, timeout, selectors) => {
+        if (!selectors.has(name)) throw new Error("该提示模板未在当前授权目录发布。")
+        return client.getPrompt({ name, arguments: args }, { timeout })
+      })
       return yield* withClient(
         clientName,
         (client, timeout) => client.getPrompt({ name, arguments: args }, { timeout }),
@@ -778,6 +871,10 @@ const layer = Layer.effect(
     })
 
     const readResource = Effect.fn("MCP.readResource")(function* (clientName: string, resourceUri: string) {
+      if (QuantCodeIdentity.enabled()) return yield* contentRead(clientName, "resource", (client, timeout, selectors) => {
+        if (!selectors.has(resourceUri)) throw new Error("该资源未在当前授权目录发布。")
+        return client.readResource({ uri: resourceUri }, { timeout })
+      })
       return yield* withClient(
         clientName,
         (client, timeout) => client.readResource({ uri: resourceUri }, { timeout }),
@@ -791,6 +888,52 @@ const layer = Layer.effect(
       toolName: string,
       args: Record<string, unknown> = {},
     ) {
+      if (QuantCodeIdentity.enabled()) {
+        const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        const current = yield* InstanceState.get(state)
+        // Login invalidates the old transport. Reconnect a published host read
+        // in this same instance, without granting any task execution rights.
+        yield* readConnections.withPermits(1)(Effect.gen(function* () {
+          if (current.clients[clientName] && current.status[clientName]?.status === "connected") return
+          const latest = yield* cfgSvc.get()
+          const configured = current.config[clientName] ?? latest.mcp?.[clientName]
+          const release = yield* Effect.promise(QuantCodeToolCatalog.load)
+          const entry = release?.tools.find(item => item.server === clientName && item.tool === toolName)
+          if (!configured || !isMcpConfigured(configured) || configured.enabled === false || !entry ||
+              entry.effect !== "read" || !QuantCodeToolCatalog.visible(entry, identity) ||
+              entry.server_config_hash !== QuantCodeToolCatalog.digest(configured)) {
+            throw new Error("只读工具未发布、已禁用或不属于当前身份。")
+          }
+          yield* connect(clientName).pipe(Effect.orDie)
+          const after = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+          if (after.session_id !== identity.session_id) {
+            yield* disconnect(clientName).pipe(Effect.orDie)
+            throw new QuantCodeIdentity.IdentityError("连接组织工具期间登录身份已变化。")
+          }
+        }))
+        const cfg = yield* cfgSvc.get()
+        const definition = current.defs[clientName]?.find(item => item.name === toolName)
+        const config = current.config[clientName] ?? cfg.mcp?.[clientName]
+        if (!definition || !config) throw new Error("MCP 工具未连接或没有维护员配置。")
+        const client = current.clients[clientName]
+        const origin = { server: clientName, tool: toolName, config, schema: definition.inputSchema,
+          current: () => current.clients[clientName] === client && current.status[clientName]?.status === "connected" &&
+            QuantCodeToolCatalog.digest(current.defs[clientName]?.find(item => item.name === toolName)?.inputSchema) ===
+              QuantCodeToolCatalog.digest(definition.inputSchema),
+        }
+        const admitted = yield* Effect.promise(() => QuantCodeToolCatalog.allowed(origin, identity))
+        // Raw host lookup has no task plan/receipt/Gate context. Only published
+        // reads can use it; task writes must pass the native execution boundary.
+        if (!admitted || admitted.entry.effect !== "read") throw new Error("此 MCP 操作需要原生任务执行上下文或专用管理接口。")
+        const response = yield* withClient(clientName, (client, timeout) => client.callTool(
+          { name: toolName, arguments: args }, CallToolResultSchema,
+          { timeout, resetTimeoutOnProgress: true, onprogress: () => {} },
+        ), "callTool", { toolName })
+        const after = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        if (after.session_id !== identity.session_id) throw new Error("执行过程中登录身份已变化。")
+        yield* Effect.promise(() => QuantCodeToolCatalog.revalidate(origin, after, admitted))
+        return response
+      }
       return yield* withClient(
         clientName,
         (client, timeout) =>

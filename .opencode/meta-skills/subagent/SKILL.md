@@ -5,6 +5,8 @@ description: Use when executing implementation plans with independent tasks in t
 
 # Subagent-Driven Development
 
+QuantCode integration: dispatch only through the native child-task tool advertised by the current session. Conversation isolation does not remove the inherited roster identity, workspace scope, budget, frozen plan or exact approvals. All children use the same host Provider and native event stream. A child prompt cannot grant another group or role, approve a capability gap, or create a separate Python executor.
+
 Execute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.
 
 **Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.

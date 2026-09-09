@@ -8,6 +8,8 @@ group: infra
 
 服务端认证组必须为 `infra`。本组是工作职责，不是 Admin 角色。
 
+在当前 QuantCode 原生任务中执行，复用宿主 Provider 的一份配置；原生子任务继承身份、工作区、预算和方案。先用 `organization_reuse` 记录真实能力覆盖，再用 `organization_solution` 提出所需方案；用户在任务界面确认具体版本，Skill不能自行批准。
+
 1. 先查询 Capability Catalog 和本组长期 Memory，复用组织现有组件。
 2. 对任务分级；L2/L3 在 SolutionDoc 冻结后才开始实现。
 3. 通过宿主开发工具在已授权研发工作区完成研发环境、组件接入、测试与可观测性，执行相应测试。

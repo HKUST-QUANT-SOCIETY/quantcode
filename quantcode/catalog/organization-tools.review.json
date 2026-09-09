@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "id": "quantcode-organization-m1",
+  "reviewed_sources": {
+    ".opencode/groups/model/tool_allowlist.yaml": "2a7a0b26c4e7dbd67fb6e4054ed332a57fdb78caf62d070f72e7ca6373a7ed4a",
+    "dream/distill_prototype.py": "b392ddd3190f4f982d8408d1772bf708810374df3def5e0eac9583e8927c8961",
+    "frontend/packages/opencode/src/quantcode/legacy-provider.ts": "250c6d83b14878cf2ca45c706f38f1ee8ade86a97cbc010e95761039fca2a912",
+    "frontend/packages/opencode/src/quantcode/legacy-tools.ts": "85c3cbeebb074b80c352154eb85a55ce54a0334669dc4bd271e7a200a487dee2",
+    "frontend/packages/opencode/src/quantcode/legacy.ts": "59f4c90f50c215abcb96d0f82a65498d519a9f2e4e6ca4aeacb3304bcba93e5c",
+    "frontend/packages/opencode/src/quantcode/process-sandbox.ts": "fc51a32d7dde2bf98714f0ea84d90ccfcf5c64aa210a4436797e0c9ea855e632",
+    "frontend/packages/schema/src/quantcode-legacy.ts": "29394c277b8190308fbac709bc711b436a8826f576fbef5a335cd7289d12d9d8",
+    "frontend/packages/schema/src/quantcode-native-gate.ts": "b5407586273751c59a71a1e1b40632b2b9f82a76cf439179637386a6daad4f47",
+    "quantcode/file_mutation.py": "083d1fb3f2155983c5ebe354678eb101b7331e06d6afc0cc961d7ef3f6523a01",
+    "quantcode/gateway.py": "942fd80544afa66edb403793c1f2e1db3c2254a42b20efc02d9219ed41b5c953",
+    "quantcode/identity.py": "971c4569236f45d6f93eddecbe799d73a762ae607b0dc27aaac324b29a1e3431",
+    "quantcode/identity_login.py": "6428f3ee597355d911d3da4f63d66cab784a5ac59a5cc1d31928173786c4dd55",
+    "quantcode/knowledge_host.py": "bbe3f1a5f04da0e95c2e8e488f527e91dfb5053673219a153f8c5186a3cd4192",
+    "quantcode/legacy_approval.py": "3dc18daf3625e0d01507a2dc57970f5fdbb0e0d9bc213d083157e7e2305e0994",
+    "quantcode/legacy_contract.py": "765141d2040ef9fef2e96d209a460b634c06db6ebe9c600e488ea57a65ce6135",
+    "quantcode/legacy_executor.py": "eb4ffa0f05e5f4258fe9772af41d194d43f500995f02e83fad460be01563bea3",
+    "quantcode/legacy_host.py": "9031d1b0fd54020236bd0bf8d1b057f68631bccce7080ffab69bcb3d35b2421e",
+    "quantcode/legacy_tool_host.py": "778e8fb92dedf89d87f7292bc7527f45fea21941d875c8951f196e59eb0ee301",
+    "quantcode/legacy_usage.py": "4a32a22689c73aa47f8a794d753b99372becc80870c4fbd049148cf715f5426d",
+    "quantcode/mcp_host.py": "0035bb1fba0b09e289227c709f313bc054095870406080b3cc5f1fcdbee78d48",
+    "quantcode/mcp_server.py": "647532f88a9e8c8644e5859c9497a74e136b13a72f1dc954a5626c5a8269194d",
+    "quantcode/native_gate.py": "901b3e57ef322ae81e5abdb9baf81719295bdb61d6a717adf3b4f61c6fd2c4c5",
+    "quantcode/native_review.py": "e5aab9353a3fa0480ee8ed72095b32bc0a099083825e0034cae9a6d21b4d306b",
+    "quantcode/native_task_migration.py": "09c04dd6d36e48c829e226c8437884b47fbc62ade2268ea930f68b42fac162af",
+    "quantcode/native_tasks.py": "e6da620d315cbe6351bbebfe823d7d369f81aaa6653fd3e897812e33467bcf1a",
+    "quantcode/remote_mcp.py": "63e5d008c8cc2e4d8fb13a32d3a18fca95722a038022147f1b65dea9258351ad",
+    "runner/admin_scope.py": "11e8ef3c70dc5a78d5e185f62049a9e757beaf2fef7bc33addaf770e7bd34ac3",
+    "runner/agent_engine.py": "dcd7666d1cc23c9b8f644db91354da968430962dec6420b117eded126a584c95",
+    "runner/agent_mcp_tool.py": "61d74380f9fbecc8635ed51dcd8530d642d54006e1c81433f9b0584a2547eb16",
+    "runner/blackboard.py": "00b778d35ff7288fc85a83dc19cc2e01e1cabbd7c48028e0c72f567c21b389b4",
+    "runner/blackboard_keys.py": "e3c11531d8f1d64065c08964fd88f2dd9338535b075092e1e5a26e908ec81cfe",
+    "runner/compose_executor.py": "cc97412161db01ed58c1abb74fa57ae6e5802b4cec4c1b1d95ef6f32939a3e65",
+    "runner/config_loader.py": "257079c4ae082047ca8e583ee61e8895f16b37314c77fab4ef747587bffade3e",
+    "runner/distill/cards.py": "756e29d6c42667c6545eab741b5772d036af7774e997878341e8408e44f28b6a",
+    "runner/distill/governance.py": "393acb5ad5e62ce0c3cf1df73fa5586c4a779f22ce4f66879904a7a17cf01fc7",
+    "runner/dream_consumer.py": "f1d695f50c462154e8d7b15ac5593151ae80d0ee5fb0c32049eccaff535991fb",
+    "runner/execution_lock.py": "c30664af9ecbd9983f20eda32757fd7237f4bef7907c1581d547573e4df44da0",
+    "runner/memory/fts.py": "ffb55809e008bb12a8b7bf834d9b4224b927ddeb7b9bf5110055e84af8eaba86",
+    "runner/memory/grants.py": "6f55efaad02b9808b6972925d35feef2c7d5a5c8b3bdb077738464113b140576",
+    "runner/memory/query.py": "07a7851d8fd1a3c6c0e7a2aad5f68e0a4e4950d2478563662997c225349de209",
+    "runner/memory/service.py": "5c042c3f324232a5602a54c62893256562e45e3cde48211e57c6c0f8740a5de8",
+    "runner/parallel_registry.py": "e233db88432bc6b6fa87269dcc5ec8fc14f7322f32e2d5f9385c4592ac72361e",
+    "runner/run_history.py": "68a9da0859d12d09d465e748c31241a09182a1885bd7cee8d129213cc9d18732",
+    "schemas/capability_card.py": "892f1f39d4f1564db8ae4287b9cb1676d8f2e46150d67daa4b49eca31ad0b895",
+    "schemas/evidence_chain.py": "facc5246cb73e1bc274863159aeb1832d8efa5d21f7ccb1313952fa57fc053ed",
+    "schemas/groups.py": "62dc533ec02e4dc64cd74095879f62a3f6b762a5ac77f2fe6c0f73eedee9de55",
+    "schemas/human_gate.py": "84f1e265a1a9a42488dbe6ed150ff9d4fc036bf0e6190160228bcb07da36d5de",
+    "schemas/model.py": "86f5c317d65373deb93acbc3829ff458881bc177821b56356f39b59adf167be2",
+    "schemas/native_gate.py": "ca944f1748c84ef53630e821c397c4c84f6ca4b3d6b2ed81ddf0dd43954b0d24",
+    "schemas/native_review.py": "ccfb1812dab136198d11f1b44fc6b4486206012f392829ef52092a964eb96d84",
+    "schemas/native_tasks.py": "9acb9dc8370ae793eed35ce8f21ce514d2f83ae81a31656bc6f863b1fd3ee032",
+    "schemas/session_context.py": "d1690cc5d5dd47114542130fb3a18ab8159c3919e70a2531dd956f2dcec5f8e4",
+    "tools/admin/_register.py": "c9de0f872f17075a3405d7242c2c818485a4150e86f5e7df121f230d7e1a386f",
+    "tools/algorithms/_register.py": "8d3150b71771e2bfd345c8a18567342f8d6603eea668b946b3d5472c1d762eb6",
+    "tools/factor/gen_schema.py": "9b5c5fa24dcbc8edc9e8b0f6f8feab7ee97904f53aad810452acd867cedba801",
+    "tools/factor/match_main.py": "8c72edc2ebadc6819234d55133f893d2c39910d6cfd31de40cba4dee55951c60",
+    "tools/factor/merge_to_main.py": "301503b2d0d45bdf25bf9084bbe3cb597c206ce3bcd39375c7b9205755575121",
+    "tools/factor/quant_evaluator_adapter.py": "447ace6b4d97d8b853e8de74a9d17203ebd7c7515734358603b6dd7689092c48",
+    "tools/market/_register.py": "7417fd6b1880df91ca8265ca2a76fd8904d9266da42fbf729efe424b7284da8e",
+    "tools/market/backing.py": "3706b3c21a52b15028d4483b0babfa2224907c38065d811c7316f8d77c8d6e2e",
+    "tools/model/extract_metadata.py": "bf8caf2ca56d1355ecc767538d4730535bb07a21bc15ce1cc382be0e8f7f8ba2",
+    "tools/model/generate_model_spec.py": "dddb05ec5af36f6bdf95f56d5dc0deccb7a79637c3a92787ddbd99aa13af0ad3",
+    "tools/model/read_pr.py": "4bd774abf7cdccc9a3c05399bbb693222ea0a2c2796095df5fb93b978efb4b74",
+    "tools/model/write_blackboard.py": "886497293351ee4ca234a9f7299e14811a436d50d802e7427961fc45d88b444f",
+    "tools/registry.py": "fb827efb7aec2462618edb4d06451a67dbeacf44112c85932d2b39235012b4d2",
+    "tools/risk/_register.py": "58af3f0335a06eaddc6a0ade553b4bac17c38d5c9a59173ead462e9c7dc8bfa4",
+    "tools/risk/risk_tools.py": "3afa92c6e871f0fdd941ab879b3e4f9c661c2812a5be197a9b17bab1a72852ba",
+    "tools/schema_utils.py": "1e16a7f505ab96f70e1454a9f5af95f9f14b62732d0b87c4a553ffb9d0978dc4",
+    "tools/solution/_register.py": "aead1017fbe76078b5fec7427821368c20da345cd8f8fdd62de0bf956543f2d5",
+    "tools/subagent/_register.py": "6ecfccd0ad558e763ccc5f1fa5e05f84083cc69b51207ce7053d357f48a81873",
+    "tools/utils/dedupe.py": "d88cbe6ce86b055897402c0103470a204293dc603de5206603f16d63a85b86d0"
+  },
+  "tools": [
+    {
+      "tool": "list_capabilities",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "capability_catalog",
+      "status": "published",
+      "source": {
+        "file": "runner/distill/cards.py",
+        "symbol": "_list_capabilities_execute"
+      },
+      "review": "Returns visible_cards(load_cards()) metadata under ctx.group/role. Integration and maturity status are passed through from configs/capabilities.yaml; no component is executed and no status is promoted."
+    },
+    {
+      "tool": "search_memory",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "group_memory",
+      "status": "published",
+      "source": {
+        "file": "quantcode/mcp_server.py",
+        "symbol": "_search_memory_execute"
+      },
+      "review": "Only query and limit are accepted. Native runtime or a native task binding always uses the existing gateway /memory/search authority, regardless of QUANTCODE_SHARED_MEMORY; no local personal Memory fallback. Before and after lookup, compare the private credential record and live roster session, including group/role/workspace/scopes and native login. The gateway applies long-term group/project ACL and Admin disclosure audit. Legacy non-gateway mode keeps its existing local Memory path. Empty/uninitialized/unavailable/error responses retain their actual status."
+    },
+    {
+      "tool": "session_context",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "quantcode/mcp_server.py",
+        "symbol": "_session_context_execute"
+      },
+      "review": "Returns server-resolved session identity summary; input has no group, role, actor or credential fields."
+    },
+    {
+      "tool": "list_skills",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "quantcode/mcp_server.py",
+        "symbol": "_list_skills_execute"
+      },
+      "review": "Reads maintained group SKILL metadata through read_governed_skill; validates group identifiers and cross-group requests. A skill listing is not an execution grant."
+    },
+    {
+      "tool": "list_algorithms",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "tools/algorithms/_register.py",
+        "symbol": "_list_algorithms_execute"
+      },
+      "review": "Reads fixed algorithms config and returns id/description only. Does not call dynamic entry_point functions."
+    },
+    {
+      "tool": "describe_algorithm",
+      "effect": "read",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "tools/algorithms/_register.py",
+        "symbol": "_describe_algorithm_execute"
+      },
+      "review": "Reads a selected algorithms config entry. Does not import or call its entry_point. This metadata is not component connectivity evidence."
+    },
+    {
+      "tool": "generate_model_spec",
+      "effect": "read",
+      "groups": [
+        "model"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "tools/model/generate_model_spec.py",
+        "symbol": "generate_model_spec_execute"
+      },
+      "review": "Pure ModelSpec.model_validate(metadata).model_dump; validates supplied contract fields without reading code_path, invoking a model or calculating business results."
+    },
+    {
+      "tool": "list_factors",
+      "effect": "read",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "tools/market/_register.py",
+        "symbol": "_list_factors_execute"
+      },
+      "review": "Reads the host-configured staging selected_pool.csv and index.json via backing.list_factors_impl. backend accepts only staging; missing source remains an error. No Blackboard write or claim of canonical component CONNECTED."
+    },
+    {
+      "tool": "pool_browse",
+      "effect": "read",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "published",
+      "source": {
+        "file": "tools/market/_register.py",
+        "symbol": "_pool_browse_execute"
+      },
+      "review": "Reads filtered staging metadata via backing.pool_browse_impl. All paths derive from host staging configuration, not caller filenames; backend is restricted to staging. No component connectivity declaration."
+    },
+    {
+      "tool": "read_pr",
+      "effect": "read",
+      "groups": [
+        "model"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/model/read_pr.py",
+        "symbol": "read_pr_execute"
+      },
+      "review": "GitHub branch rechecks visible repository scope, but optional pr_path can read any file under backend checkout including organization control files. Keep disabled until local path/private-file policy is shared with the unified runtime."
+    },
+    {
+      "tool": "extract_metadata",
+      "effect": "read",
+      "groups": [
+        "model"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/model/extract_metadata.py",
+        "symbol": "extract_metadata_execute"
+      },
+      "review": "body/pr branches parse supplied text; optional pr_path delegates to _read_local_pr with the same backend control-file exposure as read_pr. Whole tool remains disabled; branch-sensitive policy is not inferred."
+    },
+    {
+      "tool": "run_algorithm",
+      "effect": "restricted_access",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/algorithms/_register.py",
+        "symbol": "_run_algorithm_execute"
+      },
+      "review": "Dynamically imports/calls algorithms.yaml entry_point and accepts blackboard_db_path. Its read-only description does not prove the target function effects or file authorization. Requires reviewed target and trusted resource routing."
+    },
+    {
+      "tool": "load_factor_panel",
+      "effect": "shared_write",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/market/_register.py",
+        "symbol": "_load_factor_panel_execute"
+      },
+      "review": "write_to_blackboard defaults true. Writes PROJECT shared.datasets.panel/{factor_id} through write_panel_to_blackboard, accepts caller blackboard_db_path override. Requires exact resource approval, trusted task attribution and removal of caller db override."
+    },
+    {
+      "tool": "write_blackboard",
+      "effect": "shared_write",
+      "groups": [
+        "model"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/model/write_blackboard.py",
+        "symbol": "write_blackboard_wrapped_execute"
+      },
+      "review": "Native transport binds actual JSON arguments and task/call IDs to the live roster. Native writer requires canonical shared.model_entries key, expected_version and current gateway approved merge Gate matching every operation field. Existing Blackboard BEGIN IMMEDIATE performs version CAS and rechecks approval inside its transaction. Native calls bypass legacy 300s dedupe and select only explicit private QUANTCODE_SHARED_BLACKBOARD_DB; legacy calls retain their existing path. Remains disabled until the actual shared service DB is configured and the native Gate/transport/receipt chain passes final verification.",
+      "resource": {
+        "prefix": "blackboard:project:",
+        "key_argument": "/key",
+        "version_argument": "/expected_version",
+        "key_pattern": "^shared\\.model_entries\\.[A-Za-z0-9_.-]+$"
+      }
+    },
+    {
+      "tool": "quant_evaluator",
+      "effect": "restricted_access",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/factor/quant_evaluator_adapter.py",
+        "symbol": "quant_evaluator_execute"
+      },
+      "review": "POSTs factor_spec to host-configured /evaluate using host secret. Adapter honestly returns UNAVAILABLE when not configured; remote persistence/idempotency contract has not been verified. Do not infer read-only or CONNECTED from the adapter name. Enable only after endpoint semantics and task receipts are integrated.",
+      "capability_id": "quant-evaluator"
+    },
+    {
+      "tool": "merge_to_main",
+      "effect": "shared_write",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/factor/merge_to_main.py",
+        "symbol": "_merge_execute"
+      },
+      "review": "May write the shared mainline factors index after legacy LangGraph HumanGate; arguments include factor_id/report/dry_run. Must bind exact report, code hash, index version and current reviewer in the unified Gate before admitting side effects."
+    },
+    {
+      "tool": "freeze_solution",
+      "effect": "shared_write",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/solution/_register.py",
+        "symbol": "_freeze_execute"
+      },
+      "review": "Legacy freeze accepts model-provided confirm bool and opens the default SolutionStore. Unified native organization_solution plus exact-version desktop review owns new-task freezing; this MCP entry must not bypass it."
+    },
+    {
+      "tool": "run_agent",
+      "effect": "legacy_executor",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "runner/agent_mcp_tool.py",
+        "symbol": "_run_agent_execute"
+      },
+      "review": "Invokes Python AgentRunner new/resume flow with its own model loop. New tasks must use the internalized native session engine; legacy history compatibility is a separate authenticated route."
+    },
+    {
+      "tool": "spawn_subagent",
+      "effect": "legacy_executor",
+      "groups": [
+        "fundamental",
+        "factor",
+        "model",
+        "risk",
+        "strategy",
+        "options",
+        "infra",
+        "agent"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/subagent/_register.py",
+        "symbol": "_spawn_subagent_execute"
+      },
+      "review": "Calls parallel_registry.create_subagent with Python model/checkpoint context. Native TaskTool/session children are the new-task executor; this entry stays outside their tool catalog."
+    },
+    {
+      "tool": "read_blackboard",
+      "effect": "read",
+      "groups": [
+        "model",
+        "risk"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/risk/_register.py",
+        "symbol": "_read_blackboard_execute"
+      },
+      "review": "Native input_data accepts only canonical blackboard_key under shared.model_entries and reads the explicitly configured shared host DB through existing BlackboardService. Returns actual entry version, or 0 only when the key is absent in an initialized store. No caller DB/project override or fixture fallback in native mode; identity rechecked before disclosure. Legacy risk read is unchanged. Remains disabled until shared service configuration and native context final verification."
+    },
+    {
+      "tool": "match_main",
+      "effect": "restricted_access",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/factor/match_main.py",
+        "symbol": "_match_main_execute"
+      },
+      "review": "May read SSH mainline snippets and calls runner.llm_provider.create_deepseek_llm using a separate Python environment/config model. Excluded from native tools/list and calls until a task-accounted host Provider interface replaces that model dependency; not a deterministic capability lookup."
+    },
+    {
+      "tool": "gen_schema",
+      "effect": "restricted_access",
+      "groups": [
+        "factor"
+      ],
+      "roles": [
+        "analyst",
+        "approver",
+        "admin"
+      ],
+      "resource_scopes": [],
+      "path_arguments": [],
+      "purpose": "ordinary",
+      "status": "disabled",
+      "source": {
+        "file": "tools/factor/gen_schema.py",
+        "symbol": "_gen_schema_execute"
+      },
+      "review": "Calls a separate /chat/completions endpoint using QUANTCODE_API_KEY/DEEPSEEK_* and may silently fill rule-based defaults. Excluded from native tools/list and calls; the native task may propose a draft, but real schema validation and source completeness remain required. No alternate Python model key is accepted for new tasks."
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { Duration, Effect } from "effect"
+import type { Duration, Effect, Scope } from "effect"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { Config } from "../../../src/config/config"
@@ -80,7 +80,7 @@ export type ActiveScenario = {
   path: string
   name: string
   project: ProjectOptions | undefined
-  seed: (ctx: ScenarioContext) => Effect.Effect<unknown>
+  seed: (ctx: ScenarioContext) => Effect.Effect<unknown, never, Scope.Scope>
   request: (ctx: ScenarioContext, state: unknown) => RequestSpec
   authProbe: RequestSpec | undefined
   expect: (ctx: ScenarioContext, state: unknown, result: CallResult) => Effect.Effect<void>
@@ -96,7 +96,7 @@ export type BuilderState<S> = {
   path: string
   name: string
   project: ProjectOptions | undefined
-  seed: (ctx: ScenarioContext) => Effect.Effect<S>
+  seed: (ctx: ScenarioContext) => Effect.Effect<S, never, Scope.Scope>
   request: (ctx: SeededContext<S>) => RequestSpec
   authProbe: RequestSpec | undefined
   capture: CaptureMode

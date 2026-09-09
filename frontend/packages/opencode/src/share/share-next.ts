@@ -19,6 +19,7 @@ import { SessionShareTable } from "@opencode-ai/core/share/sql"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { EventV2 } from "@opencode-ai/core/event"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
 
@@ -123,7 +124,7 @@ const layer = Layer.effect(
 
     function sync(sessionID: SessionID, data: Data[]) {
       return Effect.gen(function* () {
-        if (disabled) return
+        if (disabled || QuantCodeIdentity.enabled()) return
         const share = yield* getCached(sessionID)
         if (!share) return
 
@@ -161,7 +162,7 @@ const layer = Layer.effect(
           ),
         )
 
-        if (disabled) return cache
+        if (disabled || QuantCodeIdentity.enabled()) return cache
 
         const watch = <D extends EventV2.Definition>(
           def: D,
@@ -204,6 +205,7 @@ const layer = Layer.effect(
     )
 
     const request = Effect.fn("ShareNext.request")(function* () {
+      if (QuantCodeIdentity.enabled()) throw new Error("QuantCode 组织任务不支持上游公共分享服务，请使用组织内任务记录。")
       const headers: Record<string, string> = {}
       const active = yield* account.active()
       if (Option.isNone(active) || !active.value.active_org_id) {
@@ -245,7 +247,7 @@ const layer = Layer.effect(
     })
 
     const flush = Effect.fn("ShareNext.flush")(function* (sessionID: SessionID) {
-      if (disabled) return
+      if (disabled || QuantCodeIdentity.enabled()) return
       const s = yield* InstanceState.get(state)
       const queued = s.queue.get(sessionID)
       if (!queued) return
@@ -299,7 +301,7 @@ const layer = Layer.effect(
     })
 
     const init = Effect.fn("ShareNext.init")(function* () {
-      if (disabled) return
+      if (disabled || QuantCodeIdentity.enabled()) return
       yield* InstanceState.get(state)
     })
 
@@ -308,6 +310,7 @@ const layer = Layer.effect(
     })
 
     const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID) {
+      if (QuantCodeIdentity.enabled()) throw new Error("QuantCode 组织任务不支持上游公共分享服务，请使用组织内任务记录。")
       if (disabled) return { id: "", url: "", secret: "" }
       yield* Effect.logInfo("creating share", { sessionID: sessionID })
       const req = yield* request()
@@ -336,6 +339,9 @@ const layer = Layer.effect(
     })
 
     const remove = Effect.fn("ShareNext.remove")(function* (sessionID: SessionID) {
+      // Old external shares remain historical records. Removing a local task
+      // must not contact an upstream account service or claim it revoked data.
+      if (QuantCodeIdentity.enabled()) throw new Error("此记录属于旧的外部分享服务，需通过原服务撤销分享。")
       if (disabled) return
       yield* Effect.logInfo("removing share", { sessionID: sessionID })
       const s = yield* InstanceState.get(state)

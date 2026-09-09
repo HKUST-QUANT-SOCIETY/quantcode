@@ -1,3 +1,6 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { afterEach, describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -57,7 +60,7 @@ const lsp = Layer.succeed(
 )
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([Agent.node, FSUtil.node, CrossSpawnSpawner.node, Truncate.node, LSP.node]), [
+  LayerNode.compile(LayerNode.group([Database.node, AppProcess.node, EventV2Bridge.node, Agent.node, FSUtil.node, CrossSpawnSpawner.node, Truncate.node, LSP.node]), [
     [LSP.node, lsp],
   ]),
 )

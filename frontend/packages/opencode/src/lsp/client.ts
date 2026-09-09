@@ -2,7 +2,9 @@ import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node"
 import type { Diagnostic as VSCodeDiagnostic } from "vscode-languageserver-types"
-import { Process } from "@/util/process"
+import { LspLaunch } from "./launch"
+import { LspGovernance } from "./governance"
+import { QuantCodeWorkspace, type WorkspaceGrant } from "@/quantcode/workspace"
 import { LANGUAGE_EXTENSIONS } from "./language"
 import { Effect, Schema } from "effect"
 import type * as LSPServer from "./server"
@@ -126,8 +128,10 @@ export async function create(input: {
   root: string
   directory: string
   instance: InstanceContext
+  grant?: WorkspaceGrant
 }) {
-  const instance = input.instance
+  const grant = input.grant
+  await LspGovernance.check(grant)
 
   const connection = createMessageConnection(
     new StreamMessageReader(input.server.process.stdout as any),
@@ -136,6 +140,8 @@ export async function create(input: {
   input.server.process.stderr?.resume()
   // --- Connection state ---
 
+  let closed = false
+  const files: Record<string, { version: number; text: string }> = {}
   const pushDiagnostics = new Map<string, Diagnostic[]>()
   const pullDiagnostics = new Map<string, Diagnostic[]>()
   const published = new Map<string, { at: number; version?: number }>()
@@ -145,35 +151,72 @@ export async function create(input: {
   const mergedDiagnostics = (filePath: string) =>
     dedupeDiagnostics([...(pushDiagnostics.get(filePath) ?? []), ...(pullDiagnostics.get(filePath) ?? [])])
   const updatePushDiagnostics = (filePath: string, next: Diagnostic[]) => {
+    if (closed) return
     pushDiagnostics.set(filePath, next)
     for (const listener of diagnosticListeners) listener({ path: filePath, serverID: input.serverID })
   }
   const updatePullDiagnostics = (filePath: string, next: Diagnostic[]) => {
+    if (closed) return
     pullDiagnostics.set(filePath, next)
   }
   const emitRegistrationChange = () => {
     for (const listener of [...registrationListeners]) listener()
   }
 
+  const shutdown = async () => {
+    if (closed) return
+    closed = true
+    connection.end()
+    connection.dispose()
+    pushDiagnostics.clear()
+    pullDiagnostics.clear()
+    published.clear()
+    diagnosticListeners.clear()
+    registrationListeners.clear()
+    for (const key of Object.keys(files)) delete files[key]
+    await LspLaunch.stop(input.server.process)
+  }
+  const authorize = async () => {
+    if (!grant) return
+    if (closed || input.server.process.exitCode !== null || input.server.process.signalCode !== null) {
+      throw new QuantCodeWorkspace.WorkspaceDenied("语言服务已停止，请重新打开授权文件。")
+    }
+    await LspGovernance.check(grant).catch(async error => {
+      await shutdown()
+      throw error
+    })
+  }
+  if (grant) {
+    input.server.process.once("exit", () => { void shutdown().catch(() => undefined) })
+    input.server.process.once("error", () => { void shutdown().catch(() => undefined) })
+  }
+
   // --- LSP connection handlers ---
 
   connection.onNotification("textDocument/publishDiagnostics", (params) => {
-    const filePath = getFilePath(params.uri)
-    if (!filePath) return
-    published.set(filePath, {
-      at: Date.now(),
-      version: typeof params.version === "number" ? params.version : undefined,
-    })
-    if (shouldSeedDiagnosticsOnFirstPush(input.serverID) && !pushDiagnostics.has(filePath)) {
-      pushDiagnostics.set(filePath, params.diagnostics)
-      return
-    }
-    updatePushDiagnostics(filePath, params.diagnostics)
+    void (async () => {
+      const filePath = getFilePath(params.uri)
+      if (!filePath) return
+      await authorize()
+      if (grant && !await LspGovernance.allowedPath(filePath, grant)) return
+      const items = await LspGovernance.publicResult(params.diagnostics as Diagnostic[], grant)
+      await authorize()
+      published.set(filePath, {
+        at: Date.now(),
+        version: typeof params.version === "number" ? params.version : undefined,
+      })
+      if (shouldSeedDiagnosticsOnFirstPush(input.serverID) && !pushDiagnostics.has(filePath)) {
+        pushDiagnostics.set(filePath, items)
+        return
+      }
+      updatePushDiagnostics(filePath, items)
+    })().catch(() => undefined)
   })
   connection.onRequest("window/workDoneProgress/create", (params) => {
     return null
   })
   connection.onRequest("workspace/configuration", async (params) => {
+    await authorize()
     const items = (params as { items?: { section?: string }[] }).items ?? []
     return items.map((item) => configurationValue(input.server.initialization, item.section))
   })
@@ -197,12 +240,10 @@ export async function create(input: {
     }
     if (changed) emitRegistrationChange()
   })
-  connection.onRequest("workspace/workspaceFolders", async () => [
-    {
-      name: "workspace",
-      uri: pathToFileURL(input.root).href,
-    },
-  ])
+  connection.onRequest("workspace/workspaceFolders", async () => {
+    await authorize()
+    return [{ name: "workspace", uri: pathToFileURL(input.root).href }]
+  })
   connection.onRequest("workspace/diagnostic/refresh", async () => null)
   connection.listen()
 
@@ -250,10 +291,12 @@ export async function create(input: {
       },
     }),
     INITIALIZE_TIMEOUT_MS,
-  ).catch((err) => {
+  ).catch(async (err) => {
+    await shutdown()
     throw new InitializeError({ serverID: input.serverID, cause: err })
   })
 
+  await authorize()
   const syncKind = getSyncKind(initialized.capabilities)
   const hasStaticPullDiagnostics = Boolean(initialized.capabilities?.diagnosticProvider)
 
@@ -264,8 +307,6 @@ export async function create(input: {
       settings: input.server.initialization,
     })
   }
-
-  const files: Record<string, { version: number; text: string }> = {}
 
   // --- Diagnostic helpers ---
 
@@ -291,7 +332,8 @@ export async function create(input: {
   }
 
   async function requestDiagnosticReport(filePath: string, identifier?: string): Promise<DiagnosticRequestResult> {
-    const report = await withTimeout(
+    await authorize()
+    const received = await withTimeout(
       connection.sendRequest<DocumentDiagnosticReport | null>("textDocument/diagnostic", {
         ...(identifier ? { identifier } : {}),
         textDocument: {
@@ -300,6 +342,8 @@ export async function create(input: {
       }),
       DIAGNOSTICS_REQUEST_TIMEOUT_MS,
     ).catch(() => null)
+    const report = await LspGovernance.publicResult(received, grant)
+    await authorize()
     if (!report) return { handled: false, matched: false, byFile: new Map<string, Diagnostic[]>() }
 
     const byFile = new Map<string, Diagnostic[]>()
@@ -318,6 +362,7 @@ export async function create(input: {
     for (const [uri, related] of Object.entries(report.relatedDocuments ?? {})) {
       const relatedPath = getFilePath(uri)
       if (!relatedPath || !Array.isArray(related.items)) continue
+      if (grant && !await LspGovernance.allowedPath(relatedPath, grant)) continue
       push(relatedPath, related.items)
       handled = true
       matched = matched || relatedPath === filePath
@@ -330,13 +375,16 @@ export async function create(input: {
     filePath: string,
     identifier?: string,
   ): Promise<DiagnosticRequestResult> {
-    const report = await withTimeout(
+    await authorize()
+    const received = await withTimeout(
       connection.sendRequest<WorkspaceDiagnosticReport | null>("workspace/diagnostic", {
         ...(identifier ? { identifier } : {}),
         previousResultIds: [],
       }),
       DIAGNOSTICS_REQUEST_TIMEOUT_MS,
     ).catch(() => null)
+    const report = await LspGovernance.publicResult(received, grant)
+    await authorize()
     if (!report) return { handled: false, matched: false, byFile: new Map<string, Diagnostic[]>() }
 
     const byFile = new Map<string, Diagnostic[]>()
@@ -344,6 +392,7 @@ export async function create(input: {
     for (const item of report.items ?? []) {
       const relatedPath = item.uri ? getFilePath(item.uri) : undefined
       if (!relatedPath || !Array.isArray(item.items)) continue
+      if (grant && !await LspGovernance.allowedPath(relatedPath, grant)) continue
       const existing = byFile.get(relatedPath) ?? []
       byFile.set(relatedPath, existing.concat(item.items))
       matched = matched || relatedPath === filePath
@@ -387,7 +436,7 @@ export async function create(input: {
     if (!requests.length) return { handled: false, matched: false }
 
     const results: DiagnosticRequestResult[] = []
-    return new Promise<{ handled: boolean; matched: boolean }>((resolve) => {
+    return new Promise<{ handled: boolean; matched: boolean }>((resolve, reject) => {
       let pending = requests.length
       let resolved = false
       const finish = (merged: { handled: boolean; matched: boolean }, force = false) => {
@@ -398,12 +447,16 @@ export async function create(input: {
       }
 
       for (const request of requests) {
-        request.then((result) => {
+        void request.then((result) => {
           results.push(result)
           pending -= 1
           const merged = mergeResults(filePath, results)
           finish(merged)
           if (pending === 0) finish(merged, true)
+        }).catch(error => {
+          if (resolved) return
+          resolved = true
+          reject(error)
         })
       }
     })
@@ -544,6 +597,8 @@ export async function create(input: {
 
   const result = {
     root: input.root,
+    grant,
+    authorize,
     get serverID() {
       return input.serverID
     },
@@ -555,7 +610,10 @@ export async function create(input: {
         request.path = Filesystem.normalizePath(
           path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path),
         )
-        const text = await Filesystem.readText(request.path)
+        await authorize()
+        const text = grant ? (await QuantCodeWorkspace.readFile(grant, request.path)).content.toString("utf8")
+          : await Filesystem.readText(request.path)
+        await authorize()
         const extension = path.extname(request.path)
         const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"
 
@@ -594,6 +652,7 @@ export async function create(input: {
                   ]
                 : [{ text }],
           })
+          await authorize()
           return next
         }
 
@@ -617,6 +676,7 @@ export async function create(input: {
           },
         })
         files[request.path] = { version: 0, text }
+        await authorize()
         return 0
       },
     },
@@ -628,20 +688,19 @@ export async function create(input: {
       return result
     },
     async waitForDiagnostics(request: { path: string; version: number; mode?: "document" | "full"; after?: number }) {
+      await authorize()
       const normalizedPath = Filesystem.normalizePath(
         path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path),
       )
       if (request.mode === "document") {
         await waitForDocumentDiagnostics({ path: normalizedPath, version: request.version, after: request.after })
+        await authorize()
         return
       }
       await waitForFullDiagnostics({ path: normalizedPath, version: request.version, after: request.after })
+      await authorize()
     },
-    async shutdown() {
-      connection.end()
-      connection.dispose()
-      await Process.stop(input.server.process)
-    },
+    shutdown,
   }
 
   return result

@@ -35,6 +35,7 @@ type InlineEditorComponent = (props: {
 }) => JSX.Element
 
 export type WorkspaceSidebarContext = {
+  allowWorktrees: Accessor<boolean>
   currentDir: Accessor<string>
   navList: Accessor<Session[]>
   sidebarExpanded: Accessor<boolean>
@@ -138,6 +139,7 @@ const WorkspaceHeader = (props: {
 )
 
 const WorkspaceActions = (props: {
+  allowWorktrees: Accessor<boolean>
   directory: string
   local: Accessor<boolean>
   busy: Accessor<boolean>
@@ -199,7 +201,7 @@ const WorkspaceActions = (props: {
           >
             <DropdownMenu.ItemLabel>{props.language.t("common.rename")}</DropdownMenu.ItemLabel>
           </DropdownMenu.Item>
-          <DropdownMenu.Item
+          <Show when={props.allowWorktrees()}><DropdownMenu.Item
             disabled={props.local() || props.busy()}
             onSelect={() => props.showResetWorkspaceDialog(props.root, props.directory)}
           >
@@ -210,7 +212,7 @@ const WorkspaceActions = (props: {
             onSelect={() => props.showDeleteWorkspaceDialog(props.root, props.directory)}
           >
             <DropdownMenu.ItemLabel>{props.language.t("common.delete")}</DropdownMenu.ItemLabel>
-          </DropdownMenu.Item>
+          </DropdownMenu.Item></Show>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu>
@@ -403,6 +405,7 @@ export const SortableWorkspace = (props: {
                 </div>
               </Show>
               <WorkspaceActions
+                allowWorktrees={props.ctx.allowWorktrees}
                 directory={props.directory}
                 local={local}
                 busy={busy}

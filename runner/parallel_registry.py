@@ -18,9 +18,10 @@ ponytail:
 from __future__ import annotations
 
 import threading
+import os
 import time
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 from runner.agent_engine import AgentRunner
 from runner.langgraph_base import CHECKPOINTS_DB, make_thread_id
@@ -92,6 +93,8 @@ class SubagentRegistry:
         Raises:
             ValueError: model 缺失。
         """
+        if os.environ.get("OPENCODE_CHANNEL") == "quantcode" and os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1":
+            raise PermissionError("Legacy parallel execution is retired for native tasks; use the native task tree")
         if model is None:
             raise ValueError("create_subagent: model is required (parent model from ctx['_model'])")
 

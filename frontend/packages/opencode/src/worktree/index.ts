@@ -17,6 +17,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { AppProcess } from "@opencode-ai/core/process"
 import { InstanceState } from "@/effect/instance-state"
 import { WorktreeEvent } from "@opencode-ai/schema/worktree-event"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 export const Event = WorktreeEvent
 
@@ -200,6 +201,7 @@ const layer: Layer.Layer<
       name?: string
       detached?: boolean
     }) {
+      if (QuantCodeIdentity.enabled()) return yield* new CreateFailedError({ message: "组织任务仅使用已登记工作区；此旧入口不能在宿主私有目录自动创建执行环境。" })
       const ctx = yield* InstanceState.context
       if (ctx.project.vcs !== "git") {
         return yield* new NotGitError({ message: "Worktrees are only supported for git projects" })
@@ -279,6 +281,7 @@ const layer: Layer.Layer<
     })
 
     const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
+      if (QuantCodeIdentity.enabled()) return yield* new CreateFailedError({ message: "组织工作区由宿主登记，旧启动脚本入口不可执行。" })
       yield* setup(info)
       yield* boot(info, startCommand).pipe(
         Effect.catchCause((cause) => Effect.logError("worktree bootstrap failed", { cause })),
@@ -332,6 +335,10 @@ const layer: Layer.Layer<
 
     const list = Effect.fn("Worktree.list")(function* () {
       const ctx = yield* InstanceState.context
+      if (QuantCodeIdentity.enabled()) {
+        const current = yield* project.get(ctx.project.id)
+        return current ? [current.worktree, ...current.sandboxes].map(directory => ({ directory, name: pathSvc.basename(directory) })) : []
+      }
       if (ctx.project.vcs !== "git") {
         return []
       }
@@ -386,6 +393,7 @@ const layer: Layer.Layer<
     }
 
     const remove = Effect.fn("Worktree.remove")(function* (input: RemoveInput) {
+      if (QuantCodeIdentity.enabled()) return yield* new RemoveFailedError({ message: "此旧入口不能删除组织工作区，请通过宿主管理其登记和文件。" })
       const ctx = yield* InstanceState.context
       if (ctx.project.vcs !== "git") {
         return yield* new NotGitError({ message: "Worktrees are only supported for git projects" })
@@ -523,6 +531,7 @@ const layer: Layer.Layer<
     })
 
     const reset = Effect.fn("Worktree.reset")(function* (input: ResetInput) {
+      if (QuantCodeIdentity.enabled()) return yield* new ResetFailedError({ message: "此旧入口不能重置组织工作区，请在原生任务中明确文件恢复范围。" })
       const ctx = yield* InstanceState.context
       if (ctx.project.vcs !== "git") {
         return yield* new NotGitError({ message: "Worktrees are only supported for git projects" })

@@ -12,7 +12,6 @@ from schemas import (
     OptionSide,
     OptionsBacktestReport,
     OptionsPosition,
-    OptionsPositionLeg,
     OptionsSpec,
     VolSurfacePoint,
     VolSurfaceResult,

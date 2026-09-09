@@ -22,9 +22,15 @@ if _path_str not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def _explicit_test_environment(monkeypatch):
+def _explicit_test_environment(monkeypatch, tmp_path):
     """Unauthenticated environment fallbacks are legal only in explicit tests."""
     monkeypatch.setenv("QUANTCODE_ENV", "test")
+    from quantcode import identity
+
+    # Real member rosters must never influence tests or get modified by them.
+    monkeypatch.setattr(identity, "DEFAULT_BINDINGS_PATH", tmp_path / "test-roster.yaml")
+    for name in ("QUANTCODE_IDENTITY_SESSION_FILE", "QUANTCODE_SSH_KEY_FINGERPRINT", "QUANTCODE_SSH_FINGERPRINT"):
+        monkeypatch.delenv(name, raising=False)
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,8 @@ import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
-import { PRODUCT_FEEDBACK_URL } from "@/brand"
+import { isQuantCode, PRODUCT_FEEDBACK_URL } from "@/brand"
+import { projectRuntime } from "@/components/quantcode/project-actions"
 
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
@@ -115,6 +116,17 @@ export default function LegacyLayout(props: ParentProps) {
   const pickDirectory = useDirectoryPicker()
   const settings = useSettings()
   const server = useServer()
+  const [projectCapabilities] = createResource(() => isQuantCode ? serverSDK().client : undefined,
+    async client => ({ client, mode: await projectRuntime(client) }))
+  const projectMode = () => !isQuantCode ? "legacy" : !projectCapabilities.loading && !projectCapabilities.error &&
+    projectCapabilities()?.client === serverSDK().client ? projectCapabilities()?.mode : undefined
+  const allowWorktrees = () => projectMode() === "legacy"
+  const requireWorktrees = async () => {
+    if (!allowWorktrees()) return false
+    if (!isQuantCode) return true
+    const client = serverSDK().client
+    return projectRuntime(client).then(mode => serverSDK().client === client && mode === "legacy", () => false)
+  }
   const notification = useNotification()
   const permission = usePermission()
   const navigate = useNavigate()
@@ -582,6 +594,7 @@ export default function LegacyLayout(props: ParentProps) {
     workspaceName(directory, projectId, branch) ?? branch ?? getFilename(directory)
 
   const workspaceSetting = createMemo(() => {
+    if (!allowWorktrees()) return false
     const project = currentProject()
     if (!project) return false
     if (project.vcs !== "git") return false
@@ -993,11 +1006,12 @@ export default function LegacyLayout(props: ParentProps) {
       },
       {
         id: "workspace.new",
-        title: language.t("workspace.new"),
+        title: allowWorktrees() ? language.t("workspace.new") : "打开授权研究项目",
         category: language.t("command.category.workspace"),
         keybind: "mod+shift+w",
-        disabled: !workspaceSetting(),
+        disabled: !projectMode() || allowWorktrees() && !workspaceSetting(),
         onSelect: () => {
+          if (!allowWorktrees()) { if (projectMode() === "native") chooseProject(); return }
           const project = currentProject()
           if (!project) return
           return createWorkspace(project)
@@ -1005,12 +1019,13 @@ export default function LegacyLayout(props: ParentProps) {
       },
       {
         id: "workspace.toggle",
-        title: language.t("command.workspace.toggle"),
-        description: language.t("command.workspace.toggle.description"),
+        title: allowWorktrees() ? language.t("command.workspace.toggle") : "选择授权工作区",
+        description: allowWorktrees() ? language.t("command.workspace.toggle.description") : "选择当前研究宿主为你授权的项目目录。",
         category: language.t("command.category.workspace"),
         slash: "workspace",
-        disabled: !currentProject() || currentProject()?.vcs !== "git",
+        disabled: !projectMode() || allowWorktrees() && (!currentProject() || currentProject()?.vcs !== "git"),
         onSelect: () => {
+          if (!allowWorktrees()) { if (projectMode() === "native") chooseProject(); return }
           const project = currentProject()
           if (!project) return
           if (project.vcs !== "git") return
@@ -1332,6 +1347,7 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   function toggleProjectWorkspaces(project: LocalProject) {
+    if (!allowWorktrees()) { if (projectMode() === "native") chooseProject(); return }
     const enabled = layout.sidebar.workspaces(project.worktree)()
     if (enabled) {
       layout.sidebar.toggleWorkspaces(project.worktree)
@@ -1372,6 +1388,9 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const deleteWorkspace = async (root: string, directory: string, leaveDeletedWorkspace = false) => {
+    const context = serverSDK()
+    if (!await requireWorktrees()) return
+    if (serverSDK() !== context) return
     if (directory === root) return
 
     const current = currentDir()
@@ -1384,7 +1403,7 @@ export default function LegacyLayout(props: ParentProps) {
 
     setBusy(directory, true)
 
-    const result = await serverSDK()
+    const result = await context
       .client.worktree.remove({ directory: root, worktreeRemoveInput: { directory } })
       .then((x) => x.data)
       .catch((err) => {
@@ -1395,6 +1414,7 @@ export default function LegacyLayout(props: ParentProps) {
         return false
       })
 
+    if (serverSDK() !== context) return
     setBusy(directory, false)
 
     if (!result) return
@@ -1432,6 +1452,9 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const resetWorkspace = async (root: string, directory: string) => {
+    const context = serverSDK()
+    if (!await requireWorktrees()) return
+    if (serverSDK() !== context) return
     if (directory === root) return
     setBusy(directory, true)
 
@@ -1442,22 +1465,25 @@ export default function LegacyLayout(props: ParentProps) {
     })
     const dismiss = () => toaster.dismiss(progress)
 
-    const sessions: Session[] = await serverSDK()
+    const sessions: Session[] = await context
       .client.session.list({ directory })
       .then((x) => x.data ?? [])
       .catch(() => [])
+
+    if (serverSDK() !== context || !await requireWorktrees()) { dismiss(); setBusy(directory, false); return }
 
     clearWorkspaceTerminals(
       directory,
       sessions.map((s) => s.id),
       platform,
-      serverSDK().scope,
+      context.scope,
     )
-    await serverSDK()
+    await context
       .client.instance.dispose({ directory })
       .catch(() => undefined)
 
-    const result = await serverSDK()
+    if (serverSDK() !== context || !await requireWorktrees()) { dismiss(); setBusy(directory, false); return }
+    const result = await context
       .client.worktree.reset({ directory: root, worktreeResetInput: { directory } })
       .then((x) => x.data)
       .catch((err) => {
@@ -1468,6 +1494,7 @@ export default function LegacyLayout(props: ParentProps) {
         return false
       })
 
+    if (serverSDK() !== context) { dismiss(); return }
     if (!result) {
       setBusy(directory, false)
       dismiss()
@@ -1479,7 +1506,7 @@ export default function LegacyLayout(props: ParentProps) {
       sessions
         .filter((session) => session.time.archived === undefined)
         .map((session) =>
-          serverSDK()
+          context
             .client.session.update({
               sessionID: session.id,
               directory: session.directory,
@@ -1513,6 +1540,8 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   function DialogDeleteWorkspace(props: { root: string; directory: string }) {
+    const context = serverSDK()
+    const allowed = () => allowWorktrees() && serverSDK() === context
     const name = createMemo(() => getFilename(props.directory))
     const [data, setData] = createStore({
       status: "loading" as "loading" | "ready" | "error",
@@ -1533,6 +1562,7 @@ export default function LegacyLayout(props: ParentProps) {
     })
 
     const handleDelete = () => {
+      if (!allowed()) return
       const leaveDeletedWorkspace = !!params.dir && pathKey(currentDir()) === pathKey(props.directory)
       if (leaveDeletedWorkspace) {
         navigateWithSidebarReset(`/${base64Encode(props.root)}/session`)
@@ -1561,7 +1591,7 @@ export default function LegacyLayout(props: ParentProps) {
             <Button variant="ghost" size="large" onClick={() => dialog.close()}>
               {language.t("common.cancel")}
             </Button>
-            <Button variant="primary" size="large" disabled={data.status === "loading"} onClick={handleDelete}>
+            <Button variant="primary" size="large" disabled={!allowed() || data.status === "loading"} onClick={handleDelete}>
               {language.t("workspace.delete.button")}
             </Button>
           </div>
@@ -1571,6 +1601,8 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   function DialogResetWorkspace(props: { root: string; directory: string }) {
+    const context = serverSDK()
+    const allowed = () => allowWorktrees() && serverSDK() === context
     const name = createMemo(() => getFilename(props.directory))
     const [state, setState] = createStore({
       status: "loading" as "loading" | "ready" | "error",
@@ -1602,6 +1634,7 @@ export default function LegacyLayout(props: ParentProps) {
     })
 
     const handleReset = () => {
+      if (!allowed()) return
       dialog.close()
       void resetWorkspace(props.root, props.directory)
     }
@@ -1637,7 +1670,7 @@ export default function LegacyLayout(props: ParentProps) {
             <Button variant="ghost" size="large" onClick={() => dialog.close()}>
               {language.t("common.cancel")}
             </Button>
-            <Button variant="primary" size="large" disabled={state.status === "loading"} onClick={handleReset}>
+            <Button variant="primary" size="large" disabled={!allowed() || state.status === "loading"} onClick={handleReset}>
               {language.t("workspace.reset.button")}
             </Button>
           </div>
@@ -1818,8 +1851,12 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const createWorkspace = async (project: LocalProject) => {
+    const context = serverSDK()
+    if (!allowWorktrees()) { if (projectMode() === "native") chooseProject(); return }
+    if (!await requireWorktrees()) return
+    if (serverSDK() !== context) return
     clearSidebarHoverState()
-    const created = await serverSDK()
+    const created = await context
       .client.worktree.create({ directory: project.worktree })
       .then((x) => x.data)
       .catch((err) => {
@@ -1830,7 +1867,7 @@ export default function LegacyLayout(props: ParentProps) {
         return undefined
       })
 
-    if (!created?.directory) return
+    if (serverSDK() !== context || !created?.directory) return
 
     setWorkspaceName(created.directory, created.branch ?? getFilename(created.directory), project.id, created.branch)
 
@@ -1858,6 +1895,7 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const workspaceSidebarCtx: WorkspaceSidebarContext = {
+    allowWorktrees,
     currentDir,
     navList: currentSessions,
     sidebarExpanded,
@@ -1875,16 +1913,20 @@ export default function LegacyLayout(props: ParentProps) {
     isBusy,
     workspaceExpanded: (directory, local) => store.workspaceExpanded[directory] ?? local,
     setWorkspaceExpanded: (directory, value) => setStore("workspaceExpanded", directory, value),
-    showResetWorkspaceDialog: (root, directory) =>
-      dialog.show(() => <DialogResetWorkspace root={root} directory={directory} />),
-    showDeleteWorkspaceDialog: (root, directory) =>
-      dialog.show(() => <DialogDeleteWorkspace root={root} directory={directory} />),
+    showResetWorkspaceDialog: (root, directory) => {
+      if (allowWorktrees()) dialog.show(() => <DialogResetWorkspace root={root} directory={directory} />)
+    },
+    showDeleteWorkspaceDialog: (root, directory) => {
+      if (allowWorktrees()) dialog.show(() => <DialogDeleteWorkspace root={root} directory={directory} />)
+    },
     setScrollContainerRef: (el, mobile) => {
       if (!mobile) scrollContainerRef = el
     },
   }
 
   const projectSidebarCtx: ProjectSidebarContext = {
+    allowWorktrees,
+    workspaceActionsReady: () => projectMode() !== undefined,
     currentDir,
     currentProject,
     sidebarOpened: () => layout.sidebar.opened(),
@@ -1902,7 +1944,7 @@ export default function LegacyLayout(props: ParentProps) {
     closeProject,
     showEditProjectDialog: (proj) => showEditProjectDialog(server.current!, proj),
     toggleProjectWorkspaces,
-    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
+    workspacesEnabled: (project) => allowWorktrees() && project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
     workspaceIds,
     workspaceLabel,
     sessionProps: {
@@ -1948,12 +1990,14 @@ export default function LegacyLayout(props: ParentProps) {
         .filter((directory) => notification.project.unseenCount(directory) > 0)
         .forEach((directory) => notification.project.markViewed(directory))
     const workspacesEnabled = createMemo(() => {
+      if (!allowWorktrees()) return false
       const item = project()
       if (!item) return false
       if (item.vcs !== "git") return false
       return layout.sidebar.workspaces(item.worktree)()
     })
     const canToggle = createMemo(() => {
+      if (!allowWorktrees()) return projectMode() === "native"
       const item = project()
       if (!item) return false
       return item.vcs === "git" || layout.sidebar.workspaces(item.worktree)()
@@ -2061,7 +2105,7 @@ export default function LegacyLayout(props: ParentProps) {
                           }}
                         >
                           <DropdownMenu.ItemLabel>
-                            {workspacesEnabled()
+                            {!allowWorktrees() ? "选择授权工作区" : workspacesEnabled()
                               ? language.t("sidebar.workspaces.disable")
                               : language.t("sidebar.workspaces.enable")}
                           </DropdownMenu.ItemLabel>

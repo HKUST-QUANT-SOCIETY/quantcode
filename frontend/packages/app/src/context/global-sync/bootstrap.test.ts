@@ -93,6 +93,14 @@ describe("bootstrapDirectory", () => {
 })
 
 describe("query keys", () => {
+  test("QuantCode has no host working directory before workspace selection", async () => {
+    const client = {} as OpencodeClient
+    const query = new QueryClient()
+    expect(await query.fetchQuery(loadPathQuery(ServerScope.local, null, client))).toEqual({
+      home: "", state: "", config: "", worktree: "", directory: "",
+    })
+  })
+
   test("partitions identical directories by server scope", () => {
     const client = {} as OpencodeClient
     const remote = "https://debian.example" as typeof ServerScope.local

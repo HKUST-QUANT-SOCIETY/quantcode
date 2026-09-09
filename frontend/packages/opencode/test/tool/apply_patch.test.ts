@@ -1,3 +1,5 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
 import { describe, expect } from "bun:test"
 import path from "path"
 import * as fs from "fs/promises"
@@ -16,7 +18,7 @@ import { testEffect } from "../lib/effect"
 
 const it = testEffect(
   LayerNode.compile(
-    LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node]),
+    LayerNode.group([Database.node, AppProcess.node, LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node]),
   ),
 )
 

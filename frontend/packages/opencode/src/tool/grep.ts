@@ -6,6 +6,10 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import DESCRIPTION from "./grep.txt"
 import * as Tool from "./tool"
+import { AppProcess } from "@opencode-ai/core/process"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeReadAccess } from "@/quantcode/read-access"
 
 export const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({ description: "The regex pattern to search for in file contents" }),
@@ -22,6 +26,7 @@ export const GrepTool = Tool.define(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const ripgrep = yield* Ripgrep.Service
+    const appProcess = yield* AppProcess.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -51,6 +56,9 @@ export const GrepTool = Tool.define(
           const requested = path.isAbsolute(params.path ?? ins.directory)
             ? (params.path ?? ins.directory)
             : path.join(ins.directory, params.path ?? ".")
+          const grant = QuantCodeIdentity.enabled()
+            ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ins.directory)) : undefined
+          if (grant) yield* Effect.promise(() => QuantCodeWorkspace.target(grant, requested))
           const requestedInfo = yield* fs.stat(requested).pipe(Effect.catch(() => Effect.succeed(undefined)))
           yield* assertExternalDirectoryEffect(ctx, requested, {
             bypass: false,
@@ -60,12 +68,14 @@ export const GrepTool = Tool.define(
           const search = FSUtil.resolve(requested)
           const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
           const cwd = info?.type === "Directory" ? search : path.dirname(search)
-          const result = yield* ripgrep.grep({
-            cwd,
-            pattern: params.pattern,
-            include: params.include,
-            limit: 100,
-          })
+          const input = { cwd, pattern: params.pattern, include: params.include,
+            file: info?.type === "File" ? path.basename(search) : undefined, limit: 100 }
+          const found = grant ? yield* QuantCodeReadAccess.search(grant, appProcess, service => service.grep(input))
+            : yield* ripgrep.grep(input)
+          const result = grant ? (yield* Effect.forEach(found, match => Effect.promise(async () =>
+            await QuantCodeReadAccess.visibleMatch(grant, cwd, match) ? match : undefined)))
+              .filter(match => match !== undefined) : found
+          if (grant) yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
           if (result.length === 0) return empty
 
           const rows = result.map((item) => ({

@@ -1,10 +1,12 @@
-import { useParams } from "@solidjs/router"
+import { isQuantCode } from "@/brand"
+import { useNavigate, useParams } from "@solidjs/router"
 import { onCleanup } from "solid-js"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
 export function useSettingsDialog() {
+  const navigate = useNavigate()
   const dialog = useDialog()
   const params = useParams<{ id?: string }>()
   let run = 0
@@ -15,6 +17,7 @@ export function useSettingsDialog() {
   })
 
   return () => {
+    if (isQuantCode) { navigate(`/?settings=${Date.now()}`); return }
     const current = ++run
     const sessionID = params.id
     void import("@/components/settings-v2").then((module) => {

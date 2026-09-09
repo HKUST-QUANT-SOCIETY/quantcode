@@ -8,6 +8,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useWslServers } from "./context"
 import { enterWslOpencodeStep } from "./settings-model"
+import { isQuantCode } from "@/brand"
 
 type WslServerStep = "wsl" | "distro" | "opencode"
 
@@ -23,6 +24,9 @@ interface DialogWslServerProps {
 
 export function DialogAddWslServer(props: DialogWslServerProps = {}) {
   const language = useLanguage()
+  if (isQuantCode) return <div class="px-5 pb-5 text-14-regular text-text-weak">
+    {language.t("quantcode.servers.managedRuntime")}
+  </div>
   const platform = usePlatform()
   const dialog = useDialog()
   const wslServers = useWslServers()

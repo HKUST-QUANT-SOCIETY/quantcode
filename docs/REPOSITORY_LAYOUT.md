@@ -18,12 +18,20 @@ bun run dev:quantcode
 
 `bun run dev:desktop` 启动桌面开发；`bun run build:web` 构建网页；`bun run build:desktop` 构建桌面代码；`bun run package:desktop` 生成当前平台安装包。源码迁移不等于签名/安装包验收，现有服务不会因迁移自动重启。
 
+默认开发端口为后端 `4096`、网页 `4444`。端口已被占用时可使用 `QUANTCODE_BACKEND_PORT=4196 QUANTCODE_APP_PORT=4544 bun run dev:quantcode`，并确保前端会同步连接到该后端端口，无需停止其他工作区。
+
 ## 来源与边界
 
-完整受版本控制的前端工作区导入自 `HKUST-QUANT-SOCIETY/opencode@d81ed480bc1d2c7976cc96b6f8bb964a7e1220c5`。保留 `frontend/LICENSE`、上游版权和配套源码；未导入原仓库 Git 元数据、node_modules、本机密钥或构建产物。旧仓库保留为历史来源，后续产品修改统一提交本仓库。
+完整受版本控制的前端工作区源自 `HKUST-QUANT-SOCIETY/opencode@d81ed480bc1d2c7976cc96b6f8bb964a7e1220c5` 并已纳入当前 QuantCode 单仓库。保留 `frontend/LICENSE`、上游版权和配套源码；未导入上游仓库 Git 元数据、node_modules、本机密钥或构建产物。后续产品修改统一提交当前仓库。
 
-`frontend/.github/workflows/` 是导入的上游工作流资料，GitHub 不会执行嵌套工作流；本仓库只启用根目录 `.github/workflows/`。桌面 workflow 已适配 frontend 路径，尚未执行迁移后的跨平台安装包矩阵；签名服务/环境需在 quantcode 仓库配置。
+`frontend/.github/workflows/` 是保留的上游工作流资料，GitHub 不会执行嵌套工作流；本仓库只启用根目录 `.github/workflows/`。桌面 workflow 已适配 frontend 路径，跨平台安装包仍需单独签名和发布环境。
 
-统一回归入口：`QUANTCODE_TEST_PYTHON=.venv/bin/python PLAYWRIGHT_BASE_URL=http://localhost:4444 bun run check:product`。URL 必须指向从本仓库启动的 Dev；脚本不会自动启动或重启服务。启动器优先使用根目录 `.venv` 中的 Python。
+统一回归入口：`QUANTCODE_TEST_PYTHON=.venv/bin/python PLAYWRIGHT_BASE_URL=http://localhost:4544 bun run check:product`。URL 必须指向从本仓库启动的 QuantCode Dev；脚本使用 `playwright.quantcode.config.ts`，不会自动启动或重启服务。启动器优先使用根目录 `.venv` 中的 Python。
 
-迁移验收：Python 1,139 项通过、4 项跳过；组件 126 项通过；app/opencode/desktop 类型检查和网页构建通过；新构建产物 12 项 Headless 通过。详见 [验收台账](audit/FULL_PRODUCT_AUDIT_2026-09-05.md#单仓库迁移验收)。真实身份与组件服务仍按台账单独验收。
+当前验收：Python 1,142 项通过、4 项跳过；Ruff 0 错误；组件 126 项通过；app/opencode/desktop 类型检查和网页构建通过；新构建产物 12 项 Headless 通过；Dev 使用独立端口时 16 项 Headless 通过。详见 [验收台账](audit/FULL_PRODUCT_AUDIT_2026-09-05.md#单仓库验收)。真实身份与组件服务仍按台账单独验收。
+
+## 2026-09-08 源码内化与执行职责
+
+本仓库已包含 OpenCode 来源源码，但当前“双循环+面板转交”尚未完成架构内化。已确认目标：QuantCode 自行维护统一执行引擎；`frontend/packages/core` 和 `frontend/packages/opencode` 是执行能力的现有落点，不作为外部产品。Python 保留组织服务、契约、审批、知识和组件适配；旧 AgentRunner/checkpoint 按兼容计划迁移。内部包名与第三方协议暂保留兼容，不删除来源/许可证。
+
+具体职责、迁移阶段和验收标准见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。仅将源码放进仓库或修改产品名，不视为任务状态、权限和执行机制已统一。

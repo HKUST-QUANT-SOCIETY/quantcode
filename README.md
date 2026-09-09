@@ -1,458 +1,182 @@
-<div align="center">
-  
-# QuantCode
+# QuantCode Test V1.0
 
-**Agent-driven quantitative research platform where six specialized teams compose through schema contracts**
+QuantCode 是 HKUST QUANT SOCIETY 的团队研究与开发 Agent。因子、模型、风控、基本面、策略、期权、基建和 Agent 组使用同一套桌面端与执行器，身份、个人工作区、工具和 Memory 按组织授权隔离。
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1060%20passed-brightgreen.svg)](tests/)
-[![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
+[下载 Test V1.0](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.0.0-test.1) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
 
-[Quick Start](#quick-start) • [Screenshots](#screenshots) • [Architecture](#architecture) • [Six Workflows](#six-workflows) • [Documentation](#documentation) • [Contributing](#contributing)
+Test V1.0 的版本号为 `1.0.0-test.1`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
 
-</div>
+## 是否需要服务器
 
----
+需要。桌面端是操作入口，研究任务在组织提供的个人研究宿主上执行；Server C 的常驻服务负责身份认证、组内 Memory、任务记录和产物。成员电脑不需要安装 Python、Bun、Node.js 或另一套 OpenCode。
 
-## What is QuantCode?
-
-QuantCode is an **agent orchestration platform** for quantitative investment research. Six domain teams (Factor, Model, Risk, Fundamental, Strategy, Options) use the same ReAct runtime with group-scoped skills, tools, and memory. Structured handoffs replace ad-hoc coordination. The platform enforces **schema contracts** at every boundary: factor submissions validate against `FactorSpec`, model metadata can feed the Risk CI chain, and cross-group state flows through a type-safe Blackboard.
-
-**Core thesis**: Replace "people negotiating over Slack" with "machines validating against schemas." Replace "does this look okay?" with "`assert` pass/fail + deterministic gates."
-
-Built on a fork of [OpenCode](https://github.com/anomalyco/opencode), cherry-picking modules from MimoCode (Memory, Checkpoint, Subagent orchestration), and adding six vertical Compose flows for quant workflows.
-
----
-
-## Screenshots
-
-<div align="center">
-<img src="docs/images/screenshots/home.png" width="900" alt="QuantCode desktop — research workspace home" /><br/>
-<sub>Research workspace — roster-bound group context, SSH connection status, research templates</sub>
-</div>
-
-<div align="center">
-<br/>
-<img src="docs/images/screenshots/memory-query.png" width="900" alt="QuantCode desktop — Memory query panel" /><br/>
-<sub>Memory panel — query in-group and shared research memory (read-only, fail-closed across groups)</sub>
-</div>
-
----
-
-## News
-
-| Date | Event |
-|------|-------|
-| 2026-08-30 | 📊 **Monitoring + Self-evolution closed loop** — `list_runs` MCP tool + desktop Monitor panel (`metrics.jsonl`), `/goal` → judge verdict (met/partial/missed) → RLHF回填 |
-| 2026-08-29 | 🧭 Group identity via SSH key fingerprint and roster binding; local development may use an explicit fallback, while production requires roster authentication |
-| 2026-08-28 | 🔁 Minimal replay CLI (list/show/resume), auto checkpoint (>70% snapshot / >90% rebuild), unified single checkpoint DB |
-| 2026-07-16 | 🎯 **Beta Release** — 6-group E2E demos functional |
-| 2026-07-15 | 🔐 Risk CI E2E: GitHub PR comments with auto-generated `RiskProfile` |
-| 2026-07-10 | 🧪 Factor tools migrated from stub → real LLM (DeepSeek) for `gen_schema` + `match_main` |
-| 2026-07-09 | 📐 HumanGate deterministic routing engine (Pattern 5: interrupt-resume) |
-| 2026-07-05 | 🏗️ AgentRunner ReAct engine + self-built StateGraph (no `create_react_agent`) |
-
----
-
-## Architecture
-
-### Any domain → typed output
-
-<div align="center">
-<img src="docs/images/quantcode_flow.png" width="900" alt="QuantCode flow: 6 groups → AgentRunner → Schema validation → Blackboard → Production" />
-</div>
-
-```
-User intent → Group-specific AgentRunner → Tool chain → Schema validation → Output artifact
-     ↓
-  Factor: match_main → gen_schema → quant_evaluator → FactorReport
-  Model: read_pr → extract_metadata → generate_model_spec → (triggers Risk flow)
-  Risk: read_blackboard → calc_risk → generate_risk_profile → CI/report result
-     ↓
-  All outputs: JSON artifacts under artifacts/{group}/ + optional PR comments
+```mermaid
+flowchart LR
+    D["Mac / Windows 桌面端"] -->|"SSH 隧道"| H["个人研究宿主"]
+    H --> G["组织身份与共享 Memory"]
+    H --> M["组织测试模型"]
+    H --> W["个人工作区、任务与产物"]
 ```
 
-**Three production patterns:**
+每个成员有独立的系统账号、工作区、登录凭据和执行状态。关闭桌面窗口后可以重新连接查看服务器上的任务；需要停止执行时使用任务中的停止操作。退出登录会撤销当前登录会话。
 
-1. **Pattern 1 (Push)** — Factor group submits FactorSpec → evaluator returns evidence → acceptance produces a pass/fail result; shared-asset merge remains an explicit write operation
-2. **Pattern 2 (Pull + Handoff)** — Model group publishes ModelSpec → Risk flow consumes the authorized Blackboard entry → CI/report output returns to the originating workflow
-3. **Pattern 5 (Interrupt-Resume)** — ordinary Agent runs pause only for `merge` or `permission` decisions; Admin deployment uses a separate management surface
+## 下载和安装
 
-> Compose uses a shared ReAct runtime. The Agent chooses the next tool from the current state, while deterministic guards enforce iteration, loop, budget, and permission limits.
+从 [Test V1.0 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.0.0-test.1) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
 
-**Key primitives:**
+| 电脑 | 安装文件 |
+| --- | --- |
+| Mac，Apple Silicon（M 系列） | `quantcode-1.0.0-test.1-mac-arm64.dmg` |
+| Mac，Intel | `quantcode-1.0.0-test.1-mac-x64.dmg` |
+| Windows 10/11，x64 | `quantcode-1.0.0-test.1-win-x64.exe` |
 
-- **AgentRunner** — Self-built StateGraph ReAct engine (not `create_react_agent`). Loads group-specific tools, injects skill markdown as system prompt, routes via `tool_routing_edge` → `route_next_step`.
-- **ToolRegistry** — Global singleton. Each group's `_register.py` declares tools at import time. Tests use `importlib.reload()` to re-register after other tests clear the registry.
-- **Blackboard** — SQLite-backed shared state with scoped ACL and transactional writes. Cross-group handoff carries only a minimal Artifact reference.
-- **Memory** — FTS5 long-term Group Knowledge. Checkpoint/Progress/Trace remain Runtime State and do not appear as organizational Memory.
-- **Schema contracts** — Every artifact validates against Pydantic models in `schemas/`. `FactorSpec`, `RiskProfile`, `StrategyReport`, etc.
+Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，按提示安装到当前用户。
 
----
+测试包可能触发 Gatekeeper 或 SmartScreen。先确认下载来自上述仓库且 SHA256 与发布清单一致，再按系统提示批准运行；不要关闭整个系统的安全保护。正式签名版与内部测试版的信任状态会分别写入发布清单。
 
-## Six Workflows
-
-Each group has a vertical Compose flow that produces a typed research or engineering artifact. Production deployment stays in the Admin management surface.
-
-### 1. Factor (Owner: 肖骥超)
-
-**Goal**: Discover and call the canonical QuantEvaluator without duplicating its metrics.
-
-**Tools**: `match_main`, `gen_schema`, `quant_evaluator`. The evaluator returns a `ComponentCallResult`; an unavailable service returns `UNAVAILABLE`, never invented metrics.
-
-**Flow**:
-```python
-idea = "高ROE低PB价值因子"
-  ↓ match_main (LLM) → finds similar factors in main branch
-  ↓ gen_schema (LLM) → generates a FactorSpec satisfying the schema contract
-    (operators / estimated_runtime_seconds / forward_return_horizon included)
-  ↓ quant_evaluator (API) → canonical evaluation result + source/version/environment
-    API unavailable → result_status=UNAVAILABLE, no FactorReport fabricated
-  ↓ optional shared write → validate_factor_contract → merge HumanGate
-```
-
-> `validate_factor_contract` validates the evidence. `merge_to_main` creates a shared-asset merge request and pauses on the `merge` HumanGate; an authorized approver or Admin makes the final decision.
-
-**Demo**: `python scripts/demo_jerry_tracks.py --track factor` (factor track entry shared with the other 3 tracks; `runner/jerry_demos.py` remains the underlying module)
-
-**Tests**: `tests/test_factor_tools.py`
-
-**Status**: QuantEvaluator adapter is implemented; production connection remains environment-dependent and fails honestly when unavailable.
-
-### 1b. SSH mainline reading (factor supporting feature)
-
-`match_main` can read mainline code from your group's servers via SSH to ground matching in real signatures. Configure the `ssh_mainline` section in `config.example.json` (or `QUANTCODE_SSH_MAINLINE` env as JSON) and install the optional dependency:
+校验命令：
 
 ```bash
-pip install 'quantcode[ssh]'
+# macOS，比较结果与 SHA256SUMS 中对应文件的一行
+shasum -a 256 quantcode-1.0.0-test.1-mac-arm64.dmg
 ```
 
-Entry: `runner/server_ssh.py` — directory listing / file contents are cached under `~/.cache/quantcode/mainline/`, missing paramiko degrades gracefully (feature skipped with a warning).
-
----
-
-### 2. Model (Owner: 陈镇鸿)
-
-**Goal**: PR metadata extraction → structured handoff to the Risk CI/report chain.
-
-**Tools**: `read_pr`, `extract_metadata`, `generate_model_spec`, `write_blackboard`
-
-**Flow**:
-```python
-PR #42 opened → read_pr → extract model type/params from diff
-  ↓ generate_model_spec → {"model_name": "pb_roe_ranker", "model_type": "ml", ...}
-  ↓ write_blackboard(scope=PROJECT) → triggers Risk flow
-  ↓ Risk flow reads ModelSpec → calculates risk_metrics → generates RiskProfile
-  ↓ CI/report result returns to the workflow; no QuantCode output Gate
-  ↓ write_pr_comment → posts RiskProfile JSON to PR
+```powershell
+# Windows PowerShell
+Get-FileHash -Algorithm SHA256 .\quantcode-1.0.0-test.1-win-x64.exe
 ```
 
-**Cross-group contract**: `ModelSpec` schema (must include `model_name`, `expected_sharpe`, `capacity_estimate`).
+## 首次使用
 
----
+### 1. 准备已登记的 SSH 身份
 
-### 3. Risk (Owner: 杨欣琳)
+使用组织已经登记公钥对应的私钥。不要新建一把未登记的密钥尝试登录，也不要把私钥、模型 Key 或个人连接文件提交到 GitHub。
 
-**Goal**: Generate a structured `RiskProfile` for the CI/report chain and return threshold results.
-
-**Tools**: `read_blackboard`, `calc_risk`, `generate_risk_profile`, `risk_verdict`, `write_pr_comment`, `request_human_review`
-
-**Flow**:
-```python
-ModelSpec in Blackboard → calc_risk → {max_drawdown, tail_risk_var_99, position_limit}
-  ↓ generate_risk_profile → enriched RiskProfile with thresholds
-  ↓ risk_verdict → {verdict: "pass|fail", reasons: [...]}
-  ↓ write_pr_comment → GitHub PR comment or CI artifact with full RiskProfile JSON
-```
-
-**Gate boundary**: Risk threshold results remain reports or CI statuses. QuantCode HumanGate handles shared writes and cross-group permissions; Admin handles production deployment separately.
-
-**Demo**: `pytest tests/test_risk_react_ready.py -v`
-
-**Production**: GitHub Actions may call the Risk flow for a PR and publish its report or status.
-
----
-
-### 4. Fundamental (Owner: Lead)
-
-**Goal**: Point-in-time safe research report generation (prevent lookahead bias in backtests).
-
-**Tools**: `pit_rag_search`, `extract_financial`, `dcf_valuation`, `render_report`
-
-**PIT safety**: Chroma vector DB with timestamp filter — 2023-01-01 backtest only retrieves docs from ≤ 2022-12-31.
-
----
-
-### 5. Strategy (Owner: TBD)
-
-**Goal**: Signal combination → group-owned backtest adapter → deployment request for Admin.
-
-**Tools**: `select_signals`, `combine_signals`, `run_strategy_backtest`; deployment requests leave the ordinary Agent tool set.
-
-**Deployment**: Admin submits the approved artifact through the Admin management surface and the production service account executes the controlled request.
-
----
-
-### 6. Options (Owner: 刘炽)
-
-**Goal**: Volatility surface construction + Greeks calculation for options strategies.
-
-**Tools**: `build_vol_surface`, `calc_greeks`, `run_options_backtest`
-
-**Output**: `artifacts/options/{symbol}_vol_surface.png` + GreeksProfile JSON
-
----
-
-## Quick Start
-
-### Install the desktop app
-
-Team members should eventually install a packaged desktop release. Bun, Node.js, Git, and the OpenCode source tree will not be required for normal use. As of 2026-08-24, the complete unsigned four-target matrix and finalized release bundle passed in [OpenCode Actions run #32689170981](https://github.com/HKUST-QUANT-SOCIETY/opencode/actions/runs/32689170981): macOS Apple Silicon, macOS Intel, Windows x64, and Linux x64 (AppImage, DEB, RPM). No signed/notarized formal Release has been published.
-
-Once the release status in [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) is marked ready:
-
-1. Open [QuantCode Releases](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases).
-2. Download the signed/notarized macOS DMG/ZIP, signed Windows installer, or approved platform-unsigned Linux AppImage/DEB/RPM package for your platform.
-3. Start QuantCode, choose your research group, and connect to Server B with your registered SSH identity.
-
-See [desktop installation and upgrades](docs/DESKTOP_INSTALLATION.md) for the current readiness status, platform instructions, signing requirements, data locations, and automatic-update blocker.
-
-### Install the research engine from source
-
-The source workflow below is for QuantCode engine and desktop contributors. All product source now lives in this repository: Python at the root, UI in `frontend/packages/app`, and Electron in `frontend/packages/desktop`. See [repository layout](docs/REPOSITORY_LAYOUT.md).
-
-#### Prerequisites
-
-- Python 3.12+
-- Bun (for OpenCode desktop)
-- Git
-
-#### One-command engine install
+macOS 自带 OpenSSH，可在终端加载密钥：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUST-QUANT-SOCIETY/quantcode/main/scripts/setup.sh | bash
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+ssh-add -l
 ```
 
-**Or manual development setup:**
+把示例路径换成你自己的私钥路径。桌面端也提供“导入本地密钥”，通过系统文件选择器将密钥加入本机 SSH Agent；私钥正文不会上传给研究服务器或模型。
+
+Windows 需要系统 OpenSSH Client 和 SSH Authentication Agent。首次启用服务时，在管理员 PowerShell 执行：
+
+```powershell
+Get-Service ssh-agent | Set-Service -StartupType Automatic
+Start-Service ssh-agent
+```
+
+然后在普通 PowerShell 加载自己的密钥：
+
+```powershell
+ssh-add "$env:USERPROFILE\.ssh\id_ed25519"
+ssh-add -l
+```
+
+如果找不到 `ssh-add`，先在 Windows“可选功能”中安装 OpenSSH Client。组织管控的电脑需要由设备管理员启用该服务。
+
+### 2. 领取个人连接信息
+
+管理员为已登记成员分配 Server C SSH 用户名和个人研究端口。连接信息保存在该成员自己的服务器目录中：
 
 ```bash
-# 1. Clone the single product repository
+ssh <SSH用户名>@<Server-C地址> 'cat ~/.quantcode/test-v1/connection.json'
+```
+
+该文件包含 SSH 入口、个人端口和桌面端访问凭据，只有本人和管理员可读。不要将其粘贴到公共 Issue 或提交进仓库；不知道 SSH 用户名时，向组内管理员领取。
+
+### 3. 建立安全连接
+
+在 macOS 终端或 Windows PowerShell 运行以下命令，按个人连接文件替换占位项：
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 127.0.0.1:48196:127.0.0.1:<个人研究端口> <SSH用户名>@<Server-C地址>
+```
+
+首次连接时核对管理员提供的服务器指纹。保持此终端窗口打开。若本机 `48196` 已占用，换一个本机端口，并在下一步使用同一个端口。
+
+### 4. 在 QuantCode 中登录
+
+1. 打开“设置与登录”，点击“管理服务器”。
+2. 添加服务器，名称可填 `Test V1.0`，地址填 `http://127.0.0.1:48196`。
+3. 按个人连接文件填写访问用户名和密码，然后选择该服务器。
+4. 选择本机 SSH Agent 中与服务器登记记录匹配的公钥，点击连接。
+5. 确认显示自己的身份、业务组和授权工作目录。
+
+业务组由组织名册决定，不能通过聊天文本或自行填写组名切换。更换服务器后需要重新认证。
+
+Test V1.0 由组织预置统一测试模型。普通成员无需填写模型 Key；需要使用自己的供应商时，可在“模型供应商”中添加 URL、API Key 和模型，作为该个人研究宿主的一份模型配置。安装包不会内置组织模型密钥。
+
+## 完成第一条任务
+
+在“新建研究”选择自己的授权工作目录，确认模型可用后输入：
+
+> 在当前个人工作区创建 hello_quantcode.md，内容为当前项目的简短说明。先查询能力目录和组内 Memory，说明计划改动的文件；需要我确认时先暂停，确认后再写入并读回核对。不要修改其他目录。
+
+按界面中的“任务方案与能力复用”核对范围并填写确认说明。确认后点击 **继续执行**，不要把一段新的批准文字当作原任务的继续指令。
+
+执行结束后，可以查看对话中的工具结果、执行记录、文件和产物。下载产物后仍可重新登录查看原任务。遇到未确认的写入回执，先核对实际文件或外部证据，不要重复执行写入。
+
+## Test V1.0 的范围
+
+已支持：SSH 身份与多公钥选择、个人工作区、组织模型配置、组内 Memory、能力目录、方案与复用审批、原生任务、文件修改、预算、停止、任务历史和产物。
+
+各量化组件只有在对应服务、数据和授权已实际接通时才能使用。页面中的 `UNAVAILABLE`、`PARTIAL` 或未连接状态不表示业务已完成；Test V1.0 不承诺所有因子评估、训练、回测、风险和估值链路已经具备真实数据。普通成员不能部署到生产环境。
+
+发布验证范围与限制见 [Test V1.0 验收摘要](docs/TEST_V1_ACCEPTANCE.md)。
+
+## 常见问题
+
+| 现象 | 检查方法 |
+| --- | --- |
+| 无法连接研究服务器 | 确认 SSH 隧道仍在运行、本机端口正确，服务器访问凭据与个人文件一致 |
+| 没有可选公钥 | 运行 `ssh-add -l`；Windows 先确认 ssh-agent 服务已启动，再加载已登记私钥 |
+| 登录身份或组不对 | 核对当前服务器和公钥；由管理员修改组织名册，不能通过提示词改组 |
+| 提示选择 Agent 或模型 | 确认个人宿主的组织模型已配置；必要时刷新模型列表或联系管理员 |
+| 确认后仍未执行 | 使用方案面板中的“继续执行”，检查预算、审批版本和错误提示 |
+| Memory 为空 | 空结果可以正常使用；“未连接”需要修复服务连接，不能当作空知识库 |
+| 超出预算或出现未知写入结果 | 停止并核对任务状态，不通过重新点击或更换身份绕过限制 |
+| 更新版本 | 退出应用，下载同架构的新包并手动安装；测试版不自动更新 |
+
+## 开发者
+
+仅参与开发时需要源码环境。当前原生执行器、UI 和 Electron 都在本仓库；Python Runner 仅保留必要的历史兼容功能。
+
+```bash
 git clone https://github.com/HKUST-QUANT-SOCIETY/quantcode.git
-
-# 2. Install QuantCode
 cd quantcode
-pip install -e .
-# Optional: SSH mainline reading for factor group
-pip install 'quantcode[ssh]'
-
-# 3. Configure LLM via environment variables (no config file needed for the MCP chain)
-export QUANTCODE_API_KEY="sk-your-deepseek-api-key"     # the only API key entry
-export QUANTCODE_MODEL_PROVIDER="deepseek"              # deepseek | anthropic | stepfun (default deepseek)
-export QUANTCODE_MODEL_NAME="deepseek-chat"             # optional, provider defaults apply
-export QUANTCODE_MODEL_BASE_URL="https://api.deepseek.com/v1"  # optional, provider defaults apply
-# Group identity:
-#   Production: SSH public-key proof → server roster → actor/group/role/workspace
-#   Local development only: export QUANTCODE_GROUP="factor"
-# Optional: SSH mainline reading — copy config.example.json's ssh_mainline section
-# into your own config.json (gitignored), or set QUANTCODE_SSH_MAINLINE env (JSON string)
-
-# 4. Install the in-repository frontend/desktop workspace
+uv sync
 bun run install:frontend
-
-# 5. Start local web development (desktop: bun run dev:desktop)
 bun run dev:quantcode
+# Electron 开发入口
+bun run dev:desktop
 ```
 
-> **Config file note**: the MCP mainline (`quantcode.mcp_server` / `run_agent` tool) reads **only environment variables** — it never reads `config.json`. The `llm` section of `config.json` is consumed only by runner-direct scripts (`runner/llm_config.py`). `config.example.json` documents this split.
+研究宿主必须另外配置组织网关、名册、公钥、工作区与已审核工具目录。开发环境不自动获得组织成员权限，也不代表服务已部署。
 
-### Conversational path
+| 内容 | 入口 |
+| --- | --- |
+| 产品需求 | [docs/PRD.md](docs/PRD.md) |
+| 功能规格 | [specs/FUNCTIONAL_SPEC.md](specs/FUNCTIONAL_SPEC.md) |
+| 技术设计 | [docs/QuantCode_Design.md](docs/QuantCode_Design.md) |
+| UI 规格 | [docs/UI_DESIGN_SPEC.md](docs/UI_DESIGN_SPEC.md) |
+| 仓库结构 | [docs/REPOSITORY_LAYOUT.md](docs/REPOSITORY_LAYOUT.md) |
+| 发布与打包 | [QUANTCODE_RELEASE.md](frontend/packages/desktop/QUANTCODE_RELEASE.md) |
+| 平台安装细节 | [QUANTCODE_INSTALL.md](frontend/packages/desktop/QUANTCODE_INSTALL.md) |
 
-Open QuantCode desktop → authenticate with a local SSH identity → let the server roster bind your group → type:
-
-```
-我想开发一个基于ROE和PB的价值因子
-```
-
-Agent auto-runs: `match_main` → `gen_schema` → `quant_evaluator`. It shows metrics only when returned by the canonical component.
-
-### Provider binding (desktop)
-
-Desktop settings → **Providers**: third-party providers only — enter display name / Base URL / API Key in one form, then click **获取模型列表 (Fetch models)** to list available models live from the provider's `/models` endpoint. No official-provider OAuth flows.
-
-### Library path
-
-```python
-from tools.registry import registry
-
-# Factor group
-result = registry.call("gen_schema", {
-    "idea": "momentum factor using 20-day return",
-    "match_result": {"main_branch": "momentum", "similar_factors": []}
-})
-# Returns: {"name": "momentum_20d", "formula": "close/close.shift(20)-1", ...}
-
-# Risk group
-risk = registry.call("calc_risk", {
-    "model_spec": {"model_name": "test", "expected_sharpe": 1.5},
-    "scenario": "high_risk"
-})
-# Returns: {"max_drawdown": 0.22, "tail_risk_var_99": 0.085, ...}
-```
-
-### Run E2E demos
+运行测试：
 
 ```bash
-# All tracks
-python scripts/demo_jerry_tracks.py --track all
-
-# Individual tracks
-python scripts/demo_jerry_tracks.py --track strategy
-python scripts/demo_jerry_tracks.py --track fundamental
-python scripts/demo_jerry_tracks.py --track options
-python scripts/demo_jerry_tracks.py --track factor  # factor track entry
+.venv/bin/pytest -q
+cd frontend/packages/opencode
+bun typecheck
+bun --smol test --timeout 30000
 ```
 
-(Day-5 test: `python -m pytest tests/test_day5_jerry_demos.py::test_day5_all_demos -v`)
+## License 与来源
 
----
+本项目采用 [MIT License](LICENSE)。桌面与执行器基于仓库内维护的 OpenCode 源码；部分 Memory、Checkpoint 和 Subagent 设计参考 MimoCode。原许可证、依赖声明与第三方 notices 随源码和安装包保留。
 
-## Testing
-
-```bash
-# Full suite
-pytest
-
-# Specific group
-pytest tests/test_risk_react_ready.py -v
-
-# Factor tools
-pytest tests/test_factor_tools.py -v
-
-# Model→Risk handoff E2E
-pytest tests/test_model_risk_handoff_e2e.py -v
-
-# With real LLM (requires QUANTCODE_API_KEY)
-QUANTCODE_FACTOR_USE_REAL_LLM=1 pytest tests/test_factor_tools.py -v
-```
-
-**Test status**: 1060 passed, 4 skipped (2026-09-05). The skipped tests require explicit real-LLM access.
-
-**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk), factor tools (real LLM plus deterministic local fixtures), risk metrics (real returns + explicit stub marking), metrics/monitor read path.
-
-## Sessions & Monitoring
-
-- **Replay**: `python scripts/replay.py list|show|resume` — list threads, inspect a checkpoint, and resume a paused shared-write or permission Gate with `--decision approve|reject`.
-- **Run metrics**: `.quantcode/metrics.jsonl` written by agent engine completion hooks; query via the read-only `list_runs` MCP tool or the desktop Monitor panel.
-- **Goal judging**: `/goal <objective>` in desktop before running → after `run_agent` finishes, a judge verdict (`met` / `partial` / `missed` / `unevaluated`) is produced and fed back into RLHF (`apply_judged_session`). Goal/Judge supplies evidence; it does not make a domain or deployment decision.
-- **Auto checkpoint**: context >70% snapshots → >90% rebuilds (`runner/agent_nodes.py`, ~4 chars/token approximation, tunable via `QUANTCODE_CONTEXT_TOKENS`). Single checkpoint DB: `.quantcode/checkpoints.db`.
-
-**Coverage**: AgentRunner (ReAct engine), tool registry, Blackboard (scoped isolation), Memory (FTS5), routing guards, HumanGate (interrupt-resume), cross-group handoff (Model→Risk).
-
----
-
-## Documentation
-
-- **[User Manual](docs/USER_MANUAL.md)** — End-to-end guides for all 6 groups
-- **[Technical Design](docs/QuantCode_Design.md)** — current v5 architecture and module boundaries
-- **[Historical specifications](docs/archive/pre-v5/README.md)** — pre-v5 material, not current behavior
-- **[Testing Guide](TEST_GUIDE.md)** — current v5 test commands and contract boundaries
-- **[PRD](docs/PRD.md)** — Product requirements, acceptance criteria
-
----
-
-## In Production
-
-**Target deployment**: HKUST QUANT SOCIETY internal platform (12-18 users across 6 groups).
-
-**Current stage**: Development acceptance in progress. See the [current functional audit](docs/audit/FULL_PRODUCT_AUDIT_2026-09-05.md) for verified results and open integration requirements. Source consolidation does not establish production connectivity or installer readiness.
-
----
-
-## Roadmap
-
-- [x] **QuantEvaluator adapter** — calls the canonical API and returns an explicit `UNAVAILABLE` envelope when disconnected; no mock fallback.
-- [x] **Replay / auto checkpoint** — `scripts/replay.py` (list/show/resume shared-write or permission runs) + context >70% snapshot / >90% rebuild. *(done 2026-08)*
-- [x] **Monitoring dashboard v0** — `list_runs` read-only MCP tool + desktop Monitor panel aggregating `.quantcode/metrics.jsonl`. *(done 2026-08)*
-- [x] **Shared-write merge path** — factor asset merge requests use the `merge` HumanGate contract; domain owners retain the final decision
-- [x] **Parallel agent workflows** — bounded Subagent registry with inherited group permissions and budgets
-- [x] **Token budget management** — runtime budget limits, explicit exhaustion state, and checkpoint support
-- [ ] **Dynamic Tool Catalog enforcement** — replace compatibility allowlists with roster-derived effective tool sets on every production call
-- [ ] **Production deployment adapter** — connect the Admin management surface to the real production service account and adapter
-- [ ] **Desktop app packaging** — bundled Python sidecar / installable build
-
----
-
-## Contributing
-
-**Agent-first workflow** (recommended):
-
-Open the QuantCode desktop → authenticate with your local SSH identity → type:
-
-```
-/implement add a new tool for calculating Fama-French 3-factor exposures
-```
-
-The Model agent will:
-1. Generate `tools/factor/fama_french.py` with ToolDef
-2. Register in `tools/factor/_register.py`
-3. Write unit tests in `tests/test_fama_french.py`
-4. Run tests and fix until green
-5. Create PR with summary
-
-**Manual workflow**:
-
-```bash
-# 1. Create feature branch
-git checkout -b feat/your-feature
-
-# 2. Make changes
-# 3. Add tests (test coverage must not decrease)
-pytest tests/test_your_feature.py
-
-# 4. Commit with conventional commits format
-git commit -m "feat(factor): add Fama-French 3-factor tool"
-
-# 5. Push and open PR
-git push origin feat/your-feature
-gh pr create
-```
-
-> **IMPORTANT**: GitHub Actions may run the Risk CI chain on PRs. QuantCode HumanGate applies to shared writes and cross-group permissions; production deployment remains an Admin-only management action.
-
-**Code style**: Black (line length 100), Ruff (target py312), type hints required.
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## Acknowledgements
-
-Built by the HKUST QUANT SOCIETY Agent Group (6 people):
-- **Lead**: Hendrix Chen (chenyuanheng0127@gmail.com)
-- **Factor**: 肖骥超
-- **Model**: 陈镇鸿
-- **Risk**: 杨欣琳
-- **Fundamental**: Lead
-- **Options**: 刘炽
-
-**Technology stack**:
-- [OpenCode](https://github.com/anomalyco/opencode) — Desktop shell fork
-- [LangGraph](https://github.com/langchain-ai/langgraph) — StateGraph orchestration
-- [LangChain](https://github.com/langchain-ai/langchain) — Tool abstractions
-- [DeepSeek](https://www.deepseek.com/) — LLM for schema generation and matching
-- Cherry-picked from [MimoCode](https://github.com/MimoCode/mimocode): Memory, Checkpoint, Subagent modules
-
----
-
-<div align="center">
-  
-**[⬆ Back to Top](#quantcode)**
-
-Made with ☕ by the HKUST QUANT SOCIETY Agent Group
-
-</div>
+由 HKUST QUANT SOCIETY 维护。

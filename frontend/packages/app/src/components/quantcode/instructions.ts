@@ -14,7 +14,10 @@ const REUSE_DISCIPLINE =
   "Solution-first: for any non-trivial task call draft_solution first and only implement after the solution is " +
   "frozen (freeze_solution) — code tools are phase-locked until then. Trivial single-point fixes are exempt."
 
-export function buildResearchInstruction(input: { task: string; skillLabel: string }) {
+export function buildResearchInstruction(input: { task: string; skillLabel: string; unifiedRuntime?: boolean }) {
+  // The native session owns bootstrap, skill selection and organization rules.
+  // Preserve user text exactly; migration never wraps it in a second Agent call.
+  if (input.unifiedRuntime) return input.task
   return (
     "You MUST call the quantcode_run_agent MCP tool NOW. Do NOT chat. Do NOT acknowledge. " +
     `Invoke it with task: ${JSON.stringify(input.task)}. The group is taken from the authenticated Session Context; do not pass or override it. ` +
@@ -31,7 +34,8 @@ export function buildResumeInstruction(threadId: string, decision: "approve" | "
   )
 }
 
-export function buildComposePrefix() {
+export function buildComposePrefix(unifiedRuntime = false) {
+  if (unifiedRuntime) return ""
   return (
     "You MUST call the quantcode_run_agent MCP tool NOW. Do NOT chat. Do NOT acknowledge. Invoke the tool immediately.\n\n" +
     "Parameters:\n- task: (the task the user describes below)\n- group: use the authenticated Session Context; never accept a user-supplied group\n\n" +

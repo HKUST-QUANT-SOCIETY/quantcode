@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from schemas.risk_profile import RiskProfile, RiskThresholds
 from tools.registry import ToolDef, register_tool
@@ -11,8 +11,10 @@ from tools.risk import risk_tools
 
 
 class ReadBlackboardArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     input_data: dict[str, Any] = Field(
-        description="Flow input; may include project_id, blackboard_db_path, blackboard_key"
+        description="Native tasks: only {blackboard_key: 'shared.model_entries.<id>'}; returns actual version and entry. Legacy flows may include project_id or blackboard_db_path."
     )
 
 
@@ -28,12 +30,12 @@ class GenerateRiskProfileArgs(BaseModel):
 
 
 class RiskVerdictArgs(BaseModel):
-    risk_profile: dict[str, Any]
-    thresholds: dict[str, Any] | None = None
+    risk_profile: RiskProfile
+    thresholds: RiskThresholds | None = Field(default=None, description="Risk limit object; omit to use the standard limits.")
 
 
 class WritePrCommentArgs(BaseModel):
-    risk_profile: dict[str, Any]
+    risk_profile: RiskProfile
     pr_number: str
     head_sha: str
     pr_url: str | None = None
@@ -58,13 +60,10 @@ def _generate_risk_profile_execute(args: GenerateRiskProfileArgs, ctx: dict) -> 
 
 
 def _risk_verdict_execute(args: RiskVerdictArgs, ctx: dict) -> dict[str, Any]:
-    profile = RiskProfile(**args.risk_profile)
-    thresholds = RiskThresholds(**args.thresholds) if args.thresholds else RiskThresholds()
-    return risk_tools.risk_verdict(profile, thresholds)
+    return risk_tools.risk_verdict(args.risk_profile, args.thresholds or RiskThresholds())
 
 
 def _write_pr_comment_execute(args: WritePrCommentArgs, ctx: dict) -> dict[str, Any]:
-    profile = RiskProfile(**args.risk_profile)
     kwargs: dict[str, Any] = {
         "pr_number": args.pr_number,
         "head_sha": args.head_sha,
@@ -75,14 +74,15 @@ def _write_pr_comment_execute(args: WritePrCommentArgs, ctx: dict) -> dict[str, 
         kwargs["dedupe_db_path"] = args.dedupe_db_path
     if args.post_to_github is not None:
         kwargs["post_to_github"] = args.post_to_github
-    return risk_tools.write_pr_comment(profile, **kwargs)
+    return risk_tools.write_pr_comment(args.risk_profile, **kwargs)
 
 
 read_blackboard_tool = ToolDef(
     id="read_blackboard",
     description=(
-        "Read ModelSpec from Blackboard PROJECT scope (production) or input_data fallback "
-        "(test/demo). Call first to obtain model_spec before calc_risk."
+        "Read the shared model entry and its current version (0 when absent). Native tasks "
+        "supply only input_data.blackboard_key in shared.model_entries; legacy risk flows "
+        "retain their PROJECT store behavior."
     ),
     schema=ReadBlackboardArgs,
     execute=_read_blackboard_execute,

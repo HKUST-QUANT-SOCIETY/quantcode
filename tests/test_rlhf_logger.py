@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 
 from runner.routing.rlhf_logger import (
-    RLHF_PATH,
     log_rlhf_entry,
     make_rlhf_entry,
 )

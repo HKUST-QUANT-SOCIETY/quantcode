@@ -61,7 +61,7 @@ def _write_markdown(path: Path, args: RenderReportArgs) -> None:
         f"- As of: {args.as_of_date.isoformat()}",
         f"- Fair value / share: **{fv}**",
         f"- PIT docs used: {len(docs)} (filtered lookahead: {args.pit_filtered_count})",
-        f"- Data note: financials/DCF from pipeline; narrative synthesized from PIT snippets",
+        "- Data note: financials/DCF from pipeline; narrative synthesized from PIT snippets",
         "",
         "## Research questions",
     ]
@@ -95,8 +95,8 @@ def _write_markdown(path: Path, args: RenderReportArgs) -> None:
     if fin:
         lines.extend(
             [
-                f"| Metric | Value |",
-                f"| --- | --- |",
+                "| Metric | Value |",
+                "| --- | --- |",
                 f"| Currency | {fin.get('currency', 'N/A')} |",
                 f"| Revenue TTM | {fin.get('revenue_ttm', 'N/A')} |",
                 f"| EBIT TTM | {fin.get('ebit_ttm', 'N/A')} |",

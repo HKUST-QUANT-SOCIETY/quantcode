@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from typing import Callable
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
@@ -44,9 +44,9 @@ def create_deepseek_llm(
     优先级：显式参数 > config.json > 默认值。
 
     Args:
-        api_key: DeepSeek API key。若为 None，从 config.json 或 DEEPSEEK_API_KEY 环境变量读取。
-        model: 模型名。默认 ``"deepseek-chat"``。
-        base_url: API 地址。默认 ``"https://api.deepseek.com/v1"``。
+        api_key: API key。若为 None，从环境变量或 config.json 读取。
+        model: 模型名。默认按 provider 选择。
+        base_url: API 地址。默认按 provider 选择；qwen 使用 DashScope 国际兼容端点。
         temperature: 温度参数。默认 0.0（确定性输出）。
         max_tokens: 最大输出 token。默认 4096。
 
@@ -74,17 +74,25 @@ def create_deepseek_llm(
             "3. 或设置环境变量 DEEPSEEK_API_KEY"
         )
 
+    provider = os.environ.get("QUANTCODE_MODEL_PROVIDER", "").strip().lower() or str(cfg.get("provider", "deepseek")).strip().lower()
+    default_models = {"deepseek": "deepseek-chat", "stepfun": "step-3.7-flash", "qwen": "qwen3.7-flash"}
+    default_base_urls = {
+        "deepseek": "https://api.deepseek.com/v1",
+        "stepfun": "https://api.stepfun.com/step_plan/v1",
+        "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    }
     resolved_model = (
         model
         or os.environ.get("QUANTCODE_MODEL_NAME", "").strip()
         or os.environ.get("DEEPSEEK_MODEL", "").strip()
-        or cfg.get("model", "deepseek-chat")
+        or cfg.get("model", default_models.get(provider, "deepseek-chat"))
     )
     resolved_base_url = (
         base_url
         or os.environ.get("QUANTCODE_MODEL_BASE_URL", "").strip()
         or os.environ.get("DEEPSEEK_BASE_URL", "").strip()
-        or cfg.get("base_url", "https://api.deepseek.com/v1")
+        or (cfg.get("base_url") if cfg.get("provider", "deepseek") == provider else None)
+        or default_base_urls.get(provider, "https://api.deepseek.com/v1")
     )
     resolved_temperature = temperature if temperature is not None else cfg.get("temperature", 0.0)
     resolved_max_tokens = max_tokens if max_tokens is not None else cfg.get("max_tokens", 4096)

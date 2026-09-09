@@ -96,3 +96,45 @@ def test_extract_empty_and_parse_resume() -> None:
     assert extract_interrupt_payload({}) is None
     assert parse_resume_decision({"decision": "proceed"}) == "proceed"
     assert parse_resume_decision("proceed") is None
+
+
+class TestBuildInterruptPayload:
+    def test_custom_message(self):
+        payload = build_interrupt_payload(gate_id="g2", kind="merge", reasons=[], message="custom wait")
+        assert payload["message"] == "custom wait"
+
+
+class TestExtractInterruptPayload:
+    def test_empty_interrupt_list_returns_none(self):
+        assert extract_interrupt_payload({"__interrupt__": []}) is None
+
+    def test_extracts_raw_value(self):
+        payload = {"gate_id": "hg_2", "message": "wait"}
+        result = extract_interrupt_payload({"__interrupt__": [payload]})
+        assert result is not None
+        assert result["gate_id"] == "hg_2"
+        assert result == payload
+
+
+class TestNormalizeExternalDecision:
+    def test_case_insensitive(self):
+        assert normalize_external_decision("APPROVE") == "approve"
+        assert normalize_external_decision("Approve") == "approve"
+
+
+class TestParseResumeDecision:
+    def test_empty_dict_returns_none(self):
+        assert parse_resume_decision({}) is None
+
+    def test_none_returns_none(self):
+        assert parse_resume_decision(None) is None
+
+
+class TestToReactResumePayload:
+    def test_garbage_falls_back_to_abort(self):
+        assert to_react_resume_payload("???") == {"decision": "abort"}
+
+
+def test_human_gate_rejects_empty_gate_id():
+    with pytest.raises(ValidationError, match="gate_id"):
+        HumanGate(gate_id="", kind="merge", status=HumanGateStatus.PENDING)

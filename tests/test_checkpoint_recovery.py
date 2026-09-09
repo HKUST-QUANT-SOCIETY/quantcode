@@ -14,8 +14,6 @@ Checkpoint恢复测试 — Day 2下午任务（Lead）
 """
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import pytest

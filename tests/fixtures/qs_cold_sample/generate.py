@@ -10,7 +10,7 @@ date) so D1-A4 (PIT) and D1-A5 (invalid) are exercisable.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 import pyarrow as pa

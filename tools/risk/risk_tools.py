@@ -4,13 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 from schemas import BlackboardScope, ModelSpec
 from schemas.risk_profile import RiskProfile, RiskThresholds
-from tools.github_comments import find_existing_comment, github_request, post_pr_comment
+from tools.github_comments import find_existing_comment, github_request
 from tools.risk.statistics_stub import calc_risk_from_returns, calc_risk_stub
 from tools.utils.dedupe import dedupe_within
 
@@ -31,6 +32,35 @@ def read_blackboard(
     trigger_risk_flow 写读两端一致；``project_id`` 仅作为生产路径开关保留。
     test/demo fallback：input_data["model_spec"] 或嵌套 blackboard（非生产路径）。
     """
+    if ctx is not None and "_native_call" in ctx:
+        from tools.model.write_blackboard import native_blackboard_path
+        from runner.blackboard import BlackboardService
+        from runner.blackboard_keys import PROJECT_SESSION_ID
+        from quantcode.identity_login import read_session_file
+
+        if set(input_data) != {"blackboard_key"}:
+            raise PermissionError("native Blackboard read accepts only blackboard_key")
+        key = input_data.get("blackboard_key")
+        if not isinstance(key, str) or not re.fullmatch(r"shared\.model_entries\.[A-Za-z0-9_.-]+", key):
+            raise PermissionError("native Blackboard read requires a canonical shared.model_entries key")
+        native = ctx["_native_call"]
+        if not isinstance(native, dict) or ctx.get("group") not in {"model", "risk"}:
+            raise PermissionError("native Blackboard read is unavailable for this group")
+        session_file = Path(os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE", ""))
+        current = read_session_file(session_file)
+        if current.get("session_id") != native.get("login_session_id") or any(current.get(field) != ctx.get(field)
+                for field in ("session_id", "actor_id", "group", "role", "workspace_id", "resource_scopes")):
+            raise PermissionError("native Blackboard read identity changed")
+        service = BlackboardService(db_path=native_blackboard_path(), session_id=PROJECT_SESSION_ID,
+                                    requester_group=current["group"])
+        entry = service.get_entry(BlackboardScope.PROJECT, None, key)
+        if read_session_file(session_file) != current:
+            raise PermissionError("native Blackboard read identity changed before disclosure")
+        return {"resource": "blackboard:project:" + key, "version": entry.version if entry else 0,
+                "project_entry": entry.model_dump(mode="json") if entry else None,
+                "model_spec": entry.value.get("model_spec", entry.value) if entry and isinstance(entry.value, dict)
+                else entry.value if entry else None}
+
     blackboard_key = input_data.get("blackboard_key", "model_spec")
     project_id = input_data.get("project_id")
     blackboard_db_path = input_data.get("blackboard_db_path")
@@ -104,6 +134,16 @@ def calc_risk(
     """
     if scenario not in ("normal", "high_risk"):
         raise ValueError(f"Unknown scenario: {scenario!r}")
+
+    environment = os.environ.get("QUANTCODE_ENV", "").strip().lower()
+    if (
+        returns is None
+        and environment not in {"dev", "development", "test"}
+        and os.environ.get("QUANTCODE_ENABLE_COMPONENT_FIXTURES") != "1"
+    ):
+        raise PermissionError(
+            "canonical risk component is not connected; local checkout/API required before production risk evaluation"
+        )
 
     metrics = calc_risk_stub(scenario)  # type: ignore[arg-type]
     if returns is not None:

@@ -1,7 +1,7 @@
 import path from "path"
 import os from "os"
 import { randomBytes, randomUUID } from "crypto"
-import { mkdir, readFile, rm, stat, utimes, writeFile } from "fs/promises"
+import { mkdir, readFile, rm, stat, lstat, rename, utimes, writeFile } from "fs/promises"
 import { Hash } from "./hash"
 import { Effect } from "effect"
 
@@ -64,6 +64,68 @@ export namespace Flock {
   export interface Lease {
     release: () => Promise<void>
     [Symbol.asyncDispose]: () => Promise<void>
+  }
+
+  export interface Owner {
+    token: string
+    pid: number
+    hostname: string
+    createdAt: string
+  }
+
+  /** Read lease ownership for explicit recovery. No timestamps imply expiry. */
+  export async function inspect(key: string, input: Pick<Options, "dir"> = {}): Promise<Owner | undefined> {
+    const directory = path.join(input.dir ?? root(), Hash.fast(key) + ".lock")
+    const info = await lstat(directory).catch((error) => {
+      if (code(error) === "ENOENT") return undefined
+      throw error
+    })
+    if (!info) return undefined
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Invalid lock directory")
+    const filename = path.join(directory, "meta.json")
+    const meta = await lstat(filename)
+    if (!meta.isFile() || meta.isSymbolicLink() || meta.size > 16_384) throw new Error("Invalid lock metadata")
+    const owner = JSON.parse(await readFile(filename, "utf8")) as Partial<Owner>
+    if (typeof owner.token !== "string" || !owner.token || !Number.isSafeInteger(owner.pid) || owner.pid! <= 0 ||
+        typeof owner.hostname !== "string" || typeof owner.createdAt !== "string") throw new Error("Invalid lock owner")
+    return owner as Owner
+  }
+
+  /** Recover only an exact, dead local owner after the caller records evidence.
+   * This never sends a signal to a process or treats EPERM as process death. */
+  export async function recover(key: string, expected: Owner, record: (owner: Owner) => Promise<void>, input: Pick<Options, "dir"> = {}) {
+    const directory = input.dir ?? root()
+    return recoverOwned(key, expected, record, directory, 0)
+  }
+
+  function deadLocalOwner(owner: Owner) {
+    if (owner.hostname !== os.hostname()) return false
+    try { process.kill(owner.pid, 0); return false } catch (error) { return code(error) === "ESRCH" }
+  }
+
+  async function recoverOwned(key: string, expected: Owner, record: (owner: Owner) => Promise<void>, directory: string, depth: number): Promise<void> {
+    if (depth > 8) throw new Error("Repeated recovery crashes require host lock inspection")
+    // A recovery process can itself crash. Recover its dead mutex owner using
+    // the same token/host/process checks, never a time-based eviction. Recovery
+    // mutexes carry no task effects, so they do not create task approval data.
+    const blocker = await inspect(`recovery:${key}`, { dir: directory })
+    if (blocker && deadLocalOwner(blocker)) {
+      await recoverOwned(`recovery:${key}`, blocker, async () => {}, directory, depth + 1)
+    }
+    return withLock(`recovery:${key}`, async () => {
+      const same = (value: Owner | undefined) => value && value.token === expected.token && value.pid === expected.pid &&
+        value.hostname === expected.hostname && value.createdAt === expected.createdAt
+      const owner = await inspect(key, { dir: directory })
+      if (!same(owner) || !deadLocalOwner(owner!)) throw new Error("Lock changed or its owner is still running on this or another host")
+      await record(owner!)
+      if (!same(await inspect(key, { dir: directory }))) throw new Error("Lock changed during recovery")
+      const lockfile = path.join(directory, Hash.fast(key) + ".lock")
+      const retired = `${lockfile}.recovered-${randomUUID()}`
+      // Retire the exact stale directory before new callers can acquire it.
+      // Delete only this retired path; never a replacement owner's directory.
+      await rename(lockfile, retired)
+      await rm(retired, { recursive: true })
+    }, { dir: directory, staleMs: Number.POSITIVE_INFINITY, timeoutMs: 5000 })
   }
 
   function code(err: unknown) {
@@ -224,6 +286,9 @@ export namespace Flock {
 
     const startHeartbeat = (intervalMs = Math.max(100, Math.floor(opts.staleMs / 3))) => {
       if (timer) return
+      // Non-expiring leases deliberately require explicit crash recovery.
+      // Passing Infinity to setInterval would instead schedule every 1 ms.
+      if (!Number.isFinite(intervalMs)) return
       // Heartbeat prevents long critical sections from being evicted as stale.
       timer = setInterval(() => {
         const t = new Date()

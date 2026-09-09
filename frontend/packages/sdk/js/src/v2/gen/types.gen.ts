@@ -5,10 +5,30 @@ export type ClientOptions = {
 }
 
 export type Event =
+  | EventQuantcodeKnowledgeCandidatesObserved
+  | EventQuantcodeExecutionChanged
+  | EventQuantcodeArtifactsCaptured
   | EventModelsDevRefreshed
   | EventIntegrationUpdated
   | EventIntegrationConnectionUpdated
   | EventCatalogUpdated
+  | EventQuantcodeInspection
+  | EventQuantcodeCoverageProposed
+  | EventQuantcodeCoverageReviewed
+  | EventQuantcodeSolutionChanged
+  | EventQuantcodeGateRequested
+  | EventQuantcodeGateDecided
+  | EventQuantcodeWriteStarted
+  | EventQuantcodeWriteCompleted
+  | EventQuantcodeWriteReconciled
+  | EventQuantcodeTaskLockRecoveryRecorded
+  | EventQuantcodeBudgetPolicy
+  | EventQuantcodeBudgetReserved
+  | EventQuantcodeBudgetSettled
+  | EventQuantcodeBudgetChanged
+  | EventQuantcodeBudgetRequestEnded
+  | EventQuantcodeBudgetReviewed
+  | EventQuantcodeBudgetLockRecoveryRecorded
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
@@ -147,6 +167,50 @@ export type MoveSessionError = {
   data: {
     message: string
   }
+}
+
+export type QuantCodeKnowledgeCandidate = {
+  name: string
+  group: string
+  status: "draft" | "publishing" | "promoted" | "rejected" | "superseded" | "revoked"
+  digest: string
+  tool_sequence: Array<string>
+}
+
+export type QuantCodeKnowledgeResult = {
+  source_id: string
+  session_id: string
+  source_revision: number
+  input_digest: string
+  observed_at: string
+  candidates: Array<QuantCodeKnowledgeCandidate>
+}
+
+export type QuantCodeArtifactSnapshot = {
+  id: string
+  kind: "artifact" | "report"
+  name?: string
+  mime: string
+  bytes?: number
+  sha256?: string
+  ref: string
+  source: "attachment" | "metadata"
+  capture_status: "available" | "unavailable"
+  unavailable_reason?: "original_not_captured" | "capture_failed" | "invalid_content"
+}
+
+export type QuantCodeBudgetState = {
+  session_id: string
+  root_session_id: string
+  token_limit: number | null
+  used: number
+  reserved: number
+  remaining: number | null
+  known_cost: number
+  unpriced_requests: number
+  requests: number
+  unconfirmed_requests: number
+  status: "active" | "warning" | "stopped_budget"
 }
 
 export type SnapshotFileDiff = {
@@ -734,6 +798,38 @@ export type GlobalEvent = {
   payload:
     | {
         id: string
+        type: "quantcode.knowledge.candidates.observed"
+        properties: {
+          sessionID: string
+          result: QuantCodeKnowledgeResult
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.execution.changed"
+        properties: {
+          sessionID: string
+          status: "idle" | "busy" | "retry"
+          timestamp: number
+          pid: number
+          hostname: string
+          reason?: "cancelled" | "executor_lost"
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.artifacts.captured"
+        properties: {
+          sessionID: string
+          message_id: string
+          call_id: string
+          result_digest: string
+          artifacts: Array<QuantCodeArtifactSnapshot>
+          timestamp: number
+        }
+      }
+    | {
+        id: string
         type: "models-dev.refreshed"
         properties: {
           [key: string]: unknown
@@ -758,6 +854,246 @@ export type GlobalEvent = {
         type: "catalog.updated"
         properties: {
           [key: string]: unknown
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.inspection"
+        properties: {
+          sessionID: string
+          intent_hash: string
+          timestamp: number
+          purpose: "capability_catalog" | "group_memory"
+          server: string
+          tool: string
+          call_id: string
+          catalog_digest: string
+          result_hash: string
+          authorization_hash: string
+          capabilities: Array<{
+            id: string
+            integration_status: string
+          }>
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.coverage.proposed"
+        properties: {
+          sessionID: string
+          intent_hash: string
+          timestamp: number
+          proposal_hash: string
+          inspection_hash: string
+          coverage: "full" | "partial" | "none"
+          components: Array<string>
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.coverage.reviewed"
+        properties: {
+          sessionID: string
+          intent_hash: string
+          timestamp: number
+          proposal_hash: string
+          reviewer: string
+          decision: "approve" | "reject"
+          note: string
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.solution.changed"
+        properties: {
+          sessionID: string
+          document_id: string
+          document_hash: string
+          version: number
+          status: "draft" | "frozen" | "superseded"
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.gate.requested"
+        properties: {
+          sessionID: string
+          request_id: string
+          operation_digest: string
+          kind: "merge" | "permission"
+          resource: string
+          actor: string
+          expires_at: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.gate.decided"
+        properties: {
+          sessionID: string
+          request_id: string
+          operation_digest: string
+          decision: "approve" | "reject"
+          reviewer: string
+          note: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.write.started"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          message_id: string
+          call_id: string
+          operation_digest: string
+          tool: string
+          files: Array<string>
+          plan_hashes: Array<string>
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.write.completed"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          message_id: string
+          call_id: string
+          operation_digest: string
+          result_digest: string
+          result: unknown
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.write.reconciled"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          message_id: string
+          call_id: string
+          operation_digest: string
+          decision: "confirmed_completed" | "confirmed_not_executed"
+          reviewer: string
+          evidence_ref: string
+          note: string
+          prior_receipt_digest: string
+          result?: unknown
+          result_digest?: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.task_lock.recovery_recorded"
+        properties: {
+          sessionID: string
+          lock_digest: string
+          reviewer: string
+          evidence_ref: string
+          note: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.policy"
+        properties: {
+          sessionID: string
+          token_limit: number | null
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.reserved"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          request_id: string
+          provider: string
+          model: string
+          purpose: string
+          input_estimate: number
+          output_limit: number
+          tokens: number
+          timestamp: number
+          process?: {
+            pid: number
+            hostname: string
+          }
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.settled"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          request_id: string
+          input_tokens: number
+          output_tokens: number
+          tokens: number
+          cost: number | null
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.changed"
+        properties: {
+          sessionID: string
+          state: QuantCodeBudgetState
+          timestamp: number
+          reason?: "token_limit" | "capacity_reserved" | "input_too_large"
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.request_ended"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          request_id: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.reviewed"
+        properties: {
+          sessionID: string
+          source_session_id: string
+          request_id: string
+          input_tokens: number
+          output_tokens: number
+          tokens: number
+          cost: number | null
+          reservation_digest: string
+          request_stopped: true
+          decision: "usage_confirmed" | "confirmed_not_executed"
+          reviewer: string
+          evidence_ref: string
+          note: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "quantcode.budget.lock_recovery_recorded"
+        properties: {
+          sessionID: string
+          lock_digest: string
+          reviewer: string
+          processes_stopped: true
+          evidence_ref: string
+          note: string
+          timestamp: number
         }
       }
     | {
@@ -1601,6 +1937,26 @@ export type GlobalEvent = {
         }
       }
     | EventServerInstanceDisposed
+    | SyncEventQuantcodeKnowledgeCandidatesObserved
+    | SyncEventQuantcodeExecutionChanged
+    | SyncEventQuantcodeArtifactsCaptured
+    | SyncEventQuantcodeInspection
+    | SyncEventQuantcodeCoverageProposed
+    | SyncEventQuantcodeCoverageReviewed
+    | SyncEventQuantcodeSolutionChanged
+    | SyncEventQuantcodeGateRequested
+    | SyncEventQuantcodeGateDecided
+    | SyncEventQuantcodeWriteStarted
+    | SyncEventQuantcodeWriteCompleted
+    | SyncEventQuantcodeWriteReconciled
+    | SyncEventQuantcodeTaskLockRecoveryRecorded
+    | SyncEventQuantcodeBudgetPolicy
+    | SyncEventQuantcodeBudgetReserved
+    | SyncEventQuantcodeBudgetSettled
+    | SyncEventQuantcodeBudgetChanged
+    | SyncEventQuantcodeBudgetRequestEnded
+    | SyncEventQuantcodeBudgetReviewed
+    | SyncEventQuantcodeBudgetLockRecoveryRecorded
     | SyncEventSessionCreated
     | SyncEventSessionUpdated
     | SyncEventSessionDeleted
@@ -2123,6 +2479,7 @@ export type Provider = {
 
 export type ExperimentalCapabilities = {
   backgroundSubagents: boolean
+  quantcodeUnifiedRuntime: boolean
 }
 
 export type ConsoleState = {
@@ -2144,6 +2501,560 @@ export type ToolListItem = {
 export type ToolList = Array<ToolListItem>
 
 export type ToolIds = Array<string>
+
+export type QuantCodeTaskError = {
+  _tag: "QuantCodeTaskError"
+  message: string
+}
+
+export type QuantCodeSolutionDocument = {
+  id: string
+  goal: string
+  status: "draft" | "frozen" | "superseded"
+  version: number
+  doc_hash: string
+  acceptance_criteria: Array<string>
+  file_impact: Array<string>
+  rounds: Array<{
+    round_no: number
+    feedback: string
+    revision: string
+    at: string
+  }>
+  needs_human: boolean
+  trivial_exempt: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type QuantCodeSolutionState = {
+  engine: "quantcode"
+  session_id: string
+  classification: {
+    complexity: "L0" | "L1" | "L2" | "L3"
+    solution_required: boolean
+    business_mode: string
+    execution_strategy: string
+    governance: string
+  }
+  solution?: QuantCodeSolutionDocument
+}
+
+export type QuantCodeSolutionReview = {
+  expected_hash: string
+  expected_version: number
+  decision: "approve" | "reject"
+  note: string
+}
+
+export type QuantCodeReuseState = {
+  session_id: string
+  intent_hash: string
+  catalog_checked: boolean
+  memory_checked: boolean
+  proposal?: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    inspection_hash: string
+    coverage: "full" | "partial" | "none"
+    components: Array<string>
+    reason: string
+  }
+  review?: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    reviewer: string
+    decision: "approve" | "reject"
+    note: string
+  }
+}
+
+export type QuantCodeReuseError = {
+  _tag: "QuantCodeReuseError"
+  message: string
+}
+
+export type QuantCodeReuseReview = {
+  proposal_hash: string
+  decision: "approve" | "reject"
+  note: string
+}
+
+export type QuantCodeReceiptState = {
+  session_id: string
+  root_session_id: string
+  unresolved: Array<{
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    tool: string
+    files: Array<string>
+    plan_hashes: Array<string>
+    timestamp: number
+    receipt_digest: string
+    completion_damaged: boolean
+  }>
+}
+
+export type QuantCodeReceiptReview = {
+  source_session_id: string
+  message_id: string
+  call_id: string
+  expected_digest: string
+  expected_receipt_digest: string
+  decision: "confirmed_completed" | "confirmed_not_executed"
+  evidence_ref: string
+  note: string
+  result?: unknown
+}
+
+export type QuantCodeTaskLockState = {
+  session_id: string
+  status: "idle" | "active" | "recovery_required" | "other_host"
+  lock_digest?: string
+}
+
+export type QuantCodeTaskLockRecovery = {
+  expected_digest: string
+  processes_stopped: true
+  evidence_ref: string
+  note: string
+}
+
+export type QuantCodePublicationStatus = {
+  source_id: string
+  state: "starting" | "idle" | "pending" | "retrying"
+  pending_tasks: number
+  failed_tasks: number
+  last_attempt_at?: number
+  last_success_at?: number
+  last_error?: "identity_unavailable" | "projection_unavailable"
+}
+
+export type QuantCodeArtifactRef = {
+  id: string
+  kind: "artifact" | "report"
+  name?: string
+  mime: string
+  bytes?: number
+  sha256?: string
+  ref: string
+  source: "attachment" | "metadata"
+  capture_status: "available" | "unavailable"
+  unavailable_reason?: "original_not_captured" | "capture_failed" | "invalid_content"
+  source_event_id: string
+  source_event_seq: number
+  message_id: string
+  call_id: string
+  result_digest: string
+}
+
+export type QuantCodeSolutionRef = {
+  document_id: string
+  document_hash: string
+  version: number
+  status: "draft" | "frozen" | "superseded"
+}
+
+export type QuantCodeTaskSummary = {
+  session_id: string
+  root_session_id: string
+  parent_session_id?: string
+  source_id: string
+  source_revision: number
+  received_at?: number
+  read_only?: boolean
+  actor_id: string
+  group: string
+  role: string
+  workspace_id: string
+  title: string
+  status:
+    | "queued"
+    | "running"
+    | "completed"
+    | "cancelled"
+    | "error"
+    | "waiting_for_human"
+    | "stopped_budget"
+    | "paused"
+    | "unknown"
+  created_at: number
+  updated_at: number
+  model?: string
+  agent?: string
+  tokens_input: number
+  tokens_output: number
+  cost: number | null
+  reserved_tokens: number
+  unconfirmed_requests: number
+  artifact_count: number
+  artifacts: Array<QuantCodeArtifactRef>
+  artifact_manifest_hash: string
+  solution?: QuantCodeSolutionRef
+  knowledge?: QuantCodeKnowledgeResult
+  last_error?: string
+  directory?: string
+}
+
+export type QuantCodeLegacyProjectionPending = {
+  source_id: string
+  session_id: string
+  root_session_id: string
+  source_revision: number
+  title: string
+  state: "awaiting_archive" | "awaiting_rebuild"
+  message: string
+}
+
+export type QuantCodeTaskList = {
+  tasks: Array<QuantCodeTaskSummary>
+  legacy_pending?: Array<QuantCodeLegacyProjectionPending>
+  next_cursor: string | null
+}
+
+export type QuantCodeArtifact = {
+  id: string
+  kind: "artifact" | "report"
+  name?: string
+  mime: string
+  bytes?: number
+  sha256?: string
+  ref: string
+  source: "attachment" | "metadata"
+  capture_status: "available" | "unavailable"
+  unavailable_reason?: "original_not_captured" | "capture_failed" | "invalid_content"
+  source_event_id: string
+  source_event_seq: number
+  message_id: string
+  call_id: string
+  result_digest: string
+  delivery_status: "available" | "pending" | "unavailable"
+}
+
+export type QuantCodeTaskIndexRead = {
+  task: QuantCodeTaskSummary
+  artifacts: Array<QuantCodeArtifact>
+  artifacts_next_cursor: string | null
+}
+
+export type QuantCodeArtifactList = {
+  source_revision: number
+  artifact_manifest_hash: string
+  artifact_count: number
+  artifacts: Array<QuantCodeArtifact>
+  next_cursor: string | null
+  manifest_complete: boolean
+}
+
+export type QuantCodeArtifactRead = {
+  source_revision: number
+  artifact: QuantCodeArtifact
+  offset: number
+  content?: string
+  encoding?: "base64"
+  chunk_sha256?: string
+  next_offset: number | null
+}
+
+export type QuantCodeLegacyList = {
+  engine: "legacy-python"
+  runs: Array<{
+    engine: "legacy-python"
+    read_only: true
+    thread_id: string
+    checkpoint_id: string
+    timestamp: string | null
+    task: string
+    status: string
+    group: string | null
+    actor_id: string | null
+    workspace_id: string | null
+    iterations: number
+    artifacts?: Array<unknown>
+  }>
+  next_cursor: string | null
+}
+
+export type QuantCodeNativeGateId = string
+
+export type QuantCodeNativeGate = {
+  gate_id: QuantCodeNativeGateId
+  record_digest: string
+  request: {
+    request_id: string
+    root_session_id: string
+    session_id: string
+    message_id: string
+    call_id: string
+    server: string
+    tool: string
+    kind: "merge" | "permission"
+    resource: string
+    resource_version?: string
+    operation_digest: string
+    catalog_digest: string
+    arguments_json: string
+    arguments_digest: string
+    description: string
+    expires_at: number
+  }
+  owner: {
+    session_id: string
+    actor_id: string
+    group: string
+    role: string
+    workspace_id: string
+    resource_scopes: Array<string>
+  }
+  status: "pending" | "approved" | "rejected" | "expired" | "cancelled"
+  valid: boolean
+  decision: {
+    decision: "approve" | "reject"
+    reviewer: string
+    reviewer_session_id: string
+    note: string
+    timestamp: number
+    operation_digest: string
+    record_digest: string
+    receipt_digest: string
+  } | null
+}
+
+export type QuantCodeLegacyDetail = {
+  engine: "legacy-python"
+  read_only: true
+  thread_id: string
+  checkpoint_id: string
+  timestamp: string | null
+  task: string
+  status: string
+  group: string | null
+  actor_id: string | null
+  workspace_id: string | null
+  iterations: number
+  artifacts?: Array<unknown>
+  can_resume: boolean
+  recovery: {
+    available: boolean
+    gate_available: boolean
+    provenance: "missing" | "registered" | "changed"
+    checkpoint_digest: string
+    owner_digest: string
+    latest_checkpoint_id: string
+    serializer_version: string
+    executor_version: string | null
+    provenance_digest: string | null
+    runtime_digest: string | null
+    approval?: QuantCodeNativeGate | null
+    approval_error?: string
+    blockers: Array<{
+      code: string
+      message: string
+    }>
+    usage?: {
+      used_tokens: number
+      reserved_tokens: number
+      unconfirmed_requests: number
+      requests: number
+      cost: number | null
+    } | null
+  }
+  recovery_block_reason: string
+  pending_approval: boolean
+  checkpoints: Array<string>
+  messages: Array<{
+    type: string
+    content: unknown
+    tool_calls: Array<unknown>
+  }>
+  final_message?: string
+  tool_calls?: Array<unknown>
+  execution_trace?: unknown
+  output_data?: unknown
+  timeline?: unknown
+  timeline_error?: string
+  unresolved_operations?: Array<unknown>
+  receipt_reviews?: Array<unknown>
+  receipt_review_error?: string
+  gate?: unknown
+  errors?: Array<unknown>
+}
+
+export type QuantCodeLegacyResumeInput = {
+  thread_id: string
+  checkpoint_id: string
+  checkpoint_digest: string
+  executor_version: string
+  provenance_digest: string
+  approval_gate_id?: string
+  expected_gate_id?: string
+}
+
+export type QuantCodeLegacyResume = {
+  engine: "legacy-python"
+  thread_id: string
+  checkpoint_id: string
+  resumed: boolean
+  read_only: boolean
+  recovery: {
+    available: boolean
+    gate_available: boolean
+    provenance: "missing" | "registered" | "changed"
+    checkpoint_digest: string
+    owner_digest: string
+    latest_checkpoint_id: string
+    serializer_version: string
+    executor_version: string | null
+    provenance_digest: string | null
+    runtime_digest: string | null
+    approval?: QuantCodeNativeGate | null
+    approval_error?: string
+    blockers: Array<{
+      code: string
+      message: string
+    }>
+    usage?: {
+      used_tokens: number
+      reserved_tokens: number
+      unconfirmed_requests: number
+      requests: number
+      cost: number | null
+    } | null
+  }
+  latest_checkpoint_id?: string
+  status: string
+}
+
+export type QuantCodeLegacyApprovalInput = {
+  thread_id: string
+  checkpoint_id: string
+  checkpoint_digest: string
+  executor_version: string
+  provenance_digest: string
+  expected_gate_id: string
+}
+
+export type QuantCodeBudgetReviewState = {
+  budget: QuantCodeBudgetState
+  lock: {
+    status: "idle" | "active" | "recovery_required" | "other_host"
+    lock_digest?: string
+  }
+  requests: Array<{
+    request_id: string
+    source_session_id: string
+    provider: string
+    model: string
+    purpose: string
+    reserved_tokens: number
+    timestamp: number
+    reservation_digest: string
+    status: "active" | "ended" | "process_missing" | "other_host" | "unknown"
+  }>
+}
+
+export type QuantCodeBudgetReview = {
+  request_id: string
+  expected_digest: string
+  request_stopped: boolean
+  decision: "usage_confirmed" | "confirmed_not_executed"
+  receipt?: {
+    input_tokens: number
+    output_tokens: number
+    tokens: number
+    cost: number | null
+  }
+  evidence_ref: string
+  note: string
+}
+
+export type QuantCodeBudgetLockRecovery = {
+  expected_digest: string
+  processes_stopped: boolean
+  evidence_ref: string
+  note: string
+}
+
+export type QuantCodeNativeGateList = {
+  gates: Array<QuantCodeNativeGate>
+  next_cursor: string | null
+}
+
+export type QuantCodeNativeGateReview = {
+  gate_id: string
+  expected_digest: string
+  operation_digest: string
+  decision: "approve" | "reject"
+  note: string
+}
+
+export type QuantCodeGitHubCredentialPreparation = {
+  version: 1
+  nonce: string
+  session_id: string
+  owner_digest: string
+  github_subject: string
+  expires_at: number
+}
+
+export type QuantCodeGitHubCredentialImport = {
+  version: 1
+  nonce: string
+  session_id: string
+  owner_digest: string
+  token: string
+}
+
+export type QuantCodeGitHubConnection = {
+  status: "connected"
+  subject: string
+}
+
+export type QuantCodeWorkspaces = {
+  login_session_id: string
+  roots: Array<{
+    directory: string
+    access: "read" | "write"
+  }>
+  preferred?: string
+}
+
+export type QuantCodeWorkspaceApiError = {
+  _tag: "QuantCodeWorkspaceApiError"
+  message: string
+}
+
+export type QuantCodeIdentityChallenge = {
+  challenge_id: string
+  public_key: string
+  fingerprint: string
+  nonce: string
+  ttl_seconds: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  gateway_origin: string
+}
+
+export type QuantCodeIdentityApiError = {
+  _tag: "QuantCodeIdentityApiError"
+  message: string
+}
+
+export type QuantCodeIdentitySession = {
+  status: "connected"
+  actor_id: string
+  session_id: string
+  fingerprint: string
+  group: string
+  groups: Array<string>
+  expires_at: string
+  execution_status: "disconnected"
+}
 
 export type WorktreeError = {
   name:
@@ -2334,7 +3245,7 @@ export type VcsApplyError = {
   name: "VcsApplyError"
   data: {
     message: string
-    reason: "non-git" | "not-clean"
+    reason: "non-git" | "not-clean" | "denied"
   }
 }
 
@@ -2855,10 +3766,30 @@ export type QuestionRejected2 = {
 }
 
 export type V2Event =
+  | QuantcodeKnowledgeCandidatesObserved
+  | QuantcodeExecutionChanged
+  | QuantcodeArtifactsCaptured
   | ModelsDevRefreshed
   | IntegrationUpdated
   | IntegrationConnectionUpdated
   | CatalogUpdated
+  | QuantcodeInspection
+  | QuantcodeCoverageProposed
+  | QuantcodeCoverageReviewed
+  | QuantcodeSolutionChanged
+  | QuantcodeGateRequested
+  | QuantcodeGateDecided
+  | QuantcodeWriteStarted
+  | QuantcodeWriteCompleted
+  | QuantcodeWriteReconciled
+  | QuantcodeTaskLockRecoveryRecorded
+  | QuantcodeBudgetPolicy
+  | QuantcodeBudgetReserved
+  | QuantcodeBudgetSettled
+  | QuantcodeBudgetChanged
+  | QuantcodeBudgetRequestEnded
+  | QuantcodeBudgetReviewed
+  | QuantcodeBudgetLockRecoveryRecorded
   | SessionCreated
   | SessionUpdated
   | SessionDeleted
@@ -3190,6 +4121,418 @@ export type EventServerInstanceDisposed = {
   type: "server.instance.disposed"
   properties: {
     directory: string
+  }
+}
+
+export type SyncEventQuantcodeKnowledgeCandidatesObserved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.knowledge.candidates.observed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      result: QuantCodeKnowledgeResult
+    }
+  }
+}
+
+export type SyncEventQuantcodeExecutionChanged = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.execution.changed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      status: "idle" | "busy" | "retry"
+      timestamp: number
+      pid: number
+      hostname: string
+      reason?: "cancelled" | "executor_lost"
+    }
+  }
+}
+
+export type SyncEventQuantcodeArtifactsCaptured = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.artifacts.captured.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      message_id: string
+      call_id: string
+      result_digest: string
+      artifacts: Array<QuantCodeArtifactSnapshot>
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeInspection = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.inspection.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      intent_hash: string
+      timestamp: number
+      purpose: "capability_catalog" | "group_memory"
+      server: string
+      tool: string
+      call_id: string
+      catalog_digest: string
+      result_hash: string
+      authorization_hash: string
+      capabilities: Array<{
+        id: string
+        integration_status: string
+      }>
+    }
+  }
+}
+
+export type SyncEventQuantcodeCoverageProposed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.coverage.proposed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      intent_hash: string
+      timestamp: number
+      proposal_hash: string
+      inspection_hash: string
+      coverage: "full" | "partial" | "none"
+      components: Array<string>
+      reason: string
+    }
+  }
+}
+
+export type SyncEventQuantcodeCoverageReviewed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.coverage.reviewed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      intent_hash: string
+      timestamp: number
+      proposal_hash: string
+      reviewer: string
+      decision: "approve" | "reject"
+      note: string
+    }
+  }
+}
+
+export type SyncEventQuantcodeSolutionChanged = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.solution.changed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      document_id: string
+      document_hash: string
+      version: number
+      status: "draft" | "frozen" | "superseded"
+    }
+  }
+}
+
+export type SyncEventQuantcodeGateRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.gate.requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      request_id: string
+      operation_digest: string
+      kind: "merge" | "permission"
+      resource: string
+      actor: string
+      expires_at: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeGateDecided = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.gate.decided.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      request_id: string
+      operation_digest: string
+      decision: "approve" | "reject"
+      reviewer: string
+      note: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeWriteStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.write.started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      message_id: string
+      call_id: string
+      operation_digest: string
+      tool: string
+      files: Array<string>
+      plan_hashes: Array<string>
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeWriteCompleted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.write.completed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      message_id: string
+      call_id: string
+      operation_digest: string
+      result_digest: string
+      result: unknown
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeWriteReconciled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.write.reconciled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      message_id: string
+      call_id: string
+      operation_digest: string
+      decision: "confirmed_completed" | "confirmed_not_executed"
+      reviewer: string
+      evidence_ref: string
+      note: string
+      prior_receipt_digest: string
+      result?: unknown
+      result_digest?: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeTaskLockRecoveryRecorded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.task_lock.recovery_recorded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      lock_digest: string
+      reviewer: string
+      evidence_ref: string
+      note: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetPolicy = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.policy.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      token_limit: number | null
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetReserved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.reserved.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      request_id: string
+      provider: string
+      model: string
+      purpose: string
+      input_estimate: number
+      output_limit: number
+      tokens: number
+      timestamp: number
+      process?: {
+        pid: number
+        hostname: string
+      }
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetSettled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.settled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      request_id: string
+      input_tokens: number
+      output_tokens: number
+      tokens: number
+      cost: number | null
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetChanged = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.changed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      state: QuantCodeBudgetState
+      timestamp: number
+      reason?: "token_limit" | "capacity_reserved" | "input_too_large"
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetRequestEnded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.request_ended.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      request_id: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetReviewed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.reviewed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      source_session_id: string
+      request_id: string
+      input_tokens: number
+      output_tokens: number
+      tokens: number
+      cost: number | null
+      reservation_digest: string
+      request_stopped: true
+      decision: "usage_confirmed" | "confirmed_not_executed"
+      reviewer: string
+      evidence_ref: string
+      note: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventQuantcodeBudgetLockRecoveryRecorded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "quantcode.budget.lock_recovery_recorded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      lock_digest: string
+      reviewer: string
+      processes_stopped: true
+      evidence_ref: string
+      note: string
+      timestamp: number
+    }
   }
 }
 
@@ -5023,6 +6366,68 @@ export type SkillV2Info = {
   content: string
 }
 
+export type QuantcodeKnowledgeCandidatesObserved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.knowledge.candidates.observed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    result: QuantCodeKnowledgeResult
+  }
+}
+
+export type QuantcodeExecutionChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.execution.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    status: "idle" | "busy" | "retry"
+    timestamp: number
+    pid: number
+    hostname: string
+    reason?: "cancelled" | "executor_lost"
+  }
+}
+
+export type QuantcodeArtifactsCaptured = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.artifacts.captured"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    message_id: string
+    call_id: string
+    result_digest: string
+    artifacts: Array<QuantCodeArtifactSnapshot>
+    timestamp: number
+  }
+}
+
 export type ModelsDevRefreshed = {
   id: string
   metadata?: {
@@ -5088,6 +6493,416 @@ export type CatalogUpdated = {
   location?: LocationRef
   data: {
     [key: string]: unknown
+  }
+}
+
+export type QuantcodeInspection = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.inspection"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    purpose: "capability_catalog" | "group_memory"
+    server: string
+    tool: string
+    call_id: string
+    catalog_digest: string
+    result_hash: string
+    authorization_hash: string
+    capabilities: Array<{
+      id: string
+      integration_status: string
+    }>
+  }
+}
+
+export type QuantcodeCoverageProposed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.coverage.proposed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    inspection_hash: string
+    coverage: "full" | "partial" | "none"
+    components: Array<string>
+    reason: string
+  }
+}
+
+export type QuantcodeCoverageReviewed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.coverage.reviewed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    reviewer: string
+    decision: "approve" | "reject"
+    note: string
+  }
+}
+
+export type QuantcodeSolutionChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.solution.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    document_id: string
+    document_hash: string
+    version: number
+    status: "draft" | "frozen" | "superseded"
+  }
+}
+
+export type QuantcodeGateRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.gate.requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    request_id: string
+    operation_digest: string
+    kind: "merge" | "permission"
+    resource: string
+    actor: string
+    expires_at: number
+  }
+}
+
+export type QuantcodeGateDecided = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.gate.decided"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    request_id: string
+    operation_digest: string
+    decision: "approve" | "reject"
+    reviewer: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type QuantcodeWriteStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.write.started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    tool: string
+    files: Array<string>
+    plan_hashes: Array<string>
+    timestamp: number
+  }
+}
+
+export type QuantcodeWriteCompleted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.write.completed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    result_digest: string
+    result: unknown
+    timestamp: number
+  }
+}
+
+export type QuantcodeWriteReconciled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.write.reconciled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    decision: "confirmed_completed" | "confirmed_not_executed"
+    reviewer: string
+    evidence_ref: string
+    note: string
+    prior_receipt_digest: string
+    result?: unknown
+    result_digest?: string
+    timestamp: number
+  }
+}
+
+export type QuantcodeTaskLockRecoveryRecorded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.task_lock.recovery_recorded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    lock_digest: string
+    reviewer: string
+    evidence_ref: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type QuantcodeBudgetPolicy = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.policy"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    token_limit: number | null
+    timestamp: number
+  }
+}
+
+export type QuantcodeBudgetReserved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.reserved"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    provider: string
+    model: string
+    purpose: string
+    input_estimate: number
+    output_limit: number
+    tokens: number
+    timestamp: number
+    process?: {
+      pid: number
+      hostname: string
+    }
+  }
+}
+
+export type QuantcodeBudgetSettled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.settled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    input_tokens: number
+    output_tokens: number
+    tokens: number
+    cost: number | null
+    timestamp: number
+  }
+}
+
+export type QuantcodeBudgetChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    state: QuantCodeBudgetState
+    timestamp: number
+    reason?: "token_limit" | "capacity_reserved" | "input_too_large"
+  }
+}
+
+export type QuantcodeBudgetRequestEnded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.request_ended"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    timestamp: number
+  }
+}
+
+export type QuantcodeBudgetReviewed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.reviewed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    input_tokens: number
+    output_tokens: number
+    tokens: number
+    cost: number | null
+    reservation_digest: string
+    request_stopped: true
+    decision: "usage_confirmed" | "confirmed_not_executed"
+    reviewer: string
+    evidence_ref: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type QuantcodeBudgetLockRecoveryRecorded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "quantcode.budget.lock_recovery_recorded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    lock_digest: string
+    reviewer: string
+    processes_stopped: true
+    evidence_ref: string
+    note: string
+    timestamp: number
   }
 }
 
@@ -6153,6 +7968,41 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
+export type EventQuantcodeKnowledgeCandidatesObserved = {
+  id: string
+  type: "quantcode.knowledge.candidates.observed"
+  properties: {
+    sessionID: string
+    result: QuantCodeKnowledgeResult
+  }
+}
+
+export type EventQuantcodeExecutionChanged = {
+  id: string
+  type: "quantcode.execution.changed"
+  properties: {
+    sessionID: string
+    status: "idle" | "busy" | "retry"
+    timestamp: number
+    pid: number
+    hostname: string
+    reason?: "cancelled" | "executor_lost"
+  }
+}
+
+export type EventQuantcodeArtifactsCaptured = {
+  id: string
+  type: "quantcode.artifacts.captured"
+  properties: {
+    sessionID: string
+    message_id: string
+    call_id: string
+    result_digest: string
+    artifacts: Array<QuantCodeArtifactSnapshot>
+    timestamp: number
+  }
+}
+
 export type EventModelsDevRefreshed = {
   id: string
   type: "models-dev.refreshed"
@@ -6182,6 +8032,263 @@ export type EventCatalogUpdated = {
   type: "catalog.updated"
   properties: {
     [key: string]: unknown
+  }
+}
+
+export type EventQuantcodeInspection = {
+  id: string
+  type: "quantcode.inspection"
+  properties: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    purpose: "capability_catalog" | "group_memory"
+    server: string
+    tool: string
+    call_id: string
+    catalog_digest: string
+    result_hash: string
+    authorization_hash: string
+    capabilities: Array<{
+      id: string
+      integration_status: string
+    }>
+  }
+}
+
+export type EventQuantcodeCoverageProposed = {
+  id: string
+  type: "quantcode.coverage.proposed"
+  properties: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    inspection_hash: string
+    coverage: "full" | "partial" | "none"
+    components: Array<string>
+    reason: string
+  }
+}
+
+export type EventQuantcodeCoverageReviewed = {
+  id: string
+  type: "quantcode.coverage.reviewed"
+  properties: {
+    sessionID: string
+    intent_hash: string
+    timestamp: number
+    proposal_hash: string
+    reviewer: string
+    decision: "approve" | "reject"
+    note: string
+  }
+}
+
+export type EventQuantcodeSolutionChanged = {
+  id: string
+  type: "quantcode.solution.changed"
+  properties: {
+    sessionID: string
+    document_id: string
+    document_hash: string
+    version: number
+    status: "draft" | "frozen" | "superseded"
+  }
+}
+
+export type EventQuantcodeGateRequested = {
+  id: string
+  type: "quantcode.gate.requested"
+  properties: {
+    sessionID: string
+    request_id: string
+    operation_digest: string
+    kind: "merge" | "permission"
+    resource: string
+    actor: string
+    expires_at: number
+  }
+}
+
+export type EventQuantcodeGateDecided = {
+  id: string
+  type: "quantcode.gate.decided"
+  properties: {
+    sessionID: string
+    request_id: string
+    operation_digest: string
+    decision: "approve" | "reject"
+    reviewer: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeWriteStarted = {
+  id: string
+  type: "quantcode.write.started"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    tool: string
+    files: Array<string>
+    plan_hashes: Array<string>
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeWriteCompleted = {
+  id: string
+  type: "quantcode.write.completed"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    result_digest: string
+    result: unknown
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeWriteReconciled = {
+  id: string
+  type: "quantcode.write.reconciled"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    message_id: string
+    call_id: string
+    operation_digest: string
+    decision: "confirmed_completed" | "confirmed_not_executed"
+    reviewer: string
+    evidence_ref: string
+    note: string
+    prior_receipt_digest: string
+    result?: unknown
+    result_digest?: string
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeTaskLockRecoveryRecorded = {
+  id: string
+  type: "quantcode.task_lock.recovery_recorded"
+  properties: {
+    sessionID: string
+    lock_digest: string
+    reviewer: string
+    evidence_ref: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeBudgetPolicy = {
+  id: string
+  type: "quantcode.budget.policy"
+  properties: {
+    sessionID: string
+    token_limit: number | null
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeBudgetReserved = {
+  id: string
+  type: "quantcode.budget.reserved"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    provider: string
+    model: string
+    purpose: string
+    input_estimate: number
+    output_limit: number
+    tokens: number
+    timestamp: number
+    process?: {
+      pid: number
+      hostname: string
+    }
+  }
+}
+
+export type EventQuantcodeBudgetSettled = {
+  id: string
+  type: "quantcode.budget.settled"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    input_tokens: number
+    output_tokens: number
+    tokens: number
+    cost: number | null
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeBudgetChanged = {
+  id: string
+  type: "quantcode.budget.changed"
+  properties: {
+    sessionID: string
+    state: QuantCodeBudgetState
+    timestamp: number
+    reason?: "token_limit" | "capacity_reserved" | "input_too_large"
+  }
+}
+
+export type EventQuantcodeBudgetRequestEnded = {
+  id: string
+  type: "quantcode.budget.request_ended"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeBudgetReviewed = {
+  id: string
+  type: "quantcode.budget.reviewed"
+  properties: {
+    sessionID: string
+    source_session_id: string
+    request_id: string
+    input_tokens: number
+    output_tokens: number
+    tokens: number
+    cost: number | null
+    reservation_digest: string
+    request_stopped: true
+    decision: "usage_confirmed" | "confirmed_not_executed"
+    reviewer: string
+    evidence_ref: string
+    note: string
+    timestamp: number
+  }
+}
+
+export type EventQuantcodeBudgetLockRecoveryRecorded = {
+  id: string
+  type: "quantcode.budget.lock_recovery_recorded"
+  properties: {
+    sessionID: string
+    lock_digest: string
+    reviewer: string
+    processes_stopped: true
+    evidence_ref: string
+    note: string
+    timestamp: number
   }
 }
 
@@ -7717,9 +9824,9 @@ export type QuantcodeToolReadOnlyData = {
 
 export type QuantcodeToolReadOnlyErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | QuantCodeTaskError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | QuantCodeTaskError | InvalidRequestError
 }
 
 export type QuantcodeToolReadOnlyError = QuantcodeToolReadOnlyErrors[keyof QuantcodeToolReadOnlyErrors]
@@ -7778,9 +9885,9 @@ export type QuantcodeCandidateReviewData = {
 
 export type QuantcodeCandidateReviewErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | QuantCodeTaskError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | QuantCodeTaskError | InvalidRequestError
 }
 
 export type QuantcodeCandidateReviewError = QuantcodeCandidateReviewErrors[keyof QuantcodeCandidateReviewErrors]
@@ -7914,6 +10021,1058 @@ export type QuantcodeDeploymentCancelResponses = {
   200: unknown
 }
 
+export type QuantcodeSolutionStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/solution"
+}
+
+export type QuantcodeSolutionStatusErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeSolutionStatusError = QuantcodeSolutionStatusErrors[keyof QuantcodeSolutionStatusErrors]
+
+export type QuantcodeSolutionStatusResponses = {
+  /**
+   * QuantCodeSolutionState
+   */
+  200: QuantCodeSolutionState
+}
+
+export type QuantcodeSolutionStatusResponse = QuantcodeSolutionStatusResponses[keyof QuantcodeSolutionStatusResponses]
+
+export type QuantcodeSolutionProposeData = {
+  body?: {
+    goal: string
+    acceptance_criteria: Array<string>
+    file_impact: Array<string>
+    expected_hash?: string
+    expected_version?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/solution"
+}
+
+export type QuantcodeSolutionProposeErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeSolutionProposeError = QuantcodeSolutionProposeErrors[keyof QuantcodeSolutionProposeErrors]
+
+export type QuantcodeSolutionProposeResponses = {
+  /**
+   * QuantCodeSolutionState
+   */
+  200: QuantCodeSolutionState
+}
+
+export type QuantcodeSolutionProposeResponse =
+  QuantcodeSolutionProposeResponses[keyof QuantcodeSolutionProposeResponses]
+
+export type QuantcodeSolutionReviewData = {
+  body?: QuantCodeSolutionReview
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/solution/review"
+}
+
+export type QuantcodeSolutionReviewErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeSolutionReviewError = QuantcodeSolutionReviewErrors[keyof QuantcodeSolutionReviewErrors]
+
+export type QuantcodeSolutionReviewResponses = {
+  /**
+   * QuantCodeSolutionState
+   */
+  200: QuantCodeSolutionState
+}
+
+export type QuantcodeSolutionReviewResponse = QuantcodeSolutionReviewResponses[keyof QuantcodeSolutionReviewResponses]
+
+export type QuantcodeReuseStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/reuse"
+}
+
+export type QuantcodeReuseStatusErrors = {
+  /**
+   * QuantCodeReuseError | InvalidRequestError
+   */
+  400: QuantCodeReuseError | InvalidRequestError
+}
+
+export type QuantcodeReuseStatusError = QuantcodeReuseStatusErrors[keyof QuantcodeReuseStatusErrors]
+
+export type QuantcodeReuseStatusResponses = {
+  /**
+   * QuantCodeReuseState
+   */
+  200: QuantCodeReuseState
+}
+
+export type QuantcodeReuseStatusResponse = QuantcodeReuseStatusResponses[keyof QuantcodeReuseStatusResponses]
+
+export type QuantcodeReuseReviewData = {
+  body?: QuantCodeReuseReview
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/reuse/review"
+}
+
+export type QuantcodeReuseReviewErrors = {
+  /**
+   * QuantCodeReuseError | InvalidRequestError
+   */
+  400: QuantCodeReuseError | InvalidRequestError
+}
+
+export type QuantcodeReuseReviewError = QuantcodeReuseReviewErrors[keyof QuantcodeReuseReviewErrors]
+
+export type QuantcodeReuseReviewResponses = {
+  /**
+   * QuantCodeReuseState
+   */
+  200: QuantCodeReuseState
+}
+
+export type QuantcodeReuseReviewResponse = QuantcodeReuseReviewResponses[keyof QuantcodeReuseReviewResponses]
+
+export type QuantcodeWriteReceiptStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/write-receipts"
+}
+
+export type QuantcodeWriteReceiptStatusErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeWriteReceiptStatusError =
+  QuantcodeWriteReceiptStatusErrors[keyof QuantcodeWriteReceiptStatusErrors]
+
+export type QuantcodeWriteReceiptStatusResponses = {
+  /**
+   * QuantCodeReceiptState
+   */
+  200: QuantCodeReceiptState
+}
+
+export type QuantcodeWriteReceiptStatusResponse =
+  QuantcodeWriteReceiptStatusResponses[keyof QuantcodeWriteReceiptStatusResponses]
+
+export type QuantcodeWriteReceiptReviewData = {
+  body?: QuantCodeReceiptReview
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/write-receipts/review"
+}
+
+export type QuantcodeWriteReceiptReviewErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeWriteReceiptReviewError =
+  QuantcodeWriteReceiptReviewErrors[keyof QuantcodeWriteReceiptReviewErrors]
+
+export type QuantcodeWriteReceiptReviewResponses = {
+  /**
+   * QuantCodeReceiptState
+   */
+  200: QuantCodeReceiptState
+}
+
+export type QuantcodeWriteReceiptReviewResponse =
+  QuantcodeWriteReceiptReviewResponses[keyof QuantcodeWriteReceiptReviewResponses]
+
+export type QuantcodeTaskLockStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/execution-lock"
+}
+
+export type QuantcodeTaskLockStatusErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeTaskLockStatusError = QuantcodeTaskLockStatusErrors[keyof QuantcodeTaskLockStatusErrors]
+
+export type QuantcodeTaskLockStatusResponses = {
+  /**
+   * QuantCodeTaskLockState
+   */
+  200: QuantCodeTaskLockState
+}
+
+export type QuantcodeTaskLockStatusResponse = QuantcodeTaskLockStatusResponses[keyof QuantcodeTaskLockStatusResponses]
+
+export type QuantcodeTaskLockRecoverData = {
+  body?: QuantCodeTaskLockRecovery
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/execution-lock/recover"
+}
+
+export type QuantcodeTaskLockRecoverErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeTaskLockRecoverError = QuantcodeTaskLockRecoverErrors[keyof QuantcodeTaskLockRecoverErrors]
+
+export type QuantcodeTaskLockRecoverResponses = {
+  /**
+   * QuantCodeTaskLockState
+   */
+  200: QuantCodeTaskLockState
+}
+
+export type QuantcodeTaskLockRecoverResponse =
+  QuantcodeTaskLockRecoverResponses[keyof QuantcodeTaskLockRecoverResponses]
+
+export type QuantcodeBudgetStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/budget"
+}
+
+export type QuantcodeBudgetStatusErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeBudgetStatusError = QuantcodeBudgetStatusErrors[keyof QuantcodeBudgetStatusErrors]
+
+export type QuantcodeBudgetStatusResponses = {
+  /**
+   * QuantCodeBudgetState
+   */
+  200: QuantCodeBudgetState
+}
+
+export type QuantcodeBudgetStatusResponse = QuantcodeBudgetStatusResponses[keyof QuantcodeBudgetStatusResponses]
+
+export type QuantcodePublicationStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/task-publication"
+}
+
+export type QuantcodePublicationStatusErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodePublicationStatusError = QuantcodePublicationStatusErrors[keyof QuantcodePublicationStatusErrors]
+
+export type QuantcodePublicationStatusResponses = {
+  /**
+   * QuantCodePublicationStatus
+   */
+  200: QuantCodePublicationStatus
+}
+
+export type QuantcodePublicationStatusResponse =
+  QuantcodePublicationStatusResponses[keyof QuantcodePublicationStatusResponses]
+
+export type QuantcodeTaskIndexListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    limit?: string
+    cursor?: string
+  }
+  url: "/experimental/quantcode/tasks"
+}
+
+export type QuantcodeTaskIndexListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeTaskIndexListError = QuantcodeTaskIndexListErrors[keyof QuantcodeTaskIndexListErrors]
+
+export type QuantcodeTaskIndexListResponses = {
+  /**
+   * QuantCodeTaskList
+   */
+  200: QuantCodeTaskList
+}
+
+export type QuantcodeTaskIndexListResponse = QuantcodeTaskIndexListResponses[keyof QuantcodeTaskIndexListResponses]
+
+export type QuantcodeTaskIndexReadData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/task-index"
+}
+
+export type QuantcodeTaskIndexReadErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeTaskIndexReadError = QuantcodeTaskIndexReadErrors[keyof QuantcodeTaskIndexReadErrors]
+
+export type QuantcodeTaskIndexReadResponses = {
+  /**
+   * QuantCodeTaskIndexRead
+   */
+  200: QuantCodeTaskIndexRead
+}
+
+export type QuantcodeTaskIndexReadResponse = QuantcodeTaskIndexReadResponses[keyof QuantcodeTaskIndexReadResponses]
+
+export type QuantcodeOrganizationTasksListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    limit?: string
+    cursor?: string
+    source_id?: string
+    root_session_id?: string
+  }
+  url: "/experimental/quantcode/organization-tasks"
+}
+
+export type QuantcodeOrganizationTasksListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeOrganizationTasksListError =
+  QuantcodeOrganizationTasksListErrors[keyof QuantcodeOrganizationTasksListErrors]
+
+export type QuantcodeOrganizationTasksListResponses = {
+  /**
+   * QuantCodeTaskList
+   */
+  200: QuantCodeTaskList
+}
+
+export type QuantcodeOrganizationTasksListResponse =
+  QuantcodeOrganizationTasksListResponses[keyof QuantcodeOrganizationTasksListResponses]
+
+export type QuantcodeOrganizationTasksReadData = {
+  body?: never
+  path: {
+    source_id: string
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}"
+}
+
+export type QuantcodeOrganizationTasksReadErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeOrganizationTasksReadError =
+  QuantcodeOrganizationTasksReadErrors[keyof QuantcodeOrganizationTasksReadErrors]
+
+export type QuantcodeOrganizationTasksReadResponses = {
+  /**
+   * QuantCodeTaskIndexRead
+   */
+  200: QuantCodeTaskIndexRead
+}
+
+export type QuantcodeOrganizationTasksReadResponse =
+  QuantcodeOrganizationTasksReadResponses[keyof QuantcodeOrganizationTasksReadResponses]
+
+export type QuantcodeArtifactsListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    source_revision: string
+    limit?: string
+    cursor?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/artifacts"
+}
+
+export type QuantcodeArtifactsListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeArtifactsListError = QuantcodeArtifactsListErrors[keyof QuantcodeArtifactsListErrors]
+
+export type QuantcodeArtifactsListResponses = {
+  /**
+   * QuantCodeArtifactList
+   */
+  200: QuantCodeArtifactList
+}
+
+export type QuantcodeArtifactsListResponse = QuantcodeArtifactsListResponses[keyof QuantcodeArtifactsListResponses]
+
+export type QuantcodeArtifactsReadData = {
+  body?: never
+  path: {
+    sessionID: string
+    artifact_id: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    source_revision: string
+    offset?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/artifacts/{artifact_id}"
+}
+
+export type QuantcodeArtifactsReadErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeArtifactsReadError = QuantcodeArtifactsReadErrors[keyof QuantcodeArtifactsReadErrors]
+
+export type QuantcodeArtifactsReadResponses = {
+  /**
+   * QuantCodeArtifactRead
+   */
+  200: QuantCodeArtifactRead
+}
+
+export type QuantcodeArtifactsReadResponse = QuantcodeArtifactsReadResponses[keyof QuantcodeArtifactsReadResponses]
+
+export type QuantcodeOrganizationArtifactsListData = {
+  body?: never
+  path: {
+    source_id: string
+    sessionID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    source_revision: string
+    limit?: string
+    cursor?: string
+  }
+  url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}/artifacts"
+}
+
+export type QuantcodeOrganizationArtifactsListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeOrganizationArtifactsListError =
+  QuantcodeOrganizationArtifactsListErrors[keyof QuantcodeOrganizationArtifactsListErrors]
+
+export type QuantcodeOrganizationArtifactsListResponses = {
+  /**
+   * QuantCodeArtifactList
+   */
+  200: QuantCodeArtifactList
+}
+
+export type QuantcodeOrganizationArtifactsListResponse =
+  QuantcodeOrganizationArtifactsListResponses[keyof QuantcodeOrganizationArtifactsListResponses]
+
+export type QuantcodeOrganizationArtifactsReadData = {
+  body?: never
+  path: {
+    source_id: string
+    sessionID: string
+    artifact_id: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    source_revision: string
+    offset?: string
+  }
+  url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}/artifacts/{artifact_id}"
+}
+
+export type QuantcodeOrganizationArtifactsReadErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeOrganizationArtifactsReadError =
+  QuantcodeOrganizationArtifactsReadErrors[keyof QuantcodeOrganizationArtifactsReadErrors]
+
+export type QuantcodeOrganizationArtifactsReadResponses = {
+  /**
+   * QuantCodeArtifactRead
+   */
+  200: QuantCodeArtifactRead
+}
+
+export type QuantcodeOrganizationArtifactsReadResponse =
+  QuantcodeOrganizationArtifactsReadResponses[keyof QuantcodeOrganizationArtifactsReadResponses]
+
+export type QuantcodeLegacyListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    limit?: string
+    cursor?: string
+    organization?: "true" | "false"
+    reports_only?: "true" | "false"
+    group_filter?: string
+  }
+  url: "/experimental/quantcode/legacy/tasks"
+}
+
+export type QuantcodeLegacyListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeLegacyListError = QuantcodeLegacyListErrors[keyof QuantcodeLegacyListErrors]
+
+export type QuantcodeLegacyListResponses = {
+  /**
+   * QuantCodeLegacyList
+   */
+  200: QuantCodeLegacyList
+}
+
+export type QuantcodeLegacyListResponse = QuantcodeLegacyListResponses[keyof QuantcodeLegacyListResponses]
+
+export type QuantcodeLegacyDetailData = {
+  body?: never
+  path: {
+    thread_id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    checkpoint_id?: string
+    trace_cursor?: string
+    organization?: "true" | "false"
+  }
+  url: "/experimental/quantcode/legacy/tasks/{thread_id}"
+}
+
+export type QuantcodeLegacyDetailErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeLegacyDetailError = QuantcodeLegacyDetailErrors[keyof QuantcodeLegacyDetailErrors]
+
+export type QuantcodeLegacyDetailResponses = {
+  /**
+   * QuantCodeLegacyDetail
+   */
+  200: QuantCodeLegacyDetail
+}
+
+export type QuantcodeLegacyDetailResponse = QuantcodeLegacyDetailResponses[keyof QuantcodeLegacyDetailResponses]
+
+export type QuantcodeLegacyResumeData = {
+  body?: QuantCodeLegacyResumeInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/legacy/resume"
+}
+
+export type QuantcodeLegacyResumeErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeLegacyResumeError = QuantcodeLegacyResumeErrors[keyof QuantcodeLegacyResumeErrors]
+
+export type QuantcodeLegacyResumeResponses = {
+  /**
+   * QuantCodeLegacyResume
+   */
+  200: QuantCodeLegacyResume
+}
+
+export type QuantcodeLegacyResumeResponse = QuantcodeLegacyResumeResponses[keyof QuantcodeLegacyResumeResponses]
+
+export type QuantcodeLegacyRequestApprovalData = {
+  body?: QuantCodeLegacyApprovalInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/legacy/request-approval"
+}
+
+export type QuantcodeLegacyRequestApprovalErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeLegacyRequestApprovalError =
+  QuantcodeLegacyRequestApprovalErrors[keyof QuantcodeLegacyRequestApprovalErrors]
+
+export type QuantcodeLegacyRequestApprovalResponses = {
+  /**
+   * QuantCodeNativeGate
+   */
+  200: QuantCodeNativeGate
+}
+
+export type QuantcodeLegacyRequestApprovalResponse =
+  QuantcodeLegacyRequestApprovalResponses[keyof QuantcodeLegacyRequestApprovalResponses]
+
+export type QuantcodeBudgetReviewStateData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/budget/review"
+}
+
+export type QuantcodeBudgetReviewStateErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeBudgetReviewStateError = QuantcodeBudgetReviewStateErrors[keyof QuantcodeBudgetReviewStateErrors]
+
+export type QuantcodeBudgetReviewStateResponses = {
+  /**
+   * QuantCodeBudgetReviewState
+   */
+  200: QuantCodeBudgetReviewState
+}
+
+export type QuantcodeBudgetReviewStateResponse =
+  QuantcodeBudgetReviewStateResponses[keyof QuantcodeBudgetReviewStateResponses]
+
+export type QuantcodeBudgetReviewData = {
+  body?: QuantCodeBudgetReview
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/budget/review"
+}
+
+export type QuantcodeBudgetReviewErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeBudgetReviewError = QuantcodeBudgetReviewErrors[keyof QuantcodeBudgetReviewErrors]
+
+export type QuantcodeBudgetReviewResponses = {
+  /**
+   * QuantCodeBudgetReviewState
+   */
+  200: QuantCodeBudgetReviewState
+}
+
+export type QuantcodeBudgetReviewResponse = QuantcodeBudgetReviewResponses[keyof QuantcodeBudgetReviewResponses]
+
+export type QuantcodeBudgetRecoverLockData = {
+  body?: QuantCodeBudgetLockRecovery
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/session/{sessionID}/budget/lock/recover"
+}
+
+export type QuantcodeBudgetRecoverLockErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeBudgetRecoverLockError = QuantcodeBudgetRecoverLockErrors[keyof QuantcodeBudgetRecoverLockErrors]
+
+export type QuantcodeBudgetRecoverLockResponses = {
+  /**
+   * QuantCodeBudgetReviewState
+   */
+  200: QuantCodeBudgetReviewState
+}
+
+export type QuantcodeBudgetRecoverLockResponse =
+  QuantcodeBudgetRecoverLockResponses[keyof QuantcodeBudgetRecoverLockResponses]
+
+export type QuantcodeNativeGateListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    cursor?: string
+  }
+  url: "/experimental/quantcode/native-gates"
+}
+
+export type QuantcodeNativeGateListErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeNativeGateListError = QuantcodeNativeGateListErrors[keyof QuantcodeNativeGateListErrors]
+
+export type QuantcodeNativeGateListResponses = {
+  /**
+   * QuantCodeNativeGateList
+   */
+  200: QuantCodeNativeGateList
+}
+
+export type QuantcodeNativeGateListResponse = QuantcodeNativeGateListResponses[keyof QuantcodeNativeGateListResponses]
+
+export type QuantcodeNativeGateReadData = {
+  body?: never
+  path: {
+    gateID: QuantCodeNativeGateId
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/native-gates/{gateID}"
+}
+
+export type QuantcodeNativeGateReadErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeNativeGateReadError = QuantcodeNativeGateReadErrors[keyof QuantcodeNativeGateReadErrors]
+
+export type QuantcodeNativeGateReadResponses = {
+  /**
+   * QuantCodeNativeGate
+   */
+  200: QuantCodeNativeGate
+}
+
+export type QuantcodeNativeGateReadResponse = QuantcodeNativeGateReadResponses[keyof QuantcodeNativeGateReadResponses]
+
+export type QuantcodeNativeGateDecideData = {
+  body?: QuantCodeNativeGateReview
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/native-gates/decide"
+}
+
+export type QuantcodeNativeGateDecideErrors = {
+  /**
+   * QuantCodeTaskError | InvalidRequestError
+   */
+  400: QuantCodeTaskError | InvalidRequestError
+}
+
+export type QuantcodeNativeGateDecideError = QuantcodeNativeGateDecideErrors[keyof QuantcodeNativeGateDecideErrors]
+
+export type QuantcodeNativeGateDecideResponses = {
+  /**
+   * QuantCodeNativeGate
+   */
+  200: QuantCodeNativeGate
+}
+
+export type QuantcodeNativeGateDecideResponse =
+  QuantcodeNativeGateDecideResponses[keyof QuantcodeNativeGateDecideResponses]
+
+export type QuantcodeGithubCommitData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    repo: string
+    sha: string
+  }
+  url: "/experimental/quantcode/github/commit"
+}
+
+export type QuantcodeGithubCommitErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeGithubCommitError = QuantcodeGithubCommitErrors[keyof QuantcodeGithubCommitErrors]
+
+export type QuantcodeGithubCommitResponses = {
+  /**
+   * Success
+   */
+  200: unknown
+}
+
+export type QuantcodeGithubStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/github"
+}
+
+export type QuantcodeGithubStatusErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeGithubStatusError = QuantcodeGithubStatusErrors[keyof QuantcodeGithubStatusErrors]
+
+export type QuantcodeGithubStatusResponses = {
+  /**
+   * Success
+   */
+  200: unknown
+}
+
+export type QuantcodeGithubConnectData = {
+  body?: {
+    mode: "local" | "browser" | "cancel"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/github"
+}
+
+export type QuantcodeGithubConnectErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeGithubConnectError = QuantcodeGithubConnectErrors[keyof QuantcodeGithubConnectErrors]
+
+export type QuantcodeGithubConnectResponses = {
+  /**
+   * Success
+   */
+  200: unknown
+}
+
+export type QuantcodeGithubPrepareCredentialData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/github/credential/prepare"
+}
+
+export type QuantcodeGithubPrepareCredentialErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeGithubPrepareCredentialError =
+  QuantcodeGithubPrepareCredentialErrors[keyof QuantcodeGithubPrepareCredentialErrors]
+
+export type QuantcodeGithubPrepareCredentialResponses = {
+  /**
+   * QuantCodeGitHubCredentialPreparation
+   */
+  200: QuantCodeGitHubCredentialPreparation
+}
+
+export type QuantcodeGithubPrepareCredentialResponse =
+  QuantcodeGithubPrepareCredentialResponses[keyof QuantcodeGithubPrepareCredentialResponses]
+
+export type QuantcodeGithubImportCredentialData = {
+  body?: QuantCodeGitHubCredentialImport
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/github/credential/import"
+}
+
+export type QuantcodeGithubImportCredentialErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeGithubImportCredentialError =
+  QuantcodeGithubImportCredentialErrors[keyof QuantcodeGithubImportCredentialErrors]
+
+export type QuantcodeGithubImportCredentialResponses = {
+  /**
+   * QuantCodeGitHubConnection
+   */
+  200: QuantCodeGitHubConnection
+}
+
+export type QuantcodeGithubImportCredentialResponse =
+  QuantcodeGithubImportCredentialResponses[keyof QuantcodeGithubImportCredentialResponses]
+
 export type QuantcodeIdentityListData = {
   body?: never
   path?: never
@@ -7940,9 +11099,102 @@ export type QuantcodeIdentityListResponses = {
   200: unknown
 }
 
+export type QuantcodeWorkspacesListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    preferred?: string
+    expected_session_id?: string
+  }
+  url: "/experimental/quantcode/workspaces"
+}
+
+export type QuantcodeWorkspacesListErrors = {
+  /**
+   * QuantCodeWorkspaceApiError | BadRequest | InvalidRequestError
+   */
+  400: QuantCodeWorkspaceApiError | EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeWorkspacesListError = QuantcodeWorkspacesListErrors[keyof QuantcodeWorkspacesListErrors]
+
+export type QuantcodeWorkspacesListResponses = {
+  /**
+   * QuantCodeWorkspaces
+   */
+  200: QuantCodeWorkspaces
+}
+
+export type QuantcodeWorkspacesListResponse = QuantcodeWorkspacesListResponses[keyof QuantcodeWorkspacesListResponses]
+
+export type QuantcodeIdentityChallengeData = {
+  body?: {
+    identity_id?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/identity/challenge"
+}
+
+export type QuantcodeIdentityChallengeErrors = {
+  /**
+   * QuantCodeIdentityApiError | BadRequest | InvalidRequestError
+   */
+  400: QuantCodeIdentityApiError | EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeIdentityChallengeError = QuantcodeIdentityChallengeErrors[keyof QuantcodeIdentityChallengeErrors]
+
+export type QuantcodeIdentityChallengeResponses = {
+  /**
+   * QuantCodeIdentityChallenge
+   */
+  200: QuantCodeIdentityChallenge
+}
+
+export type QuantcodeIdentityChallengeResponse =
+  QuantcodeIdentityChallengeResponses[keyof QuantcodeIdentityChallengeResponses]
+
+export type QuantcodeIdentityVerifyData = {
+  body?: {
+    challenge_id: string
+    signature: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/identity/verify"
+}
+
+export type QuantcodeIdentityVerifyErrors = {
+  /**
+   * QuantCodeIdentityApiError | BadRequest | InvalidRequestError
+   */
+  400: QuantCodeIdentityApiError | EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeIdentityVerifyError = QuantcodeIdentityVerifyErrors[keyof QuantcodeIdentityVerifyErrors]
+
+export type QuantcodeIdentityVerifyResponses = {
+  /**
+   * QuantCodeIdentitySession
+   */
+  200: QuantCodeIdentitySession
+}
+
+export type QuantcodeIdentityVerifyResponse = QuantcodeIdentityVerifyResponses[keyof QuantcodeIdentityVerifyResponses]
+
 export type QuantcodeIdentityLoginData = {
   body?: {
-    [key: string]: unknown
+    identity_id?: string
+    group?: string
   }
   path?: never
   query?: {
@@ -7962,6 +11214,32 @@ export type QuantcodeIdentityLoginErrors = {
 export type QuantcodeIdentityLoginError = QuantcodeIdentityLoginErrors[keyof QuantcodeIdentityLoginErrors]
 
 export type QuantcodeIdentityLoginResponses = {
+  /**
+   * Success
+   */
+  200: unknown
+}
+
+export type QuantcodeIdentityLogoutData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/quantcode/identity/logout"
+}
+
+export type QuantcodeIdentityLogoutErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type QuantcodeIdentityLogoutError = QuantcodeIdentityLogoutErrors[keyof QuantcodeIdentityLogoutErrors]
+
+export type QuantcodeIdentityLogoutResponses = {
   /**
    * Success
    */
@@ -8571,6 +11849,9 @@ export type VcsDiffRawResponse = VcsDiffRawResponses[keyof VcsDiffRawResponses]
 export type VcsApplyData = {
   body?: {
     patch: string
+    sessionID?: string
+    messageID?: string
+    callID?: string
   }
   path?: never
   query?: {
@@ -9582,6 +12863,7 @@ export type PermissionReplyData = {
   body?: {
     reply: "once" | "always" | "reject"
     message?: string
+    expected_digest?: string
   }
   path: {
     requestID: string
@@ -10053,9 +13335,13 @@ export type SessionDiffData = {
 
 export type SessionDiffErrors = {
   /**
-   * Bad request
+   * BadRequest | InvalidRequestError
    */
-  400: BadRequestError
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
 }
 
 export type SessionDiffError = SessionDiffErrors[keyof SessionDiffErrors]
@@ -10744,6 +14030,10 @@ export type PartDeleteErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionBusyError
+   */
+  409: SessionBusyError
 }
 
 export type PartDeleteError = PartDeleteErrors[keyof PartDeleteErrors]
@@ -10780,6 +14070,10 @@ export type PartUpdateErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionBusyError
+   */
+  409: SessionBusyError
 }
 
 export type PartUpdateError = PartUpdateErrors[keyof PartUpdateErrors]

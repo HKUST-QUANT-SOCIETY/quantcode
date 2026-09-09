@@ -1,9 +1,29 @@
 import { readFile, stat } from "node:fs/promises"
+import { readPrivateFile } from "@/quantcode/private-file"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 /** Host-owned gateway credential; never expose it in browser payloads or MCP. */
 export async function quantcodeManagement(path: "/deployments" | "/deployments/cancel" | "/receipts/reconcile", sessionID: string, payload?: unknown): Promise<unknown> {
   const filename = process.env.QUANTCODE_IDENTITY_SESSION_FILE
   if (!filename) return { error: "Identity gateway session is not configured" }
+  if (QuantCodeIdentity.enabled()) {
+    const before = await readPrivateFile(filename)
+    const record = JSON.parse(before) as { gateway: string; token: string }
+    const identity = await QuantCodeIdentity.currentIdentity()
+    if (identity.session_id !== sessionID || (identity.role !== "admin" && !(path === "/receipts/reconcile" && identity.role === "approver")))
+      throw new QuantCodeIdentity.IdentityError("当前身份没有此管理操作权限。")
+    if (await readPrivateFile(filename) !== before) throw new QuantCodeIdentity.IdentityError()
+    const response = await fetch(new URL(path, record.gateway), {
+      method: payload === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${record.token}`, "Content-Type": "application/json" },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+    })
+    const result: unknown = await response.json()
+    if ((await QuantCodeIdentity.currentIdentity()).session_id !== sessionID || await readPrivateFile(filename) !== before)
+      throw new QuantCodeIdentity.IdentityError("管理请求期间登录已变化，请重新查询结果。")
+    if (!response.ok) return { error: `Management request rejected (${response.status})` }
+    return result
+  }
   const info = await stat(filename)
   if (info.mode & 0o077 || (process.getuid && info.uid !== process.getuid())) throw new Error("Identity session file must be owned by this host account with permissions 0600")
   const record = JSON.parse(await readFile(filename, "utf8")) as { gateway: string; token: string }

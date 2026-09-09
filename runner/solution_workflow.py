@@ -457,6 +457,51 @@ def freeze_solution(
     return (store or get_store()).save(doc)
 
 
+def review_solution(
+    doc_id: str,
+    *,
+    expected_hash: str,
+    expected_version: int,
+    reviewer: str,
+    decision: str,
+    note: str,
+    store: SolutionStore,
+    evidence_dir: Path,
+) -> SolutionDoc:
+    """Trusted UI review of an exact version; never registered as an LLM tool.
+
+    Unlike the legacy round-count workflow, this path records the actual
+    reviewer decision and does not invent discussion rounds to satisfy a
+    numeric quota. Existing tools retain their original freeze semantics.
+    """
+    if decision not in {"approve", "reject"} or not reviewer.strip() or not note.strip():
+        raise SolutionWorkflowError("reviewer, explicit decision and review note are required")
+    doc = _require(doc_id, store)
+    if doc.doc_hash != expected_hash or doc.version != expected_version:
+        raise SolutionWorkflowError("方案已变化，请重新查看当前版本后确认")
+    if doc.status != SolutionStatus.DRAFT:
+        raise SolutionWorkflowError("仅草稿方案可以确认或拒绝")
+    if not doc.acceptance_criteria:
+        raise SolutionWorkflowError("方案必须填写验收标准")
+    from runner.evidence import append_event
+    target = SolutionStatus.FROZEN if decision == "approve" else SolutionStatus.SUPERSEDED
+    reviewed = doc.model_copy(update={
+        "status": target, "needs_human": False, "version": doc.version + 1,
+        "rounds": list(doc.rounds) + [SolutionRound(
+            round_no=len(doc.rounds) + 1, feedback=note.strip(),
+            revision=f"{reviewer}: {decision} version {doc.version}", at=_utc_now_iso(),
+        )],
+    })
+    reviewed = reviewed.model_copy(update={"doc_hash": compute_doc_hash(reviewed)})
+    append_event(doc_id, "output_data", {
+        "event": "solution_review",
+        "reviewer": reviewer, "decision": decision, "expected_version": expected_version,
+        "expected_hash": expected_hash, "next_version": reviewed.version,
+        "next_hash": reviewed.doc_hash, "note": note,
+    }, evidence_dir, required=True)
+    return store.save(reviewed)
+
+
 def supersede_solution(doc_id: str, *, store: SolutionStore | None = None) -> SolutionDoc:
     """废弃方案（frozen → superseded；draft 也可直接废弃）。"""
     doc = _require(doc_id, store)

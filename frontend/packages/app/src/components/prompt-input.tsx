@@ -1358,7 +1358,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const designPlaceholder = () => {
     if (store.mode === "shell") return placeholder()
-    return "Ask anything, / for commands, @ for context..."
+    return language.t("prompt.placeholder.commands")
   }
 
   const modelControlState = createMemo<ComposerModelControlState>(() => ({

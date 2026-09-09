@@ -198,6 +198,8 @@ def _mcp_checkpoint_db() -> Path:
 
 
 def _run_agent_execute(args: RunAgentArgs, ctx: dict) -> dict[str, Any]:
+    if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" or "_native_call" in ctx:
+        return {"status": "error", "error": "Legacy Runner is unavailable as a native task tool; use the dedicated checkpoint history/recovery adapter."}
     from uuid import uuid4
     from runner.execution_lock import execution_lock
 

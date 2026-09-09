@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Context, Config as EffectConfig, Effect, Layer, Queue, Schema } from "effect"
+import { Context, Config as EffectConfig, Effect, Fiber, Layer, Queue, Schema } from "effect"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import path from "path"
 import { pathToFileURL } from "url"
 import { mkdir } from "fs/promises"
+import { createServer } from "node:http"
 import { Location } from "@opencode-ai/core/location"
 import { Pty } from "@opencode-ai/core/pty"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
@@ -41,13 +42,27 @@ const servedRoutes: Layer.Layer<never, EffectConfig.ConfigError, HttpServer.Http
   { disableListenLog: true, disableLogger: true },
 )
 
+class PtyTestServer extends Context.Service<PtyTestServer, ReturnType<typeof createServer>>()("@test/PtyHttpServer") {}
+const testServerLayer = Layer.unwrap(Effect.gen(function* () {
+  const server = yield* PtyTestServer
+  return NodeHttpServer.layer(() => server, { host: "127.0.0.1", port: 0 })
+})).pipe(Layer.provideMerge(Layer.sync(PtyTestServer, () => createServer())))
+
+const closeTestConnections = Effect.gen(function* () {
+  const server = yield* PtyTestServer
+  // WebSocket receivers and response bodies finish in the test. Bun may still
+  // retain idle HTTP sockets beyond node:http's graceful shutdown timeout.
+  yield* Effect.addFinalizer(() => Effect.sync(() => server.closeAllConnections()))
+})
+
 const effectIt = testEffect(
   Layer.mergeAll(
     testStateLayer,
     Socket.layerWebSocketConstructorGlobal,
     servedRoutes.pipe(
       Layer.provide(Socket.layerWebSocketConstructorGlobal),
-      Layer.provideMerge(NodeHttpServer.layerTest),
+      Layer.provideMerge(HttpServer.layerTestClient.pipe(Layer.provide(FetchHttpClient.layer))),
+      Layer.provideMerge(testServerLayer),
       Layer.provideMerge(NodeServices.layer),
     ),
   ),
@@ -133,6 +148,7 @@ describe("v2 pty HttpApi", () => {
     "serves PTY websocket output and input through the canonical route",
     () =>
       Effect.gen(function* () {
+        yield* closeTestConnections
         const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
         const created = yield* HttpClientRequest.post("/api/pty").pipe(
           directoryHeader(dir),
@@ -148,7 +164,7 @@ describe("v2 pty HttpApi", () => {
           { closeCodeIsError: () => false },
         )
         const messages = yield* Queue.unbounded<string>()
-        yield* socket
+        const receiver = yield* socket
           .runRaw((message) =>
             Queue.offer(messages, typeof message === "string" ? message : new TextDecoder().decode(message)),
           )
@@ -166,18 +182,21 @@ describe("v2 pty HttpApi", () => {
         yield* write("ping-v2\n")
         expect(yield* takeUntil("ping-v2")).toContain("ping-v2")
         yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
+        yield* Fiber.join(receiver).pipe(Effect.timeout("5 seconds"))
 
         const removed = yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(
           directoryHeader(dir),
           HttpClient.execute,
         )
         expect(removed.status).toBe(204)
+        yield* removed.arrayBuffer
       }),
   )
   ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
     "applies plugin shell environment before forced PTY values",
     () =>
       Effect.gen(function* () {
+        yield* closeTestConnections
         const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
         const plugin = path.join(dir, "plugin.ts")
         const cwd = path.join(dir, "child")
@@ -223,7 +242,7 @@ describe("v2 pty HttpApi", () => {
           { closeCodeIsError: () => false },
         )
         const messages = yield* Queue.unbounded<string>()
-        yield* socket
+        const receiver = yield* socket
           .runRaw((message) =>
             Queue.offer(messages, typeof message === "string" ? message : new TextDecoder().decode(message)),
           )
@@ -244,7 +263,10 @@ describe("v2 pty HttpApi", () => {
           `caller|plugin|plugin|xterm-256color|${cwd}`,
         )
         yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
-        yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(directoryHeader(dir), HttpClient.execute)
+        yield* Fiber.join(receiver).pipe(Effect.timeout("5 seconds"))
+        const removed = yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(directoryHeader(dir), HttpClient.execute)
+        expect(removed.status).toBe(204)
+        yield* removed.arrayBuffer
       }),
   )
 })

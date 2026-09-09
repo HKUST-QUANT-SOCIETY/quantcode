@@ -35,6 +35,10 @@ _REUSE_DISCIPLINE = (
 )
 _STRICT_REUSE_DISCIPLINE = "【严格复用模式】禁止引入外部自造实现，仅允许使用已登记能力。"
 _TRUNCATION_MARK = "…（目录已截断，全量用 list_capabilities 查看）"
+_LOCAL_COMPONENT_NOTICE = (
+    "组件运行策略：量化 canonical 仓库由组员拉取到本地，先阅读能力卡和本地 README；"
+    "在组件发布 API 前不要把目录登记或 fixture 当作已接通服务，也不要生成伪造生产指标。"
+)
 
 
 def _format_card_line(card: Any) -> str:
@@ -81,6 +85,10 @@ def capability_digest(
         max_chars = int(cfg_max) if cfg_max else DEFAULT_DIGEST_MAX_CHARS
 
     header = [_DIGEST_HEADER, _REUSE_DISCIPLINE]
+    # Keep the first canonical card visible in constrained prompts; the local
+    # checkout notice is included in normal-sized summaries.
+    if max_chars >= 800:
+        header.append(_LOCAL_COMPONENT_NOTICE)
     if strict_reuse_enabled(config_name):
         header.append(_STRICT_REUSE_DISCIPLINE)
     card_lines = [_format_card_line(c) for c in visible_cards(cards, group)]

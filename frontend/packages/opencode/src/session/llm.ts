@@ -4,11 +4,11 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
-import { Context, Effect, Layer } from "effect"
+import { Cause, Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
+import { stepCountIs, streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent } from "@opencode-ai/llm"
-import { LLMClient } from "@opencode-ai/llm/route"
+import { LLMClient, RequestExecutor } from "@opencode-ai/llm/route"
 import type { LLMClientService } from "@opencode-ai/llm/route"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -29,6 +29,10 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { Database } from "@opencode-ai/core/database/database"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeAccess } from "@/quantcode/access"
+import { QuantCodeBudget } from "@/quantcode/budget"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -70,6 +74,7 @@ const live: Layer.Layer<
   | EventV2Bridge.Service
   | LLMClientService
   | RuntimeFlags.Service
+  | Database.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -81,8 +86,15 @@ const live: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    const database = yield* Database.Service
 
-    const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
+    type Accounting = {
+      reservation?: QuantCodeBudget.Reservation
+      usage?: NonNullable<ReturnType<typeof QuantCodeBudget.usage>>
+      completed: boolean
+    }
+    const run = Effect.fn("LLM.run")(function* (input: StreamRequest, accounting: Accounting) {
+      if (QuantCodeIdentity.enabled()) yield* QuantCodeBudget.check(input.sessionID)
       yield* Effect.logInfo("stream", {
         providerID: input.model.providerID,
         modelID: input.model.id,
@@ -111,6 +123,16 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
       })
+      if (QuantCodeIdentity.enabled()) {
+        accounting.reservation = yield* QuantCodeBudget.reserve({
+          sessionID: input.sessionID, model: input.model,
+          purpose: input.small ? "title" : input.agent.name === "compaction" ? "compaction" : "conversation",
+          messages: ProviderTransform.message(prepared.messages, input.model, prepared.messageTransformOptions),
+          tools: prepared.tools, options: prepared.params.options, maxOutputTokens: prepared.params.maxOutputTokens,
+        })
+        prepared.params.maxOutputTokens = accounting.reservation.outputLimit
+        Object.assign(prepared.headers, { "x-quantcode-request-id": accounting.reservation.requestID })
+      }
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via opencode's tool system
@@ -223,7 +245,10 @@ const live: Layer.Layer<
 
       // Runtime seam: native is an opt-in adapter over @opencode-ai/llm. It
       // either returns a ready LLMEvent stream or a concrete fallback reason.
-      if (flags.experimentalNativeLlm) {
+      input.abort.throwIfAborted()
+      // The QuantCode URL/key connection uses Provider's compatible SDK fetch
+      // boundary, including current credential/version validation.
+      if (flags.experimentalNativeLlm && !QuantCodeIdentity.enabled()) {
         const native = LLMNativeRuntime.stream({
           model: input.model,
           provider: item,
@@ -320,7 +345,10 @@ const live: Layer.Layer<
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
           headers: prepared.headers,
-          maxRetries: input.retries ?? 0,
+          // Each retry must pass native request admission and reserve its own
+          // spend. The SDK's hidden retries cannot share one reservation.
+          maxRetries: QuantCodeIdentity.enabled() ? 0 : input.retries ?? 0,
+          stopWhen: stepCountIs(1),
           messages: prepared.messages,
           model: wrapLanguageModel({
             model: language,
@@ -358,27 +386,91 @@ const live: Layer.Layer<
       Stream.scoped(
         Stream.unwrap(
           Effect.gen(function* () {
+            const accounting: Accounting = { completed: false }
             const ctrl = yield* Effect.acquireRelease(
               Effect.sync(() => new AbortController()),
               (ctrl) => Effect.sync(() => ctrl.abort()),
             )
+            if (QuantCodeIdentity.enabled()) {
+              const access = yield* QuantCodeAccess.requireSession(input.sessionID)
+              if (!access) throw new QuantCodeIdentity.IdentityError()
+              // Auxiliary title streams do not necessarily run under the
+              // foreground SessionRunner. Give every provider call the same
+              // identity lifetime without adding another model loop.
+              yield* Effect.gen(function* () {
+                while (!ctrl.signal.aborted) {
+                  yield* Effect.sleep("2 seconds")
+                  const current = yield* QuantCodeAccess.requireSession(input.sessionID)
+                  if (!current || current.identity.session_id !== access.identity.session_id) throw new QuantCodeIdentity.IdentityError()
+                  yield* QuantCodeBudget.check(input.sessionID)
+                }
+              }).pipe(
+                Effect.catchCause(cause => Effect.sync(() => ctrl.abort(Cause.squash(cause)))),
+                Effect.forkScoped,
+              )
+              yield* Effect.addFinalizer(() => Effect.gen(function* () {
+                // Stop local transport before marking an unresolved request as
+                // ended. Remote billing still needs an explicit provider receipt.
+                ctrl.abort()
+                const reservation = accounting.reservation
+                if (!reservation) return
+                if (accounting.completed && accounting.usage) {
+                  yield* QuantCodeBudget.settle(reservation, accounting.usage).pipe(
+                    Effect.onExit(() => QuantCodeBudget.end(reservation)), Effect.asVoid,
+                  )
+                  return
+                }
+                yield* QuantCodeBudget.end(reservation)
+              }))
+            }
 
-            const result = yield* run({ ...input, abort: ctrl.signal })
-
-            if (result.type === "native") return result.stream
+            const result = yield* run({ ...input, abort: ctrl.signal }, accounting)
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
             const state = LLMAISDK.adapterState()
-            return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
+            const source = result.type === "native" ? result.stream : Stream.fromAsyncIterable(result.result.fullStream, (e) =>
               e instanceof Error ? e : new Error(String(e)),
             ).pipe(
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
             )
+            const interrupted = Effect.callback<never, Error>(resume => {
+              const abort = () => resume(Effect.fail(ctrl.signal.reason instanceof Error
+                ? ctrl.signal.reason : new QuantCodeIdentity.IdentityError()))
+              if (ctrl.signal.aborted) abort()
+              ctrl.signal.addEventListener("abort", abort, { once: true })
+              return Effect.sync(() => ctrl.signal.removeEventListener("abort", abort))
+            })
+            return !accounting.reservation ? source : source.pipe(Stream.provideService(RequestExecutor.MaxRetries, 0),
+              // Interrupt the native Effect transport too; its provider stream
+              // does not consume the SDK AbortSignal used by tool callbacks.
+              Stream.interruptWhen(interrupted), Stream.tap(event => Effect.gen(function* () {
+              if (event.type === "step-start" && event.index !== 0) {
+                ctrl.abort()
+                throw new Error("一个预算预留只能执行一次模型请求。")
+              }
+              if (event.type === "step-finish") {
+                accounting.usage = QuantCodeBudget.usage(event.usage, input.model, event.providerMetadata)
+                accounting.completed = true
+              }
+              if (event.type === "finish") {
+                const total = QuantCodeBudget.usage(event.usage, input.model, event.providerMetadata)
+                if (total && (!accounting.usage || total.total >= accounting.usage.total)) {
+                  accounting.usage = { ...total, cost: total.cost ?? (total.total === accounting.usage?.total ? accounting.usage.cost : null) }
+                }
+                accounting.completed = true
+              }
+              if (ctrl.signal.aborted) throw ctrl.signal.reason ?? new QuantCodeIdentity.IdentityError()
+              if (event.type === "step-finish" || event.type === "finish") {
+                const current = yield* QuantCodeAccess.requireSession(input.sessionID)
+                if (!current || current.identity.session_id !== accounting.reservation!.loginID) throw new QuantCodeIdentity.IdentityError()
+              }
+            })))
           }),
         ),
-      )
+      ).pipe(Stream.provideService(Database.Service, database),
+        Stream.provideService(EventV2Bridge.Service, events))
 
     return Service.of({ stream })
   }),
@@ -398,6 +490,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     llmClient,
     RuntimeFlags.node,
+    Database.node,
   ],
 })
 

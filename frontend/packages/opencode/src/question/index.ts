@@ -1,3 +1,5 @@
+import { QuantCodeAccess } from "@/quantcode/access"
+import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
@@ -35,6 +37,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Que
 }) {}
 
 interface PendingEntry {
+  loginSession?: string
   info: Request
   deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
 }
@@ -65,6 +68,8 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    const database = yield* Database.Service
+    const authorize = (sessionID: string) => QuantCodeAccess.requireSession(sessionID).pipe(Effect.provideService(Database.Service, database))
     const state = yield* InstanceState.make<State>(
       Effect.fn("Question.state")(function* () {
         const state = {
@@ -89,6 +94,7 @@ const layer = Layer.effect(
       questions: ReadonlyArray<Info>
       tool?: Tool
     }) {
+      const access = yield* authorize(input.sessionID)
       const pending = (yield* InstanceState.get(state)).pending
       const id = QuestionID.ascending()
       yield* Effect.logInfo("asking", { id, questions: input.questions.length })
@@ -100,11 +106,11 @@ const layer = Layer.effect(
         questions: input.questions,
         tool: input.tool,
       }
-      pending.set(id, { info, deferred })
+      pending.set(id, { info, deferred, loginSession: access?.identity.session_id })
       yield* events.publish(Event.Asked, info)
 
       return yield* Effect.ensuring(
-        Deferred.await(deferred),
+        Deferred.await(deferred).pipe(Effect.flatMap(answers => authorize(input.sessionID).pipe(Effect.as(answers)))),
         Effect.sync(() => {
           pending.delete(id)
         }),
@@ -121,6 +127,8 @@ const layer = Layer.effect(
         yield* Effect.logWarning("reply for unknown request", { requestID: input.requestID })
         return yield* new NotFoundError({ requestID: input.requestID })
       }
+      const access = yield* authorize(existing.info.sessionID)
+      if (existing.loginSession !== access?.identity.session_id) return yield* new NotFoundError({ requestID: input.requestID })
       pending.delete(input.requestID)
       yield* Effect.logInfo("replied", { requestID: input.requestID, answers: input.answers })
       yield* events.publish(Event.Replied, {
@@ -138,6 +146,8 @@ const layer = Layer.effect(
         yield* Effect.logWarning("reject for unknown request", { requestID })
         return yield* new NotFoundError({ requestID })
       }
+      const access = yield* authorize(existing.info.sessionID)
+      if (existing.loginSession !== access?.identity.session_id) return yield* new NotFoundError({ requestID })
       pending.delete(requestID)
       yield* Effect.logInfo("rejected", { requestID })
       yield* events.publish(Event.Rejected, {
@@ -156,6 +166,6 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node, Database.node] })
 
 export * as Question from "."

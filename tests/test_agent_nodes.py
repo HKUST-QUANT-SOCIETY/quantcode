@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -19,9 +18,8 @@ from runner.agent_nodes import (
     make_should_continue,
     make_tool_node,
 )
-from runner.routing.rlhf_logger import RLHF_PATH as _DEFAULT_RLHF_PATH
-from tools.loop_detector import LoopDetector, MAX_ITERATIONS
-from tools.registry import ToolDef, ToolRegistry, register_tool
+from tools.loop_detector import LoopDetector
+from tools.registry import ToolDef
 
 
 # ---------------------------------------------------------------------------

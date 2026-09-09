@@ -10,7 +10,7 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 2 (Stateful Blackboard)
 
 ## 何时使用
 
-模型组每周文献分享会前，把多篇论文 / 博客的关键信息抽取成结构化笔记，沉淀到组级 MEMORY.md，避免"分享完即丢"。
+模型组每周文献分享会前，把多篇论文 / 博客的关键信息抽取成结构化笔记，形成可审阅的组知识候选。
 
 ## 输入
 
@@ -21,9 +21,9 @@ pattern: Pattern 1 (Orchestrator-Worker) + Pattern 2 (Stateful Blackboard)
 ## 工作流程
 
 1. **抓取正文**：PDF 解析 / 网页抓取
-2. **LLM 结构化**：抽取 problem / method / experiment / result / takeaway
+2. **当前任务模型结构化**：抽取 problem / method / experiment / result / takeaway，使用同一宿主 Provider
 3. **生成结构化笔记**：每篇文献输出统一字段，便于之后检索和复用
-4. **写入 Group MEMORY**：`.opencode/groups/model/MEMORY.md` 追加新条目
+4. **提出组知识候选**：通过已发布的知识候选接口提交来源和摘要，由真实审阅流程晋升；不直接修改受保护的组 Memory 文件
 5. **生成分享会用的 markdown 摘要**
 
 ## 输出 schema
@@ -47,4 +47,4 @@ papers:
 
 - 每篇文献至少包含 title / problem / method / takeaway / relevance_to_quant
 - markdown 摘要可直接用于周会分享
-- 写入 GROUP memory 的内容不包含跨组私密数据；需要共享时另写 PROJECT scope 的 `shared.*` 摘要
+- 组知识候选不包含跨组私密数据；共享晋升只有精确批准和真实成功回执才算完成

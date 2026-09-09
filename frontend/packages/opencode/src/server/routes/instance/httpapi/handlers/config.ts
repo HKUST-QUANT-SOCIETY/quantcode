@@ -1,3 +1,4 @@
+import { QuantCodeConfigPolicy } from "@/quantcode/config-policy"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import * as InstanceState from "@/effect/instance-state"
@@ -12,10 +13,11 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
     const configSvc = yield* Config.Service
 
     const get = Effect.fn("ConfigHttpApi.get")(function* () {
-      return yield* configSvc.get()
+      return QuantCodeConfigPolicy.publicConfig(yield* configSvc.get())
     })
 
     const update = Effect.fn("ConfigHttpApi.update")(function* (ctx) {
+      yield* Effect.promise(() => QuantCodeConfigPolicy.assertUpdate(ctx.payload))
       yield* configSvc.update(ctx.payload)
       yield* markInstanceForDisposal(yield* InstanceState.context)
       return ctx.payload

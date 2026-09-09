@@ -1,3 +1,6 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -24,7 +27,7 @@ import { InstanceStore } from "@/project/instance-store"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
-    LayerNode.group([
+    LayerNode.group([Database.node, AppProcess.node, EventV2Bridge.node,
       CrossSpawnSpawner.node,
       FSUtil.node,
       Plugin.node,

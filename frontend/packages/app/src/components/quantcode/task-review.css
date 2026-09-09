@@ -1,0 +1,50 @@
+.qc-task-review { flex: 0 0 auto; color: var(--text-strong); border-bottom: 1px solid var(--border-weak-base); background: var(--background-base); font-size: 13px; }
+.qc-task-review > summary { display: flex; align-items: center; gap: 16px; min-height: 38px; padding: 8px 24px; cursor: pointer; list-style: none; }
+.qc-task-review > summary::-webkit-details-marker { display: none; }
+.qc-task-review > summary::before { content: "›"; font-size: 18px; line-height: 1; }
+.qc-task-review[open] > summary::before { transform: rotate(90deg); }
+.qc-task-review > summary:hover { background: var(--surface-base-hover); }
+.qc-task-review > summary strong { font-weight: 600; }
+.qc-task-review-status { margin-left: auto; color: var(--text-base); font-size: 12px; }
+.qc-task-review-status[data-pending="true"] { padding: 2px 8px; border-radius: 4px; color: var(--text-on-warning-strong); background: var(--surface-warning-base); }
+.qc-task-review-body { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 20px; }
+.qc-task-review-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 8px 0 16px; }
+.qc-task-review p { margin: 0; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qc-task-review-toolbar p, .qc-task-review section > p, .qc-task-review small { color: var(--text-base); }
+.qc-task-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.qc-task-review section { min-width: 0; display: grid; gap: 12px; padding: 18px; border: 1px solid var(--border-weak-base); border-radius: 8px; background: var(--background-stronger); }
+.qc-task-review section header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.qc-task-review section header span { flex-shrink: 0; color: var(--text-base); font-size: 12px; }
+.qc-task-review h3, .qc-task-review h4 { margin: 0; color: var(--text-strong); font-weight: 600; line-height: 1.5; }
+.qc-task-review h3 { font-size: 14px; }
+.qc-task-review h4 { font-size: 12px; }
+.qc-task-review ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.qc-task-review li { line-height: 1.6; overflow-wrap: anywhere; }
+.qc-task-review code { font-size: 12px; }
+.qc-task-review-phase { font-weight: 500; }
+.qc-task-review-history summary { cursor: pointer; padding: 4px 0; }
+.qc-task-review-history > div { padding: 10px 0; border-bottom: 1px solid var(--border-weak-base); }
+.qc-task-review form { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border-weak-base); }
+.qc-task-review label { font-size: 12px; font-weight: 500; }
+.qc-task-review textarea { width: 100%; min-height: 80px; padding: 10px 12px; border: 1px solid var(--border-base); border-radius: 6px; color: var(--text-strong); background: var(--background-base); font: inherit; resize: vertical; }
+.qc-task-review :is(summary, textarea, button):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.qc-task-review-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.qc-task-review-error, .qc-task-review-notice { padding: 10px 12px; margin-bottom: 12px !important; border: 1px solid var(--border-base); border-radius: 6px; }
+.qc-task-review-error { color: var(--text-on-critical-strong); background: var(--surface-critical-base); }
+.qc-task-review-notice { color: var(--text-on-success-strong); background: var(--surface-success-base); }
+.qc-task-review-decision { padding: 12px; border-left: 2px solid var(--border-base); background: var(--surface-base); }
+.qc-task-review-panel { border: 1px solid var(--border-weak-base); border-radius: 8px; }
+.qc-task-review-panel .qc-task-review-body { max-height: none; overflow: visible; }
+.qc-task-review-panel .qc-task-review-columns { grid-template-columns: minmax(0, 1fr); }
+.qc-task-review .qc-write-receipt { margin-bottom: 16px; border-left: 3px solid var(--border-warning-base); }
+.qc-write-receipt input { padding: 10px 12px; border: 1px solid var(--border-base); border-radius: 6px; color: var(--text-strong); background: var(--background-base); font: inherit; }
+.qc-write-receipt input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.qc-write-receipt form details > :is(label, textarea, button) { display: block; margin-top: 8px; }
+.qc-recovery-confirm { display: flex; align-items: center; gap: 8px; line-height: 1.6; }
+.qc-task-review .qc-task-budget { margin-bottom: 16px; gap: 8px; }
+.qc-task-budget progress { width: 100%; height: 6px; accent-color: var(--text-interactive-base); }
+.qc-budget-review > summary { cursor: pointer; padding: 8px 0; }
+.qc-budget-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.qc-budget-fields label { display: grid; gap: 6px; }
+.qc-budget-review input:not([type="checkbox"]) { width: 100%; padding: 8px 10px; border: 1px solid var(--border-base); border-radius: 6px; color: var(--text-strong); background: var(--background-base); font: inherit; }
+.qc-budget-review input:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }

@@ -1,10 +1,13 @@
 # Install QuantCode Desktop
 
 QuantCode Desktop is distributed to authorized HKUST Quant Society members
-through the private `HKUST-QUANT-SOCIETY/quantcode` GitHub Releases page. A
+through the public `HKUST-QUANT-SOCIETY/quantcode` GitHub Releases page. A
 workflow artifact from a pull request is an unsigned QA build, not a formal
-release. Install a team release only when its `release-manifest.json` has
-`distribution.releaseClass` set to `approved-release`.
+release. Formal releases have `distribution.releaseClass=approved-release`.
+The explicitly labeled **QuantCode Test V1.0** prerelease uses version
+`1.0.0-test.1`, tag `quantcode-v1.0.0-test.1`, and `releaseClass=internal-test`.
+It provides unsigned macOS arm64/x64 and Windows x64 packages for member testing;
+it does not claim Apple notarization or a Windows publisher signature.
 
 ## Choose a package
 
@@ -18,8 +21,7 @@ release. Install a team release only when its `release-manifest.json` has
 | Fedora/RHEL x64 | `quantcode-<version>-linux-x86_64.rpm` |
 
 Download the package, `release-manifest.json`, and `SHA256SUMS` from the same
-release. GitHub authentication is required because the release repository is
-private.
+release. The public release downloads do not require repository credentials.
 
 ## Verify the download
 
@@ -45,13 +47,18 @@ Compare the printed value with the matching `SHA256SUMS` line. With GitHub CLI
 installed, verify source-workflow provenance as well:
 
 ```bash
-gh attestation verify ./quantcode-0.1.0-mac-arm64.dmg -R HKUST-QUANT-SOCIETY/opencode
+gh attestation verify ./quantcode-0.1.0-mac-arm64.dmg -R HKUST-QUANT-SOCIETY/quantcode
 ```
 
-The macOS manifest must report `developer-id-notarized`; the Windows manifest
+For formal releases, the macOS manifest must report `developer-id-notarized`; the Windows manifest
 must report `azure-trusted-signing`. Linux is intentionally reported as
 `approved-platform-unsigned`: verify both SHA-256 and GitHub provenance before
 installing it.
+
+For Test V1.0, verify the exact `quantcode-v1.0.0-test.1` prerelease and source
+commit. Its manifest must report `internal-test`, `unsigned-test` for macOS and
+Windows, and `updateFeed=disabled`. Checksums and GitHub provenance identify the
+tested build; they do not turn an unsigned installer into a signed one.
 
 ## Install
 
@@ -59,13 +66,32 @@ installing it.
 
 Open the DMG, drag **QuantCode** to **Applications**, then launch QuantCode from
 Applications. The formal package is signed with Developer ID and notarized by
-Apple. Do not bypass Gatekeeper for an unsigned pull-request artifact.
+Apple. Test V1.0 is unsigned and may require an explicit macOS security prompt
+to be approved by the member after verifying the release. If organization policy
+blocks unsigned applications, use an approved signed release instead. Do not
+disable Gatekeeper globally.
 
 ### Windows
 
 Run the x64 installer. QuantCode is installed for the current user and appears
 in the Start menu. The formal installer and `QuantCode.exe` are signed with the
 publisher recorded in the release manifest.
+
+Test V1.0 is unsigned and may show a SmartScreen warning. Verify the source and
+checksum before choosing whether to run it; managed computers may require IT
+approval. Install **OpenSSH Client** in Windows Optional Features, then start
+the **OpenSSH Authentication Agent** service. In an administrator PowerShell:
+
+```powershell
+Set-Service -Name ssh-agent -StartupType Automatic
+Start-Service ssh-agent
+```
+
+The desktop uses `%SystemRoot%\System32\OpenSSH\ssh-add.exe` and
+`ssh-keygen.exe`. Import your registered key through **From File / Import SSH
+Private Key**, or load it with that system `ssh-add.exe`; Git Bash's separate
+agent is not the Windows service used by the desktop. A passphrase-protected
+key may need to be unlocked with `ssh-add.exe` in a terminal first.
 
 ### Linux
 
@@ -91,14 +117,19 @@ sudo dnf install ./quantcode-0.1.0-linux-x86_64.rpm
 ## Connect your workspace
 
 Installers do not contain a GitHub PAT, an SSH private key, or a QuantCode
-Python checkout. Configure the Server B connection with the member credentials
-issued to you, then enable the required QuantCode MCP server for your group.
+Python checkout. Connect to the QuantCode execution host supplied by the
+organization and sign in with your registered SSH identity. The roster binds
+your group automatically. Add one URL/API Key connection in QuantCode model
+settings. The host owns Python organization services, published component
+tools and workspace grants; members do not install another OpenCode product,
+choose a group, or configure a second Runner model key.
 Keep private keys in the operating-system credential or SSH store, never in a
 project file or the desktop package.
 
 ## Upgrade
 
-Automatic updates are disabled while releases remain private. To upgrade:
+Automatic updates are disabled for the current release workflows, including
+Test V1.0. To upgrade:
 
 1. Quit QuantCode completely.
 2. Download and verify the newer package for the same architecture.

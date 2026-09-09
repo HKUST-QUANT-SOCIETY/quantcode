@@ -28,6 +28,7 @@ type RendererState = {
   quantcodeWorkspace?: boolean
   sidecarUrl?: string
   sidecarHealthy?: boolean
+  unifiedRuntime?: boolean
   error?: string
 }
 
@@ -137,6 +138,11 @@ async function evaluate(target: DevToolsTarget) {
                     cache: "no-store",
                     signal: AbortSignal.timeout(3000),
                   })
+                  const capabilities = await fetch(new URL("/experimental/capabilities", sidecar.url), {
+                    headers,
+                    cache: "no-store",
+                    signal: AbortSignal.timeout(3000),
+                  })
                   return {
                     readyState: document.readyState,
                     rootChildren: document.querySelector("#root")?.children.length ?? 0,
@@ -149,6 +155,7 @@ async function evaluate(target: DevToolsTarget) {
                     interactiveControls: document.querySelectorAll("button, a[href], input, textarea, select").length,
                     sidecarUrl: sidecar.url,
                     sidecarHealthy: health.ok,
+                    unifiedRuntime: capabilities.ok && (await capabilities.json()).quantcodeUnifiedRuntime === true,
                   }
                 } catch (error) {
                   return { error: error instanceof Error ? error.message : String(error) }
@@ -187,6 +194,7 @@ function validateState(target: DevToolsTarget, state: RendererState) {
   if (state.fatalError) return `renderer reached the fatal error page: ${state.bodyText ?? ""}`
   if ((state.interactiveControls ?? 0) < 1) return "renderer has not reached an interactive application surface"
   if (!state.sidecarHealthy) return `sidecar health check failed: ${state.sidecarUrl ?? "<missing URL>"}`
+  if (!state.unifiedRuntime) return "packaged QuantCode sidecar did not enable the unified runtime by default"
 }
 
 let lastError = "no renderer target"
@@ -215,6 +223,7 @@ while (Date.now() < deadline) {
             title: target.title,
             url: target.url,
             sidecarUrl: state.sidecarUrl,
+            unifiedRuntime: state.unifiedRuntime,
             stableForMs: Date.now() - firstPassAt,
           }),
         )

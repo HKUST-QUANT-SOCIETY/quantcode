@@ -14,6 +14,8 @@ import { InstanceState } from "@/effect/instance-state"
 import { trimDiff } from "./edit"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import * as Bom from "@/util/bom"
+import { QuantCodeFileMutation } from "@/quantcode/file-mutation"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -29,6 +31,7 @@ export const WriteTool = Tool.define(
   Effect.gen(function* () {
     const lsp = yield* LSP.Service
     const fs = yield* FSUtil.Service
+    const files = yield* QuantCodeFileMutation.make(fs)
     const events = yield* EventV2Bridge.Service
     const format = yield* Format.Service
 
@@ -41,10 +44,10 @@ export const WriteTool = Tool.define(
           const filepath = path.isAbsolute(params.filePath)
             ? params.filePath
             : path.join(instance.directory, params.filePath)
-          yield* assertExternalDirectoryEffect(ctx, filepath)
+          yield* assertExternalDirectoryEffect(ctx, filepath, { access: "write" })
 
-          const exists = yield* fs.existsSafe(filepath)
-          const source = exists ? yield* Bom.readFile(fs, filepath) : { bom: false, text: "" }
+          const source = yield* files.read(ctx.sessionID, filepath, ctx.abort)
+          const exists = source.exists
           const next = Bom.split(params.content)
           const desiredBom = source.bom || next.bom
           const contentOld = source.text
@@ -61,9 +64,9 @@ export const WriteTool = Tool.define(
             },
           })
 
-          yield* fs.writeWithDirs(filepath, Bom.join(contentNew, desiredBom))
-          if (yield* format.file(filepath)) {
-            yield* Bom.syncFile(fs, filepath, desiredBom)
+          yield* files.write(ctx.sessionID, filepath, Bom.join(contentNew, desiredBom), source, ctx.abort)
+          if (yield* format.file(filepath, ctx.sessionID, ctx.abort)) {
+            yield* files.syncBom(ctx.sessionID, filepath, desiredBom, ctx.abort)
           }
           yield* events.publish(FileSystem.Event.Edited, { file: filepath })
           yield* events.publish(Watcher.Event.Updated, {
@@ -95,6 +98,9 @@ export const WriteTool = Tool.define(
               diagnostics,
               filepath,
               exists: exists,
+              ...(QuantCodeIdentity.enabled() ? { artifacts: [{
+                path: filepath, name: path.basename(filepath), mime: FSUtil.mimeType(filepath), kind: "artifact",
+              }] } : {}),
             },
             output,
           }

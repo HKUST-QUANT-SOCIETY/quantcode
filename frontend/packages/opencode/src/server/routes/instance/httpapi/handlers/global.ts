@@ -1,3 +1,6 @@
+import { QuantCodeConfigPolicy } from "@/quantcode/config-policy"
+import { QuantCodeEventAccess } from "@/quantcode/event-access"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
@@ -32,6 +35,7 @@ function parseBody(body: string) {
 
 function eventResponse() {
   return Effect.gen(function* () {
+    const authorize = yield* QuantCodeEventAccess.subscriber()
     yield* Effect.logInfo("global event connected")
     const events = Stream.callback<GlobalBusEvent>((queue) => {
       const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
@@ -48,7 +52,18 @@ function eventResponse() {
     return HttpServerResponse.stream(
       Stream.make({ payload: { id: EventV2.ID.create(), type: "server.connected", properties: {} } }).pipe(
         Stream.concat(events.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
-        Stream.map(eventData),
+        Stream.mapEffect(event => {
+          const payload = event.payload as { type?: string; properties?: unknown; syncEvent?: { type?: string; data?: unknown } }
+          // A sync envelope is a second delivery of a durable session event;
+          // apply the same ACL to its canonical payload before releasing it.
+          const type = payload.type === "sync" ? payload.syncEvent?.type?.replace(/\.(?:v)?\d+$/, "") : payload.type
+          const properties = payload.type === "sync" ? payload.syncEvent?.data : payload.properties
+          return authorize(type ?? "", properties, "directory" in event ? event.directory : undefined).pipe(Effect.map(allowed => ({ event, allowed })))
+        }),
+        Stream.filter(item => item.allowed),
+        Stream.map(item => eventData(QuantCodeIdentity.enabled() && ["server.connected", "server.heartbeat"].includes(item.event.payload.type)
+          ? { payload: { id: item.event.payload.id, type: item.event.payload.type, properties: {} } }
+          : item.event)),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
         Stream.ensuring(Effect.logInfo("global event disconnected")),
@@ -80,13 +95,14 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      return yield* config.getGlobal()
+      return QuantCodeConfigPolicy.publicConfig(yield* config.getGlobal())
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
+      yield* Effect.promise(() => QuantCodeConfigPolicy.assertUpdate(ctx.payload))
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
-      return result.info
+      return QuantCodeConfigPolicy.publicConfig(result.info)
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
@@ -95,6 +111,10 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
+      if (Installation.managedByQuantCode()) return {
+        status: 409,
+        body: { success: false as const, error: "QuantCode 服务随产品发布更新，请使用桌面更新或组织提供的安装包。" },
+      }
       const method = yield* installation.method()
       if (method === "unknown") {
         return {

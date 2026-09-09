@@ -163,7 +163,6 @@ def test_tooldef_permission_validation():
 def test_react_agent_permission_ask_interrupt_and_resume(perm_file):
     import importlib
 
-    import langchain_core.messages as lc
     import tools.strategy._register  # noqa: F401
     from runner.agent_engine import AgentRunner
     from runner.langgraph_base import clear_checkpointer_cache

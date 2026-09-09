@@ -265,6 +265,7 @@ class AgentRunner:
         Returns:
             编译后的 StateGraph app，调 ``.invoke()`` / ``.stream()``。
         """
+        self._require_runtime("build")
         # Day 3 评审修复：每次 build 重置 LoopDetector 窗口
         self.loop_detector.reset()
 
@@ -489,6 +490,7 @@ class AgentRunner:
             确保同秒同 group+flow_name 不碰撞（避免 checkpoint 互相覆盖）。
             如果 caller 显式传 ``thread_id``，则原样使用，不追加。
         """
+        self._require_runtime("run")
         if self.role is not None:
             # Authenticated callers share the same durable trace path whether
             # they use the synchronous API, MCP, or a recovery operation.
@@ -600,6 +602,8 @@ class AgentRunner:
         message reconstruction, so OpenCode/MCP can consume node-level status:
         thought/tool_call/tool_result/risk_metrics/human_gate/output_data/artifact.
         """
+        self._require_runtime("stream", thread_id=thread_id, resume=resume or resume_decision is not None,
+                              task=task, skill_name=skill_name, meta_skills=meta_skills)
         thread_id = self._generate_thread_id(thread_id, flow_name)
         solution_required = _requires_solution(task, solution_required)
         meta_skills = meta_skills or []
@@ -917,6 +921,7 @@ class AgentRunner:
         Returns:
             Final state dict after resume.
         """
+        self._require_runtime("resume")
         if self.role is not None and self.role not in {"approver", "admin"}:
             raise PermissionError("only an approver or admin may resume a HumanGate")
 
@@ -936,6 +941,20 @@ class AgentRunner:
             flow_name=flow_name,
             resume_decision=decision,
         )
+
+    def _require_runtime(self, operation: str, **arguments: Any) -> None:
+        """New native tasks cannot enter this retained historical engine.
+
+        The exact-source host can bind a private admission hook to its loaded
+        archive and one runner instance. No request parameter, environment
+        bypass, resume boolean or ordinary constructor enables that hook.
+        """
+        if os.environ.get("OPENCODE_CHANNEL") != "quantcode" or os.environ.get("QUANTCODE_UNIFIED_RUNTIME") != "1":
+            return
+        admission = globals().get("_quantcode_legacy_recovery_admission")
+        if admission is None:
+            raise PermissionError("Legacy Runner is retired for native tasks; use the verified checkpoint recovery host")
+        admission(self, operation, arguments)
 
     def _validate_new_checkpoint(self, app: Any, thread_id: str) -> None:
         """A new authenticated task must not overwrite an existing run."""

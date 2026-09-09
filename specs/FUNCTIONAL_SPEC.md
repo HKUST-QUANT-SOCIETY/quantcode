@@ -1,5 +1,8 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
+> **2026-09-08 用户确认 · 源码内化与单执行引擎**：OpenCode 来源源码已纳入本仓库，由 QuantCode 自行维护。目标采用统一会话与 Agent 执行引擎，Python 收缩为组织能力/组件服务，取消新任务对第二套 `run_agent` 循环的强制转交。该目标尚未完成迁移；下文旧实现状态仍是历史证据。迁移要求见 [执行引擎内化决策](../docs/decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
+
+
 > **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](../docs/audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
 
 
@@ -39,6 +42,8 @@
 | D-013 | 数据与标签契约来自数据层唯一权威。 |
 | D-014 | OpenCode/MimoCode Agent 底座能力继续保留。 |
 | D-015 | 测试服从当前规范，旧断言不得反向定义设计。 |
+| D-016 | QuantCode 自行维护纳入仓库的执行引擎源码；新任务使用统一模型、会话、工具循环与状态，不嵌套第二套 Python 通用 Agent 循环。迁移完成前旧任务有显式兼容边界。 |
+| D-017 | roster、工作区、能力复用、P-10 与 Gate 约束在可信执行边界生效，覆盖原生工具、MCP 和子任务；取消旧循环前必须迁移这些约束。 |
 
 ### 0.2 底座能力与 QuantCode 增量
 
@@ -48,7 +53,7 @@
 | MimoCode | Compose ReAct、通用 Compose Skill、Memory/FTS5、Task、Checkpoint/Replay、Subagent、Goal/Judge、Dream/Distill 的可移植设计 |
 | QuantCode | roster 组绑定、组内 Memory、动态 Tool Catalog、能力卡、Blackboard handoff、量化组件契约、Admin、GitGraph/Pop 和 P-10 |
 
-功能规格只锁定 QuantCode 的行为和边界。OpenCode/MimoCode 的底座行为由各自实现和版本维护，QuantCode 不复制一套同名基础设施。
+功能规格锁定 QuantCode 的行为和边界。OpenCode 来源的执行代码现在由 QuantCode 同仓维护、测试与发布；来源记录和许可证保留。MimoCode 提供可移植设计参考，不是另一个线上产品依赖。基础执行能力复用同一代码实现，不再另外复制通用 Agent 循环。
 
 ## 1. 当前运营模型
 
@@ -69,8 +74,8 @@ L2/L3 必须形成 SolutionDoc；L0/L1 不得被固定讨论轮次阻塞。L3 �
 
 | 模式 | 典型用户 | Agent/系统行为 | 治理方式 |
 |---|---|---|---|
-| 研究/分析 | 六组研究员 | 查资料、查能力、调用评估器、生成分析和报告引用 | 否 |
-| 工程开发 | 六组研究员 | 按任务复杂度形成方案，复用已有组件，生成或修改个人工作环境代码 | 否 |
+| 研究/分析 | 八组成员 | 查资料、查能力、调用评估器、生成分析和报告引用 | 否 |
+| 工程开发 | 八组成员 | 按任务复杂度形成方案，复用已有组件，生成或修改个人工作环境代码 | 否 |
 | 组件适配 | 因子/模型/策略相关成员 | 把已调试代码接到组织标准接口，报告契约违规 | 否；结果交给 Admin 管理面 |
 | 生产变更 | Admin | 通过 Admin 管理面和生产服务账号执行受控部署 | Admin 操作审计，不进入普通 Agent Gate |
 | 运营管理 | Admin | 查看所有组的任务、错误、组件、Memory、Blackboard、GitGraph 和通知 | 查询不需要；审批动作仍留 Gate 记录 |
@@ -135,7 +140,7 @@ DataAccess
 
 游客或未认证用户只看公开契约；普通组员按 GitHub/组权限看到摘要和被授权详情；Admin 看到完整目录。目录发现不代表运行时已经接入，卡片必须明确 `maturity_status` 和 `integration_status`。
 
-工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。第一阶段六组共用研究/开发工具集合；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
+工具目录由维护员后端维护：注册 Tool/Flow、检查 schema 和副作用、发布版本、绑定环境、下线或回滚。八组共用研究/开发工具集合，各组差异由 session、Skill、Memory 和已发布 catalog 表达；后端保留按 group、role 和 resource 增加 mask 的接口。用户、前端和 Agent 只能消费已发布工具，不能注册或提升权限。`tools/list` 和 `tools/call` 使用同一份 session 计算结果。
 
 ### 2.3 数据口径契约
 
@@ -157,11 +162,11 @@ DataAccess
 
 | 编号 | 状态 | 功能性 | 完整性 | 可维护性 | 证据/剩余边界 |
 |---|---|---|---|---|---|
-| F-01 | PARTIAL | 通过 | 外部 SSH gateway 待接 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、Lens `session_context`；真实桌面身份桥待验 |
+| F-01 | PARTIAL | 通过 | Server C gateway 已接；真实成员桌面身份桥待逐人验收 | 通过 | `quantcode/mcp_server.py`、`runner/agent_mcp_tool.py`、frontend `session_context`；多组 actor 登录时选定单一 Session group |
 | F-02 | PARTIAL | 通过 | 服务端历史回放和 Desktop E2E 待验 | 通过 | `AgentRunner.stream()`/resume、checkpoint、trace contract；恢复阶段也写入 execution trace，本地缓存按 actor/group/workspace 隔离 |
 | F-03 | IMPLEMENTED | 通过 | Admin 部署仍为 STAGING | 通过 | `merge`/`permission` Gate；风险、预算、循环只返回结果/停止状态 |
 | F-04 | IMPLEMENTED | 通过 | 外部组件状态同步和完整 Admin UI 待接 | 通过 | FTS5 Group ACL、`search_memory`、`list_capabilities`、14 张卡；Memory 根为 `<project>/.quantcode` |
-| F-05 | PARTIAL | 后端 challenge/roster 通过 | 本地 Agent/Keychain bridge、网络探测待接 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
+| F-05 | PARTIAL | 后端 challenge/roster 通过 | Server C gateway 已接；成员本地 Agent/Keychain bridge、网络探测和逐人桌面闭环待验 | 通过 | UI 只选择 identity，不接受私钥文本；未接线显示 unavailable |
 | F-06 | PARTIAL | staging adapter 通过 | canonical DataAccess/QuantEvaluator 生产连接待验 | 通过 | `eval_from_panel` 与契约检查；`UNAVAILABLE` 不生成伪指标 |
 | F-07 | IMPLEMENTED | CI/handoff 通过 | 外部 GitHub/报告平台待验 | 通过 | Model→Risk CI 和 Blackboard 公共契约 |
 | F-08 | PARTIAL | 组内适配可回归 | 各领域 canonical 服务待接 | 通过 | `tools/*` 与 `flows/*` 保留为适配层，不复制业务产品 |
@@ -194,7 +199,7 @@ DataAccess
 
 首页提交任务，服务端从已认证会话得到组身份，加载该组 Skill、能力摘要和可用工具。允许显式选择 Skill，但不能用 `group` 参数越权切换组；多组授权必须来自服务端 roster。`list_skills` 应来自真实目录。
 
-**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定、`session_context` 和 `tools/list`/`tools/call` 共用的 effective catalog 已有；Lens 已读取服务端组/角色并移除自由切组，真实本地身份 bridge 仍依赖外部桌面环境。
+**当前实现**：MCP `run_agent`、SSH challenge/roster 后端、会话组锁定、`session_context` 和 `tools/list`/`tools/call` 共用的 effective catalog 已有；frontend 已读取服务端组/角色并移除自由切组，真实本地身份 bridge 仍依赖外部桌面环境。
 
 **验收补充**：提交请求只能使用认证 session 的 `group`；请求中出现不同组时拒绝；`tools/list` 与 `tools/call` 必须使用同一份 effective tool set；无 roster 的生产请求 fail-closed。Skill 列表来自维护员发布目录，不能由用户输入或 Agent 运行时注册。
 
@@ -233,7 +238,7 @@ Activity 显示思考、工具调用/结果、产物、错误、方案状态、G
 
 流程为“本地 SSH 身份 → 服务端验证公钥指纹 → roster 匹配 actor/组/角色/个人工作目录 → 建立不可变会话”。私钥只留在本机密钥链或 SSH agent，不进入 LLM、Memory、日志或普通 UI 请求。登录后可读取授权主线、写入个人开发环境；生产环境由独立服务账号运行，不提供研究员直接登录。
 
-**当前实现**：指纹映射、一次性 challenge/signing、SessionContext 和只读状态查询后端已有；Lens 仅接受本地 Agent/Keychain identity，当前没有真实 SSH gateway/网络探测，不能视为完整登录。
+**当前实现**：指纹映射、一次性 challenge/signing、SessionContext、Server C Ubuntu systemd gateway 和只读状态查询后端已有；Lens 仅接受本地 Agent/Keychain identity，成员设备逐人登录与网络探测仍需验收，不能只凭本机 Lead 登录视为全员完成。
 
 **失败状态**至少区分密钥拒绝、主机不可达、roster 未命中、资源权限不足和身份接线未完成。研究员登录后拥有被授权服务器上的个人工作目录；该目录属于研究/开发环境。生产 shell、生产服务账号和生产进程控制不属于此功能。
 
@@ -350,7 +355,8 @@ PyTest 全绿只说明测试与当前代码一致。凡是断言风险越限 Hum
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-08 | 用户确认 OpenCode 源码内化；新增 D-016/D-017；目标改为统一执行引擎，Python 组织服务保留，旧循环按阶段迁移。 |
 | 2026-09-01 | HumanGate 收窄为写操作；模型 PR 降级为 CI；业务流水线归组内；新增 P-07/P-08/P-09/P-10 |
 | 2026-09-03 | 根据组长会议与组件指南重建运营基线：组内 Memory、组件权威与复用纪律、Admin 全权限、GitHub 权限一致、SSH 不进生产、GitGraph 全增强、方案按复杂度分级 |
-| 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、六组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
+| 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、八组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |
 | 2026-09-05 | v0.5.1 核验同步：Session Context 成为唯一组/角色来源；Memory 接入只读 `search_memory`；普通 UI 移除自由切组、私钥文本和 `/deploy`；补充 F/P 功能性、完整性、可维护性台账及外部待验边界 |

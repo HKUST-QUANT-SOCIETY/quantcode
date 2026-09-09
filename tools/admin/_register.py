@@ -29,7 +29,6 @@ import fnmatch
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -243,7 +242,7 @@ def _review_distill_candidate_execute(
     denied = _candidate_review_gate(ctx)
     if denied:
         return denied
-    from runner.distill.governance import review_candidate
+    from runner.distill.governance import candidate_publish_root, candidate_storage, review_candidate
 
     try:
         item = review_candidate(
@@ -254,10 +253,13 @@ def _review_distill_candidate_execute(
             reviewer_group=str(ctx.get("group") or "") or None,
             superseded_by=args.superseded_by,
             expected_digest=args.expected_digest,
-            candidates_dir=Path(ctx.get("candidates_dir") or (Path(__file__).resolve().parents[2] / ".quantcode" / "distill_candidates")),
+            candidates_dir=candidate_storage(ctx),
+            publish_root=candidate_publish_root(ctx) if args.action == "promote" else None,
         )
     except (KeyError, PermissionError, ValueError, FileNotFoundError) as exc:
         return {"ok": False, "error": str(exc)}
+    if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" or "_native_call" in ctx:
+        item = {key: item.get(key) for key in ("name", "group", "status", "reviewed_at", "reviewer_id", "superseded_by")}
     return {"ok": True, "candidate": item}
 
 
@@ -646,8 +648,8 @@ class ListDistillCandidatesArgs(BaseModel):
 
 
 def _list_distill_candidates(args: ListDistillCandidatesArgs, ctx: dict) -> dict:
-    from runner.distill.governance import list_candidates
-    return list_candidates(ctx, candidates_dir=Path(__file__).resolve().parents[2] / ".quantcode" / "distill_candidates")
+    from runner.distill.governance import candidate_storage, list_candidates
+    return list_candidates(ctx, candidates_dir=candidate_storage(ctx))
 
 
 tool = ToolDef(id="list_distill_candidates", description="Approver/admin review queue with draft content and digest; same-group scope unless Admin, whose read is audited.", schema=ListDistillCandidatesArgs, execute=_list_distill_candidates)

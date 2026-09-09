@@ -9,6 +9,10 @@ import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeReadAccess } from "@/quantcode/read-access"
+import { AppProcess } from "@opencode-ai/core/process"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -64,11 +68,12 @@ type Metadata = {
 export const ReadTool = Tool.define<
   typeof Parameters,
   Metadata,
-  FSUtil.Service | Instruction.Service | LSP.Service | Scope.Scope
+  FSUtil.Service | Instruction.Service | LSP.Service | Scope.Scope | AppProcess.Service
 >(
   "read",
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
+    const processes = yield* AppProcess.Service
     const instruction = yield* Instruction.Service
     const lsp = yield* LSP.Service
     const scope = yield* Scope.Scope
@@ -134,7 +139,8 @@ export const ReadTool = Tool.define<
       )
     })
 
-    const lines = Effect.fn("ReadTool.lines")(function* (filepath: string, opts: { limit: number; offset: number }) {
+    const lines = Effect.fn("ReadTool.lines")(function* (filepath: string, opts: { limit: number; offset: number },
+      guarded?: Awaited<ReturnType<typeof QuantCodeWorkspace.openFile>>) {
       const start = opts.offset - 1
       const raw: string[] = []
       const flags = { bytes: 0, count: 0, cut: false, more: false, done: false }
@@ -145,7 +151,19 @@ export const ReadTool = Tool.define<
       // line of the upstream splitLines pipeline) and use a tagged error to stop the
       // upstream file stream as soon as the byte cap is reached.
       const decoder = new TextDecoder("utf-8")
-      yield* fs.stream(filepath).pipe(
+      const chunks = async function* (file: NonNullable<typeof guarded>) {
+        const bytes = Buffer.alloc(65536)
+        let offset = 0
+        while (true) {
+          const read = await file.handle.read(bytes, 0, bytes.length, offset)
+          if (!read.bytesRead) return
+          offset += read.bytesRead
+          yield Buffer.from(bytes.subarray(0, read.bytesRead))
+        }
+      }
+      const source: Stream.Stream<Uint8Array, Error | Stream.Error<ReturnType<typeof fs.stream>>> = guarded
+        ? Stream.fromAsyncIterable(chunks(guarded), error => error as Error) : fs.stream(filepath)
+      yield* source.pipe(
         Stream.map((bytes) => decoder.decode(bytes, { stream: true })),
         Stream.splitLines,
         Stream.runForEach((text) =>
@@ -238,6 +256,9 @@ export const ReadTool = Tool.define<
       if (process.platform === "win32") {
         filepath = FSUtil.normalizePath(filepath)
       }
+      const grant = QuantCodeIdentity.enabled()
+        ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(instance.directory)) : undefined
+      if (grant) filepath = yield* Effect.promise(() => QuantCodeWorkspace.target(grant, filepath))
       const title = path.relative(instance.worktree, filepath)
 
       const stat = yield* fs.stat(filepath).pipe(
@@ -259,10 +280,15 @@ export const ReadTool = Tool.define<
         metadata: {},
       })
 
-      if (!stat) return yield* miss(filepath)
+      if (!stat) {
+        if (grant) throw new Error(`File not found: ${filepath}`)
+        return yield* miss(filepath)
+      }
 
       if (stat.type === "Directory") {
-        const items = yield* list(filepath)
+        const items = grant
+          ? (yield* QuantCodeReadAccess.list(grant, filepath, processes, ctx.abort)).map(entry => entry.name + (entry.type === "directory" ? "/" : ""))
+          : yield* list(filepath)
         const limit = params.limit ?? DEFAULT_READ_LIMIT
         const offset = params.offset || 1
         const start = offset - 1
@@ -297,14 +323,23 @@ export const ReadTool = Tool.define<
         }
       }
 
+      const guarded = grant ? yield* Effect.acquireRelease(
+        Effect.promise(() => QuantCodeWorkspace.openFile(grant, filepath)),
+        file => Effect.promise(() => file.close()),
+      ) : undefined
       const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
-      const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
+      const sample = guarded ? yield* Effect.promise(async () => {
+        const bytes = Buffer.alloc(Math.min(SAMPLE_BYTES, guarded.size))
+        const read = await guarded.handle.read(bytes, 0, bytes.length, 0)
+        return bytes.subarray(0, read.bytesRead)
+      }) : yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
 
       const mime = sniffAttachmentMime(sample, FSUtil.mimeType(filepath))
       const isImage = SUPPORTED_IMAGE_MIMES.has(mime)
 
       if (isImage || isPdfAttachment(mime)) {
-        const bytes = yield* fs.readFile(filepath)
+        const bytes = guarded ? yield* Effect.promise(() => guarded.handle.readFile()) : yield* fs.readFile(filepath)
+        if (guarded) yield* Effect.promise(() => guarded.validate())
         const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
         return {
           title,
@@ -328,7 +363,8 @@ export const ReadTool = Tool.define<
         return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
       }
 
-      const file = yield* lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset || 1 })
+      const file = yield* lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset || 1 }, guarded)
+      if (guarded) yield* Effect.promise(() => guarded.validate())
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
         return yield* Effect.fail(
           new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`),
@@ -353,7 +389,8 @@ export const ReadTool = Tool.define<
       yield* warm(filepath)
 
       if (loaded.length > 0) {
-        output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
+        const tag = grant ? "workspace-context" : "system-reminder"
+        output += `\n\n<${tag}>\n${loaded.map((item) => item.content).join("\n\n")}\n</${tag}>`
       }
 
       return {
@@ -380,7 +417,7 @@ export const ReadTool = Tool.define<
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
-        run(params, ctx).pipe(Effect.orDie),
+        Effect.scoped(run(params, ctx)).pipe(Effect.orDie),
     }
   }),
 )

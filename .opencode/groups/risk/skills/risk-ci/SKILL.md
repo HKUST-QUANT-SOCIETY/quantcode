@@ -26,9 +26,11 @@ pattern: ReAct tool loop + deterministic CI compatibility flow
 
 ## 运行路径
 
-- 产品主路径：`AgentRunner(group="risk")` + 本 Skill；
+- 产品主路径：当前 QuantCode 原生任务加载本 Skill，直接调用当前发布目录中的组织/组件工具；
 - CI 兼容路径：`scripts/run_risk_ci_tool.py` → `runner.risk_ci`；
 - MCP 工具：`read_blackboard`、`calc_risk`、`generate_risk_profile`、`risk_verdict`、`write_pr_comment`。
+
+上列为适配接口名，不表示它们已接通或拥有发布权限。共享读写与受限资源访问仍遵守当前精确 merge/permission 审批；不得将“风险本身不触发审批”解释为允许绕过工具权限。
 
 ## 完成条件
 

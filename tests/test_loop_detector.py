@@ -7,11 +7,9 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from tools.loop_detector import (
     LoopDetector,
-    MAX_ITERATIONS,
 )
 
 

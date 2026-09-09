@@ -1,3 +1,5 @@
+import { QuantCodeAccess } from "@/quantcode/access"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { Workspace } from "@/control-plane/workspace"
 import * as InstanceState from "@/effect/instance-state"
 import { Session } from "@/session/session"
@@ -25,6 +27,9 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     const { db } = yield* Database.Service
 
     const start = Effect.fn("SyncHttpApi.start")(function* () {
+      // Native events are the unified executor's authority, not writable input
+      // from another workspace. Dedicated authenticated import is separate.
+      if (QuantCodeIdentity.enabled()) return false
       yield* workspace
         .startWorkspaceSyncing((yield* InstanceState.context).project.id)
         .pipe(Effect.ignore, Effect.forkIn(scope))
@@ -32,6 +37,7 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     })
 
     const replay = Effect.fn("SyncHttpApi.replay")(function* (ctx: { payload: typeof ReplayPayload.Type }) {
+      if (QuantCodeIdentity.enabled()) return yield* new HttpApiError.BadRequest({})
       const payload: EventV2.SerializedEvent[] = ctx.payload.events.map((event) => ({
         id: event.id,
         aggregateID: event.aggregateID,
@@ -59,6 +65,7 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     })
 
     const steal = Effect.fn("SyncHttpApi.steal")(function* (ctx: { payload: typeof SessionPayload.Type }) {
+      if (QuantCodeIdentity.enabled()) return yield* new HttpApiError.BadRequest({})
       const workspaceID = yield* InstanceState.workspaceID
       if (!workspaceID) return yield* new HttpApiError.BadRequest({})
 
@@ -71,7 +78,7 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
 
     const history = Effect.fn("SyncHttpApi.history")(function* (ctx: { payload: typeof HistoryPayload.Type }) {
       const exclude = Object.entries(ctx.payload)
-      return yield* db
+      const rows = yield* db
         .select()
         .from(EventTable)
         .where(
@@ -82,6 +89,8 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
         .orderBy(asc(EventTable.seq))
         .all()
         .pipe(Effect.orDie)
+      const visible = yield* QuantCodeAccess.visibleSessions([...new Set(rows.map(row => row.aggregate_id))])
+      return rows.filter(row => visible.has(row.aggregate_id))
     })
 
     return handlers.handle("start", start).handle("replay", replay).handle("steal", steal).handle("history", history)

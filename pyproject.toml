@@ -45,6 +45,14 @@ exclude = ["vendor*", "templates*", "docs*", "tests*"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["docs/archive", "frontend", "build"]
+
+[tool.ruff.lint.per-file-ignores]
+"export_investor_brief_pdf.py" = ["E701", "E702"]
+"quantcode/mcp_server.py" = ["E402"]
+"runner/hello_world_example.py" = ["E402"]
+"scripts/accept_jerry_day5.py" = ["E402"]
+"scripts/demo_factor_evaluation.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

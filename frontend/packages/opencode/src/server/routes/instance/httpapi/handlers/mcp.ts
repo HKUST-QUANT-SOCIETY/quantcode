@@ -1,3 +1,4 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { MCP } from "@/mcp"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
@@ -14,6 +15,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const add = Effect.fn("McpHttpApi.add")(function* (ctx: { payload: typeof AddPayload.Type }) {
+      if (QuantCodeIdentity.enabled()) return yield* new HttpApiError.BadRequest({})
       const result = (yield* mcp.add(ctx.payload.name, ctx.payload.config)).status
       return yield* Schema.decodeUnknownEffect(StatusMap)(
         "status" in result ? { [ctx.payload.name]: result } : result,
@@ -21,6 +23,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const authStart = Effect.fn("McpHttpApi.authStart")(function* (ctx: { params: { name: string } }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       return yield* Effect.gen(function* () {
         if (!(yield* mcp.supportsOAuth(ctx.params.name))) {
           return yield* new UnsupportedOAuthError({ error: `MCP server ${ctx.params.name} does not support OAuth` })
@@ -37,6 +40,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       params: { name: string }
       payload: typeof AuthCallbackPayload.Type
     }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       return yield* mcp
         .finishAuth(ctx.params.name, ctx.payload.code)
         .pipe(
@@ -49,6 +53,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const authAuthenticate = Effect.fn("McpHttpApi.authAuthenticate")(function* (ctx: { params: { name: string } }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       return yield* Effect.gen(function* () {
         if (!(yield* mcp.supportsOAuth(ctx.params.name))) {
           return yield* new UnsupportedOAuthError({ error: `MCP server ${ctx.params.name} does not support OAuth` })
@@ -62,6 +67,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const authRemove = Effect.fn("McpHttpApi.authRemove")(function* (ctx: { params: { name: string } }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       const status = yield* mcp.status()
       if (!(ctx.params.name in status))
         return yield* new McpServerNotFoundError({
@@ -73,6 +79,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const connect = Effect.fn("McpHttpApi.connect")(function* (ctx: { params: { name: string } }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       yield* mcp
         .connect(ctx.params.name)
         .pipe(
@@ -86,6 +93,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const disconnect = Effect.fn("McpHttpApi.disconnect")(function* (ctx: { params: { name: string } }) {
+      if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
       yield* mcp
         .disconnect(ctx.params.name)
         .pipe(

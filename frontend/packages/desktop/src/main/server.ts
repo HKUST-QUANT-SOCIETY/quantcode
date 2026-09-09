@@ -5,6 +5,7 @@ import type { Details } from "electron"
 import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
+import { CHANNEL } from "./constants"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
 
 export type HealthCheck = { wait: Promise<void> }
@@ -16,7 +17,10 @@ type SidecarMessage =
 
 export type SidecarListener = { stop: () => Promise<void> }
 
-const SIDECAR_SERVICE_NAME = "opencode server"
+// The sidecar is the same vendored execution server in every channel. Its
+// process label follows the product surface while protocol/env names remain
+// compatible with the upstream implementation.
+const SIDECAR_SERVICE_NAME = CHANNEL === "quantcode" ? "quantcode server" : "opencode server"
 const SIDECAR_START_STALL_TIMEOUT = 60_000
 const SIDECAR_STOP_TIMEOUT = 6_000
 
@@ -211,6 +215,8 @@ function createSidecarEnv(): Record<string, string> {
   const env = Object.fromEntries(
     Object.entries(process.env).flatMap(([key, value]) => (value === undefined ? [] : [[key, String(value)]])),
   )
+  env.OPENCODE_CHANNEL = CHANNEL
+  if (CHANNEL === "quantcode") env.QUANTCODE_UNIFIED_RUNTIME = "1"
   delete env.DEBUG
   if (process.platform === "linux") delete env.LD_PRELOAD
   if (!app.isPackaged) env.OPENCODE_DISABLE_CHANNEL_DB = "1"
