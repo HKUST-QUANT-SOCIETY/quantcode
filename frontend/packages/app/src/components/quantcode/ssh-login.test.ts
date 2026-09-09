@@ -87,7 +87,7 @@ describe("SshLoginView", () => {
     view.remove()
   })
 
-  test("binds the roster group without a selector and waits for real logout", async () => {
+  test("binds the roster group through the authorized-group selector and waits for real logout", async () => {
     let selected = ""
     let finish: ((value: { status: "disconnected" } | { status: "error"; reason: string }) => void) | undefined
     const view = SshLoginView({ t, identities: [{ ...IDENTITIES[0], group: "model", groups: ["model", "factor"] }],
@@ -99,14 +99,18 @@ describe("SshLoginView", () => {
     })
     document.body.append(view)
     fillForm(view)
-    expect(view.querySelector("#qc-ssh-group")).toBeNull()
+    // 多组身份：授权组选择器可见，默认选中身份自身组，可切换到其他授权组
+    const groupSelect = view.querySelector<HTMLSelectElement>("#qc-ssh-group")!
+    expect(groupSelect).toBeTruthy()
+    expect(groupSelect.value).toBe("model")
+    groupSelect.value = "factor"
+    groupSelect.dispatchEvent(new Event("change"))
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
     await flush()
-    expect(selected).toBe("")
+    expect(selected).toBe("factor")
     expect(view.querySelector(".qc-connection-pill")?.textContent).toContain("已连接")
     expect(view.querySelector(".qc-ssh-fingerprint")?.textContent).toBe("SHA256:AbCd1234")
     expect(view.querySelector("[data-session-group]")?.textContent).toBe("model")
-    expect(view.querySelector("#qc-ssh-group")).toBeNull()
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
     expect(view.querySelector("#qc-ssh-identity")).toBeNull()
     expect(view.querySelector<HTMLButtonElement>(".qc-button")!.disabled).toBe(true)

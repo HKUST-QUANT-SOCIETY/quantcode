@@ -55,3 +55,6 @@ docs/Day2_to_Day5_Roadmap.md
 .playwright-cli/
 :memory:*
 /tests/fixtures/blackboard.json
+
+# Developer-machine local component path mapping (machine-specific paths)
+configs/local_components.yaml

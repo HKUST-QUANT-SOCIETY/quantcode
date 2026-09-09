@@ -62,6 +62,8 @@ export type SshLoginProps = {
   identities?: SshIdentity[]
   session?: SshSession
   disconnect?: SshDisconnectFn
+  /** 通过系统文件选择器把私钥加入本机 SSH Agent；私钥正文不上传。 */
+  importKey?: () => Promise<{ fingerprint: string } | null>
 }
 
 export function SshLoginView(props: SshLoginProps): HTMLElement {
@@ -96,6 +98,25 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
       hint.className = "qc-ssh-hint"
       hint.textContent = "未发现可用的本机 SSH 身份。"
       root.replaceChildren(status, hint)
+      // 空身份时仍提供导入私钥入口：按钮走本机 ssh-add，成功后触发外层刷新。
+      if (props.importKey) {
+        const importButton = document.createElement("button")
+        importButton.type = "button"
+        importButton.className = "qc-button qc-button-secondary"
+        importButton.textContent = "导入本地 SSH 密钥"
+        importButton.addEventListener("click", () => {
+          importButton.disabled = true
+          void props.importKey!()
+            .then(fingerprint => {
+              if (!fingerprint) return
+              hint.textContent = `已导入 SSH 密钥并加入本机 Agent：${fingerprint.fingerprint}。若列表未刷新，请重开设置页。`
+            })
+            .catch(error => {
+              hint.textContent = error instanceof Error ? error.message : "SSH 私钥导入失败，请重试。"
+            })
+        })
+        root.append(importButton)
+      }
       return
     }
 
@@ -165,6 +186,29 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
         submit.disabled = !authorized.includes(group)
       })
       root.append(label, select)
+    }
+    if (props.importKey) {
+      const importButton = document.createElement("button")
+      importButton.type = "button"
+      importButton.className = "qc-button qc-button-secondary"
+      importButton.textContent = "导入本地 SSH 密钥"
+      importButton.addEventListener("click", () => {
+        importButton.disabled = true
+        void props.importKey!()
+          .then(fingerprint => {
+            if (!fingerprint) return
+            reason = ""
+            status = "form"
+            logs = [`已导入 SSH 密钥并加入本机 Agent：${fingerprint.fingerprint}`]
+            render()
+          })
+          .catch(error => {
+            reason = error instanceof Error ? error.message : "SSH 私钥导入失败，请重试。"
+            status = "error"
+            render()
+          })
+      })
+      actions.append(importButton)
     }
     root.append(actions)
   }
