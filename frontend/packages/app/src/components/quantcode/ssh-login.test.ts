@@ -124,6 +124,33 @@ describe("SshLoginView", () => {
     view.remove()
   })
 
+  test("re-login via private-key file import auto-continues into connect", async () => {
+    let selected = ""
+    let imported = 0
+    const view = SshLoginView({ t, identities: [{ ...IDENTITIES[0], group: "model", groups: ["model"] }],
+      connect: async ({ group }) => {
+        selected = group ?? ""
+        return { status: "connected", fingerprint: "SHA256:Imported", group: "model", groups: ["model"] }
+      },
+      importKey: async () => {
+        imported += 1
+        return { fingerprint: "SHA256:Imported" }
+      },
+    })
+    document.body.append(view)
+    fillForm(view)
+    const relogin = view.querySelector<HTMLButtonElement>(".qc-gate-actions .qc-button-secondary")!
+    expect(relogin.textContent).toBe("重新登录：选择本地私钥")
+    relogin.click()
+    await flush()
+    expect(imported).toBe(1)
+    // 导入成功后自动继续连接，不需要第二次点击
+    expect(view.querySelector(".qc-connection-pill")?.textContent).toContain("已连接")
+    expect(view.querySelector(".qc-ssh-fingerprint")?.textContent).toBe("SHA256:Imported")
+    expect(selected).toBe("model")
+    view.remove()
+  })
+
   test("reopening settings restores the authenticated identity and exposes logout", () => {
     const view = SshLoginView({ t, identities: IDENTITIES,
       session: { status: "connected", fingerprint: "SHA256:restored", group: "factor", groups: ["model", "factor"] },
