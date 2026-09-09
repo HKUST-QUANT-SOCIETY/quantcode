@@ -850,6 +850,13 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         return
       }
       if ("error" in data && typeof data.error === "string") {
+        // 本机研究宿主（sidecar）没有组织身份配置：组织登录必须走个人研究宿主，
+        // 把宿主侧的配置错误翻译成下一步操作指引，而不是裸报错。
+        if (serverKey === "sidecar" && data.error.includes("尚未配置组织身份连接")) {
+          setState("sshIdentityError",
+            "当前选中的是本机研究宿主（开发用），不支持组织登录。请点右侧「管理服务器」，添加组织分配给你的个人研究宿主地址并切换过去。")
+          return
+        }
         setState("sshIdentityError", data.error)
         return
       }
