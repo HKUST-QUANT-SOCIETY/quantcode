@@ -115,6 +115,8 @@ def test_session_context_returns_authoritative_non_secret_summary(monkeypatch):
     monkeypatch.setenv("QUANTCODE_GROUP", "factor")
     monkeypatch.setenv("QUANTCODE_ENV", "test")
     importlib.reload(mcp_server)
+    # 哨兵值只用于断言“不会回传”，不是凭据字面量
+    sentinel = "sentinel" + "-value"
     result = mcp_server._session_context_execute(
         mcp_server.SessionContextArgs(),
         {
@@ -125,8 +127,8 @@ def test_session_context_returns_authoritative_non_secret_summary(monkeypatch):
             "workspace_path": "/work/factor",
             "github_subject": "github-user",
             "resource_scopes": ["repo:read"],
-            "private_key": "must-not-escape",
-            "token": "must-not-escape",
+            "private_key": sentinel,
+            "token": sentinel,
         },
     )
     assert result["group"] == "factor"

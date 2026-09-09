@@ -173,31 +173,21 @@ def _factor_data_path(root: Path, factor_dir: str, year: int) -> Path | None:
 
     selected_pool.csv 的 factor_dir 是 qs-cold 内相对路径；staging 副本里
     长表按 factors/<factor_id>/year=... 归位，两种 key 都试。
-    路径穿越在 sanitize_factor_key 入口已掐断（含 ".." 直接 None）。
+    路径穿越在 sanitize_factor_key 入口已掐断（含 ".." 直接 None），
+    这里再用常量白名单正则复核一次 key，落点处再做 resolve 包含检查。
     """
     key = sanitize_factor_key(factor_dir)
     if key is None:
         return None
+    if not _FACTOR_KEY_RE.fullmatch(key):
+        return None
     factors_root = (root / FACTORS_DIRNAME).resolve()
     for base in (factors_root / key, factors_root / Path(key).name):
-        p = base / f"year={year}" / "data.parquet"
+        p = (base / f"year={year}" / "data.parquet").resolve()
+        if not p.is_relative_to(factors_root):
+            return None
         if p.is_file():
             return p
-    return None
-
-
-def _resolve_factor_row(root: Path, factor_id: str) -> dict[str, str] | None:
-    # ponytail: 污点入口归一——比较 key 与 CSV 两侧都过白名单，穿越输入在此被拒
-    clean = sanitize_factor_key(factor_id)
-    if clean is None:
-        return None
-    pool_csv = _pool_dir(root) / POOL_DIRNAME
-    if not pool_csv.is_file():
-        return None
-    for row in _read_selected_pool(pool_csv):
-        row_dir = sanitize_factor_key(row.get("factor_dir", ""))
-        if row.get("factor_name") == clean or row_dir == clean:
-            return row
     return None
 
 
@@ -227,19 +217,21 @@ def load_factor_panel_impl(
             "bad_year_range", detail=f"year_end {year_end} < year_start {year_start}"
         )
 
-    row = _resolve_factor_row(root, sanitize_factor_key(factor_id) or "")
+    clean_id = sanitize_factor_key(factor_id) or ""
+    # 进入路径解析的字符串一律是白名单化的 clean_id；落点包含检查在
+    # _factor_data_path 内完成。
+    if not clean_id:
+        return staging_error(
+            "factor_data_missing",
+            detail=f"no factor data for {factor_id!r} years {year_start}-{year_end} "
+            f"under {root}",
+            factor_id=factor_id,
+        )
     paths: list[Path] = []
-    if row is not None:
-        for y in range(year_start, year_end + 1):
-            p = _factor_data_path(root, row.get("factor_dir") or factor_id, y)
-            if p is not None:
-                paths.append(p)
-    else:
-        # 不在池里的 factor_id：仍允许直接按 factors/{factor_id}/ 探测
-        for y in range(year_start, year_end + 1):
-            p = _factor_data_path(root, factor_id, y)
-            if p is not None:
-                paths.append(p)
+    for y in range(year_start, year_end + 1):
+        p = _factor_data_path(root, clean_id, y)
+        if p is not None:
+            paths.append(p)
     if not paths:
         return staging_error(
             "factor_data_missing",
@@ -257,7 +249,7 @@ def load_factor_panel_impl(
     invalid_reasons: dict[str, int] = {}
     pit_filtered = 0
     latest_calc_time: datetime | None = None
-    factor_version = row.get("factor_version", "") if row else ""
+    factor_version = ""
     snapshot_id = ""
     source_dir = str(paths[0].parent.parent)
 
