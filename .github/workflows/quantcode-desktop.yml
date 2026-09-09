@@ -380,6 +380,19 @@ jobs:
             fi
             gh release edit "$TAG" --repo "$TARGET_REPOSITORY" --title "$RELEASE_TITLE" --notes-file "$notes"
           else
+            # GitHub creates a draft release as an untagged release when the
+            # requested tag does not exist yet. Create the exact ref first so
+            # verification and the published URL cannot drift to untagged-*.
+            ref="refs/tags/$TAG"
+            if ! gh api "repos/$TARGET_REPOSITORY/git/ref/$ref" --jq .object.sha >/tmp/current-tag-sha 2>/dev/null; then
+              gh api "repos/$TARGET_REPOSITORY/git/refs" -f "ref=$ref" -f "sha=$GITHUB_SHA" >/dev/null
+            else
+              current_sha="$(cat /tmp/current-tag-sha)"
+              if [[ "$current_sha" != "$GITHUB_SHA" ]]; then
+                echo "Existing release tag $TAG points at $current_sha, expected $GITHUB_SHA" >&2
+                exit 1
+              fi
+            fi
             flags=(--draft --target "$GITHUB_SHA")
             if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
             gh release create "$TAG" --repo "$TARGET_REPOSITORY" --title "$RELEASE_TITLE" --notes-file "$notes" "${flags[@]}"
