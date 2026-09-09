@@ -84,6 +84,11 @@ describe("QuantCode desktop release workflow contract", () => {
     expect(workflow).toContain("quantcode-test-publish")
     expect(workflow).toContain("flags+=(--prerelease --latest=false)")
     expect(workflow).toContain('git rev-parse "$tag^{commit}"')
+    expect(workflow).toContain('gh api "repos/$TARGET_REPOSITORY/git/refs" -f "ref=$ref" -f "sha=$GITHUB_SHA"')
+    expect(workflow).toContain('gh api "repos/$TARGET_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha')
+    expect(workflow).not.toContain('git/ref/$ref')
+    expect(workflow).toContain('gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json assets')
+    expect(workflow).not.toContain('gh api "repos/$TARGET_REPOSITORY/releases/tags/$TAG"')
   })
 
   test("uses the native Node 24 checkout action for every release job", () => {
