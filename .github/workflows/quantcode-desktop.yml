@@ -384,7 +384,7 @@ jobs:
             # requested tag does not exist yet. Create the exact ref first so
             # verification and the published URL cannot drift to untagged-*.
             ref="refs/tags/$TAG"
-            if ! gh api "repos/$TARGET_REPOSITORY/git/ref/$ref" --jq .object.sha >/tmp/current-tag-sha 2>/dev/null; then
+            if ! gh api "repos/$TARGET_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha >/tmp/current-tag-sha 2>/dev/null; then
               gh api "repos/$TARGET_REPOSITORY/git/refs" -f "ref=$ref" -f "sha=$GITHUB_SHA" >/dev/null
             else
               current_sha="$(cat /tmp/current-tag-sha)"
@@ -433,7 +433,10 @@ jobs:
             printf '%s\t%s\tsha256:%s\n' "$name" "$size" "$digest"
           done < <(find release-assets release-finalized -maxdepth 1 -type f -print | sort) | sort > "$expected"
 
-          gh api "repos/$TARGET_REPOSITORY/releases/tags/$TAG" \
+          # GitHub's public REST release-by-tag endpoint returns 404 for draft
+          # releases. `gh release view` resolves draft releases in the same
+          # authenticated context used by staging, so verify its assets here.
+          gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json assets \
             --jq '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' | sort > "$actual"
 
           diff --unified "$expected" "$actual"
