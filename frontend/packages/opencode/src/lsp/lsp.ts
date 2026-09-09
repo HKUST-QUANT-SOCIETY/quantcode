@@ -6,8 +6,10 @@ import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
 import * as LSPServer from "./server"
 import { Config } from "@/config/config"
-import { Process } from "@/util/process"
-import { spawn as lspspawn } from "./launch"
+import { LspLaunch } from "./launch"
+import { LspGovernance } from "./governance"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
 import { Effect, Layer, Context, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { containsPath } from "@/project/instance-context"
@@ -171,7 +173,7 @@ const layer = Layer.effect(
                 root: existing?.root ?? (async (_file, ctx) => ctx.directory),
                 extensions: item.extensions ?? existing?.extensions ?? [],
                 spawn: async (root) => ({
-                  process: lspspawn(item.command[0], item.command.slice(1), {
+                  process: await LspLaunch.spawn(item.command[0], item.command.slice(1), {
                     cwd: root,
                     env: { ...process.env, ...item.env },
                   }),
@@ -205,18 +207,34 @@ const layer = Layer.effect(
       }),
     )
 
+    const activeClients = async (s: State) => {
+      if (!QuantCodeIdentity.enabled()) return s.clients
+      const stale = await Promise.all(s.clients.map(async client => {
+        if (await client.authorize().then(() => true, () => false)) return
+        await client.shutdown()
+        return client
+      }))
+      s.clients = s.clients.filter(client => !stale.includes(client))
+      return s.clients
+    }
+
     const getClients = Effect.fnUntraced(function* (file: string) {
-      const ctx = yield* InstanceState.context
+      const initial = yield* InstanceState.context
+      const grant = QuantCodeIdentity.enabled()
+        ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(initial.directory)) : undefined
+      if (grant) yield* Effect.promise(() => QuantCodeWorkspace.target(grant, file))
+      const ctx = grant ? { ...initial, directory: grant.directory, worktree: grant.root } : initial
       if (!containsPath(file, ctx)) return [] as LSPClient.Info[]
       const s = yield* InstanceState.get(state)
       const clients = yield* Effect.promise(async () => {
+        await activeClients(s)
         const extension = path.parse(file).ext || file
         const result: LSPClient.Info[] = []
         let updated = 0
 
         async function schedule(server: LSPServer.Info, root: string, key: string) {
-          const handle = await server
-            .spawn(root, ctx, flags)
+          const handle = await LspGovernance.within(grant, () => server
+            .spawn(root, ctx, grant ? { ...flags, disableLspDownload: true } : flags))
             .then((value) => {
               if (!value) s.broken.add(key)
               return value
@@ -233,17 +251,22 @@ const layer = Layer.effect(
             root,
             directory: ctx.directory,
             instance: ctx,
+            grant,
           }).catch(async () => {
             s.broken.add(key)
-            await Process.stop(handle.process)
+            await LspLaunch.stop(handle.process)
             return undefined
           })
 
           if (!client) return undefined
+          await client.authorize().catch(async error => {
+            await client.shutdown()
+            throw error
+          })
 
           const existing = s.clients.find((x) => x.root === root && x.serverID === server.id)
           if (existing) {
-            await Process.stop(handle.process)
+            await client.shutdown()
             return existing
           }
 
@@ -254,9 +277,12 @@ const layer = Layer.effect(
         for (const server of Object.values(s.servers)) {
           if (server.extensions.length && !server.extensions.includes(extension)) continue
 
-          const root = await server.root(file, ctx)
+          const root = await LspGovernance.within(grant, () => server.root(file, ctx))
           if (!root) continue
-          if (s.broken.has(root + server.id)) continue
+          if (grant) await QuantCodeWorkspace.target(grant, root)
+          await LspGovernance.check(grant)
+          const key = `${grant?.identity.session_id ?? ""}:${root}:${server.id}`
+          if (s.broken.has(key)) continue
 
           const match = s.clients.find((x) => x.root === root && x.serverID === server.id)
           if (match) {
@@ -264,7 +290,7 @@ const layer = Layer.effect(
             continue
           }
 
-          const inflight = s.spawning.get(root + server.id)
+          const inflight = s.spawning.get(key)
           if (inflight) {
             const client = await inflight
             if (!client) continue
@@ -272,14 +298,14 @@ const layer = Layer.effect(
             continue
           }
 
-          const task = schedule(server, root, root + server.id)
-          s.spawning.set(root + server.id, task)
+          const task = schedule(server, root, key)
+          s.spawning.set(key, task)
 
-          task.finally(() => {
-            if (s.spawning.get(root + server.id) === task) {
-              s.spawning.delete(root + server.id)
+          void task.finally(() => {
+            if (s.spawning.get(key) === task) {
+              s.spawning.delete(key)
             }
-          })
+          }).catch(() => undefined)
 
           const client = await task
           if (!client) continue
@@ -288,6 +314,7 @@ const layer = Layer.effect(
           updated++
         }
 
+        await LspGovernance.check(grant)
         return { result, updated }
       })
       yield* Effect.forEach(Array.from({ length: clients.updated }), () => events.publish(Event.Updated, {}), {
@@ -298,12 +325,30 @@ const layer = Layer.effect(
 
     const run = Effect.fnUntraced(function* <T>(file: string, fn: (client: LSPClient.Info) => Promise<T>) {
       const clients = yield* getClients(file)
-      return yield* Effect.promise(() => Promise.all(clients.map((x) => fn(x))))
+      return yield* Effect.promise(() => Promise.all(clients.map(async client => {
+        await client.authorize()
+        const result = await fn(client)
+        await client.authorize()
+        return LspGovernance.publicResult(result, client.grant)
+      })))
     })
 
     const runAll = Effect.fnUntraced(function* <T>(fn: (client: LSPClient.Info) => Promise<T>) {
+      const ctx = yield* InstanceState.context
+      const grant = QuantCodeIdentity.enabled()
+        ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory)) : undefined
       const s = yield* InstanceState.get(state)
-      return yield* Effect.promise(() => Promise.all(s.clients.map((x) => fn(x))))
+      return yield* Effect.promise(async () => {
+        const clients = await activeClients(s)
+        const results = await Promise.all(clients.map(async client => {
+          await client.authorize()
+          const result = await fn(client)
+          await client.authorize()
+          return LspGovernance.publicResult(result, client.grant)
+        }))
+        await LspGovernance.check(grant)
+        return results
+      })
     })
 
     const init = Effect.fn("LSP.init")(function* () {
@@ -313,8 +358,11 @@ const layer = Layer.effect(
     const status = Effect.fn("LSP.status")(function* () {
       const ctx = yield* InstanceState.context
       const s = yield* InstanceState.get(state)
+      const grant = QuantCodeIdentity.enabled()
+        ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory)) : undefined
       const result: Status[] = []
-      for (const client of s.clients) {
+      const clients = yield* Effect.promise(() => activeClients(s))
+      for (const client of clients) {
         result.push({
           id: client.serverID,
           name: s.servers[client.serverID].id,
@@ -322,10 +370,12 @@ const layer = Layer.effect(
           status: "connected",
         })
       }
+      yield* Effect.promise(() => LspGovernance.check(grant))
       return result
     })
 
     const hasClients = Effect.fn("LSP.hasClients")(function* (file: string) {
+      if (QuantCodeIdentity.enabled()) return (yield* getClients(file)).length > 0
       const ctx = yield* InstanceState.context
       const s = yield* InstanceState.get(state)
       return yield* Effect.promise(async () => {
@@ -357,7 +407,7 @@ const layer = Layer.effect(
               after,
             })
           }),
-        ).catch(() => {}),
+        ).catch(error => { if (QuantCodeIdentity.enabled()) throw error }),
       )
     })
 

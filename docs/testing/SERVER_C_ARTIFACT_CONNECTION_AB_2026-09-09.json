@@ -1,0 +1,353 @@
+{
+  "native_host": [
+    {
+      "attempt": 1,
+      "http_status": 400,
+      "source_revision": null,
+      "error_category": "QuantCodeTaskError",
+      "message": "任务操作未完成，内容可能已变化。请重新读取当前版本后再决定。"
+    },
+    {
+      "attempt": 2,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 3,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 4,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 5,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 6,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 7,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 8,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 9,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 10,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 11,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    },
+    {
+      "attempt": 12,
+      "http_status": 200,
+      "source_revision": 164,
+      "error_category": null,
+      "message": null
+    }
+  ],
+  "gateway": [
+    {
+      "transport": "python-httpx-direct-gateway",
+      "results": [
+        {
+          "attempt": 1,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 2,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 3,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 4,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 5,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 6,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 7,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 8,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 9,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 10,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 11,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 12,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        }
+      ]
+    },
+    {
+      "transport": "cli8-bun-direct-gateway",
+      "connection_close": false,
+      "results": [
+        {
+          "attempt": 1,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 2,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 3,
+          "error_category": "Error",
+          "code": "ECONNRESET"
+        },
+        {
+          "attempt": 4,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 5,
+          "error_category": "Error",
+          "code": "ECONNRESET"
+        },
+        {
+          "attempt": 6,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 7,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 8,
+          "error_category": "Error",
+          "code": "ECONNRESET"
+        },
+        {
+          "attempt": 9,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 10,
+          "error_category": "Error",
+          "code": "ECONNRESET"
+        },
+        {
+          "attempt": 11,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 12,
+          "error_category": "Error",
+          "code": "ECONNRESET"
+        }
+      ]
+    },
+    {
+      "transport": "cli8-bun-direct-gateway",
+      "connection_close": true,
+      "results": [
+        {
+          "attempt": 1,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 2,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 3,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 4,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 5,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 6,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 7,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 8,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 9,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 10,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 11,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        },
+        {
+          "attempt": 12,
+          "http_status": 200,
+          "source_revision": 164,
+          "error_category": null
+        }
+      ]
+    }
+  ],
+  "login_count": 8,
+  "logout": [
+    {
+      "group": "fundamental",
+      "verified": true
+    },
+    {
+      "group": "factor",
+      "verified": true
+    },
+    {
+      "group": "model",
+      "verified": true
+    },
+    {
+      "group": "risk",
+      "verified": true
+    },
+    {
+      "group": "strategy",
+      "verified": true
+    },
+    {
+      "group": "options",
+      "verified": true
+    },
+    {
+      "group": "infra",
+      "verified": true
+    },
+    {
+      "group": "agent",
+      "verified": true
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
@@ -9,6 +10,7 @@ import { Global } from "@opencode-ai/core/global"
 import fsNode from "fs/promises"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Auth } from "../auth"
+import { QuantCodeConfigPolicy } from "@/quantcode/config-policy"
 import { Env } from "../env"
 import { applyEdits, modify } from "jsonc-parser"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -99,6 +101,7 @@ async function substituteWellKnownRemoteConfig(input: {
 }
 
 async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }>(config: T, filepath: string) {
+  if (QuantCodeIdentity.enabled()) { config.plugin = []; return config }
   if (!config.plugin) return config
   for (let i = 0; i < config.plugin.length; i++) {
     // Normalize path-like plugin specs while we still know which config file declared them.
@@ -136,7 +139,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Co
 
 export const use = serviceUse(Service)
 
-function globalConfigFile() {
+export function globalConfigFile() {
   const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
     path.join(Global.Path.config, file),
   )
@@ -216,6 +219,12 @@ const layer = Layer.effect(
       env?: Record<string, string>,
     ) {
       const source = "path" in options ? options.path : options.source
+      if (QuantCodeIdentity.enabled()) {
+        const original = ConfigParse.jsonc(text, source)
+        if (isRecord(original) && /\{(?:env|file):|\$\{/i.test(JSON.stringify(original.provider ?? {}))) {
+          throw new Error("QuantCode 模型连接不能引用宿主环境变量或文件，请在设置中保存 URL 与 API Key。")
+        }
+      }
       const expanded = yield* Effect.promise(() =>
         ConfigVariable.substitute(
           "path" in options
@@ -228,7 +237,7 @@ const layer = Layer.effect(
       if (!("path" in options)) return data
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
-      if (!data.$schema) {
+      if (!data.$schema && !QuantCodeIdentity.enabled()) {
         data.$schema = "https://opencode.ai/config.json"
         const updated = text.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
         yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
@@ -244,6 +253,7 @@ const layer = Layer.effect(
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
+      if (QuantCodeIdentity.enabled()) return yield* loadFile(globalConfigFile(), env)
       let result: Info = {}
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
@@ -260,7 +270,7 @@ const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc"), env))
 
       const legacy = path.join(Global.Path.config, "config")
-      if (existsSync(legacy)) {
+      if (existsSync(legacy) && !QuantCodeIdentity.enabled()) {
         yield* Effect.promise(() =>
           import(pathToFileURL(legacy).href, { with: { type: "toml" } })
             .then(async (mod) => {
@@ -289,6 +299,7 @@ const layer = Layer.effect(
     )
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
+      if (QuantCodeIdentity.enabled()) return yield* loadGlobal()
       return yield* cachedGlobal
     })
 
@@ -353,6 +364,7 @@ const layer = Layer.effect(
         }
 
         for (const [key, value] of Object.entries(auth)) {
+          if (QuantCodeIdentity.enabled()) break
           if (value.type === "wellknown") {
             const url = key.replace(/\/+$/, "")
             authEnv[value.key] = value.token
@@ -402,7 +414,7 @@ const layer = Layer.effect(
           yield* Effect.logDebug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
         }
 
-        if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+        if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG && !QuantCodeIdentity.enabled()) {
           for (const file of yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
             yield* merge(file, yield* loadFile(file, authEnv), "local")
           }
@@ -421,7 +433,7 @@ const layer = Layer.effect(
         const deps: Fiber.Fiber<void>[] = []
 
         for (const dir of directories) {
-          if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
+          if ((!QuantCodeIdentity.enabled() && dir.endsWith(".opencode")) || dir === Flag.OPENCODE_CONFIG_DIR) {
             for (const file of ["opencode.json", "opencode.jsonc"]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
@@ -432,35 +444,39 @@ const layer = Layer.effect(
             }
           }
 
-          yield* ensureGitignore(dir).pipe(Effect.orDie)
+          if (!QuantCodeIdentity.enabled()) {
+            yield* ensureGitignore(dir).pipe(Effect.orDie)
 
-          const dep = yield* npmSvc
-            .install(dir, {
-              add: [
-                {
-                  name: "@opencode-ai/plugin",
-                  version: InstallationLocal ? undefined : InstallationVersion,
-                },
-              ],
-            })
-            .pipe(
-              Effect.exit,
-              Effect.tap((exit) =>
-                Exit.isFailure(exit)
-                  ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
-                  : Effect.void,
-              ),
-              Effect.asVoid,
-              Effect.forkDetach,
-            )
-          deps.push(dep)
+            const dep = yield* npmSvc
+              .install(dir, {
+                add: [
+                  {
+                    name: "@opencode-ai/plugin",
+                    version: InstallationLocal ? undefined : InstallationVersion,
+                  },
+                ],
+              })
+              .pipe(
+                Effect.exit,
+                Effect.tap((exit) =>
+                  Exit.isFailure(exit)
+                    ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
+                    : Effect.void,
+                ),
+                Effect.asVoid,
+                Effect.forkDetach,
+              )
+            deps.push(dep)
+          }
 
-          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          if (!QuantCodeIdentity.enabled()) {
+            result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
+            result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
+            result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          }
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
-          const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
+          const list = QuantCodeIdentity.enabled() ? [] : yield* Effect.promise(() => ConfigPlugin.load(dir))
           yield* mergePluginOrigins(dir, list)
         }
 
@@ -477,7 +493,7 @@ const layer = Layer.effect(
         const activeAccount = Option.getOrUndefined(
           yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
         )
-        if (activeAccount?.active_org_id) {
+        if (activeAccount?.active_org_id && !QuantCodeIdentity.enabled()) {
           const accountID = activeAccount.id
           const orgID = activeAccount.active_org_id
           const url = activeAccount.url
@@ -582,6 +598,17 @@ const layer = Layer.effect(
           result.compaction = { ...result.compaction, prune: false }
         }
 
+        if (QuantCodeIdentity.enabled()) {
+          // Desktop URL/model settings have one authority: QuantCode's own
+          // host config. Project/env/managed/upstream account config may not
+          // inject a different model connection into native task execution.
+          result.provider = global.provider
+          result.model = global.model
+          result.small_model = global.small_model
+          result.disabled_providers = global.disabled_providers
+          result.enabled_providers = global.enabled_providers
+        }
+
         return {
           config: result,
           directories,
@@ -621,6 +648,7 @@ const layer = Layer.effect(
     })
 
     const update = Effect.fn("Config.update")(function* (config: Info) {
+      if (QuantCodeIdentity.enabled()) { yield* updateGlobal(config); return }
       const dir = yield* InstanceState.directory
       const file = path.join(dir, "config.json")
       const existing = yield* loadFile(file)
@@ -638,17 +666,37 @@ const layer = Layer.effect(
       const before = (yield* readConfigFile(file)) ?? "{}"
       const patch = writableGlobal(config)
 
+      if (QuantCodeIdentity.enabled() && patch.provider) {
+        const previous = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
+        for (const [id, provider] of Object.entries(patch.provider)) {
+          const target = QuantCodeConfigPolicy.modelURL(provider?.options?.baseURL)
+          if (target === QuantCodeConfigPolicy.modelURL(previous.provider?.[id]?.options?.baseURL)) continue
+          const credential = yield* authSvc.get(id).pipe(Effect.orDie)
+          if (!QuantCodeConfigPolicy.credentialMatches(credential, target)) {
+            throw new Error("接口 URL 已变化，请为该地址重新输入 API Key 后保存。")
+          }
+        }
+      }
+
       let next: Info
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
         const merged = mergeDeep(writable(existing), patch)
+        if (QuantCodeIdentity.enabled() && patch.provider) merged.provider = { ...existing.provider, ...patch.provider }
         const serialized = JSON.stringify(merged, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
         next = merged
       } else {
-        const updated = patchJsonc(before, patch)
+        let updated = patchJsonc(before, patch)
+        if (QuantCodeIdentity.enabled() && patch.provider) {
+          // Replace the reviewed connection as a unit, removing old env/API
+          // key/transport leftovers; preserve unrelated JSONC comments.
+          for (const [id, provider] of Object.entries(patch.provider)) {
+            updated = applyEdits(updated, modify(updated, ["provider", id], provider, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+          }
+        }
         next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
         changed = updated !== before
         if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)

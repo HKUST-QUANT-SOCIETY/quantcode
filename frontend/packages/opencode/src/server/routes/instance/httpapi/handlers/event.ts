@@ -1,3 +1,4 @@
+import { QuantCodeEventAccess } from "@/quantcode/event-access"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
@@ -24,6 +25,7 @@ function eventID() {
 
 function eventResponse(events: EventV2.Interface) {
   return Effect.gen(function* () {
+    const authorize = yield* QuantCodeEventAccess.subscriber()
     const instance = yield* InstanceState.context
     const workspaceID = yield* InstanceState.workspaceID
     // Listener registration is eager, so events published after this point cannot
@@ -69,7 +71,9 @@ function eventResponse(events: EventV2.Interface) {
     return HttpServerResponse.stream(
       Stream.make({ id: eventID(), type: "server.connected", properties: {} }).pipe(
         Stream.concat(output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
-        Stream.map(eventData),
+        Stream.mapEffect(event => authorize(event.type, event.properties, instance.directory).pipe(Effect.map(allowed => ({ event, allowed })))),
+        Stream.filter(item => item.allowed),
+        Stream.map(item => eventData(item.event)),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
         Stream.ensuring(Effect.logInfo("event disconnected")),

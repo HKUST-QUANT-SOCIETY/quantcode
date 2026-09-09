@@ -16,7 +16,10 @@ export function resolveBrand(channel: ImportMetaEnv["VITE_OPENCODE_CHANNEL"]) {
 
 export function productCopy(value: string, productName: string) {
   const zen = "\u0000opencode-zen\u0000"
-  return value.replaceAll("OpenCode Zen", zen).replaceAll("OpenCode", productName).replaceAll(zen, "OpenCode Zen")
+  return value
+    .replaceAll("OpenCode Zen", zen)
+    .replaceAll("OpenCode", productName)
+    .replaceAll(zen, "OpenCode Zen")
 }
 
 const brand = resolveBrand(import.meta.env.VITE_OPENCODE_CHANNEL)

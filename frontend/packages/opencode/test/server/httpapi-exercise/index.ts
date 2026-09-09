@@ -36,6 +36,7 @@ import { runScenario } from "./runner"
 import { disposeApps } from "./backend"
 import { runtime } from "./runtime"
 import { type Scenario } from "./types"
+import { quantcodeScenarios } from "./quantcode-scenarios"
 
 function cursor(input: Record<string, unknown>) {
   return Buffer.from(JSON.stringify(input)).toString("base64url")
@@ -58,6 +59,7 @@ function locationData(validate: (value: any) => void) {
 }
 
 const scenarios: Scenario[] = [
+  ...quantcodeScenarios,
   http.protected
     .get("/global/health", "global.health")
     .global()
@@ -331,7 +333,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: `/file/content?${new URLSearchParams({ path: "hello.txt" })}`, headers: ctx.headers() }))
     .json(200, (body) => {
       object(body)
-      check(body.content === "hello", `content should match seeded file: ${JSON.stringify(body)}`)
+      check(body.type === "text" && body.content === "hello\n", `content should preserve the seeded file bytes: ${JSON.stringify(body)}`)
     }),
   http.protected
     .get("/file/content", "file.read.missing")

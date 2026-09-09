@@ -1,5 +1,8 @@
 # QuantCode 功能规格（FUNCTIONAL_SPEC）
 
+> **2026-09-08 用户确认 · 源码内化与单执行引擎**：OpenCode 来源源码已纳入本仓库，由 QuantCode 自行维护。目标采用统一会话与 Agent 执行引擎，Python 收缩为组织能力/组件服务，取消新任务对第二套 `run_agent` 循环的强制转交。该目标尚未完成迁移；下文旧实现状态仍是历史证据。迁移要求见 [执行引擎内化决策](../docs/decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
+
+
 > **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](../docs/audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
 
 
@@ -39,6 +42,8 @@
 | D-013 | 数据与标签契约来自数据层唯一权威。 |
 | D-014 | OpenCode/MimoCode Agent 底座能力继续保留。 |
 | D-015 | 测试服从当前规范，旧断言不得反向定义设计。 |
+| D-016 | QuantCode 自行维护纳入仓库的执行引擎源码；新任务使用统一模型、会话、工具循环与状态，不嵌套第二套 Python 通用 Agent 循环。迁移完成前旧任务有显式兼容边界。 |
+| D-017 | roster、工作区、能力复用、P-10 与 Gate 约束在可信执行边界生效，覆盖原生工具、MCP 和子任务；取消旧循环前必须迁移这些约束。 |
 
 ### 0.2 底座能力与 QuantCode 增量
 
@@ -48,7 +53,7 @@
 | MimoCode | Compose ReAct、通用 Compose Skill、Memory/FTS5、Task、Checkpoint/Replay、Subagent、Goal/Judge、Dream/Distill 的可移植设计 |
 | QuantCode | roster 组绑定、组内 Memory、动态 Tool Catalog、能力卡、Blackboard handoff、量化组件契约、Admin、GitGraph/Pop 和 P-10 |
 
-功能规格只锁定 QuantCode 的行为和边界。OpenCode/MimoCode 的底座行为由各自实现和版本维护，QuantCode 不复制一套同名基础设施。
+功能规格锁定 QuantCode 的行为和边界。OpenCode 来源的执行代码现在由 QuantCode 同仓维护、测试与发布；来源记录和许可证保留。MimoCode 提供可移植设计参考，不是另一个线上产品依赖。基础执行能力复用同一代码实现，不再另外复制通用 Agent 循环。
 
 ## 1. 当前运营模型
 
@@ -350,6 +355,7 @@ PyTest 全绿只说明测试与当前代码一致。凡是断言风险越限 Hum
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-08 | 用户确认 OpenCode 源码内化；新增 D-016/D-017；目标改为统一执行引擎，Python 组织服务保留，旧循环按阶段迁移。 |
 | 2026-09-01 | HumanGate 收窄为写操作；模型 PR 降级为 CI；业务流水线归组内；新增 P-07/P-08/P-09/P-10 |
 | 2026-09-03 | 根据组长会议与组件指南重建运营基线：组内 Memory、组件权威与复用纪律、Admin 全权限、GitHub 权限一致、SSH 不进生产、GitGraph 全增强、方案按复杂度分级 |
 | 2026-09-03 | v0.4 文档校审：补回底座 Agent 能力、八组 Compose 契约、事件与任务归属、组件卡字段、CI 保留链和 P-01~P-10 验收；部署与普通 Agent Gate 分离 |

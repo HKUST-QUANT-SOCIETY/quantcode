@@ -14,6 +14,14 @@ const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   installCli: () => ipcRenderer.invoke("install-cli"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
+  github: { request: (input) => ipcRenderer.invoke("quantcode-github-request", input) },
+  identity: {
+    inspect: (input) => ipcRenderer.invoke("quantcode-identity-inspect", input),
+    connect: (input) => ipcRenderer.invoke("quantcode-identity-connect", input),
+    importKey: (input) => ipcRenderer.invoke("quantcode-identity-import-key", input),
+    disconnect: (input) => ipcRenderer.invoke("quantcode-identity-disconnect", input),
+    cancel: (input) => ipcRenderer.invoke("quantcode-identity-cancel", input),
+  },
   wslServers: {
     getState: () => ipcRenderer.invoke("wsl-servers-get-state"),
     subscribe: (cb) => {

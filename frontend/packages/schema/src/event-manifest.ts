@@ -1,3 +1,7 @@
+import { QuantCodeGovernance } from "./quantcode-governance"
+import { QuantCodeTaskIndex } from "./quantcode-task-index"
+import { QuantCodeBudgetEvent } from "./quantcode-budget"
+import { QuantCodeKnowledge } from "./quantcode-knowledge"
 export * as EventManifest from "./event-manifest"
 
 import { Catalog } from "./catalog"
@@ -37,9 +41,13 @@ const sessionV1LiveDefinitions = SessionV1.Event.Definitions.filter((definition)
 const coreDefinitions = Event.inventory(...sessionV1DurableDefinitions, ...SessionEvent.Definitions)
 
 const foundationDefinitions = Event.inventory(
+  ...QuantCodeKnowledge.Definitions,
+  ...QuantCodeTaskIndex.Definitions,
   ...ModelsDev.Event.Definitions,
   ...Integration.Event.Definitions,
   ...Catalog.Event.Definitions,
+  ...QuantCodeGovernance.Definitions,
+  ...QuantCodeBudgetEvent.Definitions,
   ...coreDefinitions,
 )
 

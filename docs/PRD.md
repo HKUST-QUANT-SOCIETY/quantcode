@@ -3,7 +3,7 @@
 > **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
 
 
-> **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
+> **版本**：v5.2（2026-09-08，单执行引擎与源码内化决策）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **产品状态**：研究 Agent 平台与组织能力中枢
 > **唯一功能基线**：[FUNCTIONAL_SPEC.md](../specs/FUNCTIONAL_SPEC.md)。本文件说明产品目标、用户和范围；用户操作说明以当前 [USER_MANUAL.md](USER_MANUAL.md) 为准。归档内容不作为当前行为或验收依据。
@@ -12,7 +12,7 @@
 
 ## 0. 产品定义
 
-QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建立在 OpenCode 桌面端和 MimoCode 工作流设计之上。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
+QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢。它内化已经纳入本仓库的 OpenCode 执行引擎源码，并吸收 MimoCode 的工作流设计，由 QuantCode 统一维护桌面、会话、模型和任务执行。它把组织已有的数据、因子引擎、评估器、模型工具、风险组件和部署入口登记为可发现、可复用、可审计的能力，让 Agent 在研究和工程任务中优先使用已有能力，并把结论、错误、决策和最佳实践沉淀到对应组的共享 Memory。
 
 各研究组和外部平台维护业务真相：报告平台汇总研究成果和策略表现，各组维护算法、回测、组合、期权和基本面业务，生产系统负责实际运行。QuantCode 把这些系统接入研究工作流，提供编排、契约、可观测和组织协作。
 
@@ -24,7 +24,9 @@ QuantCode 是按业务组登录的研究 Agent 平台与组织能力中枢，建
 | MimoCode | Compose ReAct、通用 Skill、Memory/FTS5、Task、Checkpoint/Replay、Subagent、Goal/Judge、Dream/Distill 的工作流设计 |
 | QuantCode | SSH roster 自动绑定组、组内 Memory、动态 Tool Catalog、组件能力卡、Blackboard handoff、Admin、GitGraph/Pop、P-10 和量化组件适配 |
 
-OpenCode 负责桌面和会话底座，MimoCode 提供可移植的工作流设计，QuantCode 负责组织规则和量化接入。三者的职责在设计、实现和验收中分开记录。
+OpenCode 表示源码来源，MimoCode 表示设计参考，用户使用的是一个 QuantCode 产品。QuantCode 维护同仓执行引擎、组织规则与量化接入；保留来源和许可证，不要求另装或配置 OpenCode。
+
+**2026-09-08 已确认目标，迁移未完成**：新任务以统一模型和会话引擎执行，Compose 与普通研究/工程任务共享执行机制。Python 提供身份、Memory、能力目录、Blackboard、契约、审批和审计服务，不再作为第二套通用 Agent。原生工具和子任务也必须受组织规则约束。实现阶段与退出条件见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
 
 ## 1. 要解决的问题
 
@@ -211,7 +213,7 @@ AlphaProbe、CogAlpha、FactorMiner、Factor Research DB、Sentinel、PaperRAG�
 - MCP、Provider、Workspace、Permission、插件、命令和工具结果回流；
 - Compose ReAct、15 个通用 Compose Skill、Memory FTS5/BM25、Task 树、Checkpoint/Replay、Context 重建、Subagent、Goal/Judge、Dream/Distill；
 - Pydantic/JSON Schema 契约、动态 Schema、Blackboard、trace、metrics、evidence、幂等键和副作用去重；
-- LangGraph AgentRunner 的迭代上限、循环检测、预算、降级、恢复和回放。
+- 统一执行引擎的迭代上限、循环检测、预算、降级、恢复和回放；现有 LangGraph AgentRunner 的行为按兼容要求迁移，不保留第二套新任务循环。
 
 QuantCode 在这些能力之上增加 roster 组绑定、组内 Memory、动态 Tool Catalog、量化组件能力卡、Admin、GitGraph、Pop、跨组 handoff 和 P-10 方案分级。
 
@@ -277,6 +279,8 @@ Pop 遵守同一 GitHub 可见性边界，并记录来源、时间、去重键�
 - 测试按当前运营模型分层，旧语义不再被“全绿”掩盖。
 
 ### 8.3 里程碑与质量要求
+
+下表保留产品建设路线的 M1～M5，描述产品能力范围，不是本次执行引擎内化的实施顺序。其中旧 AgentRunner 的实现方式已被 2026-09-08 决策替代，不能据此继续为新任务运行 Python 通用循环。本次迁移严格按 [内化决策的 M0 → M1 → M2 → M3 → M4](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md) 推进，阶段状态以 [内化进度](decisions/RUNTIME_INTERNALIZATION_PROGRESS.md) 为准；两套编号不能互相作为完成证明。
 
 | 里程碑 | 达成标准 |
 |---|---|

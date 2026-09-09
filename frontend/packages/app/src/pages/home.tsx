@@ -1424,8 +1424,8 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
 }
 
 /**
- * QuantCode owns the root route. The OpenCode project/session home is still
- * available to the upstream channels, but a QuantCode install should open the
+ * QuantCode owns the root route. The upstream project/session home is still
+ * available to the other channels, but a QuantCode install should open the
  * research workspace before a project or session exists.
  */
 export function QuantCodeHome() {
@@ -1434,7 +1434,7 @@ export function QuantCodeHome() {
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
 
-  const startResearch = (instruction: string) => {
+  const startResearch = (task: string) => {
     const conn = server.current
     if (!conn) return false
 
@@ -1442,30 +1442,24 @@ export function QuantCodeHome() {
     if (global.servers.health[key]?.healthy === false) return false
 
     const projects = global.ensureServerCtx(conn).projects
-    const directory = projects.last() ?? projects.list()[0]?.worktree
-    if (directory) {
-      projects.touch(directory)
-      tabs.newDraft({ server: key, directory }, instruction, { submit: true })
-      return true
-    }
-
-    // A first-run member has no project to bind the draft to yet. Use the same
-    // native/V2 directory picker as the rest of the app, then create the draft
-    // with the exact instruction that was entered in the QuantCode workspace.
+    // The host resolves the current member's real roots and reauthorizes the
+    // remembered project before the existing draft/composer receives it.
     return new Promise<boolean>((resolve) => {
       pickDirectory({
         server: conn,
         title: "选择研究项目",
         multiple: false,
+        preferred: projects.last() ?? projects.list()[0]?.worktree,
+        useDefault: true,
         onSelect: (result) => {
           const directory = Array.isArray(result) ? result[0] : result
-          if (!directory) {
+          if (!directory || !server.current || ServerConnection.key(server.current) !== key) {
             resolve(false)
             return
           }
           projects.open(directory)
           projects.touch(directory)
-          tabs.newDraft({ server: key, directory }, instruction, { submit: true })
+          tabs.newDraft({ server: key, directory }, task, { submit: true })
           resolve(true)
         },
       })

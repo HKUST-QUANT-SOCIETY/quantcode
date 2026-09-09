@@ -1,3 +1,6 @@
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { SessionCancellation } from "./cancellation"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Slug } from "@opencode-ai/core/util/slug"
@@ -5,8 +8,6 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
 import { BackgroundJob } from "@/background/job"
-import { Decimal } from "decimal.js"
-import type { ProviderMetadata, Usage } from "@opencode-ai/llm"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Database } from "@opencode-ai/core/database/database"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
@@ -338,76 +339,7 @@ export function plan(input: { slug: string; time: { created: number } }, instanc
   return path.join(base, [input.time.created, input.slug].join("-") + ".md")
 }
 
-export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?: ProviderMetadata }) => {
-  const safe = (value: number) => {
-    if (!Number.isFinite(value)) return 0
-    return Math.max(0, value)
-  }
-  const inputTokens = safe(input.usage.inputTokens ?? 0)
-  const outputTokens = safe(input.usage.outputTokens ?? 0)
-  const reasoningTokens = safe(input.usage.reasoningTokens ?? 0)
-
-  const cacheReadInputTokens = safe(input.usage.cacheReadInputTokens ?? 0)
-  const cacheWriteInputTokens = safe(
-    Number(
-      input.usage.cacheWriteInputTokens ??
-        input.metadata?.["anthropic"]?.["cacheCreationInputTokens"] ??
-        // google-vertex-anthropic returns metadata under "vertex" key
-        // (AnthropicMessagesLanguageModel custom provider key from 'vertex.anthropic.messages')
-        input.metadata?.["vertex"]?.["cacheCreationInputTokens"] ??
-        // @ts-expect-error
-        input.metadata?.["bedrock"]?.["usage"]?.["cacheWriteInputTokens"] ??
-        // @ts-expect-error
-        input.metadata?.["venice"]?.["usage"]?.["cacheCreationInputTokens"] ??
-        0,
-    ),
-  )
-
-  // AI SDK v6 normalized inputTokens to include cached tokens across all providers
-  // (including Anthropic/Bedrock which previously excluded them). Always subtract cache
-  // tokens to get the non-cached input count for separate cost calculation.
-  const adjustedInputTokens = safe(inputTokens - cacheReadInputTokens - cacheWriteInputTokens)
-
-  const total = input.usage.totalTokens
-
-  const tokens = {
-    total,
-    input: adjustedInputTokens,
-    output: safe(outputTokens - reasoningTokens),
-    reasoning: reasoningTokens,
-    cache: {
-      write: cacheWriteInputTokens,
-      read: cacheReadInputTokens,
-    },
-  }
-
-  const contextTokens = inputTokens
-  const costInfo =
-    input.model.cost?.tiers
-      ?.filter((item) => item.tier.type === "context" && contextTokens > item.tier.size)
-      .sort((a, b) => b.tier.size - a.tier.size)[0] ??
-    (input.model.cost?.experimentalOver200K && contextTokens > 200_000
-      ? input.model.cost.experimentalOver200K
-      : input.model.cost)
-  const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
-  return {
-    cost:
-      typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0
-        ? new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
-        : safe(
-            new Decimal(0)
-              .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
-              // TODO: update models.dev to have better pricing model, for now:
-              // charge reasoning tokens at the same rate as output tokens
-              .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
-              .toNumber(),
-          ),
-    tokens,
-  }
-}
+export { getUsage } from "./usage"
 
 export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionBusyError", {
   sessionID: SessionID,
@@ -426,7 +358,7 @@ export interface Interface {
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
-  }) => Effect.Effect<Info>
+  }) => Effect.Effect<Info, NotFound>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
@@ -451,7 +383,7 @@ export interface Interface {
   readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
-  readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
+  readonly children: (parentID: SessionID) => Effect.Effect<Info[], NotFound>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
@@ -513,6 +445,8 @@ const layer: Layer.Layer<
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
     }) {
+      const originalAdmission = yield* SessionCancellation.InputAdmission
+      originalAdmission?.()
       const ctx = yield* InstanceState.context
       const result: Info = {
         id: SessionID.descending(input.id),
@@ -535,9 +469,30 @@ const layer: Layer.Layer<
           updated: Date.now(),
         },
       }
+      let cancellationCheck: (() => void) | undefined
+      if (QuantCodeIdentity.enabled()) {
+        const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(input.directory, "read", identity))
+        const parent = input.parentID ? yield* get(input.parentID) : undefined
+        if (parent) {
+          if (parent.directory !== grant.directory || parent.projectID !== ctx.project.id ||
+            input.workspaceID !== undefined && input.workspaceID !== parent.workspaceID)
+            throw new QuantCodeWorkspace.WorkspaceDenied("子任务必须继承父任务的项目、工作目录和工作区。")
+          result.projectID = parent.projectID
+          result.workspaceID = parent.workspaceID
+        }
+        result.directory = grant.directory
+        result.metadata = { ...QuantCodeIdentity.preserveBinding(undefined, input.metadata),
+          quantcode: QuantCodeIdentity.bindSession(identity, result.id, parent) }
+        originalAdmission?.()
+        cancellationCheck = SessionCancellation.admission(QuantCodeIdentity.requireOwner(result.metadata, identity), result.id, true)
+      }
       yield* Effect.logInfo("created", result)
 
-      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
+      const currentCheck = cancellationCheck
+      const check = originalAdmission || currentCheck ? () => { originalAdmission?.(); currentCheck?.() } : undefined
+      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result },
+        check ? { commit: () => Effect.sync(check) } : undefined)
 
       return result
     })
@@ -545,20 +500,32 @@ const layer: Layer.Layer<
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       if (!row) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
-      return fromRow(row)
+      const session = fromRow(row)
+      if (QuantCodeIdentity.enabled()) {
+        const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+        QuantCodeIdentity.requireOwner(session.metadata, identity)
+      }
+      return session
     })
 
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
       const ctx = yield* InstanceState.context
+      const identity = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeIdentity.currentIdentity().catch(() => undefined)) : undefined
+      if (QuantCodeIdentity.enabled() && !identity) return []
       return yield* listByProject(db, {
         projectID: ctx.project.id,
+        quantcodeActor: identity?.actor_id,
+        quantcodeGroup: identity?.group,
         experimentalWorkspaces: flags.experimentalWorkspaces,
         ...input,
-      })
+      }).pipe(Effect.map(items => identity ? items.filter(item => QuantCodeIdentity.owns(QuantCodeIdentity.sessionBinding(item.metadata), identity)) : items))
     })
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
+      const identity = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeIdentity.currentIdentity().catch(() => undefined)) : undefined
+      if (QuantCodeIdentity.enabled() && !identity) return []
       const conditions: SQL[] = []
+      if (identity) conditions.push(sql`json_extract(${SessionTable.metadata}, '$.quantcode.owner.actor_id') = ${identity.actor_id}`, sql`json_extract(${SessionTable.metadata}, '$.quantcode.owner.group') = ${identity.group}`)
       if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
       if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
       if (input?.start) conditions.push(gte(SessionTable.time_updated, input.start))
@@ -596,9 +563,11 @@ const layer: Layer.Layer<
         }
       }
       return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+        .filter(item => !identity || QuantCodeIdentity.owns(QuantCodeIdentity.sessionBinding(item.metadata), identity))
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID) {
+      yield* get(parentID)
       const rows = yield* db
         .select()
         .from(SessionTable)
@@ -610,6 +579,12 @@ const layer: Layer.Layer<
 
     const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {
       const session = yield* get(sessionID)
+      if (QuantCodeIdentity.enabled()) {
+        // Keep immutable messages, approvals and uncertain-write receipts.
+        // The HTTP caller cancels active work before archiving this task.
+        yield* setArchived({ sessionID, time: Date.now() })
+        return
+      }
       try {
         // `remove` needs to work in all cases, such as broken sessions that
         // run cleanup without instance state.
@@ -631,19 +606,29 @@ const layer: Layer.Layer<
       }
     })
 
+    const editable = Effect.fn("Session.editable")(function* (sessionID: SessionID) {
+      if (!QuantCodeIdentity.enabled()) return
+      const row = yield* db.select({ metadata: SessionTable.metadata }).from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+      QuantCodeIdentity.requireEditable(row?.metadata ?? undefined)
+    })
     const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
+        yield* editable(msg.sessionID)
+        const check = yield* SessionCancellation.InputAdmission
+        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg },
+          check ? { commit: () => Effect.sync(check) } : undefined)
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        yield* editable(part.sessionID)
+        const check = yield* SessionCancellation.InputAdmission
         yield* events.publish(SessionV1.Event.PartUpdated, {
           sessionID: part.sessionID,
           part: structuredClone(part),
           time: Date.now(),
-        })
+        }, check ? { commit: () => Effect.sync(check) } : undefined)
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
 
@@ -696,6 +681,7 @@ const layer: Layer.Layer<
     const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
+      if (QuantCodeIdentity.enabled()) QuantCodeIdentity.requireEditable(original.metadata)
       const title = getForkedTitle(original.title)
       const session = yield* createNext({
         directory: ctx.directory,
@@ -739,6 +725,10 @@ const layer: Layer.Layer<
     const patch = (sessionID: SessionID, info: Patch) =>
       Effect.gen(function* () {
         const current = yield* get(sessionID)
+        if (QuantCodeIdentity.enabled() && QuantCodeIdentity.readOnly(current.metadata) &&
+            (Object.keys(info).some(key => key !== "time") || Object.keys(info.time ?? {}).some(key => key !== "archived"))) {
+          QuantCodeIdentity.requireEditable(current.metadata)
+        }
         const next = {
           ...current,
           ...info,
@@ -748,7 +738,10 @@ const layer: Layer.Layer<
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
-        yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
+        if (QuantCodeIdentity.enabled()) next.metadata = QuantCodeIdentity.preserveBinding(current.metadata, next.metadata)
+        const check = yield* SessionCancellation.InputAdmission
+        yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next },
+          check ? { commit: () => Effect.sync(check) } : undefined)
       })
 
     const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
@@ -831,6 +824,7 @@ const layer: Layer.Layer<
     })
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
+      if (QuantCodeIdentity.enabled()) yield* get(input.sessionID)
       if (input.limit) {
         return (yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
           Effect.provideService(Database.Service, database),
@@ -859,10 +853,12 @@ const layer: Layer.Layer<
       sessionID: SessionID
       messageID: MessageID
     }) {
+      yield* editable(input.sessionID)
+      const check = yield* SessionCancellation.InputAdmission
       yield* events.publish(SessionV1.Event.MessageRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
-      })
+      }, check ? { commit: () => Effect.sync(check) } : undefined)
       return input.messageID
     })
 
@@ -871,11 +867,13 @@ const layer: Layer.Layer<
       messageID: MessageID
       partID: PartID
     }) {
+      yield* editable(input.sessionID)
+      const check = yield* SessionCancellation.InputAdmission
       yield* events.publish(SessionV1.Event.PartRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
         partID: input.partID,
-      })
+      }, check ? { commit: () => Effect.sync(check) } : undefined)
       return input.partID
     })
 
@@ -886,6 +884,7 @@ const layer: Layer.Layer<
       field: string
       delta: string
     }) {
+      yield* editable(input.sessionID)
       yield* events.publish(MessageV2.Event.PartDelta, input)
     })
 
@@ -962,9 +961,12 @@ function listByProject(
   input: ListInput & {
     projectID: ProjectV2.ID
     experimentalWorkspaces: boolean
+    quantcodeActor?: string
+    quantcodeGroup?: string
   },
 ) {
   const conditions = [eq(SessionTable.project_id, input.projectID)]
+  if (input.quantcodeActor) conditions.push(sql`json_extract(${SessionTable.metadata}, '$.quantcode.owner.actor_id') = ${input.quantcodeActor}`, sql`json_extract(${SessionTable.metadata}, '$.quantcode.owner.group') = ${input.quantcodeGroup}`)
 
   if (input.workspaceID) {
     conditions.push(eq(SessionTable.workspace_id, input.workspaceID))

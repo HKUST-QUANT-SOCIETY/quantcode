@@ -1,6 +1,8 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { DesktopGitHub } from "@opencode-ai/app/github"
+import type { QuantCodeDesktopIdentity } from "@opencode-ai/app/identity"
 export type {
   WslDistroProbe,
   WslInstalledDistro,
@@ -46,6 +48,8 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   wslServers: WslServersAPI
   updater: UpdaterAPI
+  github: DesktopGitHub
+  identity: QuantCodeDesktopIdentity
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

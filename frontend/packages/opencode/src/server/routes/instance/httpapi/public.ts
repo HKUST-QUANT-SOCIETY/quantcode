@@ -30,6 +30,7 @@ type OpenApiSpec = {
 }
 
 type OpenApiSchema = {
+  "x-effect-undefined"?: boolean
   $ref?: string
   additionalProperties?: OpenApiSchema | boolean
   allOf?: OpenApiSchema[]
@@ -89,9 +90,9 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
   // actual schema from any parent union that references them.
   fixSelfReferencingComponents(spec)
 
-  // Effect's Schema.optional emits `anyOf: [T, {type:"null"}]` in OpenAPI,
-  // but the legacy SDK expected plain `T` for optional fields. Strip null
-  // from all component schemas so both request and response types match.
+  // Undefined is approximated by null in Effect's JSON Schema generator.
+  // Preserve its opt-in provenance until this compatibility transform removes
+  // only those arms. Real NullOr values, including optional ones, stay nullable.
   for (const [name, schema] of Object.entries(spec.components?.schemas ?? {})) {
     spec.components!.schemas![name] = stripOptionalNull(structuredClone(schema))
   }
@@ -114,9 +115,8 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
         const body = operation.requestBody.content?.["application/json"]
         if (body?.schema) body.schema = stripOptionalNull(structuredClone(body.schema))
         if (path === "/experimental/workspace" && method === "post") {
-          // Workspace creation fields `branch` and `extra` are Schema.NullOr —
-          // genuinely nullable, not just optional. Re-add the null that the
-          // component-level strip above removed.
+          // Preserve the historical workspace shape; nullable() is idempotent
+          // now that the generator distinguishes Null from Undefined.
           const ref = operation.requestBody.content?.["application/json"]?.schema?.$ref?.replace(
             "#/components/schemas/",
             "",
@@ -124,8 +124,8 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
           const properties = ref
             ? spec.components?.schemas?.[ref]?.properties
             : operation.requestBody.content?.["application/json"]?.schema?.properties
-          if (properties?.branch) properties.branch = { anyOf: [properties.branch, { type: "null" }] }
-          if (properties?.extra) properties.extra = { anyOf: [properties.extra, { type: "null" }] }
+          if (properties?.branch) properties.branch = nullable(properties.branch)
+          if (properties?.extra) properties.extra = nullable(properties.extra)
         }
         if (path === "/experimental/workspace/warp" && method === "post") {
           const ref = operation.requestBody.content?.["application/json"]?.schema?.$ref?.replace(
@@ -135,7 +135,7 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
           const properties = ref
             ? spec.components?.schemas?.[ref]?.properties
             : operation.requestBody.content?.["application/json"]?.schema?.properties
-          if (properties?.id) properties.id = { anyOf: [properties.id, { type: "null" }] }
+          if (properties?.id) properties.id = nullable(properties.id)
         }
       }
       for (const response of Object.values(operation.responses ?? {})) {
@@ -174,7 +174,16 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
     }
   }
   deleteUnusedLegacyErrorComponents(spec)
+  removeUndefinedMarkers(spec)
   return input
+}
+
+// Streaming extension schemas also carry provenance. This private marker is
+// used only while translating; never publish it in the OpenAPI document.
+function removeUndefinedMarkers(input: unknown): void {
+  if (!input || typeof input !== "object") return
+  delete (input as OpenApiSchema)["x-effect-undefined"]
+  for (const value of Object.values(input)) removeUndefinedMarkers(value)
 }
 
 function isV2ApiPath(path: string) {
@@ -449,7 +458,7 @@ function fixSelfReferencingComponents(spec: OpenApiSpec) {
     }
   }
   // Simplest fix: generate the raw spec (without transform) to get correct schemas
-  const raw: OpenApiSpec = OpenApi.fromApi(OpenCodeHttpApi)
+  const raw: OpenApiSpec = OpenApi.fromApi(OpenCodeHttpApi.annotate(OpenApi.MarkUndefined, true))
   const rawSchemas = raw.components?.schemas
   if (!rawSchemas) return
   for (const name of selfRefs) {
@@ -457,8 +466,9 @@ function fixSelfReferencingComponents(spec: OpenApiSpec) {
   }
 }
 
-/** Strip `{type:"null"}` arms that Effect's `Schema.optional` adds to OpenAPI unions. */
+/** Strip only marked Undefined arms; required and optional NullOr retain null. */
 function stripOptionalNull(schema: OpenApiSchema): OpenApiSchema {
+  delete schema["x-effect-undefined"]
   if (schema.allOf?.length === 1) {
     const [constraint] = schema.allOf
     delete schema.allOf
@@ -467,10 +477,10 @@ function stripOptionalNull(schema: OpenApiSchema): OpenApiSchema {
   if (isEmptyObjectUnion(schema)) return { type: "object", properties: {} }
   const options = flattenOptions(schema.anyOf ?? schema.oneOf)
   if (options) {
-    const withoutNull = options.filter((item) => item.type !== "null")
-    if (withoutNull.length === 1) return stripOptionalNull(withoutNull[0])
-    if (schema.anyOf) schema.anyOf = withoutNull.map(stripOptionalNull)
-    if (schema.oneOf) schema.oneOf = withoutNull.map(stripOptionalNull)
+    const withoutUndefined = options.filter((item) => item["x-effect-undefined"] !== true)
+    if (withoutUndefined.length === 1) return stripOptionalNull(withoutUndefined[0])
+    if (schema.anyOf) schema.anyOf = withoutUndefined.map(stripOptionalNull)
+    if (schema.oneOf) schema.oneOf = withoutUndefined.map(stripOptionalNull)
   }
   if (schema.allOf) {
     const allOf = schema.allOf.map(stripOptionalNull)
@@ -527,7 +537,7 @@ function normalizeParameter(param: OpenApiParameter, route: string) {
   param.schema = stripOptionalNull(param.schema)
 }
 
-export const PublicApi = OpenCodeHttpApi.annotateMerge(
+export const PublicApi = OpenCodeHttpApi.annotate(OpenApi.MarkUndefined, true).annotateMerge(
   OpenApi.annotations({
     title: "opencode",
     version: "1.0.0",

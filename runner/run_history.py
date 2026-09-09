@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,68 @@ def _summary(row: tuple, checkpoint: dict, values: dict) -> dict:
         "status": "completed" if values.get("task_status") == "done" else "checkpoint_saved",
         "iterations": values.get("iterations", 0),
     }
+
+
+def legacy_checkpoint_binding(ctx: dict, *, thread_id: str, checkpoint_id: str | None = None,
+                              db_path: Path = CHECKPOINTS_DB, organization: bool = False) -> dict:
+    """Read a precise checkpoint/owner binding without opening a writable saver.
+
+    LangGraph's checkpoint `v` is a serialization format version, never proof
+    of which executor source produced it. Missing source provenance stays absent.
+    """
+    _identity(ctx)
+    if organization and ctx.get("role") != "admin":
+        raise PermissionError("organization history requires Admin")
+    conn = _connect(Path(db_path))
+    if conn is None:
+        raise PermissionError("history not found in the current scope")
+    try:
+        conn.execute("BEGIN")
+        latest = conn.execute("SELECT thread_id,checkpoint_id,type,checkpoint FROM checkpoints "
+                              "WHERE thread_id=? AND checkpoint_ns='' ORDER BY checkpoint_id DESC LIMIT 1", (thread_id,)).fetchone()
+        if latest is None:
+            raise PermissionError("history not found in the current scope")
+        _, latest_values = _decode(latest)
+        if not organization and not _owned(latest_values, ctx):
+            raise PermissionError("history not found in the current scope")
+        row = latest if not checkpoint_id else conn.execute(
+            "SELECT thread_id,checkpoint_id,type,checkpoint FROM checkpoints WHERE thread_id=? AND checkpoint_ns='' AND checkpoint_id=?",
+            (thread_id, checkpoint_id),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("history not found in the current scope")
+        checkpoint, values = _decode(row)
+        if not organization and not _owned(values, ctx):
+            raise PermissionError("history not found in the current scope")
+        owner = {field: values.get(field) for field in (
+            "actor_id", "group", "role", "session_id", "workspace_id", "workspace_path", "github_subject",
+            "ssh_fingerprint", "identity",
+        )}
+        owner["resource_scopes"] = sorted(values.get("resource_scopes") or [])
+        pending_calls = next((getattr(message, "tool_calls", []) or [] for message in reversed(values.get("messages") or [])
+                              if getattr(message, "type", "") == "ai"), [])
+        digest = hashlib.sha256()
+        for value in (str(row[0]).encode(), str(row[1]).encode(), str(row[2]).encode(), bytes(row[3])):
+            digest.update(len(value).to_bytes(8, "big"))
+            digest.update(value)
+        for write in conn.execute("SELECT task_id,idx,channel,type,value FROM writes WHERE thread_id=? AND checkpoint_ns='' "
+                                  "AND checkpoint_id=? ORDER BY task_id,idx", (thread_id, row[1])):
+            for value in write:
+                blob = value if isinstance(value, bytes) else str(value).encode()
+                digest.update(len(blob).to_bytes(8, "big"))
+                digest.update(blob)
+        return {"thread_id": row[0], "checkpoint_id": row[1], "latest_checkpoint_id": latest[1],
+                "checkpoint_digest": digest.hexdigest(), "owner_digest": hashlib.sha256(
+                    json.dumps(owner, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                "owner": owner, "owned": _owned(values, ctx),
+                "pending_tool_calls": pending_calls,
+                "solution": {"id": values.get("solution_id"), "phase": values.get("solution_phase"),
+                             "blackboard_db_path": values.get("_blackboard_db_path") or str(Path(db_path).parent / "blackboard.db")},
+                "owner_complete": all(values.get(field) for field in ("actor_id", "group", "role", "workspace_id", "workspace_path"))
+                                  and isinstance(values.get("resource_scopes"), list),
+                "serializer_version": str(checkpoint.get("v", "unknown"))}
+    finally:
+        conn.close()
 
 
 def _cursor_before(cursor: str | None) -> tuple[str, str] | None:
@@ -172,10 +235,18 @@ def get_history(ctx: dict, *, thread_id: str, checkpoint_id: str | None = None,
         result.update(_summary(row, checkpoint, values))
         result["read_only"] = True
         pending = conn.execute(
-            "SELECT type,value FROM writes WHERE thread_id=? AND checkpoint_ns='' AND checkpoint_id=? AND channel='__interrupt__'",
+            "SELECT task_id,channel,type,value FROM writes WHERE thread_id=? AND checkpoint_ns='' AND checkpoint_id=? AND channel='__interrupt__'",
             (thread_id, row[1]),
         ).fetchall()
         result["pending_approval"] = bool(pending)
+        if pending:
+            # Gate payloads live in pending writes; channel_values can still
+            # contain an older Gate or none at all at the interrupt boundary.
+            from runner.human_gate import pending_gate_from_writes
+            result["gate"] = pending_gate_from_writes([
+                (task, channel, JsonPlusSerializer().loads_typed((kind, payload)))
+                for task, channel, kind, payload in pending
+            ])
         result["can_resume"] = bool(row[1] == latest[1] and _owned(values, ctx)
                                     and values.get("task_status") != "done" and not pending
                                     and all(values.get(field) == ctx.get(field) for field in ("role", "github_subject"))
@@ -200,7 +271,7 @@ def get_history(ctx: dict, *, thread_id: str, checkpoint_id: str | None = None,
         if unresolved:
             result["can_resume"] = False
             result["recovery_block_reason"] = "有工具调用尚无可读的完成回执；需先核对外部结果，不能自动恢复或重新执行。"
-        if result["can_resume"]:
+        if result["can_resume"] or pending:
             from tools.skills.loader import validate_execution_skill
             try:
                 validate_execution_skill(values)
@@ -211,7 +282,12 @@ def get_history(ctx: dict, *, thread_id: str, checkpoint_id: str | None = None,
                     else "Skill 来源当前不可用，请恢复有效版本或用当前方案新建任务。"
                 )
         from runner.stream_channel import read_from
-        result["timeline"] = read_from(thread_id, trace_cursor, limit=100)
+        if Path(db_path).resolve().parent == CHECKPOINTS_DB.resolve().parent:
+            result["timeline"] = read_from(thread_id, trace_cursor, limit=100)
+        else:
+            # A different checkpoint archive is not permission to reuse a
+            # same-named live thread's stream from the default store.
+            result["timeline_error"] = "归档检查点的独立事件流尚未登记；仅展示该检查点内保存的消息与证据。"
 
         result["messages"] = [
             {"type": getattr(message, "type", "unknown"),

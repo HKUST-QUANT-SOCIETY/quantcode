@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "remaining_disk_bytes": 1890365440,
+  "remaining_disk_gib_approx": 1.76,
+  "matrix_sha256": "c12b6f828ddb7ce8d5255f2246cf2ca52943e0f5c6d1db933ab21f476c154454",
+  "matrix_checks": 112,
+  "same_request_target_checks": 112,
+  "owner_positive_reads": 224,
+  "reader_own_positive_reads": 112,
+  "verified_logouts": 8,
+  "model_requests": 0,
+  "request_retries": 0,
+  "gateway": {
+    "MainPID": "325873",
+    "WorkingDirectory": "/opt/quantcode-qa/runtime/e2e-20260909-11",
+    "User": "quantcode-qa-gateway",
+    "ActiveState": "active"
+  },
+  "gateway_source_manifest": "a477a68f06f5b812837b58a90ee2d6c4091d2ff2b672048829f0eae778c208b0",
+  "formal_invariants": {
+    "status": "PASS",
+    "formal_roster_registry_unchanged": true,
+    "formal_gateway_pid_unchanged": true,
+    "formal_runtime_target_unchanged": true,
+    "hashes": {
+      "/home/ubuntu/quantcode-gateway-src/.opencode/authorized_groups.yaml": "c6103f264683efc3f4b94f37a29c32ae5d54d08cea30490e58350343e1569e25",
+      "/etc/quantcode/research-identities.json": "be7e747650736363f5f7032705fb685d890ff4babc1cf6702bc904839ed01d4e"
+    },
+    "gateway": {
+      "MainPID": "2778051",
+      "ActiveState": "active"
+    },
+    "runtime_target": "db7e0c6cfa075abe4633d7e63d87c52c421cbf51"
+  }
+}

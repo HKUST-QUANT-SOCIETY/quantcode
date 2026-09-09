@@ -1,0 +1,38 @@
+[
+  {
+    "file": ".opencode/groups/model/tool_allowlist.yaml",
+    "expected": "1c8af57e9e6aec74cdf60ef4d4d3ab64e7234ae9a692f3c4d3109c5d9fe3bb64",
+    "actual": "2a7a0b26c4e7dbd67fb6e4054ed332a57fdb78caf62d070f72e7ca6373a7ed4a",
+    "matched": "restore known allowlist edits 6"
+  },
+  {
+    "file": "frontend/packages/opencode/src/quantcode/legacy-provider.ts",
+    "expected": "6e3d37530837c0cf4892adfff745097f2befe0bad552f5d9f42f4947b509a31f",
+    "actual": "250c6d83b14878cf2ca45c706f38f1ee8ade86a97cbc010e95761039fca2a912",
+    "matched": "restore old splitLines invocation"
+  },
+  {
+    "file": "quantcode/identity_login.py",
+    "expected": "a0ee4f94e4c5217e213e8a45ea989e01f04706e44910941e45ef934122f8db80",
+    "actual": "6428f3ee597355d911d3da4f63d66cab784a5ac59a5cc1d31928173786c4dd55",
+    "matched": "git HEAD"
+  },
+  {
+    "file": "schemas/native_tasks.py",
+    "expected": "ca38737c746be218ad067efde94baab4ba305e1aa301abb4f840ca1087d5c7c9",
+    "actual": "9acb9dc8370ae793eed35ce8f21ce514d2f83ae81a31656bc6f863b1fd3ee032",
+    "matched": "remove optional archive marker"
+  },
+  {
+    "file": "tools/admin/_register.py",
+    "expected": "733966afb5acd319b6ad3a6acd6e189cf47d19e4575ef7ff8993b20935b00f43",
+    "actual": "c9de0f872f17075a3405d7242c2c818485a4150e86f5e7df121f230d7e1a386f",
+    "matched": "restore unused Path import"
+  },
+  {
+    "file": "tools/risk/_register.py",
+    "expected": "1c4fac3400f2c9ad7cb25f33d3fa1d33652be79d23a02e8251f15894dbfb54a5",
+    "actual": "58af3f0335a06eaddc6a0ade553b4bac17c38d5c9a59173ead462e9c7dc8bfa4",
+    "matched": "restore pre-schema contract"
+  }
+]

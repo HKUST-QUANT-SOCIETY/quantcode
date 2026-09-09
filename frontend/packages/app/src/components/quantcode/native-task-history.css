@@ -1,0 +1,27 @@
+.qc-native-history .qc-native-detail.is-current { border-left: 0; padding-left: 0; }
+.qc-native-history .qc-history-layout.has-detail { align-items: start; }
+.qc-native-history .qc-history-layout.has-detail > .qc-history-list,
+.qc-native-history .qc-history-layout.has-detail > .qc-history-detail { max-height: calc(100dvh - 220px); overflow-y: auto; }
+.qc-native-history .qc-history-layout.has-detail > .qc-history-list { position: sticky; top: 0; }
+.qc-native-history .qc-native-tabs { padding: 0; margin-top: 18px; gap: 24px; background: transparent; }
+.qc-native-message > header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; font-size: 13px; }
+.qc-native-message time { color: var(--qc-muted); font-size: 11px; flex: none; }
+.qc-native-text { margin: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; max-height: 440px; overflow-y: auto; }
+.qc-native-tool { border-top: 1px solid var(--qc-line); padding: 12px 0; }
+.qc-native-tool summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; min-height: 28px; }
+.qc-native-tool summary .qc-status { margin-left: auto; }
+.qc-native-files { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px monospace; }
+.qc-native-tree { padding-top: 18px; }
+.qc-native-tree-root { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: 13px; }
+.qc-native-child { margin-left: 18px; width: calc(100% - 18px); border-left: 2px solid var(--qc-accent); border-radius: 0 !important; }
+.qc-native-artifact { display: flex; align-items: center; gap: 12px; }
+.qc-native-artifact > div:not([data-component="icon"]) { display: grid; gap: 6px; min-width: 0; flex: 1; }
+.qc-native-artifact strong { font-size: 13px; overflow-wrap: anywhere; }
+.qc-native-artifact small { color: var(--qc-muted); font-size: 11px; }
+.qc-native-artifact-preview { margin: 6px 0 0; max-height: 180px; }
+.qc-native-usage { display: flex; gap: 16px; flex-wrap: wrap; color: var(--qc-muted); font-size: 12px; margin: 14px 0; }
+.qc-native-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 20px; border-bottom: 1px solid var(--qc-line); padding: 8px 0 20px; margin-bottom: 20px; }
+.qc-native-summary > div { display: grid; gap: 10px; min-width: 0; }
+.qc-native-summary small { color: var(--qc-muted); font-size: 12px; }
+.qc-native-summary strong { font-size: 22px; font-weight: 600; }
+.qc-native-publication { color: var(--qc-muted); font-size: 12px; line-height: 1.6; margin: 0 0 12px; }

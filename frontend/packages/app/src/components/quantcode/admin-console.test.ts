@@ -222,7 +222,7 @@ describe("AdminConsoleView", () => {
     view.querySelector<HTMLElement>(".qc-admin-open-gitgraph")!.click()
     expect(opened).toBe(true)
     for (const name of ["报告与产物", "任务管理"]) {
-      const button = Array.from(view.querySelectorAll("button")).find(item => item.textContent === name)!
+      const button = Array.from(view.querySelectorAll("button")).find(item => item.getAttribute("aria-label") === name)!
       expect(button.disabled).toBe(false)
       button.click()
     }

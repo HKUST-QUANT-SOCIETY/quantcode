@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import re
 
 from pydantic import BaseModel, ConfigDict
 
@@ -48,6 +49,7 @@ class TaskClassification(BaseModel):
 _QUERY_WORDS = ("查询", "查看", "读取", "状态", "search", "inspect", "list", "explain")
 _ADAPTER_WORDS = ("adapter", "适配", "接入组件", "contract")
 _ENGINEERING_WORDS = ("实现", "修改", "重构", "build", "fix", "code")
+_FILE_WRITE_VERBS = re.compile(r"\b(?:write|create|save)\b|创建|写入|保存")
 _COMPLEXITY_WORDS = (
     "跨文件",
     "多文件",
@@ -83,7 +85,7 @@ def classify_task(
     elif any(word in text for word in _ADAPTER_WORDS):
         business = BusinessMode.COMPONENT_ADAPTATION
         governance = Governance.PERSONAL_WORKSPACE_WRITE
-    elif any(word in text for word in _ENGINEERING_WORDS):
+    elif any(word in text for word in _ENGINEERING_WORDS) or _FILE_WRITE_VERBS.search(text):
         business = BusinessMode.ENGINEERING
         governance = Governance.PERSONAL_WORKSPACE_WRITE
     else:

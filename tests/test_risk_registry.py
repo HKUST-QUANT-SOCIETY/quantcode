@@ -81,6 +81,26 @@ def test_registry_call_risk_verdict_high_risk():
     assert gate["breached"] is True
 
 
+def test_risk_tool_schema_exposes_typed_limits_and_validates_before_execution():
+    from pydantic import ValidationError
+    from tools.risk._register import RiskVerdictArgs, WritePrCommentArgs
+    from tools.schema_utils import tool_def_to_openai_function
+
+    schema = tool_def_to_openai_function(global_registry.get("risk_verdict"))["function"]["parameters"]
+    assert schema["$defs"]["RiskThresholds"]["properties"]["max_drawdown"]["type"] == "number"
+    assert "strategy_id" in schema["$defs"]["RiskProfile"]["required"]
+    assert "RiskProfile" in WritePrCommentArgs.model_json_schema()["$defs"]
+    profile = global_registry.call("generate_risk_profile", {
+        "model_spec": {"model_name": "fixture"},
+        "risk_metrics": global_registry.call("calc_risk", {"model_spec": {"model_name": "fixture"}}),
+    })["risk_profile"]
+    with pytest.raises(ValidationError):
+        RiskVerdictArgs(risk_profile=profile, thresholds='{"max_drawdown":0.15}')
+    verdict = global_registry.call("risk_verdict", {"risk_profile": profile, "thresholds": {"max_drawdown": 0.01}})
+    assert verdict["breached"] is True
+    assert "max_drawdown" in verdict["reasons"]
+
+
 def test_mcp_call_tool_calc_risk():
     path = Path(__file__).resolve().parent / "fixtures/sample_model/model_spec.json"
     model_spec = json.loads(path.read_text(encoding="utf-8"))

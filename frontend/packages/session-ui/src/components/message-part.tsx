@@ -2544,7 +2544,18 @@ ToolRegistry.register({
     })
     return (
       <div>
-        <GenericTool tool={props.tool} status={props.status} hideDetails={props.hideDetails} input={props.input} />
+        <GenericTool
+          tool={
+            props.tool === "run_agent" &&
+            typeof document === "object" &&
+            document.documentElement?.dataset.product === "quantcode"
+              ? "QuantCode archived task"
+              : props.tool
+          }
+          status={props.status}
+          hideDetails={props.hideDetails}
+          input={props.input}
+        />
         <Show when={gate()}>
           {(value) => (
             <div

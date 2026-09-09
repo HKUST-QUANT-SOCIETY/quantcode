@@ -1,0 +1,59 @@
+{
+  "hosts": [
+    {
+      "release": "e2e-20260909-09",
+      "pid": "169287",
+      "environment_paths": {
+        "HOME": "/srv/quantcode-qa/20260909/users/sim-factor-260909",
+        "XDG_DATA_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/data",
+        "XDG_STATE_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/state",
+        "XDG_CONFIG_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/config",
+        "XDG_CACHE_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/cache",
+        "QUANTCODE_IDENTITY_SESSION_FILE": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/identity/session.json"
+      },
+      "sources": [
+        {
+          "path": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/state/quantcode/organization/task-source",
+          "source_id": "f09127ec-1a4d-411f-b332-6350ad0978fd",
+          "inode": 1333508
+        }
+      ],
+      "databases": [
+        {
+          "path": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-09/data/quantcode/opencode-quantcode.db",
+          "inode": 1333399
+        }
+      ]
+    },
+    {
+      "release": "e2e-20260909-10",
+      "pid": "217034",
+      "environment_paths": {
+        "HOME": "/srv/quantcode-qa/20260909/users/sim-factor-260909",
+        "XDG_DATA_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/data",
+        "XDG_STATE_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/state",
+        "XDG_CONFIG_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/config",
+        "XDG_CACHE_HOME": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/cache",
+        "QUANTCODE_IDENTITY_SESSION_FILE": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/identity/session.json"
+      },
+      "sources": [
+        {
+          "path": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/state/quantcode/organization/task-source",
+          "source_id": "868dfcad-d4b5-4f7a-92b1-272f072ff9f8",
+          "inode": 1334116
+        }
+      ],
+      "databases": [
+        {
+          "path": "/var/lib/quantcode-qa/native/sim-factor-260909/e2e-20260909-10/data/quantcode/opencode-quantcode.db",
+          "inode": 1333956
+        }
+      ]
+    }
+  ],
+  "factor_published_task": {
+    "source_revision": 164,
+    "status": "completed",
+    "updated_at": 1788914826176
+  }
+}

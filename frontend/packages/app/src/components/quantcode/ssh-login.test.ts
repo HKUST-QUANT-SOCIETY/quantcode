@@ -87,28 +87,25 @@ describe("SshLoginView", () => {
     view.remove()
   })
 
-  test("selects an authorized group before login and waits for real logout, including failure and retry", async () => {
+  test("binds the roster group without a selector and waits for real logout", async () => {
     let selected = ""
     let finish: ((value: { status: "disconnected" } | { status: "error"; reason: string }) => void) | undefined
     const view = SshLoginView({ t, identities: [{ ...IDENTITIES[0], group: "model", groups: ["model", "factor"] }],
       connect: async ({ group }) => {
         selected = group ?? ""
-        return { status: "connected", fingerprint: "SHA256:AbCd1234", group, groups: ["model", "factor"] }
+        return { status: "connected", fingerprint: "SHA256:AbCd1234", group: "model", groups: ["model", "factor"] }
       },
       disconnect: () => new Promise(resolve => { finish = resolve }),
     })
     document.body.append(view)
     fillForm(view)
-    const group = view.querySelector<HTMLSelectElement>("#qc-ssh-group")!
-    expect([...group.options].map(option => option.value)).toEqual(["model", "factor"])
-    group.value = "factor"
-    group.dispatchEvent(new Event("change"))
+    expect(view.querySelector("#qc-ssh-group")).toBeNull()
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
     await flush()
-    expect(selected).toBe("factor")
+    expect(selected).toBe("")
     expect(view.querySelector(".qc-connection-pill")?.textContent).toContain("已连接")
     expect(view.querySelector(".qc-ssh-fingerprint")?.textContent).toBe("SHA256:AbCd1234")
-    expect(view.querySelector("[data-session-group]")?.textContent).toBe("factor")
+    expect(view.querySelector("[data-session-group]")?.textContent).toBe("model")
     expect(view.querySelector("#qc-ssh-group")).toBeNull()
     view.querySelector<HTMLButtonElement>(".qc-button")!.click()
     expect(view.querySelector("#qc-ssh-identity")).toBeNull()

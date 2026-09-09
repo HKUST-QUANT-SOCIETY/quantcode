@@ -5,10 +5,11 @@
 
 > **项目定位 · 架构 · 功能清单 · 工程落位**
 >
-> **版本**：v5.1（2026-09-05，QuantCode v5 顶层设计同步）
+> **版本**：v5.2（2026-09-08，执行引擎内化与单循环目标架构）
 > **Owner**：Agent Group · HKUST QUANT SOCIETY
 > **上位文档**：specs/FUNCTIONAL_SPEC.md 定义功能契约，docs/PRD.md 定义产品目标，docs/UI_DESIGN_SPEC.md 定义桌面端体验。
-> **修订原则**：本版本保留原有 Agent 基础能力和工程设计，并把 OpenCode/MimoCode 的原生能力明确列为底座；只根据组长会议修正运营模式、职责边界和权限语义。不得把“领域产品不由 QuantCode 负责”误读为“QuantCode 删除 Agent 和 Compose 基础设施”。
+> **修订原则**：用户已确认 OpenCode 来源代码内化到 QuantCode，采用统一执行引擎，Python 保留组织服务与组件适配。该决策替代旧版“Python/LangGraph 必须独占核心编排”的语言边界。功能和权限不因迁移缩减；架构确认不等于代码迁移完成。详细阶段与验收见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
+> **阅读约定**：目标架构以本版本 §3、§4 和上述决策为准。本文现有代码树、历史 F/P 证据和日期早于本决策的日志仍描述 Python Runner 实现；它们不再定义新任务必须经由 `run_agent`，也不证明底座原生执行器已自动满足旧 Runner 的安全约束。
 
 > **2026-09-07 实现边界**：Session Context 是唯一的 group/role/actor 来源；Memory 只读入口使用 `search_memory`，根目录固定为 `<project>/.quantcode`；PR、实验、期权数据和 PIT fixture 经过统一路径 containment 校验，生产拒绝仓库外输入；普通桌面会话不注册 `/deploy`，也不接受私钥文本。量化组件当前采用“组员本地 checkout + Agent 预学习能力卡/README”的模式，QuantCode 不把本地 fixture 当作生产组件；组件 API 发布后再同步适配器。P-07 已有受控候选评审审计，生产运行时 strict reuse 默认开启，消费脚本支持定时模式；生产 timer 启用、真实 SSH gateway、ReturnsDataset/外部组件和生产部署队列仍属外部或后续实现，详见 `docs/IMPLEMENTATION_AUDIT.md`。
 
@@ -62,7 +63,7 @@ Idea → 任务/模式识别 → 组内能力发现 → 主线匹配 → 动态 
    ↓
 在既定组内按 idea 分派 compose / plan / build
    ↓
-通过同一个 AgentRunner 执行，输出可追踪 artifact
+通过 QuantCode 统一执行引擎执行，输出可追踪 artifact
 ```
 
 要点：
@@ -107,7 +108,7 @@ Idea → 任务/模式识别 → 组内能力发现 → 主线匹配 → 动态 
 
 ### 2.6 OpenCode/MimoCode 原生能力基线与 QuantCode 增量
 
-QuantCode 运行在 OpenCode 控制平面之上，吸收 MimoCode 已验证的工作流与记忆设计，再叠加组织和量化场景能力。设计、实现和验收必须标明能力来源，避免把上游能力误报成 QuantCode 自研，也避免因领域产品归属不同而误删底座能力。
+QuantCode 自行维护已纳入本仓库的 OpenCode 来源执行代码，吸收 MimoCode 已验证的工作流与记忆设计，将组织规则集成到同一个产品和执行链。设计、实现和验收必须标明能力来源，避免把上游能力误报成 QuantCode 自研，也避免因领域产品归属不同而误删底座能力。
 
 | 能力层 | OpenCode 原生底座 | MimoCode 原生/参考能力 | QuantCode 增量 |
 |---|---|---|---|
@@ -119,8 +120,8 @@ QuantCode 运行在 OpenCode 控制平面之上，吸收 MimoCode 已验证的�
 
 底座能力的归属规则：
 
-1. OpenCode 负责桌面壳、会话交互、模型/provider、MCP 传输和本地工作区体验；QuantCode 不在 TypeScript 侧复制另一套 Agent loop。
-2. MimoCode 的 Memory、Checkpoint、Task、Subagent、Goal/Judge、Dream/Distill 和通用 Skill 是设计参考和可复用工作流知识；QuantCode 使用自己的 Python/LangGraph 实现与数据契约，不把 MimoCode 私有运行时当作线上依赖。
+1. QuantCode 负责同仓桌面、会话、模型/provider、工具循环、MCP 与工作区；复用 OpenCode 来源的执行实现作为唯一新任务引擎，不再嵌套第二套 Python 通用 Agent loop。
+2. MimoCode 的 Memory、Checkpoint、Task、Subagent、Goal/Judge、Dream/Distill 和通用 Skill 是设计参考和可复用工作流知识；QuantCode 按功能复用服务实现、数据契约与统一执行引擎，不把 MimoCode 私有运行时当作线上依赖。
 3. QuantCode 新增组织能力：身份到组的自动绑定、组内知识共享、能力目录和最大复用纪律、跨组契约、Admin 管理视图、GitGraph/Pop、P-10 方案分级和量化组件适配。
 4. 领域组件负责数据、因子、评估、模型、风险、组合、回测、报告和生产运行的业务真相。QuantCode 只发现、编排、调用、适配和记录，不重新实现这些事实。
 
@@ -132,10 +133,10 @@ QuantCode 运行在 OpenCode 控制平面之上，吸收 MimoCode 已验证的�
 |---|---|---|
 | Session 生命周期 | 创建、继续、取消、重试、历史、标题和状态管理 | 一个用户身份对应一组可见 session；QuantCode trace 挂在原生 session 上 |
 | Prompt/Context | 文本、文件、目录、图片和结构化输入；上下文裁剪和 compaction | 注入组上下文、能力摘要、Memory 摘要和任务契约；不注入私钥或生产凭据 |
-| Agent loop | LLM 推理、工具调用、观察结果、继续或结束 | QuantCode Python AgentRunner 通过 MCP 接入，负责量化任务编排和运行时加固 |
+| Agent loop | LLM 推理、工具调用、观察结果、继续或结束 | QuantCode 同仓维护该执行循环，并接入组织身份、能力复用、P-10、Gate 和审计；Python 仅提供服务和工具 |
 | 原生工具 | `read`、`write`、`edit`、`apply_patch`、`grep`、`glob`、`shell`、`lsp`、`websearch`、`webfetch`、`todo`、`question`、`task`、`skill`、`plan`、`truncate` | 研究/开发工具作为公共工具集合的基础；具体组页面只展示当前 session 可用面 |
 | Tool Registry | 工具发现、JSON Schema 参数、工具状态、结果和错误回流 | 叠加 QuantCode Tool Catalog、量化 ToolDef 和维护员发布流程 |
-| MCP | stdio/HTTP/SSE 客户端、工具、资源、Prompt、OAuth/认证状态和变更通知 | 连接 Python 编排层、量化组件和外部服务；每次调用仍执行 session 与资源权限校验 |
+| MCP | stdio/HTTP/SSE 客户端、工具、资源、Prompt、OAuth/认证状态和变更通知 | 连接 Python 组织服务、量化组件和外部服务；每次调用仍执行 session 与资源权限校验 |
 | Permission | allow/ask/deny、权限提示、拒绝和重试 | QuantCode 只在明确的共享写入/跨组授权处接入；生产部署使用 Admin 管理面 |
 | Workspace/Project | 本地工作区、目录边界、Git 快照、分支/Worktree 和终端 | SSH 登录后绑定用户个人工作目录；不把生产服务账号目录挂入研究 workspace |
 | UI/状态流 | Desktop/TUI、消息时间线、工具状态、文件标签、终端、Diff/Review、通知 | 在原生 session UI 上增加 QuantCode Compose、Memory、能力目录、GitGraph、Pop 和 Admin 面板 |
@@ -146,11 +147,11 @@ OpenCode 原生工具仍遵守同一个工作区和 session 权限。`shell` 能
 
 #### 2.6.2 MimoCode 原生/参考 Agent 能力清单
 
-MimoCode 的价值主要体现在可移植的 Compose 工作流和 Memory 设计。QuantCode 保留其能力语义，用自己的 Python/LangGraph 实现承接：
+MimoCode 的价值主要体现在可移植的 Compose 工作流和 Memory 设计。QuantCode 保留其能力语义，按执行引擎与组织服务的职责落位；下列已有 Python 路径在迁移期提供实现参考和历史兼容：
 
 | MimoCode 能力 | 保留内容 | QuantCode 实现/边界 |
 |---|---|---|
-| Compose ReAct | `while` 式 thought → tool → observation → next thought 循环，不把流程硬编码成固定 DAG | `AgentRunner`/LangGraph；八组共用循环，组差异来自 session、Skill、Memory 和工具目录 |
+| Compose ReAct | `while` 式 thought → tool → observation → next thought 循环，不把流程硬编码成固定 DAG | 统一执行引擎；八组差异来自 session、Skill、Memory 和目录。现有 AgentRunner/LangGraph 仅作为迁移来源 |
 | 通用 Compose Skill | `brainstorm`、`plan`、`execute`、`tdd`、`review`、`debug`、`feedback`、`report`、`parallel`、`subagent`、`worktree`、`verify`、`ask`、`new-skill`、`merge` | 以 `.opencode/meta-skills/*/SKILL.md` 形式加载；QuantCode 再叠加八组 Skill 和量化契约 |
 | Memory | Markdown 文件作为事实载体，SQLite FTS5/BM25 作为检索索引，磁盘与索引 reconcile | `runner/memory`；增加 `groups` 组内隔离和 `tasks` 任务进度，具体 ACL 由 QuantCode session 决定 |
 | Context 维护 | 长上下文裁剪、摘要、最近消息保留和可继续执行 | `truncate`、`rebuild_context`、checkpoint；重建后必须重新校验当前身份和工具权限 |
@@ -176,55 +177,36 @@ MimoCode 的价值主要体现在可移植的 Compose 工作流和 Memory 设计
 
 ---
 
-## 3. 三层系统架构
+## 3. QuantCode 目标架构
 
-### 3.1 控制平面、编排平面、执行平面
+### 3.1 产品执行、组织服务与领域组件
 
-QuantCode 保留原有语言和职责边界：TypeScript 控制平面负责接入与可视化，Python 编排平面负责核心 Agent 推理和状态机，Python 执行平面负责工具和外部系统适配。
+职责边界按能力划分。TypeScript/Electron/SolidJS 提供桌面产品；同仓执行引擎统一模型、会话、工具与子任务。Python 提供组织服务、契约与适配，不再单独控制同一个任务的第二套 Agent 循环。
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│ 控制平面 Control Plane                                            │
-│ QuantCode frontend（TypeScript + Electron/SolidJS）              │
-│                                                                  │
-│ OpenCode 原生 Desktop/TUI、会话、消息流、Provider、MCP 客户端   │
-│ 本地 SSH 身份界面、自动组/角色展示、任务输入、Activity          │
-│ Compose 视图、Schema 卡片、任务树、Memory、GitGraph、Pop、Admin  │
-│ Gate 操作、通知和回放入口                                         │
-│                                                                  │
-│ 只负责接入、展示、用户交互和 MCP 调用，不承载领域计算或权限决策   │
-└────────────────────────┬─────────────────────────────────────────┘
-                         │ MCP stdio JSON-RPC / HTTP / SSE 状态流
-┌────────────────────────▼─────────────────────────────────────────┐
-│ 编排平面 Orchestration Plane                                     │
-│ QuantCode Python runner/                                         │
-│                                                                  │
-│ AgentRunner ReAct · LangGraph StateGraph · Skill loader           │
-│ 任务拆分 · 模式分派 · ToolRegistry · 方案阶段 · checkpoint/replay │
-│ MimoCode Task/Memory/Checkpoint/Subagent/Goal/Dream 设计的实现    │
-│ Memory FTS5 · Blackboard · permission · HumanGate · evidence      │
-│ 循环检测 · 迭代上限 · context truncate · RLHF/评估接入点          │
-│                                                                  │
-│ 负责 Agent 如何行动，不重新计算领域组件已经提供的业务结果         │
-└────────────────────────┬─────────────────────────────────────────┘
-                         │ ToolDef / typed adapter / external API
-┌────────────────────────▼─────────────────────────────────────────┐
-│ 执行平面 Execution Plane                                          │
-│ Python tools/ + 组织 canonical components + 外部服务              │
-│                                                                  │
-│ DataAccess · FactorEngine · QuantEvaluator · Modeling · Barra      │
-│ FactorOptimizer · FactorAssets · FactorPreprocess                 │
-│ Riskfolio-QS · VectorBT-QS · QuantPlatform · Report Platform       │
-│ GitHub · COS · Server A/B · SSH gateway · AlphaFlow adapter        │
-│ ChromaDB/PIT-RAG · 爬虫 · CI Actions · 通知服务                    │
-└──────────────────────────────────────────────────────────────────┘
+QuantCode 桌面
+  任务 · 模型设置 · 编辑器/终端 · Activity · 组织视图
+                 ↓
+QuantCode 统一执行引擎（同仓内化的执行源码）
+  session · Provider · Prompt/Context · tool loop · 子 Agent
+  任务准入/工具执行：身份 · 工作区 · P-10 · Gate · 预算
+                 ↓ MCP / 受控服务接口
+QuantCode 组织服务
+  roster · 能力目录 · Group Memory · Blackboard
+  Schema/契约 · SolutionDoc · 授权/审批 · evidence · Admin
+                 ↓
+各组 canonical components / 授权个人工作区
+  数据 · 因子 · 模型 · 风险 · 组合/回测 · 报告
+
+Admin 部署管理 → 受控生产服务（普通任务无生产 shell）
 ```
 
-三条架构铁律：
+架构约束：
 
-1. 核心推理编排只在 Python/LangGraph 编排平面；TypeScript 不复制一套 Agent loop；
-2. 控制平面与编排平面通过稳定契约解耦，可独立演进；
-3. 执行平面工具是无状态能力和适配器，不能绕过编排平面的组权限、契约检查或写操作 Gate。
+1. 新任务的模型、上下文、执行状态、取消与恢复由一个统一执行器维护；子 Agent 使用同一机制的受约束子会话。
+2. 组织服务拥有身份、资源授权与共享知识的权威事实。Skill 指导编排，但不代替服务端权限；原生文件/Shell、MCP 与子 Agent 均需接受相应检查。
+3. 领域算法由各组维护。Python 可实现组织服务、确定性契约检查和能力适配；远程调用工具不等于远程再运行第二个 Agent。
+4. 当前仍有 Python Runner 双循环实现。先迁移身份/权限/P-10/Gate、状态与恢复能力，再切换新任务入口；旧任务保留明确的只读历史与兼容恢复路径，不能静默重跑。
 
 ### 3.2 三大生产模式与幂等保险栓
 
@@ -298,14 +280,16 @@ compose  → 按组加载工作流配置，由 Agent 自主编排多个 skill/to
         ↓
 登录 session 注入 actor / group / role / workspace
         ↓
-计算 effective_tools，并绑定到 AgentRunner 与 MCP tools/list
+计算 effective_tools，并绑定到统一执行引擎的工具准入与 MCP tools/list
         ↓
 每次 tools/call 再按 session 和资源策略校验
 ```
 
 八组共用同一套研究/开发工具集合，以降低权限配置成本；出现数据、仓库或写操作权限需求时，由维护员增加 group/role/resource mask。Admin 工具和生产部署工具始终是独立管理面，不因“共用工具集合”而暴露给普通研究 Agent。
 
-### 3.4 仓库结构与职责落位
+### 3.4 当前仓库与迁移落点
+
+以下为现有 Python 目录，不是目标执行引擎的完整代码树。目标执行代码位于 `frontend/packages/core` 与 `frontend/packages/opencode`，桌面和消息视图位于 app/desktop/session-ui/ui；具体迁移须先确认实际调用路径。Python 的 agent_engine/agent_nodes/agent_mcp_tool 属于旧循环，Memory、Blackboard、schema、权限与审计实现按职责保留。
 
 ```text
 quantcode/
@@ -353,45 +337,28 @@ quantcode/
 
 ## 4. Agent 运行时设计
 
-### 4.1 AgentRunner 状态与 ReAct 图
+### 4.1 统一任务执行与状态
 
-AgentRunner 基于 LangGraph 自建 StateGraph，保留原有可中断、可重放和可加固设计。状态至少包括：
-
-- messages、task_goal、iterations、当前模式和 flow；
-- actor_id、认证 group、role、thread_id；
-- parent_task、children、task_status、solution_phase；
-- execution_trace、tool_calls、errors、artifacts、output_data；
-- risk_metrics、budget_used、checkpoint_snapshot；
-- 当前 gate_payload、human_decision 和 evidence。
-
-基本图：
+QuantCode 统一执行引擎承接任务，而不是由外层会话强制调用 Python `run_agent`。模型配置和用量来自同一 Provider 服务；普通新任务的流程为：
 
 ```text
-load session/group context
-        ↓
-llm → tool → observe → context/checkpoint routine → route → llm
-                                  ↓
-                         rlhf/evaluation logger
-                         ↓
-                   merge/permission adapter → HumanGate interrupt/resume
-                         ╲
-                          ╲ Admin 管理面发起 /deploy → 生产服务账号受控接口
+任务准入：绑定 roster actor/group/role/workspace
+ → Skill/能力摘要/Memory 上下文
+ → 模型决定下一动作
+ → 原生工具/MCP 工具准入与契约检查
+ → 工具执行和结果事件
+ → 模型继续、请求用户决定、等待精确 Gate 或结束
 ```
 
-路由处理任务状态和运行安全：
+任务标识、消息、状态、工具事件、预算、父子关系、artifact 和恢复信息以统一执行器为事实源；组织管理索引是授权投影。组织身份不来自 prompt 或历史 checkpoint，自始至终在可信边界重新校验。
 
-- 最大迭代和最大树深度；
-- 工具错误、重试和显式降级；
-- state fingerprint、重复工具调用和死循环；
-- context 占用超过阈值时 checkpoint/truncate/rebuild；
-- 预算硬上限和停止状态；
-- 共享写入的 Gate；Admin 生产部署走独立管理面和审计，不由普通 Agent 路由触发。
+迁移不能删除迭代/深度上限、循环检测、预算、上下文重建、幂等、回执核对或精确审批。先确定现有引擎哪些能力已具备，再迁入 Python Runner 中缺失的行为，不要求这些控制器继续保留在 Python。旧 LangGraph checkpoint 的读取和兼容恢复须保留执行器版本及原任务归属。
 
-风险指标、研究产出和 CI verdict 不由路由器自动升级为 HumanGate。
+风险指标、研究产出和 CI verdict 仍不得自动升级为 HumanGate。
 
 ### 4.2 Skill、模式与 ToolRegistry
 
-每个组的 SKILL.md 记录工作流知识，Agent 在运行时加载，统一 Runner 负责执行。Skill 可描述 brainstorm、plan、execute、tdd、review、debug、数据契约检查、组件适配等步骤。OpenCode/MimoCode 的通用 Skill 作为底座能力保留，QuantCode 只增加组内和量化领域的 Skill。
+每个组的 SKILL.md 记录工作流知识，Agent 在运行时加载，统一执行引擎负责执行。Skill 可描述 brainstorm、plan、execute、tdd、review、debug、数据契约检查、组件适配等步骤。OpenCode/MimoCode 的通用 Skill 作为底座能力保留，QuantCode 只增加组内和量化领域的 Skill。
 
 ToolDef 统一声明：
 
@@ -415,7 +382,7 @@ ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；�
 | 能力 | 技术设计 |
 |---|---|
 | 树状任务 | ComposeTask 表达 parent/children/status/artifacts，与 checkpoint 关联 |
-| 自动 Checkpoint | LangGraph SqliteSaver；context 占用超过策略阈值时 snapshot |
+| 自动 Checkpoint | 统一执行器持久化任务与恢复信息；现有 LangGraph SqliteSaver 只承担迁移期旧任务兼容 |
 | Context 重建 | 从 checkpoint、组内 Memory、任务进度和最近消息重组上下文 |
 | Subagent | 子图/子任务并行执行，预算隔离、组 allowlist、生命周期追踪和独立 kill |
 | Replay/Resume | 从指定 checkpoint 恢复；恢复后按当前 actor/group/role 重新授权 |
@@ -445,21 +412,13 @@ ToolRegistry 负责发现、参数校验、当前生效工具目录和 trace；�
 4. **跨组触发**：A 组完成任务后可以创建 B 组待办、写入 Blackboard、发送通知并等待 ack；只传递被授权 artifact 引用，不改变当前会话 group。
 5. **人工编排**：用户可以用 YAML 描述 pipeline、预览依赖、暂停节点、调整 Schema 和恢复任务；人工跳过只改变流程状态，不绕过权限或 Gate。
 
-### 4.6 MCP 与控制平面契约
+### 4.6 执行器与组织服务契约
 
-控制平面通过 MCP 调用 run_agent。开始和恢复是同一任务的两个阶段，组身份取自认证 session：
+新任务由桌面通过 QuantCode session API 提交，按需调用 MCP 组织工具；不再将整段任务封装成“立即调用 run_agent”的强制提示。组织工具接收所需业务参数，由可信会话绑定 actor/group/role/workspace，不能让模型自授予身份。
 
-```text
-RunAgentArgs:
-  task / session group / skill_name / max_iterations
-  thread_id / mode / decision(start|resume)
+统一事件契约需要覆盖：任务标识与父子关系、执行状态、工具调用/结果、产物、错误、方案阶段、Gate、恢复版本和 evidence 引用。Activity、Admin、方案和子任务视图直接消费事件，不能依赖解析最终自然语言回答。
 
-RunAgentResult:
-  status / thread_id / gate
-  execution_trace / output_data / artifacts / errors
-```
-
-控制平面不得根据输入框里的 group 字符串授予权限；UI 的组名只是服务端返回的会话信息。恢复请求必须携带原 thread_id 和当前权限上下文，不能利用旧 checkpoint 提升权限。
+现有 `RunAgentArgs` / `RunAgentResult` 是旧 Python 执行器协议，迁移期供旧任务兼容与回放使用。尚未验收统一执行器前，不直接删除旧 checkpoint 或中断恢复实现；新任务切换后不能用旧协议创建平行的执行事实源。
 
 ---
 
@@ -923,14 +882,13 @@ Dog Food 保留为 Agent 组的内部研发能力，而非 QuantCode 领域产�
 
 ## 14. 集成与依赖
 
-### 14.1 OpenCode 关系
+### 14.1 OpenCode 来源代码的内化
 
-- 前端来源：基于 OpenCode 上游的 QuantCode `frontend/` 工作区；
-- 控制平面负责 Desktop UI、session、MCP 接入和可视化；
-- QuantCode 业务代码位于本仓库，通过 MCP/tool/skill 接入；
-- 上游升级需锁定版本并运行 UI、MCP 和回归 smoke test。
-
-OpenCode 的实现边界以 fork 中的模块为准：`packages/opencode/src/session/` 提供 session、prompt、loop、compaction、retry 和 status；`packages/opencode/src/tool/` 提供文件、Shell、LSP、Web、Task、Skill、Plan、Todo、Question 和截断工具；`packages/opencode/src/mcp/` 提供 MCP client、tools/resources/prompts、连接状态和认证；`packages/opencode/src/permission/` 提供权限判定；`packages/opencode/src/control-plane/` 提供 workspace 路由和同步。QuantCode 只通过稳定接口接入这些底座，fork 升级时必须检查这些边界是否变化。
+- 已纳入本仓库的源码是 QuantCode 的可维护实现，QuantCode 自己修改、测试、构建和发布；OpenCode 不作为另装的产品或线上服务依赖。
+- `frontend/packages/core` 与 `frontend/packages/opencode` 中的会话、Provider、工具、MCP 和权限代码，按实际调用链确定唯一执行路径，不能同时扶持两套新任务引擎。
+- 产品界面、配置、凭据与任务状态统一为 QuantCode。旧内部包名、协议和路径可在有迁移计划的兼容期保留；不得靠全仓改名制造“内化完成”的表象。
+- 保留 `frontend/LICENSE`、上游版权和来源记录；上游改进通过人工审查和组织约束回归后引入，不能直接覆盖产品逻辑。
+- 内化验收、模块落位和分阶段退出条件见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
 
 ### 14.2 MimoCode 关系
 
@@ -953,8 +911,8 @@ MimoCode 参考代码的可执行边界仅限 `docs/mimocode-reference/memory/` 
 
 | 类别 | 选型 |
 |---|---|
-| 控制平面 | TypeScript、OpenCode fork、Electron、SolidJS、Vite、TailwindCSS；复用 OpenCode 的 Desktop/TUI、会话、Provider 和 MCP 客户端 |
-| 编排平面 | Python、LangGraph ReAct、StateGraph、自研运行时加固；承接 MimoCode 的 Task/Memory/Checkpoint/Subagent/Goal/Dream 设计 |
+| 产品与执行引擎 | TypeScript、Electron、SolidJS、Vite、TailwindCSS；同仓维护的会话、Provider、工具循环、子 Agent 和 MCP |
+| 组织服务 | Python、Pydantic、Memory/Blackboard、目录、契约、授权、审批与审计；旧 LangGraph 循环按阶段退役 |
 | 执行平面 | Python tools、canonical component adapters、MCP/HTTP clients |
 | Schema | Pydantic v2、JSON Schema |
 | 数据库 | SQLite、FTS5、checkpoint、Blackboard、去重表 |
@@ -1109,7 +1067,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六个领�
 
 ## 18. 术语表
 
-- **AgentRunner**：QuantCode Python 编排层的 LangGraph ReAct 运行时。
+- **AgentRunner**：现有 Python/LangGraph 旧执行器名；目标新任务采用 QuantCode 统一执行引擎，Python 组织服务按职责保留。
 - **Compose**：按组加载 Skill、Tool Allowlist 和 Memory 的工作流编排模式。
 - **SKILL.md**：描述一个可复用工作流或能力的 Markdown 文件。
 - **Subagent**：由 Orchestrator 创建的有界子任务执行者。
@@ -1144,7 +1102,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六个领�
 
 ### 19.2 Swimlane 责任边界
 
-每条业务 swimlane 最终都汇入 QuantCode 的 Skill invocation、Python runner、Schema validation、checkpoint/replay 和 acceptance。Owner 负责领域验收与组件契约，不因此获得其他组 Memory 或生产系统的隐含权限。
+每条业务 swimlane 最终都汇入 QuantCode 统一执行引擎的 Skill/tool 调用、组织服务的 Schema/权限检查、统一任务恢复与 evidence。Owner 负责领域验收与组件契约，不因此获得其他组 Memory 或生产系统的隐含权限。
 
 | Owner/角色 | 主要 swimlane | 负责内容 |
 |---|---|---|
@@ -1194,7 +1152,7 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六个领�
 | 2026-06-30 | Compose 是产品编排中枢 | 六组共用 ReAct + 不同配置 |
 | 2026-06-30 | 千组千流，不做千人千面 UI | 统一控制平面，组内 Skill/Memory/工具隔离 |
 | 2026-06-30 | Pattern 1 + 2 + 5 + 去重保险栓 | 以 Orchestrator、Blackboard、Gate 和幂等为底座 |
-| 2026-07-10 | 编排层定型为 Python/LangGraph | 自研 ReAct 加固、checkpoint、循环检测和算法侧接入 |
+| 2026-07-10 | 历史：编排层定型为 Python/LangGraph | 已由 2026-09-08 单执行引擎决策取代；旧实现保留迁移兼容 |
 | 2026-07-10 | model→risk 采用 Blackboard 队列 handoff | 解耦、可观测、可幂等 |
 | 2026-07-10 | 确定性 HumanGate + truncate | 保证写操作可审计，长任务可恢复 |
 | 2026-09-01 | 领域产品归各组/报告平台 | QuantCode 保留工具适配和组织编排，不删除引擎代码 |
@@ -1215,6 +1173,8 @@ tools/strategy/、tools/options/、tools/portfolio/、回测引擎和六个领�
 | 2026-09-05 | v5.1 实现核验同步 | 增加输入路径 containment 边界；同步 Session Context、只读 Memory、P-07、SSH gateway、ReturnsDataset 和生产队列状态 |
 
 ---
+
+2026-09-08：用户确认源码内化与统一执行引擎。新增任务取消第二套 Python 通用循环为目标；先迁移组织约束和恢复，再切入口。此记录是架构决策，不代表代码迁移已完成。
 
 ## 21. 实现审计
 

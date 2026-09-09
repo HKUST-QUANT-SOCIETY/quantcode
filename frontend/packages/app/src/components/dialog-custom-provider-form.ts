@@ -66,7 +66,7 @@ export function validateCustomProvider(input: ValidateArgs) {
   const nameError = !name ? input.t("provider.custom.error.name.required") : undefined
   const urlError = !baseURL
     ? input.t("provider.custom.error.baseURL.required")
-    : !/^https?:\/\//.test(baseURL)
+    : !modelConnectionURL(baseURL)
       ? input.t("provider.custom.error.baseURL.format")
       : undefined
 
@@ -148,6 +148,15 @@ export function validateCustomProvider(input: ValidateArgs) {
       },
     },
   }
+}
+
+export function modelConnectionURL(value: string) {
+  if (/\{(?:env|file):|\$\{/i.test(value)) return
+  try {
+    const url = new URL(value)
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) return
+    return url.href.endsWith("/") ? url.href : url.href + "/"
+  } catch { return }
 }
 
 let row = 0

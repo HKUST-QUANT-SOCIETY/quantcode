@@ -1,4 +1,4 @@
-import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@opencode-ai/llm"
+import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue, Usage } from "@opencode-ai/llm"
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { errorMessage } from "@/util/error"
@@ -22,7 +22,7 @@ function finishReason(value: string | undefined): FinishReason {
   return Schema.is(FinishReason)(value) ? value : "unknown"
 }
 
-function providerMetadata(value: unknown): ProviderMetadata | undefined {
+export function providerMetadata(value: unknown): ProviderMetadata | undefined {
   if (value == null) return undefined
   return Schema.is(ProviderMetadata)(value) ? value : undefined
 }
@@ -41,7 +41,7 @@ function copilotTotalNanoAiu(value: unknown) {
   return total
 }
 
-function usage(value: unknown) {
+export function usage(value: unknown): Usage | undefined {
   if (!value || typeof value !== "object") return undefined
   const item = value as {
     inputTokens?: number
@@ -49,18 +49,19 @@ function usage(value: unknown) {
     totalTokens?: number
     reasoningTokens?: number
     cachedInputTokens?: number
-    inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number }
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
     outputTokenDetails?: { reasoningTokens?: number }
   }
   const entries = Object.entries({
     inputTokens: item.inputTokens,
     outputTokens: item.outputTokens,
     totalTokens: item.totalTokens,
+    nonCachedInputTokens: item.inputTokenDetails?.noCacheTokens,
     reasoningTokens: item.outputTokenDetails?.reasoningTokens ?? item.reasoningTokens,
     cacheReadInputTokens: item.inputTokenDetails?.cacheReadTokens ?? item.cachedInputTokens,
     cacheWriteInputTokens: item.inputTokenDetails?.cacheWriteTokens,
   }).filter((entry) => entry[1] !== undefined)
-  return entries.length === 0 ? undefined : Object.fromEntries(entries)
+  return entries.length === 0 ? undefined : Usage.from(Object.fromEntries(entries))
 }
 
 function currentTextID(state: ReturnType<typeof adapterState>, id: string | undefined) {

@@ -44,6 +44,8 @@ export function userAgent(client = "cli") {
 
 export const USER_AGENT = userAgent()
 
+export const managedByQuantCode = () => InstallationChannel === "quantcode" || process.env.OPENCODE_CHANNEL === "quantcode"
+
 export function isPreview() {
   return InstallationChannel !== "latest"
 }
@@ -172,6 +174,7 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         }
       }),
       method: Effect.fn("Installation.method")(function* () {
+        if (managedByQuantCode()) return "unknown" as Method
         if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl" as Method
         if (process.execPath.includes(path.join(".local", "bin"))) return "curl" as Method
         const exec = process.execPath.toLowerCase()
@@ -206,6 +209,9 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         return "unknown" as Method
       }),
       latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
+        // The QuantCode desktop updater owns version discovery and trust.
+        // Do not query an upstream CLI feed for the embedded server.
+        if (managedByQuantCode()) return InstallationVersion
         const detectedMethod = installMethod || (yield* result.method())
 
         if (detectedMethod === "brew") {
@@ -263,6 +269,9 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         return data.tag_name.replace(/^v/, "")
       }, Effect.orDie),
       upgrade: Effect.fn("Installation.upgrade")(function* (m: Method, target: string) {
+        if (managedByQuantCode()) return yield* new UpgradeFailedError({
+          stderr: "QuantCode 通过本产品发布流程更新，请使用 QuantCode 桌面更新或组织提供的安装包。",
+        })
         let upgradeResult: { code: number; stdout: string; stderr: string } | undefined
         switch (m) {
           case "curl":

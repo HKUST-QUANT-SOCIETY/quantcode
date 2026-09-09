@@ -169,6 +169,20 @@ import type {
   PtyShellsResponses,
   PtyUpdateErrors,
   PtyUpdateResponses,
+  QuantcodeArtifactsListErrors,
+  QuantcodeArtifactsListResponses,
+  QuantcodeArtifactsReadErrors,
+  QuantcodeArtifactsReadResponses,
+  QuantCodeBudgetLockRecovery,
+  QuantcodeBudgetRecoverLockErrors,
+  QuantcodeBudgetRecoverLockResponses,
+  QuantCodeBudgetReview,
+  QuantcodeBudgetReviewErrors,
+  QuantcodeBudgetReviewResponses,
+  QuantcodeBudgetReviewStateErrors,
+  QuantcodeBudgetReviewStateResponses,
+  QuantcodeBudgetStatusErrors,
+  QuantcodeBudgetStatusResponses,
   QuantcodeCandidateReviewErrors,
   QuantcodeCandidateReviewResponses,
   QuantcodeDeploymentCancelErrors,
@@ -177,18 +191,89 @@ import type {
   QuantcodeDeploymentListResponses,
   QuantcodeDeploymentSubmitErrors,
   QuantcodeDeploymentSubmitResponses,
+  QuantcodeGithubCommitErrors,
+  QuantcodeGithubCommitResponses,
+  QuantcodeGithubConnectErrors,
+  QuantcodeGithubConnectResponses,
+  QuantCodeGitHubCredentialImport,
+  QuantcodeGithubImportCredentialErrors,
+  QuantcodeGithubImportCredentialResponses,
+  QuantcodeGithubPrepareCredentialErrors,
+  QuantcodeGithubPrepareCredentialResponses,
+  QuantcodeGithubStatusErrors,
+  QuantcodeGithubStatusResponses,
+  QuantcodeIdentityChallengeErrors,
+  QuantcodeIdentityChallengeResponses,
   QuantcodeIdentityListErrors,
   QuantcodeIdentityListResponses,
   QuantcodeIdentityLoginErrors,
   QuantcodeIdentityLoginResponses,
   QuantcodeIdentityLogoutErrors,
   QuantcodeIdentityLogoutResponses,
+  QuantcodeIdentityVerifyErrors,
+  QuantcodeIdentityVerifyResponses,
+  QuantCodeLegacyApprovalInput,
+  QuantcodeLegacyDetailErrors,
+  QuantcodeLegacyDetailResponses,
+  QuantcodeLegacyListErrors,
+  QuantcodeLegacyListResponses,
+  QuantcodeLegacyRequestApprovalErrors,
+  QuantcodeLegacyRequestApprovalResponses,
+  QuantcodeLegacyResumeErrors,
+  QuantCodeLegacyResumeInput,
+  QuantcodeLegacyResumeResponses,
+  QuantcodeNativeGateDecideErrors,
+  QuantcodeNativeGateDecideResponses,
+  QuantCodeNativeGateId,
+  QuantcodeNativeGateListErrors,
+  QuantcodeNativeGateListResponses,
+  QuantcodeNativeGateReadErrors,
+  QuantcodeNativeGateReadResponses,
+  QuantCodeNativeGateReview,
+  QuantcodeOrganizationArtifactsListErrors,
+  QuantcodeOrganizationArtifactsListResponses,
+  QuantcodeOrganizationArtifactsReadErrors,
+  QuantcodeOrganizationArtifactsReadResponses,
+  QuantcodeOrganizationTasksListErrors,
+  QuantcodeOrganizationTasksListResponses,
+  QuantcodeOrganizationTasksReadErrors,
+  QuantcodeOrganizationTasksReadResponses,
   QuantcodePopUpdateErrors,
   QuantcodePopUpdateResponses,
+  QuantcodePublicationStatusErrors,
+  QuantcodePublicationStatusResponses,
   QuantcodeReceiptReconcileErrors,
   QuantcodeReceiptReconcileResponses,
+  QuantCodeReceiptReview,
+  QuantCodeReuseReview,
+  QuantcodeReuseReviewErrors,
+  QuantcodeReuseReviewResponses,
+  QuantcodeReuseStatusErrors,
+  QuantcodeReuseStatusResponses,
+  QuantcodeSolutionProposeErrors,
+  QuantcodeSolutionProposeResponses,
+  QuantCodeSolutionReview,
+  QuantcodeSolutionReviewErrors,
+  QuantcodeSolutionReviewResponses,
+  QuantcodeSolutionStatusErrors,
+  QuantcodeSolutionStatusResponses,
+  QuantcodeTaskIndexListErrors,
+  QuantcodeTaskIndexListResponses,
+  QuantcodeTaskIndexReadErrors,
+  QuantcodeTaskIndexReadResponses,
+  QuantcodeTaskLockRecoverErrors,
+  QuantcodeTaskLockRecoverResponses,
+  QuantCodeTaskLockRecovery,
+  QuantcodeTaskLockStatusErrors,
+  QuantcodeTaskLockStatusResponses,
   QuantcodeToolReadOnlyErrors,
   QuantcodeToolReadOnlyResponses,
+  QuantcodeWorkspacesListErrors,
+  QuantcodeWorkspacesListResponses,
+  QuantcodeWriteReceiptReviewErrors,
+  QuantcodeWriteReceiptReviewResponses,
+  QuantcodeWriteReceiptStatusErrors,
+  QuantcodeWriteReceiptStatusResponses,
   QuestionAnswer,
   QuestionListErrors,
   QuestionListResponses,
@@ -1974,6 +2059,1314 @@ export class Receipt extends HeyApiClient {
   }
 }
 
+export class Solution extends HeyApiClient {
+  /**
+   * Read the authenticated native task's current solution
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeSolutionStatusResponses,
+      QuantcodeSolutionStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/solution",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Save a draft solution without granting execution permission
+   */
+  public propose<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      goal?: string
+      acceptance_criteria?: Array<string>
+      file_impact?: Array<string>
+      expected_hash?: string
+      expected_version?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "goal" },
+            { in: "body", key: "acceptance_criteria" },
+            { in: "body", key: "file_impact" },
+            { in: "body", key: "expected_hash" },
+            { in: "body", key: "expected_version" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeSolutionProposeResponses,
+      QuantcodeSolutionProposeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/solution",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * User confirmation of the exact solution version; not a model tool
+   */
+  public review<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeSolutionReview?: QuantCodeSolutionReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeSolutionReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeSolutionReviewResponses,
+      QuantcodeSolutionReviewErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/solution/review",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Reuse extends HeyApiClient {
+  /**
+   * Read task-bound capability inspection and coverage decisions
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeReuseStatusResponses,
+      QuantcodeReuseStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/reuse",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Record the user's decision on one exact capability gap proposal
+   */
+  public review<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeReuseReview?: QuantCodeReuseReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeReuseReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeReuseReviewResponses,
+      QuantcodeReuseReviewErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/reuse/review",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class WriteReceipt extends HeyApiClient {
+  /**
+   * Read unresolved native task write receipts
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeWriteReceiptStatusResponses,
+      QuantcodeWriteReceiptStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/write-receipts",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Record verified external outcome without executing or retrying a tool
+   */
+  public review<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeReceiptReview?: QuantCodeReceiptReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeReceiptReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeWriteReceiptReviewResponses,
+      QuantcodeWriteReceiptReviewErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/write-receipts/review",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class TaskLock extends HeyApiClient {
+  /**
+   * Inspect current native task execution lock
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeTaskLockStatusResponses,
+      QuantcodeTaskLockStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/execution-lock",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Recover an exact dead local executor lock after process-stop attestation
+   */
+  public recover<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeTaskLockRecovery?: QuantCodeTaskLockRecovery
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeTaskLockRecovery", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeTaskLockRecoverResponses,
+      QuantcodeTaskLockRecoverErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/execution-lock/recover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Budget extends HeyApiClient {
+  /**
+   * Read confirmed and reserved usage for the native task tree
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeBudgetStatusResponses,
+      QuantcodeBudgetStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/budget",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read unconfirmed provider usage and accounting lock state
+   */
+  public reviewState<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeBudgetReviewStateResponses,
+      QuantcodeBudgetReviewStateErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/budget/review",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Record evidence-backed usage without repeating a provider request
+   */
+  public review<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeBudgetReview?: QuantCodeBudgetReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeBudgetReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeBudgetReviewResponses,
+      QuantcodeBudgetReviewErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/budget/review",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Recover a dead accounting lock while retaining all usage and reservations
+   */
+  public recoverLock<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      quantCodeBudgetLockRecovery?: QuantCodeBudgetLockRecovery
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeBudgetLockRecovery", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeBudgetRecoverLockResponses,
+      QuantcodeBudgetRecoverLockErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/budget/lock/recover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Publication extends HeyApiClient {
+  /**
+   * Read current member's organization delivery status
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodePublicationStatusResponses,
+      QuantcodePublicationStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/task-publication",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class TaskIndex extends HeyApiClient {
+  /**
+   * List authorized native QuantCode tasks
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      limit?: string
+      cursor?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeTaskIndexListResponses,
+      QuantcodeTaskIndexListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/tasks",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read one authorized native task and its artifact references
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeTaskIndexReadResponses,
+      QuantcodeTaskIndexReadErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/task-index",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class OrganizationTasks extends HeyApiClient {
+  /**
+   * Read the gateway's authorized cross-member task projection
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      limit?: string
+      cursor?: string
+      source_id?: string
+      root_session_id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+            { in: "query", key: "source_id" },
+            { in: "query", key: "root_session_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeOrganizationTasksListResponses,
+      QuantcodeOrganizationTasksListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/organization-tasks",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read one organization task and authorized artifact previews without executing on its host
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters: {
+      source_id: string
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "source_id" },
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeOrganizationTasksReadResponses,
+      QuantcodeOrganizationTasksReadErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Artifacts extends HeyApiClient {
+  /**
+   * List artifact references from an exact native task revision
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      source_revision: string
+      limit?: string
+      cursor?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "source_revision" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeArtifactsListResponses,
+      QuantcodeArtifactsListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/artifacts",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read one verified chunk of a captured task artifact
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      artifact_id: string
+      directory?: string
+      workspace?: string
+      source_revision: string
+      offset?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "artifact_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "source_revision" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeArtifactsReadResponses,
+      QuantcodeArtifactsReadErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/session/{sessionID}/artifacts/{artifact_id}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class OrganizationArtifacts extends HeyApiClient {
+  /**
+   * List authorized organization artifact references
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      source_id: string
+      sessionID: string
+      directory?: string
+      workspace?: string
+      source_revision: string
+      limit?: string
+      cursor?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "source_id" },
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "source_revision" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeOrganizationArtifactsListResponses,
+      QuantcodeOrganizationArtifactsListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}/artifacts",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read a verified organization artifact chunk under current authorization
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters: {
+      source_id: string
+      sessionID: string
+      artifact_id: string
+      directory?: string
+      workspace?: string
+      source_revision: string
+      offset?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "source_id" },
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "artifact_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "source_revision" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeOrganizationArtifactsReadResponses,
+      QuantcodeOrganizationArtifactsReadErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/organization-tasks/{source_id}/{sessionID}/artifacts/{artifact_id}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Legacy extends HeyApiClient {
+  /**
+   * Read retained Python checkpoint history without starting execution
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      limit?: string
+      cursor?: string
+      organization?: "true" | "false"
+      reports_only?: "true" | "false"
+      group_filter?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+            { in: "query", key: "organization" },
+            { in: "query", key: "reports_only" },
+            { in: "query", key: "group_filter" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<QuantcodeLegacyListResponses, QuantcodeLegacyListErrors, ThrowOnError>({
+      url: "/experimental/quantcode/legacy/tasks",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Inspect exact legacy checkpoint ownership and executor provenance
+   */
+  public detail<ThrowOnError extends boolean = false>(
+    parameters: {
+      thread_id: string
+      directory?: string
+      workspace?: string
+      checkpoint_id?: string
+      trace_cursor?: string
+      organization?: "true" | "false"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "thread_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "checkpoint_id" },
+            { in: "query", key: "trace_cursor" },
+            { in: "query", key: "organization" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeLegacyDetailResponses,
+      QuantcodeLegacyDetailErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/legacy/tasks/{thread_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Resume an exact archived checkpoint through the controlled host Provider
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      quantCodeLegacyResumeInput?: QuantCodeLegacyResumeInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeLegacyResumeInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeLegacyResumeResponses,
+      QuantcodeLegacyResumeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/legacy/resume",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Submit the owner's exact archived operation to the existing organization approval queue
+   */
+  public requestApproval<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      quantCodeLegacyApprovalInput?: QuantCodeLegacyApprovalInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeLegacyApprovalInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeLegacyRequestApprovalResponses,
+      QuantcodeLegacyRequestApprovalErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/legacy/request-approval",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class NativeGate extends HeyApiClient {
+  /**
+   * List authorized cross-member organization approvals
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      cursor?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "cursor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeNativeGateListResponses,
+      QuantcodeNativeGateListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/native-gates",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read an authorized exact approval or the current reviewer's own recorded decision
+   */
+  public read<ThrowOnError extends boolean = false>(
+    parameters: {
+      gateID: QuantCodeNativeGateId
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "gateID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeNativeGateReadResponses,
+      QuantcodeNativeGateReadErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/native-gates/{gateID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Decide one exact organization request as its authorized reviewer
+   */
+  public decide<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      quantCodeNativeGateReview?: QuantCodeNativeGateReview
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeNativeGateReview", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeNativeGateDecideResponses,
+      QuantcodeNativeGateDecideErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/native-gates/decide",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Github extends HeyApiClient {
+  /**
+   * Read authorized commit metadata and file patches
+   */
+  public commit<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      repo: string
+      sha: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "repo" },
+            { in: "query", key: "sha" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeGithubCommitResponses,
+      QuantcodeGithubCommitErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/github/commit",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read GitHub connection status for the authenticated host identity
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeGithubStatusResponses,
+      QuantcodeGithubStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/github",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Connect GitHub using local credentials or browser authorization
+   */
+  public connect<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      mode?: "local" | "browser" | "cancel"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "mode" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeGithubConnectResponses,
+      QuantcodeGithubConnectErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/github",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Prepare an exact owner-bound desktop GitHub credential connection
+   */
+  public prepareCredential<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeGithubPrepareCredentialResponses,
+      QuantcodeGithubPrepareCredentialErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/github/credential/prepare",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Accept a desktop main-process credential for the prepared owner
+   */
+  public importCredential<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      quantCodeGitHubCredentialImport?: QuantCodeGitHubCredentialImport
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "quantCodeGitHubCredentialImport", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeGithubImportCredentialResponses,
+      QuantcodeGithubImportCredentialErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/github/credential/import",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Identity extends HeyApiClient {
   /**
    * Read the host-configured public SSH identity
@@ -2008,13 +3401,13 @@ export class Identity extends HeyApiClient {
   }
 
   /**
-   * Sign a gateway challenge with the host SSH agent
+   * Prepare a roster-bound challenge for desktop SSH signing
    */
-  public login<ThrowOnError extends boolean = false>(
+  public challenge<ThrowOnError extends boolean = false>(
     parameters?: {
       directory?: string
       workspace?: string
-      group?: "factor" | "model" | "risk" | "strategy" | "options" | "fundamental" | "infra" | "agent"
+      identity_id?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2025,6 +3418,88 @@ export class Identity extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "body", key: "identity_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeIdentityChallengeResponses,
+      QuantcodeIdentityChallengeErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/identity/challenge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Verify a desktop signature and retain the member credential on the trusted host
+   */
+  public verify<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      challenge_id?: string
+      signature?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "challenge_id" },
+            { in: "body", key: "signature" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      QuantcodeIdentityVerifyResponses,
+      QuantcodeIdentityVerifyErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/identity/verify",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Sign a gateway challenge with the host SSH agent
+   */
+  public login<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      identity_id?: string
+      group?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "identity_id" },
             { in: "body", key: "group" },
           ],
         },
@@ -2053,9 +3528,6 @@ export class Identity extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
-      body?: {
-        [key: string]: unknown
-      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2066,7 +3538,6 @@ export class Identity extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
-            { key: "body", map: "body" },
           ],
         },
       ],
@@ -2079,11 +3550,44 @@ export class Identity extends HeyApiClient {
       url: "/experimental/quantcode/identity/logout",
       ...options,
       ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
+    })
+  }
+}
+
+export class Workspaces extends HeyApiClient {
+  /**
+   * Discover the current member's authorized directories on this research host
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      preferred?: string
+      expected_session_id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "preferred" },
+            { in: "query", key: "expected_session_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      QuantcodeWorkspacesListResponses,
+      QuantcodeWorkspacesListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/quantcode/workspaces",
+      ...options,
+      ...params,
     })
   }
 }
@@ -2114,9 +3618,79 @@ export class Quantcode extends HeyApiClient {
     return (this._receipt ??= new Receipt({ client: this.client }))
   }
 
+  private _solution?: Solution
+  get solution(): Solution {
+    return (this._solution ??= new Solution({ client: this.client }))
+  }
+
+  private _reuse?: Reuse
+  get reuse(): Reuse {
+    return (this._reuse ??= new Reuse({ client: this.client }))
+  }
+
+  private _writeReceipt?: WriteReceipt
+  get writeReceipt(): WriteReceipt {
+    return (this._writeReceipt ??= new WriteReceipt({ client: this.client }))
+  }
+
+  private _taskLock?: TaskLock
+  get taskLock(): TaskLock {
+    return (this._taskLock ??= new TaskLock({ client: this.client }))
+  }
+
+  private _budget?: Budget
+  get budget(): Budget {
+    return (this._budget ??= new Budget({ client: this.client }))
+  }
+
+  private _publication?: Publication
+  get publication(): Publication {
+    return (this._publication ??= new Publication({ client: this.client }))
+  }
+
+  private _taskIndex?: TaskIndex
+  get taskIndex(): TaskIndex {
+    return (this._taskIndex ??= new TaskIndex({ client: this.client }))
+  }
+
+  private _organizationTasks?: OrganizationTasks
+  get organizationTasks(): OrganizationTasks {
+    return (this._organizationTasks ??= new OrganizationTasks({ client: this.client }))
+  }
+
+  private _artifacts?: Artifacts
+  get artifacts(): Artifacts {
+    return (this._artifacts ??= new Artifacts({ client: this.client }))
+  }
+
+  private _organizationArtifacts?: OrganizationArtifacts
+  get organizationArtifacts(): OrganizationArtifacts {
+    return (this._organizationArtifacts ??= new OrganizationArtifacts({ client: this.client }))
+  }
+
+  private _legacy?: Legacy
+  get legacy(): Legacy {
+    return (this._legacy ??= new Legacy({ client: this.client }))
+  }
+
+  private _nativeGate?: NativeGate
+  get nativeGate(): NativeGate {
+    return (this._nativeGate ??= new NativeGate({ client: this.client }))
+  }
+
+  private _github?: Github
+  get github(): Github {
+    return (this._github ??= new Github({ client: this.client }))
+  }
+
   private _identity?: Identity
   get identity(): Identity {
     return (this._identity ??= new Identity({ client: this.client }))
+  }
+
+  private _workspaces?: Workspaces
+  get workspaces(): Workspaces {
+    return (this._workspaces ??= new Workspaces({ client: this.client }))
   }
 }
 
@@ -2664,6 +4238,9 @@ export class Vcs extends HeyApiClient {
       directory?: string
       workspace?: string
       patch?: string
+      sessionID?: string
+      messageID?: string
+      callID?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2675,6 +4252,9 @@ export class Vcs extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "patch" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "callID" },
           ],
         },
       ],
@@ -3666,6 +5246,7 @@ export class Permission extends HeyApiClient {
       workspace?: string
       reply?: "once" | "always" | "reject"
       message?: string
+      expected_digest?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3679,6 +5260,7 @@ export class Permission extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "reply" },
             { in: "body", key: "message" },
+            { in: "body", key: "expected_digest" },
           ],
         },
       ],

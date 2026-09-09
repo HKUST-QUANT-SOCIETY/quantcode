@@ -2,6 +2,9 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppProcess } from "@opencode-ai/core/process"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeGitAccess } from "@/quantcode/git-access"
 
 const cfg = [
   "--no-optional-locks",
@@ -70,6 +73,7 @@ export interface Options {
   readonly env?: Record<string, string>
   readonly maxOutputBytes?: number
   readonly stdin?: ChildProcess.CommandInput
+  readonly signal?: AbortSignal
 }
 
 export interface Interface {
@@ -109,6 +113,22 @@ const layer = Layer.effect(
 
     const run = Effect.fn("Git.run")(
       function* (args: string[], opts: Options) {
+        if (QuantCodeIdentity.enabled()) {
+          opts.signal?.throwIfAborted()
+          if (opts.env || opts.stdin && opts.stdin !== "ignore") throw new QuantCodeWorkspace.WorkspaceDenied("只读 Git 查询不能覆盖执行环境或标准输入。")
+          return yield* Effect.scoped(Effect.gen(function* () {
+            const { grant, sandbox } = yield* Effect.acquireRelease(Effect.promise(() => QuantCodeGitAccess.prepareRead(opts.cwd, args)),
+              ({ sandbox }) => Effect.promise(() => sandbox.dispose()))
+            const result = yield* appProcess.run(ChildProcess.make(sandbox.command, sandbox.args, {
+              cwd: sandbox.cwd, env: sandbox.env, extendEnv: false, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+              forceKillAfter: "3 seconds",
+            }), { signal: opts.signal, timeout: "30 seconds", maxOutputBytes: opts.maxOutputBytes ?? 10_000_000, maxErrorBytes: 16384 })
+            yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
+            const stdout = QuantCodeGitAccess.publicOutput(args, result.stdout)
+            return { exitCode: result.exitCode, text: () => stdout.toString("utf8"), stdout,
+              stderr: result.stderr, truncated: result.stdoutTruncated || result.stderrTruncated } satisfies Result
+          }))
+        }
         const result = yield* appProcess.run(
           ChildProcess.make("git", [...cfg, ...args], {
             cwd: opts.cwd,
@@ -118,7 +138,7 @@ const layer = Layer.effect(
             stdout: "pipe",
             stderr: "pipe",
           }),
-          { maxOutputBytes: opts.maxOutputBytes },
+          { maxOutputBytes: opts.maxOutputBytes, signal: opts.signal },
         )
         return {
           exitCode: result.exitCode,
@@ -320,6 +340,7 @@ const layer = Layer.effect(
     })
 
     const applyPatch = Effect.fn("Git.applyPatch")(function* (cwd: string, patch: string) {
+      if (QuantCodeIdentity.enabled()) throw new QuantCodeWorkspace.WorkspaceDenied("补丁写入必须通过绑定原生任务的 VCS 入口。")
       return yield* run(["apply", "-"], { cwd, stdin: stdin(patch) })
     })
 

@@ -23,6 +23,8 @@ import { requireServerKey } from "@/utils/session-route"
 import { isQuantCode } from "@/brand"
 import { buildComposePrefix } from "@/components/quantcode/instructions"
 import { createSessionOwnership } from "./session-ownership"
+import { createEffect, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -55,6 +57,19 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const navigate = useNavigate()
   const { params, sessionKey, tabs, view } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
+  const [runtime, setRuntime] = createStore({ ready: !isQuantCode, unified: false })
+  createEffect(() => {
+    if (!isQuantCode) return
+    const client = sdk().client
+    let cancelled = false
+    setRuntime({ ready: false, unified: false })
+    void client.experimental.capabilities.get().then(response => {
+      if (!cancelled && !response.error && typeof response.data?.quantcodeUnifiedRuntime === "boolean") {
+        setRuntime({ ready: true, unified: response.data.quantcodeUnifiedRuntime })
+      }
+    }).catch(() => {})
+    onCleanup(() => { cancelled = true })
+  })
   const openDialog = async <T,>(load: () => Promise<T>, show: (value: T) => void) => {
     const owner = sessionOwnership.capture()
     const value = await load()
@@ -559,22 +574,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  // QuantCode: /compose 命令 — 强制 LLM 调 run_agent MCP tool
+  // Native Compose uses the current session; legacy hosts retain their adapter.
   const composeCmds = () =>
     isQuantCode
       ? [
           sessionCommand({
             id: "quantcode.compose",
-            title: "QuantCode Compose",
-            description: "触发 QuantCode Compose 流（强制调 run_agent MCP tool）",
+            title: "研究任务（Compose）",
+            description: language.t("quantcode.native.compose.description"),
             slash: "compose",
+            disabled: !runtime.ready,
             onSelect: () => {
-              // Force the LLM to call run_agent; the server derives group from Session Context.
-              // No conversational preamble — the entire payload is an imperative instruction
-              // that the LLM must treat as the highest-priority action.
-              // ★ FIXED: MCP tool names use single underscore (quantcode_run_agent), not double (mcp__quantcode__run_agent).
-              //   McpCatalog.toolName() → sanitize(clientName) + "_" + sanitize(name) → "quantcode" + "_" + "run_agent"
-              const prefix = buildComposePrefix()
+              const prefix = buildComposePrefix(runtime.unified)
               prompt.set([{ type: "text" as const, content: prefix, start: 0, end: prefix.length }], prefix.length)
               actions.focusInput()
             },
@@ -582,15 +593,16 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
         ]
       : []
 
-  // QuantCode: /goal 命令 — 预填目标模板，judge 由 run_agent 完成后的 Judge 步骤在对话链路里执行
+  // Goal and Solution capture user intent; execution and reviews stay task-owned.
   const goalCmds = () => [
     sessionCommand({
       id: "quantcode.goal",
-      title: language.t("quantcode.goal.title"),
-      description: language.t("quantcode.goal.description"),
+      title: language.t(runtime.unified ? "quantcode.native.goal.title" : "quantcode.goal.title"),
+      description: language.t(runtime.unified ? "quantcode.native.goal.description" : "quantcode.goal.description"),
       slash: "goal",
+      disabled: !runtime.ready,
       onSelect: () => {
-        const template = language.t("quantcode.goal.template")
+        const template = language.t(runtime.unified ? "quantcode.native.goal.template" : "quantcode.goal.template")
         // 光标落在占位符处，用户直接填写可验证完成标准
         prompt.set([{ type: "text" as const, content: template, start: 0, end: template.length }], template.indexOf("<"))
         actions.focusInput()
@@ -598,15 +610,15 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  // QuantCode: /solution 命令 — P-10 方案先行激活指令（agent 调 draft_solution；冻结前代码工具不可用）
   const solutionCmds = () => [
     sessionCommand({
       id: "quantcode.solution",
-      title: language.t("quantcode.cmd.solution.title"),
-      description: language.t("quantcode.cmd.solution.description"),
+      title: language.t(runtime.unified ? "quantcode.native.solution.title" : "quantcode.cmd.solution.title"),
+      description: language.t(runtime.unified ? "quantcode.native.solution.description" : "quantcode.cmd.solution.description"),
       slash: "solution",
+      disabled: !runtime.ready,
       onSelect: () => {
-        const template = language.t("quantcode.cmd.solution.template")
+        const template = language.t(runtime.unified ? "quantcode.native.solution.template" : "quantcode.cmd.solution.template")
         prompt.set([{ type: "text" as const, content: template, start: 0, end: template.length }], template.indexOf("<"))
         actions.focusInput()
       },

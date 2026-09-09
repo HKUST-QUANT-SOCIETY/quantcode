@@ -260,6 +260,9 @@ export async function installWslDistro(name: string, opts?: RunWslOptions) {
 }
 
 export async function installWslOpencode(version: string, distro: string, opts?: RunWslOptions) {
+  if (process.env.OPENCODE_CHANNEL === "quantcode" || import.meta.env?.OPENCODE_CHANNEL === "quantcode") {
+    throw new Error("QuantCode 不安装另一套 OpenCode。请连接组织配置的 QuantCode 研究宿主。")
+  }
   return runInteractiveCommand(
     resolveSystem32Command("wsl.exe"),
     wslArgs(

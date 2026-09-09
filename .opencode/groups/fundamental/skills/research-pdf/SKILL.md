@@ -19,7 +19,7 @@ pattern: Pattern 1 (Orchestrator-Worker)
 ## 工作流程
 
 1. 调用 `pit-rag` skill 拉取相关研报、财报、公告
-2. 调用 LLM 生成各章节结构化内容（markdown / JSON）：
+2. 由当前原生任务模型根据引用资料生成各章节结构化内容（markdown / JSON），共用宿主 Provider：
    - 公司概览
    - 业务分析
    - 财务分析
@@ -45,7 +45,7 @@ pattern: Pattern 1 (Orchestrator-Worker)
 - PDF 渲染成功（exit code 0）
 - 所有章节非空
 - 至少 10 条引用
-- **人工验收（半程序化）**：研究员愿意发出去 = 通过（走 HumanGate）
+- **内容验收**：研究员在任务内审阅报告；发布或共享写入另外走精确 merge 审批，不能把内容认可当作广泛发布授权
 
 ## 模板
 

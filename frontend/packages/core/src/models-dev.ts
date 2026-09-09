@@ -123,6 +123,11 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Mo
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    // QuantCode uses only the host's custom URL/API-key provider definitions.
+    // Ignore upstream cache/env catalogs and never start its refresh worker.
+    if (InstallationChannel === "quantcode" || process.env.OPENCODE_CHANNEL === "quantcode") {
+      return Service.of({ get: () => Effect.succeed({}), refresh: () => Effect.void })
+    }
     const fs = yield* FSUtil.Service
     const events = yield* EventV2.Service
     const http = HttpClient.filterStatusOk(

@@ -34,7 +34,7 @@ export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsAp
     name: Schema.Literal("VcsApplyError"),
     data: Schema.Struct({
       message: Schema.String,
-      reason: Schema.Literals(["non-git", "not-clean"]),
+      reason: Schema.Literals(["non-git", "not-clean", "denied"]),
     }),
   },
   { httpApiStatus: 400 },

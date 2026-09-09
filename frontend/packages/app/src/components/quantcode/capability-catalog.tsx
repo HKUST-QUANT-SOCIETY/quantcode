@@ -1,7 +1,7 @@
 /**
  * F-04/P-07 能力目录视图：组织已登记能力卡片列表。
  *
- * 数据源：生产面板优先消费 OpenCode 受限 read-only surface 的 fetcher；
+ * 数据源：生产面板优先消费执行服务的受限 read-only surface；
  * 当前 run 的 list_capabilities trace 作为回放/离线降级通道。
  *
  * 游客组被 Mask 的卡片后端已过滤，UI 无感知。

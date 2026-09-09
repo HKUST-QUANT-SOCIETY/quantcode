@@ -32,6 +32,7 @@ import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { isQuantCode } from "@/brand"
+import { QuantCodeTaskReview } from "@/components/quantcode/task-review"
 import { updateQuantCodeTrace } from "@/components/quantcode/panels"
 import { parseRunAgentOutput } from "@/components/quantcode/result-contract"
 import { useComments } from "@/context/comments"
@@ -249,6 +250,11 @@ export default function Page() {
   }
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
+  const quantcodeSession = createMemo(() => {
+    const binding = info()?.metadata?.quantcode
+    return isQuantCode && binding !== null && typeof binding === "object" && "engine" in binding &&
+      binding.engine === "quantcode" && "version" in binding && binding.version === 1
+  })
   const isChildSession = createMemo(() => !!info()?.parentID)
   const diffs = createMemo(() => (params.id ? list(sync().data.session_diff[params.id]) : []))
   const canReview = createMemo(() => !!sync().project)
@@ -1283,11 +1289,15 @@ export default function Page() {
     })
   }
 
-  // QuantCode: run_agent tool result listener — feeds execution_trace into the QuantCode panel.
-  // Reads from sync().data.part to detect completed run_agent tool calls without modifying execution flow.
+  // QuantCode compatibility listener: archived task results can still populate
+  // the legacy panel. Native tasks are already projected by the task index.
   const qcSeen = new Set<string>()
   createEffect(() => {
     if (!isQuantCode) return
+    // Native QuantCode sessions are rendered from Session/Part/Event data.
+    // The legacy trace bridge remains only for unbound historical sessions.
+    const binding = params.id ? sync().session.get(params.id)?.metadata?.quantcode : undefined
+    if (binding && typeof binding === "object" && "engine" in binding && binding.engine === "quantcode") return
     try {
       const parts = sync().data.part
       for (const partList of Object.values(parts)) {
@@ -1736,6 +1746,9 @@ export default function Page() {
     <div class="relative size-full overflow-hidden flex flex-col">
       {sessionSync() ?? ""}
       <SessionHeader />
+      <Show when={params.id && quantcodeSession()}>
+        <QuantCodeTaskReview sessionID={params.id!} />
+      </Show>
       <div
         class="flex-1 min-h-0 flex flex-col md:flex-row"
         classList={{
@@ -1854,6 +1867,7 @@ export default function Page() {
         </div>
 
         <SessionSidePanel
+          nativeSessionID={quantcodeSession() ? params.id : undefined}
           canReview={canReview}
           diffs={reviewDiffs}
           diffsReady={reviewReady}

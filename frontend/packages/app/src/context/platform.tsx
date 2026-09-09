@@ -5,6 +5,8 @@ import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
+import type { DesktopGitHub } from "../github"
+import type { QuantCodeDesktopIdentity } from "../identity"
 
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
@@ -66,6 +68,10 @@ type PlatformBase = {
 
   /** Application-global desktop updater */
   updater?: UpdaterPlatform
+
+  /** Electron-owned local GitHub credentials and browser authentication. */
+  github?: DesktopGitHub
+  identity?: QuantCodeDesktopIdentity
 
   /** Fetch override */
   fetch?: typeof fetch

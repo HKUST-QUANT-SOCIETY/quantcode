@@ -1,5 +1,8 @@
 # QuantCode 桌面端设计规格（UI_DESIGN_SPEC）
 
+> **2026-09-08 源码内化决策**：目标为 QuantCode 一体化桌面与统一任务执行，界面不要求用户理解 OpenCode/Compose Runner 两套模型、状态和配置。现有执行入口仍在迁移；此目标不覆盖历史实现证据。组织规则须进入实际执行边界，见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。
+
+
 > **2026-09-05 分组增补（用户确认）**：新增 `infra`、`agent`，共八组；RL 工程落地归 `factor`。一个 Session 仍绑定一个组。普通 GitGraph/仓库与依赖更新采用“当前组对应 GitHub team ∩ 当前 subject 的实际 membership/token 权限”；组名不授予仓库访问，Admin 保留组织视角。团队映射和实读记录见 [八组与 GitHub 核验](audit/EIGHT_GROUPS_GITHUB_2026-09-05.md)。旧文中的六条领域 Compose 流不扩充为虚构的工程业务流。
 
 
@@ -85,6 +88,10 @@ UI 只消费服务端 session、工具目录、结构化 artifact 和外部平�
 | GitGraph | 普通组员/Admin | GitHub API/组织 Git 服务 | 权限范围不同 |
 | 通知中心/Pop | 全部登录用户 | Gate、repo/package 变更 | 遵守同一 ACL |
 | 设置/连接 | 全部登录用户 | 本地 SSH/provider 状态 | 私钥不出本机；组由 roster 返回 |
+
+2026-09-08 设置适配：QuantCode 侧栏与设置快捷键进入同一个工作区设置页，按「账号与连接 / 模型供应商 / 桌面偏好」分类。QuantCode 的配置、凭据与用户状态使用独立目录，不继承 OpenCode 的个人供应商和环境自动连接列表；模型接入仅接受 URL + API Key。普通研究设置不承载通用底座的自动授权、任意服务器管理或实验布局开关。供应商页复用已有接口管理和凭据存储，支持新增、编辑与获取模型列表；当前代码仍只配置桌面对话，Python Compose 模型未联动，不能表述为研究执行已接通；已确认目标是取消第二套新任务循环，让模型设置统一作用于 QuantCode 执行引擎，而非永久要求用户配置两份模型。
+
+算法目录归入「能力目录」，按条目展示 ID 和可展开说明，读取失败与空目录分别显示。单组成员由 roster 绑定组；多组成员也不自行选组，桌面登录使用 roster 主组，登录后组不可编辑。身份刷新时清除旧组上下文。
 
 ### 3.1 面板与数据契约
 
@@ -265,7 +272,7 @@ QuantCode 不在 UI 重复实现这些平台的业务页面。`/deploy` 只在 A
 
 | 组件 | 文件 | 责任 |
 |---|---|---|
-| 品牌壳、导航和任务入口 | `panels.tsx` | OpenCode session 接入、当前组/角色/连接状态和任务提交 |
+| 桌面导航和统一任务入口 | `panels.tsx` | OpenCode session 接入、当前组/角色/连接状态和任务提交 |
 | Activity、指标和 artifact | `panels.tsx`、`metric-cards.tsx`、`factor-screen.tsx` | trace 时间线、评估结果、来源和错误 |
 | PIT 与外部平台入口 | `pit-screen.tsx` | 时点约束、artifact 和报告平台跳转 |
 | SSH 登录和供应商 | `ssh-login.tsx`、`settings-supplier.tsx` | 本地公钥证明、roster 结果和 Provider 状态 |
@@ -303,3 +310,15 @@ UI 测试必须覆盖 analyst、approver 和 admin 三类 session，并用服务
 | 2026-09-03 | v2：按业务组登录、组内 Memory、Admin 全权限、GitHub 权限边界、本地 SSH 身份、生产隔离、完整 GitGraph/Pop 和按复杂度方案先行 |
 | 2026-09-03 | v3：补齐 OpenCode/MimoCode 底座映射、面板契约、组件落位、本地化和 U1~U9 验收；Admin 部署与普通 Agent Gate 分离 |
 | 2026-09-05 | v4.1：同步 Session Context 唯一身份来源、只读 Memory/能力 API、artifact 路径 containment、移除普通会话 `/deploy` 与自由切组；明确 SSH bridge、P-07 晋升和外部生产依赖状态 |
+
+2026-09-08 GitHub 连接增补：GitGraph 同时提供 GitHub 官方网页授权（device flow）和本机凭据读取入口，两者均核对 roster subject。模型连接表单只要求 URL 与 API Key，不预填个人名称或密钥；内置供应商不再自动展示或启用。GitGraph 首屏显示经当前 ACL 过滤的缓存与仓库摘要，待更新条目明确标记，后台每批更新两个仓库。
+
+### GitGraph 图形与项目卡片（2026-09-08）
+
+项目总览使用缩略仓库卡片网格，桌面常规与宽屏每排六张。每张卡片直接显示最近四条提交的彩色分支轨道，右侧行对齐显示提交说明、作者和日期，不再以无样式折叠列表承载全库。账号连接入口收在可展开区域。
+
+仓库详情使用可关闭的模态窗口：分支标签可定位对应 HEAD；提交按 child-before-parent 拓扑顺序排列，独立轨道表达分叉与合并，直线历史保持直线。每页显示 100 条已同步提交，跨页连线裁切，缺失父提交用虚线延伸；已有每分支 30 条的同步窗口仍明确标注，不能宣称无限完整历史。
+
+点击提交后，通过宿主 `/experimental/quantcode/github/commit` 按当前 roster/GitHub 身份重新校验仓库访问，再读取完整提交说明、作者、日期、变更文件和文本 patch。原生文字渲染代码，保留缺失 patch、服务错误与重试状态。GitHub 返回超过一页文件时显示范围限制，并提供完整提交链接。切换身份后清除已打开详情，迟到响应不能重新展示旧数据。
+
+2026-09-08 桌面布局修订：GitGraph 缩略卡片桌面每行六个，完整分支标签、说明与代码 diff 留在点击展开的详情。Admin 中枢以「概览 / 任务 / 报告与产物 / 部署」页签组织，概览提供 GitGraph、报告、任务、部署四个管理入口卡片，运行记录与异常记录采用独立面板。取消 Admin 组件硬编码的内联布局，统一边框、圆角、字号与间距。此次验收仅针对桌面窗口（1440px、1920px），不进行手机端适配。

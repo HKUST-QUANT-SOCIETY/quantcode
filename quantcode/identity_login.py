@@ -60,7 +60,8 @@ def login(*, gateway: str, public_key: Path, session_file: Path, group: str | No
         response.raise_for_status()
         challenge = response.json()
         # Replacing the credential file must not leave the previous token live.
-        logout(session_file)
+        if session_file.exists() and session_file.stat().st_size > 0:
+            logout(session_file)
         with tempfile.TemporaryDirectory(prefix="quantcode-sign-") as folder:
             root = Path(folder)
             # -U forces the key in the SSH agent; only the public key is supplied.
@@ -139,7 +140,7 @@ def read_session_file(path: Path) -> dict:
     with httpx.Client(base_url=record["gateway"], timeout=10, follow_redirects=False, trust_env=False) as client:
         response = client.get("/session", headers={"Authorization": f"Bearer {record['token']}"})
         if response.status_code != 200:
-            raise PermissionError("gateway session unavailable, expired or revoked")
+            raise PermissionError("AUTHENTICATION_REQUIRED: gateway session unavailable, expired or revoked")
         return SessionContext.model_validate(response.json()).model_dump(mode="json")
 
 

@@ -15,6 +15,7 @@ import { DialogServerV2 } from "./dialog-server-v2"
 import { SettingsListV2 } from "./parts/list"
 import { AddServerMenu, isWslServer, useFilteredWslServers, WslServerSettings } from "@/wsl/settings"
 import "./settings-v2.css"
+import { isQuantCode } from "@/brand"
 
 export const SettingsServersV2: Component = () => {
   const dialog = useDialog()
@@ -85,6 +86,9 @@ export const SettingsServersV2: Component = () => {
       </div>
 
       <div class="settings-v2-tab-body settings-v2-servers">
+        <Show when={isQuantCode}>
+          <p class="text-12-regular text-text-weak px-1 pb-3">{language.t("quantcode.servers.managedRuntime")}</p>
+        </Show>
         <Show
           when={filtered().length > 0 || wslServers().length > 0}
           fallback={

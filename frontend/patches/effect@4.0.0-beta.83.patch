@@ -1,8 +1,69 @@
+diff --git a/dist/Schema.d.ts b/dist/Schema.d.ts
+--- a/dist/Schema.d.ts
++++ b/dist/Schema.d.ts
+@@ -8551,6 +8551,8 @@
+  * @since 4.0.0
+  */
+ export interface ToJsonSchemaOptions {
++    /** Mark Undefined approximations for OpenAPI compatibility transforms. */
++    readonly markUndefined?: boolean | undefined;
+     /**
+      * Controls how additional properties are handled while resolving the JSON
+      * schema.
+diff --git a/dist/SchemaRepresentation.d.ts b/dist/SchemaRepresentation.d.ts
+--- a/dist/SchemaRepresentation.d.ts
++++ b/dist/SchemaRepresentation.d.ts
+@@ -1561,7 +1561,7 @@
+  * @category constructors
+  * @since 4.0.0
+  */
+-export declare const fromASTs: (asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]) => MultiDocument;
++export declare const fromASTs: (asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>], options?: { readonly markUndefined?: boolean }) => MultiDocument;
+ /**
+  * Schema that decodes a {@link Document} from JSON and encodes it back.
+  *
+diff --git a/dist/internal/schema/representation.js b/dist/internal/schema/representation.js
+--- a/dist/internal/schema/representation.js
++++ b/dist/internal/schema/representation.js
+@@ -20,7 +20,7 @@
+   };
+ }
+ /** @internal */
+-export function fromASTs(asts) {
++export function fromASTs(asts, options) {
+   const references = {};
+   const referenceMap = new Map();
+   const uniqueReferences = new Set();
+@@ -48,6 +48,10 @@
+       };
+     }
+     const last = SchemaAST.getLastEncoding(ast);
++    // Preserve Undefined provenance across HttpApi JSON codec encodings.
++    if (options?.markUndefined && ast._tag === "Undefined" && last._tag === "Null") {
++      return { _tag: "Undefined" };
++    }
+     const identifier = InternalAnnotations.resolveIdentifier(ast) ?? prefix;
+     if (ast !== last) {
+       return recur(last, identifier);
+@@ -349,10 +353,11 @@
+           }]
+         };
+       case "Void":
++        return {
++          type: "null"
++        };
+       case "Undefined":
+-        return {
+-          type: "null"
+-        };
++        return options?.markUndefined ? { type: "null", "x-effect-undefined": true } : { type: "null" };
+       case "BigInt":
+         return {
+           "type": "string",
 diff --git a/dist/unstable/httpapi/HttpApiSchema.js b/dist/unstable/httpapi/HttpApiSchema.js
-index ecb6603d1ee4e89e92174b3a1100e8c9c720b3f3..08b832b6b3e9e4d10df156eca36b16f571f67f6e 100644
 --- a/dist/unstable/httpapi/HttpApiSchema.js
 +++ b/dist/unstable/httpapi/HttpApiSchema.js
-@@ -151,7 +151,7 @@ export const StreamSse = options => {
+@@ -151,7 +151,7 @@
    const events = options.events ?? (options.data === undefined ? undefined : Schema.Struct({
      id: Schema.UndefinedOr(Schema.String),
      event: Schema.String,
@@ -11,26 +72,115 @@ index ecb6603d1ee4e89e92174b3a1100e8c9c720b3f3..08b832b6b3e9e4d10df156eca36b16f5
    }));
    if (events === undefined) {
      throw new Error("StreamSse requires either an events schema or a data schema");
-@@ -166,6 +166,14 @@ export const StreamSse = options => {
+@@ -164,6 +164,14 @@
+     contentType: options.contentType ?? defaultStreamContentType("sse"),
+     events,
      error: options.error ?? Schema.Never
-   });
- };
++  });
++};
 +const sseDataJsonSchema = data => {
 +  const identifier = SchemaAST.resolveIdentifier(data.ast);
 +  return identifier === undefined ? Schema.fromJsonString(data) : Schema.fromJsonString(data).annotate({
 +    // The SSE transport field is a JSON string. Give that wrapper its own
 +    // OpenAPI identifier so it does not claim the decoded data schema's name.
 +    identifier: `${identifier}Stream`
-+  });
-+};
+   });
+ };
  /**
-  * Creates a streaming `Uint8Array` success response schema.
-  *
+diff --git a/dist/unstable/httpapi/OpenApi.d.ts b/dist/unstable/httpapi/OpenApi.d.ts
+--- a/dist/unstable/httpapi/OpenApi.d.ts
++++ b/dist/unstable/httpapi/OpenApi.d.ts
+@@ -115,6 +115,8 @@
+  * @since 4.0.0
+  */
+ export declare const Exclude: Context.Reference<boolean>;
++/** Opt-in provenance for Undefined approximations, consumed by a compatibility transform. */
++export declare const MarkUndefined: Context.Reference<boolean>;
+ declare const Transform_base: Context.ServiceClass<Transform, "effect/httpapi/OpenApi/Transform", (openApiSpec: Record<string, any>) => Record<string, any>>;
+ /**
+  * OpenAPI annotation for transforming a generated OpenAPI object.
+diff --git a/dist/unstable/httpapi/OpenApi.js b/dist/unstable/httpapi/OpenApi.js
+--- a/dist/unstable/httpapi/OpenApi.js
++++ b/dist/unstable/httpapi/OpenApi.js
+@@ -113,6 +113,10 @@
+  * @since 4.0.0
+  */
+ export const Exclude = /*#__PURE__*/Context.Reference("effect/httpapi/OpenApi/Exclude", {
++  defaultValue: constFalse
++});
++/** Opt-in provenance for Undefined approximations, consumed by a compatibility transform. */
++export const MarkUndefined = /*#__PURE__*/Context.Reference("effect/httpapi/OpenApi/MarkUndefined", {
+   defaultValue: constFalse
+ });
+ /**
+@@ -466,8 +470,12 @@
+     return "/" + path.map(escapeToken).join("/");
+   }
+   if (Arr.isArrayNonEmpty(pathOps)) {
+-    const multiDocument = SchemaRepresentation.fromASTs(Arr.map(pathOps, op => op.ast));
+-    const jsonSchemaMultiDocument = JsonSchema.toMultiDocumentOpenApi3_1(SchemaRepresentation.toJsonSchemaMultiDocument(multiDocument));
++    const multiDocument = SchemaRepresentation.fromASTs(Arr.map(pathOps, op => op.ast), {
++      markUndefined: Context.get(api.annotations, MarkUndefined)
++    });
++    const jsonSchemaMultiDocument = JsonSchema.toMultiDocumentOpenApi3_1(SchemaRepresentation.toJsonSchemaMultiDocument(multiDocument, {
++      markUndefined: Context.get(api.annotations, MarkUndefined)
++    }));
+     const patchOps = pathOps.map((op, i) => {
+       const oppath = escapePath(op.path);
+       const value = jsonSchemaMultiDocument.schemas[i];
+diff --git a/src/Schema.ts b/src/Schema.ts
+--- a/src/Schema.ts
++++ b/src/Schema.ts
+@@ -13182,6 +13182,9 @@
+  * @since 4.0.0
+  */
+ export interface ToJsonSchemaOptions {
++  /** Mark Undefined approximations so an OpenAPI compatibility transform can
++   * distinguish them from real Null schemas. Opt-in; remove before publishing. */
++  readonly markUndefined?: boolean | undefined
+   /**
+    * Controls how additional properties are handled while resolving the JSON
+    * schema.
+diff --git a/src/SchemaRepresentation.ts b/src/SchemaRepresentation.ts
+--- a/src/SchemaRepresentation.ts
++++ b/src/SchemaRepresentation.ts
+@@ -1653,5 +1653,5 @@
+  * @category constructors
+  * @since 4.0.0
+  */
+-export const fromASTs: (asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]) => MultiDocument =
++export const fromASTs: (asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>], options?: { readonly markUndefined?: boolean }) => MultiDocument =
+   InternalRepresentation.fromASTs
+diff --git a/src/internal/schema/representation.ts b/src/internal/schema/representation.ts
+--- a/src/internal/schema/representation.ts
++++ b/src/internal/schema/representation.ts
+@@ -21,3 +21,3 @@
+ /** @internal */
+-export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]): SchemaRepresentation.MultiDocument {
++export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>], options?: { readonly markUndefined?: boolean }): SchemaRepresentation.MultiDocument {
+   const references: Record<string, SchemaRepresentation.Representation> = {}
+@@ -54,2 +54,6 @@
+     const last = SchemaAST.getLastEncoding(ast)
++    // HttpApi JSON codecs encode Undefined as Null before representation generation.
++    if (options?.markUndefined && ast._tag === "Undefined" && last._tag === "Null") {
++      return { _tag: "Undefined" }
++    }
+     const identifier = InternalAnnotations.resolveIdentifier(ast) ?? prefix
+@@ -366,8 +370,9 @@
+       case "ObjectKeyword":
+         return { anyOf: [{ type: "object" }, { type: "array" }] }
+       case "Void":
++        return { type: "null" }
+       case "Undefined":
+-        return { type: "null" }
++        return options?.markUndefined ? { type: "null", "x-effect-undefined": true } : { type: "null" }
+       case "BigInt":
+         return {
+           "type": "string",
 diff --git a/src/unstable/httpapi/HttpApiSchema.ts b/src/unstable/httpapi/HttpApiSchema.ts
-index f2920365cf0328146523ce2e2dba04d6a8809a4a..5482d635cdf01a72063ff683d244fab891910211 100644
 --- a/src/unstable/httpapi/HttpApiSchema.ts
 +++ b/src/unstable/httpapi/HttpApiSchema.ts
-@@ -433,7 +433,7 @@ export const StreamSse: {
+@@ -433,7 +433,7 @@
    const events = options.events ?? (options.data === undefined ? undefined : Schema.Struct({
      id: Schema.UndefinedOr(Schema.String),
      event: Schema.String,
@@ -39,19 +189,47 @@ index f2920365cf0328146523ce2e2dba04d6a8809a4a..5482d635cdf01a72063ff683d244fab8
    }))
    if (events === undefined) {
      throw new Error("StreamSse requires either an events schema or a data schema")
-@@ -449,6 +449,15 @@ export const StreamSse: {
-   })
- }
- 
+@@ -446,5 +446,14 @@
+     contentType: options.contentType ?? defaultStreamContentType("sse"),
+     events,
+     error: options.error ?? Schema.Never
++  })
++}
++
 +const sseDataJsonSchema = (data: Schema.Constraint) => {
 +  const identifier = SchemaAST.resolveIdentifier(data.ast)
 +  return identifier === undefined ? Schema.fromJsonString(data) : Schema.fromJsonString(data).annotate({
 +    // The SSE transport field is a JSON string. Give that wrapper its own
 +    // OpenAPI identifier so it does not claim the decoded data schema's name.
 +    identifier: `${identifier}Stream`
-+  })
-+}
+   })
+ }
+diff --git a/src/unstable/httpapi/OpenApi.ts b/src/unstable/httpapi/OpenApi.ts
+--- a/src/unstable/httpapi/OpenApi.ts
++++ b/src/unstable/httpapi/OpenApi.ts
+@@ -132,5 +132,10 @@
+  * @since 4.0.0
+  */
+ export const Exclude = Context.Reference<boolean>("effect/httpapi/OpenApi/Exclude", {
++  defaultValue: constFalse
++})
 +
- /**
-  * Creates a streaming `Uint8Array` success response schema.
-  *
++/** Opt-in provenance for Undefined approximations, consumed by a compatibility transform. */
++export const MarkUndefined = Context.Reference<boolean>("effect/httpapi/OpenApi/MarkUndefined", {
+   defaultValue: constFalse
+ })
+@@ -573,9 +578,12 @@
+   if (Arr.isArrayNonEmpty(pathOps)) {
+     const multiDocument = SchemaRepresentation.fromASTs(
+-      Arr.map(pathOps, (op) => op.ast)
++      Arr.map(pathOps, (op) => op.ast),
++      { markUndefined: Context.get(api.annotations, MarkUndefined) }
+     )
+     const jsonSchemaMultiDocument = JsonSchema.toMultiDocumentOpenApi3_1(
+-      SchemaRepresentation.toJsonSchemaMultiDocument(multiDocument)
++      SchemaRepresentation.toJsonSchemaMultiDocument(multiDocument, {
++        markUndefined: Context.get(api.annotations, MarkUndefined)
++      })
+     )
+     const patchOps: Array<JsonPatch.JsonPatchOperation> = pathOps.map((op, i) => {
+       const oppath = escapePath(op.path)

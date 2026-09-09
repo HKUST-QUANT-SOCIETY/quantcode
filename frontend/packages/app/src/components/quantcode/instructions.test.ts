@@ -1,7 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { buildComposePrefix, buildResearchInstruction, buildResumeInstruction } from "./instructions"
+import { buildComposePrefix, buildResearchInstruction, buildResumeInstruction, buildRecoveryInstruction } from "./instructions"
 
-describe("QuantCode run_agent instructions", () => {
+describe("QuantCode task entry and legacy instructions", () => {
+  test("native task admission preserves user text without adding a second executor", () => {
+    const task = '  compare "alpha"\nthen review\n'
+    expect(buildResearchInstruction({ task, skillLabel: "Risk Review", unifiedRuntime: true })).toBe(task)
+    expect(buildComposePrefix(true)).toBe("")
+  })
+
+  test("legacy recovery remains tied to the existing checkpoint", () => {
+    const instruction = buildRecoveryInstruction("legacy-thread", "checkpoint-7")
+    expect(instruction).toContain('"thread_id":"legacy-thread"')
+    expect(instruction).toContain('"expected_checkpoint_id":"checkpoint-7"')
+    expect(instruction).toContain("Do not start a new task")
+  })
   test("quotes user task and forbids user-supplied group", () => {
     const instruction = buildResearchInstruction({
       task: 'compare "alpha"\nthen review',

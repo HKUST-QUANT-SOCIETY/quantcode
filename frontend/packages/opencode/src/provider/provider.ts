@@ -31,43 +31,59 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeConfigPolicy } from "@/quantcode/config-policy"
+import { QuantCodeToolCatalog } from "@/quantcode/tool-catalog"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
-  if (typeof ms !== "number" || ms <= 0) return res
+function wrapSSE(res: Response, ms: number, ctl: AbortController, validate?: () => Promise<void>) {
+  if ((typeof ms !== "number" || ms <= 0) && !validate) return res
   if (!res.body) return res
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
-      const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-        const id = setTimeout(() => {
-          const err = new ProviderError.ResponseStreamError("SSE read timed out")
-          ctl.abort(err)
-          void reader.cancel(err)
-          reject(err)
-        }, ms)
-
-        reader.read().then(
-          (part) => {
-            clearTimeout(id)
-            resolve(part)
-          },
-          (err) => {
-            clearTimeout(id)
-            reject(err)
-          },
-        )
-      })
-
-      if (part.done) {
-        ctrl.close()
-        return
+      try {
+        await validate?.()
+        const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
+          const fail = (error: unknown) => {
+            finish()
+            ctl.abort(error)
+            void reader.cancel(error).catch(() => undefined)
+            reject(error)
+          }
+          const id = typeof ms === "number" && ms > 0
+            ? setTimeout(() => fail(new ProviderError.ResponseStreamError("SSE read timed out")), ms) : undefined
+          let checking = false
+          // Revocation must interrupt a stalled stream too, not wait for the
+          // provider's next token. This probe lives only for this pending read.
+          const probe = validate ? setInterval(() => {
+            if (checking) return
+            checking = true
+            void validate().catch(fail).finally(() => { checking = false })
+          }, 500) : undefined
+          const finish = () => {
+            if (id) clearTimeout(id)
+            if (probe) clearInterval(probe)
+          }
+          reader.read().then(
+            part => { finish(); resolve(part) },
+            error => { finish(); reject(error) },
+          )
+        })
+        await validate?.()
+        if (part.done) {
+          ctrl.close()
+          return
+        }
+        ctrl.enqueue(part.value)
+      } catch (error) {
+        ctl.abort(error)
+        await reader.cancel(error).catch(() => undefined)
+        ctrl.error(error)
       }
-
-      ctrl.enqueue(part.value)
     },
     async cancel(reason) {
       ctl.abort(reason)
@@ -1059,8 +1075,12 @@ export const ConfigProvidersResult = Schema.Struct({
 export type ConfigProvidersResult = Types.DeepMutable<Schema.Schema.Type<typeof ConfigProvidersResult>>
 
 export function toPublicInfo(provider: Info): Info {
+  const value = QuantCodeIdentity.enabled()
+    ? { ...provider, key: undefined, env: [], options: { baseURL: provider.options.baseURL },
+        models: mapValues(provider.models, model => ({ ...model, headers: {}, options: {} })) }
+    : provider
   return JSON.parse(
-    JSON.stringify(provider, (_, value) => {
+    JSON.stringify(value, (_, value) => {
       if (typeof value === "function" || typeof value === "symbol" || value === undefined) return undefined
       if (typeof value === "bigint") return value.toString()
       return value
@@ -1140,6 +1160,8 @@ export interface Interface {
 }
 
 interface State {
+  configuration?: string
+  validate?: () => Promise<void>
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
   catalog: Record<ProviderV2.ID, Info>
@@ -1151,6 +1173,12 @@ interface State {
 export class Service extends Context.Service<Service, Interface>()("@opencode/Provider") {}
 
 export const use = serviceUse(Service)
+
+function configuration(cfg: ConfigV1.Info, auths: Record<string, Auth.Info>) {
+  return QuantCodeToolCatalog.digest({ provider: cfg.provider ?? {}, disabled: cfg.disabled_providers ?? [],
+    enabled: cfg.enabled_providers ?? [], model: cfg.model ?? null, small_model: cfg.small_model ?? null,
+    auth: Object.fromEntries(Object.keys(cfg.provider ?? {}).map(id => [id, auths[id] ?? null])) })
+}
 
 function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
   const result: Model["cost"] = {
@@ -1313,12 +1341,12 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
-        const cfg = yield* config.get()
-        const modelsDev = yield* modelsDevSvc.get()
+        const cfg = yield* (QuantCodeIdentity.enabled() ? config.getGlobal() : config.get())
+        const modelsDev: Record<string, ModelsDev.Provider> = QuantCodeIdentity.enabled() ? {} : yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
 
-        const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
+        const providers: Record<ProviderV2.ID, Info> = Object.create(null)
         const languages = new Map<string, LanguageModelV3>()
         const modelLoaders: {
           [providerID: string]: CustomModelLoader
@@ -1351,14 +1379,18 @@ const layer = Layer.effect(
         }
 
         // load plugins first so config() hook runs before reading cfg.provider
-        const plugins = yield* plugin.list()
+        const plugins = QuantCodeIdentity.enabled() ? [] : yield* plugin.list()
 
         // now read config providers - includes any modifications from plugin config() hook
-        const configProviders = Object.entries(cfg.provider ?? {})
+        const configProviders = Object.entries(cfg.provider ?? {}).filter(([id, provider]) =>
+          !QuantCodeIdentity.enabled() || QuantCodeConfigPolicy.validProviderID(id) && QuantCodeConfigPolicy.connection(provider) !== undefined)
         const disabled = new Set(cfg.disabled_providers ?? [])
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
 
+        const quantcode = process.env.OPENCODE_CHANNEL === "quantcode"
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
+          const configured = cfg.provider?.[providerID]
+          if (quantcode && (configured?.npm !== "@ai-sdk/openai-compatible" || !/^https?:\/\//.test(configured?.options?.baseURL ?? ""))) return false
           if (enabled && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
           return true
@@ -1370,7 +1402,7 @@ const layer = Layer.effect(
           if (!p || !models) continue
 
           const providerID = ProviderV2.ID.make(p.id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const provider = database[providerID]
           if (!provider) continue
@@ -1400,7 +1432,7 @@ const layer = Layer.effect(
             env: provider.env ?? existing?.env ?? [],
             options: mergeDeep(existing?.options ?? {}, provider.options ?? {}),
             source: "config",
-            models: existing?.models ?? {},
+            models: existing?.models ?? Object.create(null),
           }
 
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
@@ -1486,10 +1518,10 @@ const layer = Layer.effect(
         }
 
         // load env
-        const envs = yield* env.all()
+        const envs = QuantCodeIdentity.enabled() ? {} : yield* env.all()
         for (const [id, provider] of Object.entries(database)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
           mergeProvider(providerID, {
@@ -1502,7 +1534,7 @@ const layer = Layer.effect(
         const auths = yield* auth.all().pipe(Effect.orDie)
         for (const [id, provider] of Object.entries(auths)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           if (provider.type === "api") {
             mergeProvider(providerID, {
               source: "api",
@@ -1515,7 +1547,7 @@ const layer = Layer.effect(
         for (const plugin of plugins) {
           if (!plugin.auth) continue
           const providerID = ProviderV2.ID.make(plugin.auth.provider)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const stored = yield* auth.get(providerID).pipe(Effect.orDie)
           if (!stored) continue
@@ -1533,8 +1565,9 @@ const layer = Layer.effect(
         }
 
         for (const [id, fn] of Object.entries(custom(dep))) {
+          if (QuantCodeIdentity.enabled()) break
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const data = database[providerID]
           if (!data) {
             continue
@@ -1580,12 +1613,17 @@ const layer = Layer.effect(
             delete providers[providerID]
             continue
           }
+          if (QuantCodeIdentity.enabled() && (auths[id]?.type !== "api" || !auths[id].key.trim() ||
+              auths[id].metadata && !QuantCodeConfigPolicy.credentialMatches(auths[id], cfg.provider?.[id]?.options?.baseURL))) {
+            delete providers[providerID]
+            continue
+          }
 
           const configProvider = cfg.provider?.[providerID]
 
           for (const [modelID, model] of Object.entries(provider.models)) {
             model.api.id = model.api.id ?? model.id ?? modelID
-            if (
+            if (!QuantCodeIdentity.enabled() && (
               // These chat aliases are invalid for the special handling in the
               // built-in providers below, but custom providers may support them.
               (modelID === "gpt-5-chat-latest" &&
@@ -1593,7 +1631,7 @@ const layer = Layer.effect(
                   providerID === ProviderV2.ID.githubCopilot ||
                   providerID === ProviderV2.ID.openrouter)) ||
               (providerID === ProviderV2.ID.openrouter && modelID === "openai/gpt-5-chat")
-            )
+            ))
               delete provider.models[modelID]
             if (model.status === "alpha" && !runtimeFlags.enableExperimentalModels) delete provider.models[modelID]
             if (model.status === "deprecated") delete provider.models[modelID]
@@ -1623,7 +1661,16 @@ const layer = Layer.effect(
           }
         }
 
+        const signature = QuantCodeIdentity.enabled() ? configuration(cfg, auths) : undefined
         return {
+          configuration: signature,
+          validate: signature ? () => bridge.promise(Effect.gen(function* () {
+            const currentConfig = yield* config.getGlobal()
+            const currentAuth = yield* auth.all().pipe(Effect.orDie)
+            if (configuration(currentConfig, currentAuth) !== signature) {
+              throw new Error("模型连接或凭据已经变化，原请求已停止。请重新选择当前有效的模型后继续。")
+            }
+          })) : undefined,
           models: languages,
           providers,
           catalog,
@@ -1634,11 +1681,25 @@ const layer = Layer.effect(
       }),
     )
 
-    const list = Effect.fn("Provider.list")(() => InstanceState.use(state, (s) => s.providers))
+    const current = Effect.fn("Provider.current")(function* () {
+      const value = yield* InstanceState.get(state)
+      if (!QuantCodeIdentity.enabled()) return value
+      const cfg = yield* config.getGlobal()
+      const auths = yield* auth.all().pipe(Effect.orDie)
+      if (value.configuration === configuration(cfg, auths)) return value
+      yield* InstanceState.invalidate(state)
+      return yield* InstanceState.get(state)
+    })
+
+    const list = Effect.fn("Provider.list")(() => current().pipe(Effect.map(value => value.providers)))
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
+        await s.validate?.()
         const provider = s.providers[model.providerID]
+        if (QuantCodeIdentity.enabled() && (!provider?.key || model.api.npm !== "@ai-sdk/openai-compatible")) {
+          throw new Error("请先在 QuantCode 设置中保存模型 URL 与 API Key。")
+        }
         const options = { ...provider.options }
 
         if (
@@ -1707,9 +1768,10 @@ const layer = Layer.effect(
         delete options["headerTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
+          await s.validate?.()
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
-          const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
+          const chunkAbortCtl = s.validate || typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
           const signals: AbortSignal[] = []
@@ -1725,12 +1787,19 @@ const layer = Layer.effect(
 
           const res = await fetchFn(input, {
             ...opts,
+            ...(s.validate ? { redirect: "error" as const } : {}),
             // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
             timeout: false,
           }).finally(() => headerTimeoutCtl?.clear())
 
+          try { await s.validate?.() } catch (error) {
+            chunkAbortCtl?.abort(error)
+            await res.body?.cancel(error).catch(() => undefined)
+            throw error
+          }
+
           if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          return wrapSSE(res, chunkTimeout, chunkAbortCtl, s.validate)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
@@ -1770,12 +1839,14 @@ const layer = Layer.effect(
       }
     }
 
-    const getProvider = Effect.fn("Provider.getProvider")((providerID: ProviderV2.ID) =>
-      InstanceState.use(state, (s) => s.providers[providerID]),
-    )
+    const getProvider = Effect.fn("Provider.getProvider")((providerID: ProviderV2.ID) => current().pipe(Effect.map(s => {
+      const provider = s.providers[providerID]
+      if (QuantCodeIdentity.enabled() && !provider) throw new Error("模型连接已移除或缺少 API Key，请在设置中重新配置。")
+      return provider
+    })))
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       const provider = s.providers[providerID]
       if (!provider) {
         const catalogProvider = s.catalog[providerID]
@@ -1795,12 +1866,18 @@ const layer = Layer.effect(
           : modelSuggestions(s.catalog[providerID], modelID, runtimeFlags.enableExperimentalModels)
         return yield* new ModelNotFoundError({ providerID, modelID, suggestions })
       }
-      return info
+      return QuantCodeIdentity.enabled() ? structuredClone(info) : info
     })
 
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
-      const envs = yield* env.all()
+      const s = yield* current()
+      if (QuantCodeIdentity.enabled()) {
+        const allowed = s.providers[model.providerID]?.models[model.id]
+        if (!allowed || QuantCodeToolCatalog.digest(model) !== QuantCodeToolCatalog.digest(allowed)) {
+          return yield* new ModelNotFoundError({ providerID: model.providerID, modelID: model.id })
+        }
+      }
+      const envs = QuantCodeIdentity.enabled() ? {} : yield* env.all()
       const key = `${model.providerID}/${model.id}`
       if (s.models.has(key)) return s.models.get(key)!
 
@@ -1830,7 +1907,7 @@ const layer = Layer.effect(
     })
 
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderV2.ID, query: string[]) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       const provider = s.providers[providerID]
       if (!provider) return undefined
       for (const item of query) {
@@ -1842,7 +1919,21 @@ const layer = Layer.effect(
     })
 
     const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (providerID: ProviderV2.ID) {
-      const cfg = yield* config.get()
+      const cfg = yield* (QuantCodeIdentity.enabled() ? config.getGlobal() : config.get())
+
+      if (QuantCodeIdentity.enabled()) {
+        const s = yield* current()
+        const provider = s.providers[providerID]
+        if (!provider) return
+        for (const selected of [cfg.small_model, cfg.model]) {
+          if (!selected) continue
+          const parsed = parseModel(selected)
+          if (parsed.providerID === providerID && provider.models[parsed.modelID]) return provider.models[parsed.modelID]
+        }
+        // Title/compaction reuse an explicitly configured model on the same
+        // connection; never select a catalog's guessed cheap built-in model.
+        return Object.values(provider.models)[0]
+      }
 
       if (cfg.small_model) {
         const parsed = parseModel(cfg.small_model)
@@ -1911,10 +2002,14 @@ const layer = Layer.effect(
     })
 
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
-      const cfg = yield* config.get()
-      if (cfg.model) return parseModel(cfg.model)
+      const cfg = yield* (QuantCodeIdentity.enabled() ? config.getGlobal() : config.get())
+      if (cfg.model) {
+        const parsed = parseModel(cfg.model)
+        if (QuantCodeIdentity.enabled()) yield* getModel(parsed.providerID, parsed.modelID)
+        return parsed
+      }
 
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []

@@ -4,20 +4,26 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { RefreshAction, WorkspaceEmpty, runStatusLabel } from "./workspace-ui"
 import { ReceiptReview } from "./receipt-review"
 import type { ReceiptReconciliation } from "./api"
+import type { QuantCodeLegacyDetail } from "@opencode-ai/sdk/v2"
+import { LegacyRecovery, type LegacyRecoveryRequest, type LegacyApprovalRequest } from "./legacy-recovery"
 
 type Run = {
   thread_id: string
   checkpoint_id: string
-  timestamp?: string
+  timestamp?: string | null
   task: string
   status: string
-  group?: string
+  group?: string | null
+  actor_id?: string | null
+  engine?: "legacy-python"
 }
 type Detail = Run & {
   read_only: true
   can_resume?: boolean
   pending_approval?: boolean
   recovery_block_reason?: string
+  recovery?: QuantCodeLegacyDetail["recovery"]
+  gate?: unknown
   unresolved_operations?: { call_id: string; digest: string; receipt_status: string; tool?: string }[]
   receipt_reviews?: { review_id: string; call_id: string; reviewer: string; reviewed_at: string; decision: string; evidence_ref: string; note: string; result_digest?: string }[]
   receipt_review_error?: string
@@ -25,6 +31,7 @@ type Detail = Run & {
   messages: { type: string; content: unknown }[]
   artifacts?: unknown[]
   output_data?: unknown
+  timeline_error?: string
   timeline?: {
     events: { event_id?: string; type: string; timestamp?: number; node?: string; data?: unknown }[]
     next_cursor: number
@@ -39,6 +46,9 @@ export function RunHistoryView(props: {
   ready: boolean
   onNew?: () => void
   mode?: "tasks" | "reports"
+  legacy?: boolean
+  recoverLegacy?: LegacyRecoveryRequest
+  requestLegacyApproval?: LegacyApprovalRequest
   onRecover?: (threadId: string, checkpointId: string) => Promise<boolean>
   reconcile?: (payload: ReceiptReconciliation) => Promise<unknown>
   reconcileGroup?: string
@@ -64,12 +74,15 @@ export function RunHistoryView(props: {
       if (revision !== current) return
       if (!data || typeof data !== "object") throw new Error("历史服务返回格式错误")
       if ("error" in data) throw new Error(String(data.error))
+      if (props.legacy && (!("engine" in data) || data.engine !== "legacy-python")) throw new Error("归档任务来源校验失败。")
       if (params.thread_id) {
         if (!("read_only" in data) || data.read_only !== true || !("messages" in data) || !Array.isArray(data.messages)
           || !("checkpoints" in data) || !Array.isArray(data.checkpoints)) {
           throw new Error("历史详情返回格式错误")
         }
         const detail = data as Detail
+        if (props.legacy && (typeof detail.can_resume !== "boolean" || !detail.recovery || typeof detail.recovery.available !== "boolean"
+          || !Array.isArray(detail.recovery.blockers))) throw new Error("归档任务恢复状态返回格式错误。")
         if (detail.timeline && (!Array.isArray(detail.timeline.events) || !detail.timeline.events.every(event => event && typeof event.type === "string")
           || !Number.isSafeInteger(detail.timeline.next_cursor) || detail.timeline.next_cursor < 0)) throw new Error("执行时间线返回格式错误")
         if (params.trace_cursor !== undefined && state.detail?.timeline && detail.timeline) {
@@ -100,15 +113,16 @@ export function RunHistoryView(props: {
   createEffect(() => {
     props.scope
     props.mode
+    props.legacy
     const ready = props.ready
     revision++
     setState({ runs: [], detail: undefined, cursor: undefined, error: "", loading: false, query: "", filter: "all" })
     if (ready) void load()
   })
 
-  return <section class="qc-detail-body qc-history" aria-label="服务端研究历史">
+  return <section class="qc-detail-body qc-history" aria-label={props.legacy ? "归档任务" : "服务端研究历史"}>
     <div class="qc-view-toolbar">
-      <h3>{props.mode === "reports" ? "组织报告与产物" : props.mode === "tasks" ? "组织任务管理" : "服务端研究历史"}</h3>
+      <h3>{props.legacy ? "归档任务" : props.mode === "reports" ? "组织报告与产物" : props.mode === "tasks" ? "组织任务管理" : "服务端研究历史"}</h3>
       <span class="qc-count">{state.runs.length}{state.cursor ? "+" : ""} 个任务</span>
       <RefreshAction label="刷新历史" disabled={!props.ready || state.loading} onClick={() => void load()} />
     </div>
@@ -139,8 +153,26 @@ export function RunHistoryView(props: {
       <div class="qc-view-toolbar"><span class={`qc-status qc-status-${detail().status}`}>{runStatusLabel(detail().status)}</span><button type="button" class="qc-icon-action" aria-label="关闭历史详情" title="关闭历史详情" onClick={() => { revision++; setState({ detail: undefined, loading: false, recovering: false }) }}><Icon name="close" /></button></div>
       <h3>{detail().task || detail().thread_id}</h3>
       <p>只读回放 · {detail().timestamp}</p>
+      <Show when={detail().engine}><p class="qc-muted">历史来源：归档记录 · {detail().actor_id} · {detail().group}</p></Show>
       <Show when={detail().pending_approval}><p>该任务有待审批中断，需通过 HumanGate 明确处理，不能用普通恢复绕过。</p></Show>
       <Show when={detail().recovery_block_reason}><p role="alert">无法恢复：{detail().recovery_block_reason}</p></Show>
+      <Show when={detail().recovery}>{recovery => <details class="qc-detail-section">
+        <summary>检查点来源与恢复限制</summary>
+        <p>来源状态：{({ missing: "未登记", registered: "已登记", changed: "已变化" })[recovery().provenance]}</p>
+        <p>来源版本：{recovery().executor_version ?? "未登记"} · 数据格式版本：{recovery().serializer_version}</p>
+        <p>最新检查点：<code>{recovery().latest_checkpoint_id}</code></p>
+        <p style={{ "overflow-wrap": "anywhere" }}>检查点摘要：<code>{recovery().checkpoint_digest}</code></p>
+        <Show when={recovery().provenance_digest}><p style={{ "overflow-wrap": "anywhere" }}>来源摘要：<code>{recovery().provenance_digest}</code></p></Show>
+        <For each={recovery().blockers}>{blocker => <p>{blocker.message}</p>}</For>
+        <Show when={recovery().usage}>{usage => <div class="qc-native-usage">
+          <span>已用 {usage().used_tokens.toLocaleString()} tokens</span>
+          <span>预留 {usage().reserved_tokens.toLocaleString()} tokens</span>
+          <span>待核对请求 {usage().unconfirmed_requests}</span>
+        </div>}</Show>
+      </details>}</Show>
+      <Show when={props.legacy && props.recoverLegacy && props.requestLegacyApproval && detail().recovery}><LegacyRecovery
+        detail={{ ...detail(), recovery: detail().recovery!, can_resume: detail().can_resume === true, pending_approval: detail().pending_approval === true }}
+        resume={props.recoverLegacy!} requestApproval={props.requestLegacyApproval!} onChanged={() => void load({ thread_id: detail().thread_id })} /></Show>
       <Show when={detail().unresolved_operations?.length}>
         <h4>需要核对的工具调用</h4>
         <p>缺少完成回执不代表操作没有发生。请结合工具输出、外部平台记录和任务时间线核对，避免另起任务重复提交同一操作。</p>
@@ -148,13 +180,13 @@ export function RunHistoryView(props: {
           <strong>{operation.tool || "工具名称请查阅对应检查点"}</strong>
           <p>调用：<code>{operation.call_id}</code> · 回执：{operation.receipt_status}</p>
           <p style={{ "overflow-wrap": "anywhere" }}>核对摘要：{operation.digest}</p>
-          <Show when={detail().group === props.reconcileGroup && props.reconcile}>{reconcile => <ReceiptReview
+          <Show when={!props.legacy && detail().group === props.reconcileGroup && props.reconcile}>{reconcile => <ReceiptReview
             threadId={detail().thread_id} checkpointId={detail().checkpoint_id} callId={operation.call_id} digest={operation.digest}
             reconcile={reconcile()} onReviewed={() => void load({ thread_id: detail().thread_id })}
           />}</Show>
         </article>}</For>
       </Show>
-      <Show when={detail().can_resume && props.onRecover}>
+      <Show when={!props.legacy && detail().can_resume && props.onRecover}>
         <p>恢复会继续原任务的执行。后端会重新校验身份及最新检查点，不会回退到历史版本。</p>
         <button type="button" disabled={state.loading || state.recovering} onClick={async () => {
           const current = revision
@@ -190,6 +222,7 @@ export function RunHistoryView(props: {
       <Show when={detail().output_data}><h4>结果</h4><pre style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>{JSON.stringify(detail().output_data, null, 2)}</pre></Show>
       <Show when={detail().artifacts?.length}><h4>产物</h4><pre style={{ "white-space": "pre-wrap", "overflow-wrap": "anywhere" }}>{JSON.stringify(detail().artifacts, null, 2)}</pre></Show>
       <h4>任务执行时间线</h4>
+      <Show when={detail().timeline_error}><p role="status">{detail().timeline_error}</p></Show>
       <p>包含本任务各次运行和恢复的事件，不限于上方选择的检查点。</p>
       <Show when={!detail().timeline?.exists}><p>此历史任务没有持久事件文件，仍可查看已保存的检查点消息。</p></Show>
       <Show when={detail().timeline?.damaged_lines}><p role="alert">检测到 {detail().timeline?.damaged_lines} 条损坏事件，时间线存在缺口。</p></Show>

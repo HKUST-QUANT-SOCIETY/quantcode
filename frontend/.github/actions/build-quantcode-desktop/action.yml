@@ -14,7 +14,7 @@ inputs:
     description: "Platform-specific bun install arguments"
     required: true
   signing_mode:
-    description: "unsigned for artifact QA, signed for a platform-signed release, none for Linux with updater trust disabled"
+    description: "unsigned for artifact QA or explicitly labeled internal tests, signed for approved releases, none for Linux"
     required: true
   update_feed:
     description: "public only when the installed app can anonymously reach its update feed"
@@ -130,6 +130,23 @@ runs:
       with:
         node-version: "24"
 
+    - name: Verify Windows OpenSSH identity login
+      if: runner.os == 'Windows'
+      working-directory: frontend/packages/desktop
+      shell: pwsh
+      env:
+        QUANTCODE_WINDOWS_SSH_QA: "1"
+      run: |
+        $sshRoot = Join-Path $env:SystemRoot 'System32\OpenSSH'
+        foreach ($name in @('ssh-add.exe', 'ssh-keygen.exe')) {
+          if (-not (Test-Path (Join-Path $sshRoot $name))) { throw "Windows OpenSSH Client is missing $name" }
+        }
+        Set-Service -Name ssh-agent -StartupType Manual
+        Start-Service -Name ssh-agent
+        if ((Get-Service ssh-agent).Status -ne 'Running') { throw 'Windows SSH agent did not start' }
+        bun test ./src/main/quantcode-identity.test.ts ./src/main/quantcode-identity.windows.test.ts
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     - name: Install Linux packaging tools
       if: runner.os == 'Linux'
       working-directory: frontend
@@ -240,6 +257,12 @@ runs:
         AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_endpoint || '' }}
         AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_publisher_name || '' }}
       run: |
+        for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER \
+          AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE \
+          AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_PUBLISHER_NAME; do
+          if [[ -z "${!name}" ]]; then unset "$name"; fi
+        done
         read -r -a platform_args <<< "$QUANTCODE_PLATFORM_ARGS"
         bunx electron-builder "${platform_args[@]}" --publish never --config electron-builder.config.ts
 
@@ -319,6 +342,7 @@ runs:
           $env:QUANTCODE_SMOKE_DEBUG_URL = "http://127.0.0.1:$port/json/list"
           $env:QUANTCODE_SMOKE_PID = "$($process.Id)"
           bun scripts/verify-packaged-launch.ts
+          if ($LASTEXITCODE -ne 0) { throw "QuantCode packaged launch smoke failed with exit code $LASTEXITCODE" }
         } finally {
           taskkill /PID $process.Id /T /F 2>$null | Out-Null
           Wait-Process -Id $process.Id -Timeout 15 -ErrorAction SilentlyContinue

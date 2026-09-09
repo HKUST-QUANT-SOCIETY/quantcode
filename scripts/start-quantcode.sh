@@ -74,17 +74,10 @@ else
 fi
 
 # 3. 检查可选运行配置
-info "检查配置文件..."
-if [ -n "${QUANTCODE_API_KEY:-}" ]; then
-    info "✓ 已检测 QUANTCODE_API_KEY；MCP 将使用环境变量配置"
-elif [ -f "$PROJECT_ROOT/config.json" ]; then
-    info "✓ 已发现 runner-direct config.json；MCP 仍只读取环境变量"
-else
-    warn "未配置 QUANTCODE_API_KEY；桌面和只读页面仍可启动，Agent 运行会明确返回 provider unavailable。"
-fi
+info "模型连接在 QuantCode 设置中填写 URL、API Key 和模型；无需另一份 Runner 密钥。"
 
-# 4. 检查OpenCode桌面端
-info "检查OpenCode桌面端..."
+# 4. 检查同仓桌面源码
+info "检查 QuantCode 桌面工作区..."
 OPENCODE_DIR="$PROJECT_ROOT/frontend"
 if [ ! -f "$OPENCODE_DIR/package.json" ]; then
     error "缺少 frontend 工作区，请拉取完整的 quantcode 仓库"
@@ -97,19 +90,19 @@ if ! command -v bun &> /dev/null; then
 fi
 info "✓ Bun已安装: $(bun --version)"
 
-# 6. 安装OpenCode依赖
-info "检查OpenCode依赖..."
+# 6. 安装锁定的桌面依赖
+info "检查 QuantCode 桌面依赖..."
 cd "$OPENCODE_DIR"
 if [ ! -d "node_modules" ]; then
-    warn "OpenCode依赖未安装，正在安装..."
-    bun install || error "依赖安装失败"
-    info "✓ OpenCode依赖安装完成"
+    warn "桌面依赖未安装，正在按锁文件安装..."
+    bun install --frozen-lockfile || error "依赖安装失败"
+    info "✓ QuantCode 桌面依赖安装完成"
 else
-    info "✓ OpenCode依赖已安装"
+    info "✓ QuantCode 桌面依赖已安装"
 fi
 
 # 7. 检查opencode.local.jsonc
-info "检查OpenCode配置..."
+info "检查桌面宿主配置..."
 if [ ! -f "opencode.local.jsonc" ] && [ -f "opencode.jsonc" ]; then
     warn "opencode.local.jsonc不存在；使用仓库默认配置，不复制覆盖本地配置"
 elif [ -f "opencode.local.jsonc" ]; then

@@ -18,6 +18,7 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { QuantCodeFileMutation } from "@/quantcode/file-mutation"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -60,6 +61,7 @@ export const EditTool = Tool.define(
   Effect.gen(function* () {
     const lsp = yield* LSP.Service
     const afs = yield* FSUtil.Service
+    const files = yield* QuantCodeFileMutation.make(afs)
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
 
@@ -80,7 +82,7 @@ export const EditTool = Tool.define(
           const filePath = path.isAbsolute(params.filePath)
             ? params.filePath
             : path.join(instance.directory, params.filePath)
-          yield* assertExternalDirectoryEffect(ctx, filePath)
+          yield* assertExternalDirectoryEffect(ctx, filePath, { access: "write" })
 
           let diff = ""
           let contentOld = ""
@@ -88,8 +90,8 @@ export const EditTool = Tool.define(
           yield* lock(filePath).withPermits(1)(
             Effect.gen(function* () {
               if (params.oldString === "") {
-                const existed = yield* afs.existsSafe(filePath)
-                if (existed) {
+                const source = yield* files.read(ctx.sessionID, filePath, ctx.abort)
+                if (source.exists) {
                   throw new Error(
                     "oldString cannot be empty when editing an existing file. Provide the exact text to replace, or use write for an intentional full-file replacement.",
                   )
@@ -108,9 +110,9 @@ export const EditTool = Tool.define(
                     diff,
                   },
                 })
-                yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
-                if (yield* format.file(filePath)) {
-                  contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
+                yield* files.write(ctx.sessionID, filePath, Bom.join(contentNew, desiredBom), source, ctx.abort)
+                if (yield* format.file(filePath, ctx.sessionID, ctx.abort)) {
+                  contentNew = yield* files.syncBom(ctx.sessionID, filePath, desiredBom, ctx.abort)
                 }
                 yield* events.publish(FileSystem.Event.Edited, { file: filePath })
                 yield* events.publish(Watcher.Event.Updated, {
@@ -120,10 +122,8 @@ export const EditTool = Tool.define(
                 return
               }
 
-              const info = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-              if (!info) throw new Error(`File ${filePath} not found`)
-              if (info.type === "Directory") throw new Error(`Path is a directory, not a file: ${filePath}`)
-              const source = yield* Bom.readFile(afs, filePath)
+              const source = yield* files.read(ctx.sessionID, filePath, ctx.abort)
+              if (!source.exists) throw new Error(`File ${filePath} not found`)
               contentOld = source.text
 
               const ending = detectLineEnding(contentOld)
@@ -152,9 +152,9 @@ export const EditTool = Tool.define(
                 },
               })
 
-              yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
-              if (yield* format.file(filePath)) {
-                contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
+              yield* files.write(ctx.sessionID, filePath, Bom.join(contentNew, desiredBom), source, ctx.abort)
+              if (yield* format.file(filePath, ctx.sessionID, ctx.abort)) {
+                contentNew = yield* files.syncBom(ctx.sessionID, filePath, desiredBom, ctx.abort)
               }
               yield* events.publish(FileSystem.Event.Edited, { file: filePath })
               yield* events.publish(Watcher.Event.Updated, {

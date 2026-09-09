@@ -1,78 +1,31 @@
 ---
 name: model:pr-submit
-description: 模型组提 PR 时自动填风控元数据 + 触发 risk Compose 流
+description: 整理已授权 PR 的 ModelSpec 与证据，按当前共享服务合同交接
 group: model
 owner: 陈镇鸿
-pattern: Pattern 1 (Orchestrator-Worker) + Pattern 5 (Human-in-the-Loop Gate)
-# Compose 流拓扑（runner/compose_executor FLOW_REGISTRY 键 ("model", "model:submit")，
-# 注册于 flows/model_submit.py，import 即注册）
-flow:
-  - parse_pr_input  # read_pr + extract_metadata 透传整理
-  - generate_model_spec
-  - handoff_to_risk  # write_blackboard + trigger_risk_flow 组合节点
-  - produce_output
+pattern: Native task + contract validation + exact shared write
 ---
 
-# Model PR Submit Skill
+# 模型 PR 与交接
 
-## 何时使用
-
-模型组同学完成一个新的 ML 因子 / 策略 / 模型，准备提 PR 时调用本 skill。
+在当前原生任务中处理已授权仓库的 PR。身份与 GitHub 可见范围来自宿主会话；参数不能切换组，密钥不进入任务文本、Blackboard 或 artifact。
 
 ## 输入
 
-- 本地模型代码路径（repo-relative）
-- 训练数据范围：`training_data_start` / `training_data_end` / `as_of_date`
-- 模型类型：`linear` / `tree` / `boosting` / `neural_net` / `ensemble` / `other`
-- 超参、特征依赖、算子依赖
-- 风控元数据：universe / benchmark / holding period / max position / leverage
+需要真实 PR/commit 引用、训练数据时点、模型类型、超参、特征/算子依赖与风险元数据。先查询能力目录和组 Memory，核对相关组件状态；缺失字段明确补齐，不使用默认日期、unknown_factor 或示例数字冒充真实元数据。
 
 ## 工作流程
 
-1. **读取 PR**：调用 `read_pr(pr_number)` 获取 diff
-2. **提取元数据**：调用 `extract_metadata(diff)` 获取 ticker / factor 信息
-3. **生成 ModelSpec**：调用 `generate_model_spec(metadata)` 生成模型规格
-4. **写入 Blackboard**：调用 `write_blackboard(key="model.pr_<pr_number>_spec", value=spec)` 写入 PROJECT scope（session/key 由 `runner/blackboard_keys.py` 归一层统一：固定 PROJECT session，裸 key 自动补 `shared.model_entries.` 前缀）
-5. **触发风控**：调用 `trigger_risk_flow(blackboard_key="model.pr_<pr_number>_spec")`（裸 key 或第 4 步返回的 `project_entry.key` 均可，归一层幂等解析）写 PROJECT scope 的 `shared.pending_risk_reviews`，供 risk 组消费
+1. 通过当前公布的 GitHub/文件读取能力取得 PR 描述与完整变更。`read_pr`、`extract_metadata` 只有在实际目录允许时使用，不绕过被禁用的本地路径分支。
+2. 由当前任务模型整理候选 metadata，再调用已公布的 `generate_model_spec` 进行真实 `schemas.model.ModelSpec` 校验。模型生成内容本身不算验证通过。
+3. 若用户需要共享交接，先冻结任务方案，并用 `read_blackboard({input_data:{blackboard_key:"shared.model_entries.<entry_id>"}})` 读取当前真实版本。
+4. 提出 `write_blackboard({key:"shared.model_entries.<entry_id>",value:spec,expected_version:version})`。规范 key、完整 value 和预期版本一同进入当前精确 merge 审批；工具无权替用户确认。
+5. 成功后引用返回的共享条目、版本、原生调用和批准回执。风险 CI/后续组件只使用实际已公布的交接接口；接口未接通时明确报告，不能调用旧队列写入绕过当前合同。
 
-当前实现不默认双写 GROUP 私有条目；只有后续确有模型组私有状态需要时，才由对应 tool 显式写 GROUP scope。
+共享读写服务未配置或未发布时停在可审阅的契约与证据，不宣称交接成功。写入结果不明时先核对已有回执；不要用另一 call 或更大版本猜测重试。
 
-## 强制规则
+## 验收
 
-- **必须执行全部 5 步**，不得在任意步骤后提前停止
-- 即使元数据是 UNKNOWN / unknown_factor 等 mock 值，也必须继续执行后续步骤
-- 生成 ModelSpec 后，**必须紧接着**调用 write_blackboard
-- **必须紧接着**调用 trigger_risk_flow 完成 handoff
-- 不得在生成 ModelSpec 后输出纯文本结束；必须继续调用工具
-- 如果某步工具执行失败，重试或报告错误，不得跳过后续步骤
-- **完成 checklist**：每步完成后 mentally 标记为已完成，然后立即执行下一步。只有 5 步全部完成时，才能输出纯文本总结。
-
-## 输出 schema
-
-`schemas.model.ModelSpec`，同时写入 Blackboard：
-
-```json
-{
-  "model_id": "model-bc0e42f8",
-  "model_type": "lightgbm",
-  "training_window": {"start": "2020-01-01", "end": "2024-12-31"},
-  "hyperparameters": {"learning_rate": 0.05, "num_leaves": 31}
-}
-```
-
-## 验收标准
-
-- [ ] `read_pr` 已调用，PR diff 已获取
-- [ ] `extract_metadata` 已调用，元数据已提取
-- [ ] `generate_model_spec` 已调用，spec 已生成
-- [ ] `write_blackboard` 已调用，spec 已写入 Blackboard
-- [ ] `trigger_risk_flow` 已调用，risk 组已收到 handoff
-- 以上 5 项必须全部完成，缺一不可
-- PROJECT scope 的 `shared.pending_risk_reviews` 出现对应 pending review
-- 同一 blackboard_key 在 5 分钟内不会重复触发 risk handoff（`trigger_risk_flow` 带 `@dedupe_within`）
-
-## GitHub token 注入
-
-- `read_pr` 真实 GitHub 路径读取 `GITHUB_TOKEN`，仓库名读取 `repo` 参数或 `GITHUB_REPOSITORY`
-- 本地验证示例：`GITHUB_REPOSITORY=HKUST-QUANT-SOCIETY/opencode`
-- token 只放环境变量，不写入代码、fixture、Blackboard 或测试输出
+- PR/commit 与 ModelSpec 中的来源、时点和数据范围一致。
+- 实际契约验证通过，并保留校验结果。
+- 如果请求共享写入，只有真实服务成功结果才算完成；风险验收和生产部署仍由各自权威入口负责。

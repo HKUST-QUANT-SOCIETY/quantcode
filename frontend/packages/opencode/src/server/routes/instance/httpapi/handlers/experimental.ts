@@ -1,4 +1,23 @@
-import { localIdentity, signInLocalIdentity, signOutLocalIdentity } from "./quantcode-identity"
+import { QuantCodeSolution } from "@/quantcode/solution"
+import { QuantCodeReuse } from "@/quantcode/reuse"
+import { QuantCodeTaskLock } from "@/quantcode/task-lock"
+import { QuantCodeWriteReceipt } from "@/quantcode/write-receipt"
+import { QuantCodeBudget } from "@/quantcode/budget"
+import { QuantCodeGate } from "@/quantcode/gate"
+import { QuantCodeTaskIndex } from "@/quantcode/task-index"
+import { QuantCodeTaskPublisher } from "@/quantcode/task-publisher"
+import { QuantCodeOrganizationTasks } from "@/quantcode/organization-tasks"
+import { QuantCodeLegacyHost } from "@/quantcode/legacy"
+import { QuantCodeKnowledgeHost } from "@/quantcode/knowledge"
+import { Provider } from "@/provider/provider"
+import { Database } from "@opencode-ai/core/database/database"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { AppProcess } from "@opencode-ai/core/process"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { hostGitHub, githubConnection, githubCommit, prepareGitHubCredential, importGitHubCredential } from "./quantcode-github"
+import { HttpServerRequest } from "effect/unstable/http"
+import { localIdentity, signInLocalIdentity, signOutLocalIdentity, createIdentityChallenge, verifyIdentityChallenge } from "./quantcode-identity"
 import { quantcodeManagement } from "./quantcode-management"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
@@ -8,6 +27,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
+import { InstanceStore } from "@/project/instance-store"
 import { Session } from "@/session/session"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
@@ -35,6 +55,12 @@ import {
   SessionListQuery,
   ToolListQuery,
   WorktreeApiError,
+  QuantCodeReuseError,
+  QuantCodeTaskError,
+  QuantCodeIdentityApiError,
+  QuantCodeIdentityVerifyPayload,
+  QuantCodeWorkspaceApiError,
+  QuantCodeWorkspacesQuery,
 } from "../groups/experimental"
 
 // All workspace routes share the host credential file. Serialize its entire
@@ -95,14 +121,66 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const project = yield* Project.Service
+    const instances = yield* InstanceStore.Service
     const registry = yield* ToolRegistry.Service
     const worktreeSvc = yield* Worktree.Service
     const sessions = yield* Session.Service
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
+    const database = yield* Database.Service
+    const events = yield* EventV2Bridge.Service
+    const processes = yield* AppProcess.Service
+    const publisher = yield* QuantCodeTaskPublisher.Service
+    const providers = yield* Provider.Service
+
+    // Organization management must not depend on a model-tool MCP connection
+    // in native mode. Legacy mode keeps its existing authenticated MCP source.
+    const currentQuantCodeIdentity = Effect.fn("ExperimentalHttpApi.currentQuantCodeIdentity")(function* () {
+      if (QuantCodeIdentity.enabled()) return yield* Effect.tryPromise({
+        try: QuantCodeIdentity.currentIdentity, catch: () => new HttpApiError.BadRequest({}),
+      })
+      const raw = yield* (mcp.callTool ? mcp.callTool("quantcode", "session_context", {}) : Effect.succeed<unknown>(undefined))
+        .pipe(Effect.catchCause(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      const identity = unwrapQuantCodeResult(raw)
+      if (!identity || typeof identity !== "object" || !("session_id" in identity) ||
+        typeof identity.session_id !== "string" || !identity.session_id) return yield* new HttpApiError.BadRequest({})
+      return { ...identity, session_id: identity.session_id }
+    })
+
+    const reuse = (sessionID: string, decision?: QuantCodeReuse.Review) => Effect.gen(function* () {
+      if (!QuantCodeIdentity.enabled()) return yield* new QuantCodeReuseError({ message: "统一执行引擎尚未启用。" })
+      const current = decision ? yield* QuantCodeReuse.review(sessionID, decision) : yield* QuantCodeReuse.state(sessionID)
+      return QuantCodeReuse.publicState(current)
+    }).pipe(
+      Effect.provideService(Database.Service, database),
+      Effect.provideService(EventV2Bridge.Service, events),
+      Effect.catchDefect(error => Effect.fail(new QuantCodeReuseError({ message:
+        error instanceof QuantCodeReuse.CoverageError || error instanceof QuantCodeIdentity.IdentityError || error instanceof QuantCodeTaskLock.TaskBusyError
+          ? error.message : "无法读取或保存能力方案，请刷新当前任务后重试。",
+      }))),
+    )
+
+    const solution = <A, E>(operation: Effect.Effect<A, E, Database.Service | EventV2Bridge.Service | AppProcess.Service | Provider.Service>) => Effect.gen(function* () {
+      if (!QuantCodeIdentity.enabled()) return yield* new QuantCodeTaskError({ message: "统一执行引擎尚未启用。" })
+      return yield* operation.pipe(Effect.orDie)
+    }).pipe(
+      Effect.provideService(Database.Service, database),
+      Effect.provideService(EventV2Bridge.Service, events),
+      Effect.provideService(AppProcess.Service, processes),
+      Effect.provideService(Provider.Service, providers),
+      Effect.catchDefect(error => Effect.fail(new QuantCodeTaskError({ message:
+        error instanceof QuantCodeTaskLock.TaskBusyError || error instanceof QuantCodeIdentity.IdentityError ||
+        error instanceof QuantCodeWriteReceipt.OutcomeUnknown || error instanceof QuantCodeWriteReceipt.ReviewError
+        || error instanceof QuantCodeTaskLock.RecoveryError
+        || error instanceof QuantCodeBudget.ReviewError || error instanceof QuantCodeBudget.Exhausted
+        || error instanceof QuantCodeLegacyHost.LegacyUnavailable
+        || error instanceof QuantCodeKnowledgeHost.KnowledgeUnavailable
+          ? error.message : "任务操作未完成，内容可能已变化。请重新读取当前版本后再决定。",
+      }))),
+    )
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.experimentalBackgroundSubagents }
+      return { backgroundSubagents: flags.experimentalBackgroundSubagents, quantcodeUnifiedRuntime: QuantCodeIdentity.enabled() }
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {
@@ -176,6 +254,10 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const quantcodeTool = Effect.fn("ExperimentalHttpApi.quantcodeTool")(function* (ctx: {
       query: typeof QuantCodeToolQuery.Type
     }) {
+      if (QuantCodeIdentity.enabled() && ctx.query.tool === "list_distill_candidates") return yield* solution(QuantCodeKnowledgeHost.list())
+      if (QuantCodeIdentity.enabled() && ctx.query.tool === "session_context") {
+        return yield* currentQuantCodeIdentity()
+      }
       const args =
         ctx.query.tool === "list_skills"
           ? { group: ctx.query.group ?? "" }
@@ -195,6 +277,11 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       if (["get_run_history", "admin_get_task_history"].includes(ctx.query.tool) && !ctx.query.thread_id?.trim()) {
         return yield* Effect.fail(new HttpApiError.BadRequest({}))
       }
+      if (["get_gitgraph", "list_pops"].includes(ctx.query.tool)) {
+        const identity = yield* currentQuantCodeIdentity()
+        const session = identity.session_id
+        return yield* Effect.tryPromise({ try: () => hostGitHub(ctx.query.tool, session, args), catch: () => new HttpApiError.BadRequest({}) })
+      }
       const result = yield* (mcp.callTool
         ? mcp.callTool("quantcode", ctx.query.tool, args)
         : Effect.succeed<unknown>(undefined))
@@ -207,15 +294,18 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       if (!ctx.payload.pop_id.trim() || (ctx.payload.read === undefined && ctx.payload.ack === undefined)) {
         return yield* Effect.fail(new HttpApiError.BadRequest({}))
       }
-      const result = yield* (mcp.callTool
-        ? mcp.callTool("quantcode", "update_pop_status", ctx.payload)
-        : Effect.succeed<unknown>(undefined))
-      return unwrapQuantCodeResult(result)
+      const identity = yield* currentQuantCodeIdentity()
+      const session = identity.session_id
+      return yield* Effect.tryPromise({ try: () => hostGitHub("update_pop_status", session, ctx.payload), catch: () => new HttpApiError.BadRequest({}) })
     })
 
     const quantcodeCandidate = Effect.fn("ExperimentalHttpApi.quantcodeCandidate")(function* (ctx: {
       payload: typeof QuantCodeCandidatePayload.Type
     }) {
+      if (QuantCodeIdentity.enabled()) {
+        if (!ctx.payload.expected_digest) return yield* new HttpApiError.BadRequest({})
+        return yield* solution(QuantCodeKnowledgeHost.review({ ...ctx.payload, expected_digest: ctx.payload.expected_digest }))
+      }
       if (!ctx.payload.candidate_name.trim() || (ctx.payload.action === "promote" && !ctx.payload.expected_digest)) {
         return yield* Effect.fail(new HttpApiError.BadRequest({}))
       }
@@ -226,9 +316,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const manageDeployment = Effect.fn("ExperimentalHttpApi.manageDeployment")(function* (path: "/deployments" | "/deployments/cancel", payload?: unknown) {
-      const result = yield* (mcp.callTool ? mcp.callTool("quantcode", "session_context", {}) : Effect.succeed<unknown>(undefined))
-      const identity = unwrapQuantCodeResult(result)
-      if (!identity || typeof identity !== "object" || !("role" in identity) || identity.role !== "admin" || !("session_id" in identity) || typeof identity.session_id !== "string") {
+      const identity = yield* currentQuantCodeIdentity()
+      if (!("role" in identity) || identity.role !== "admin") {
         return yield* Effect.fail(new HttpApiError.BadRequest({}))
       }
       const sessionID = identity.session_id
@@ -236,10 +325,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
     const quantcodeDeployments = () => manageDeployment("/deployments")
     const quantcodeReceiptReconcile = Effect.fn("ExperimentalHttpApi.quantcodeReceiptReconcile")(function* (ctx: { payload: typeof QuantCodeReceiptPayload.Type }) {
-      const raw = yield* (mcp.callTool ? mcp.callTool("quantcode", "session_context", {}) : Effect.succeed<unknown>(undefined))
-      const identity = unwrapQuantCodeResult(raw)
-      if (!identity || typeof identity !== "object" || !("role" in identity) || !["admin", "approver"].includes(String(identity.role))
-        || !("session_id" in identity) || typeof identity.session_id !== "string") return yield* Effect.fail(new HttpApiError.BadRequest({}))
+      const identity = yield* currentQuantCodeIdentity()
+      if (!("role" in identity) || !["admin", "approver"].includes(String(identity.role))) return yield* Effect.fail(new HttpApiError.BadRequest({}))
       const sessionID = identity.session_id
       return yield* Effect.tryPromise({ try: () => quantcodeManagement("/receipts/reconcile", sessionID, ctx.payload), catch: () => new HttpApiError.BadRequest({}) })
     })
@@ -249,8 +336,24 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const quantcodeIdentities = () => Effect.tryPromise({
       try: localIdentity, catch: (error) => error,
     }).pipe(Effect.catch((error) => Effect.succeed({ identities: [], error: error instanceof Error ? error.message : "Identity bridge unavailable" })))
+    const quantcodeWorkspaces = (ctx: { query: typeof QuantCodeWorkspacesQuery.Type }) => Effect.tryPromise({
+      try: () => {
+        if (!QuantCodeIdentity.enabled()) throw new QuantCodeWorkspace.WorkspaceDenied("当前研究宿主尚未启用统一执行引擎。")
+        return QuantCodeWorkspace.list(ctx.query)
+      },
+      catch: error => new QuantCodeWorkspaceApiError({ message:
+        error instanceof QuantCodeIdentity.IdentityError || error instanceof QuantCodeWorkspace.WorkspaceDenied
+          ? error.message : "无法读取研究宿主的工作区授权，请联系管理员。" }),
+    })
     const quantcodeIdentityLoginWork = Effect.fn("ExperimentalHttpApi.quantcodeIdentityLoginWork")(function* (group?: string) {
       const result = yield* Effect.tryPromise({ try: () => signInLocalIdentity(group), catch: () => new HttpApiError.BadRequest({}) })
+      if (QuantCodeIdentity.enabled()) {
+        yield* mcp.disconnect("quantcode").pipe(Effect.catch(() => Effect.void))
+        // Identity controls use a synthetic host context. Every loaded research
+        // workspace also owns transports tied to the replaced host credential.
+        yield* instances.disposeAll()
+        return result
+      }
       yield* mcp.connect("quantcode").pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
       const confirmed = yield* (mcp.callTool ? mcp.callTool("quantcode", "session_context", {}) : Effect.succeed<unknown>(undefined))
       const identity = unwrapQuantCodeResult(confirmed)
@@ -262,10 +365,29 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       }
       return result
     })
-    const quantcodeIdentityLogin = (ctx: { payload: { group?: string } }) => withIdentityOperation(quantcodeIdentityLoginWork(ctx.payload.group))
+    const quantcodeIdentityLogin = (ctx: { payload?: unknown }) => withIdentityOperation(quantcodeIdentityLoginWork(
+      ctx.payload && typeof ctx.payload === "object" && "group" in ctx.payload && typeof ctx.payload.group === "string"
+        ? ctx.payload.group : undefined,
+    ))
+    const quantcodeIdentityChallenge = (ctx: { payload?: unknown }) => withIdentityOperation(Effect.tryPromise({
+      try: () => createIdentityChallenge(ctx.payload && typeof ctx.payload === "object" && "identity_id" in ctx.payload ? String(ctx.payload.identity_id) : undefined),
+      catch: () => new QuantCodeIdentityApiError({ message: "无法准备登录，请检查研究宿主配置与组织身份服务。" }),
+    }))
+    const quantcodeIdentityVerify = (ctx: { payload: typeof QuantCodeIdentityVerifyPayload.Type }) => withIdentityOperation(Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () => verifyIdentityChallenge(ctx.payload),
+        catch: () => new QuantCodeIdentityApiError({ message: "登录未完成，身份或登录请求可能已失效，请重试。" }),
+      })
+      // Authentication succeeds independently of component availability. Old
+      // transports must reconnect with the newly verified member credential.
+      yield* mcp.disconnect("quantcode").pipe(Effect.catch(() => Effect.void))
+      if (QuantCodeIdentity.enabled()) yield* instances.disposeAll()
+      return result
+    }))
     const quantcodeIdentityLogout = () => withIdentityOperation(Effect.gen(function* () {
       const result = yield* Effect.tryPromise({ try: signOutLocalIdentity, catch: () => new HttpApiError.BadRequest({}) })
       yield* mcp.disconnect("quantcode").pipe(Effect.catchTag("MCP.NotFoundError", () => Effect.void))
+      if (QuantCodeIdentity.enabled()) yield* instances.disposeAll()
       return result
     }))
 
@@ -376,8 +498,57 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("quantcodeDeploymentSubmit", quantcodeDeploymentSubmit)
       .handle("quantcodeDeploymentCancel", quantcodeDeploymentCancel)
       .handle("quantcodeIdentities", quantcodeIdentities)
+      .handle("quantcodeWorkspaces", quantcodeWorkspaces)
       .handle("quantcodeIdentityLogin", quantcodeIdentityLogin)
+      .handle("quantcodeIdentityChallenge", quantcodeIdentityChallenge)
+      .handle("quantcodeIdentityVerify", quantcodeIdentityVerify)
       .handle("quantcodeIdentityLogout", quantcodeIdentityLogout)
+      .handle("quantcodeSolution", ctx => solution(QuantCodeSolution.status(ctx.params.sessionID)))
+      .handle("quantcodeSolutionProposal", ctx => solution(QuantCodeSolution.propose(ctx.params.sessionID, { ...ctx.payload,
+        acceptance_criteria: [...ctx.payload.acceptance_criteria], file_impact: [...ctx.payload.file_impact] })))
+      .handle("quantcodeSolutionReview", ctx => solution(QuantCodeSolution.review(ctx.params.sessionID, ctx.payload)))
+      .handle("quantcodeReuse", ctx => reuse(ctx.params.sessionID))
+      .handle("quantcodeReuseReview", ctx => reuse(ctx.params.sessionID, ctx.payload))
+      .handle("quantcodeWriteReceipts", ctx => solution(QuantCodeWriteReceipt.status(ctx.params.sessionID)))
+      .handle("quantcodeWriteReceiptReview", ctx => solution(QuantCodeWriteReceipt.review(ctx.params.sessionID, ctx.payload)))
+      .handle("quantcodeTaskLock", ctx => solution(QuantCodeTaskLock.status(ctx.params.sessionID)))
+      .handle("quantcodeTaskLockRecovery", ctx => solution(QuantCodeTaskLock.recover(ctx.params.sessionID, ctx.payload)))
+      .handle("quantcodeBudget", ctx => solution(QuantCodeBudget.status(ctx.params.sessionID)))
+      .handle("quantcodePublicationStatus", () => solution(publisher.status()))
+      .handle("quantcodeTaskIndex", ctx => solution(QuantCodeTaskIndex.list({ limit: ctx.query.limit, cursor: ctx.query.cursor })))
+      .handle("quantcodeTaskIndexRead", ctx => solution(QuantCodeTaskIndex.read(ctx.params.sessionID)))
+      .handle("quantcodeOrganizationTasks", ctx => solution(QuantCodeOrganizationTasks.list({ limit: ctx.query.limit,
+        cursor: ctx.query.cursor, source_id: ctx.query.source_id, root_session_id: ctx.query.root_session_id })))
+      .handle("quantcodeOrganizationTask", ctx => solution(QuantCodeOrganizationTasks.read({ source_id: ctx.params.source_id, session_id: ctx.params.sessionID })))
+      .handle("quantcodeTaskArtifacts", ctx => solution(QuantCodeTaskIndex.listArtifacts({ sessionID: ctx.params.sessionID,
+        source_revision: ctx.query.source_revision, limit: ctx.query.limit, cursor: ctx.query.cursor })))
+      .handle("quantcodeTaskArtifact", ctx => solution(QuantCodeTaskIndex.readArtifact({ sessionID: ctx.params.sessionID,
+        source_revision: ctx.query.source_revision, artifact_id: ctx.params.artifact_id, offset: ctx.query.offset })))
+      .handle("quantcodeOrganizationArtifacts", ctx => solution(QuantCodeOrganizationTasks.listArtifacts({ source_id: ctx.params.source_id,
+        session_id: ctx.params.sessionID, source_revision: ctx.query.source_revision, limit: ctx.query.limit, cursor: ctx.query.cursor })))
+      .handle("quantcodeOrganizationArtifact", ctx => solution(QuantCodeOrganizationTasks.readArtifact({ source_id: ctx.params.source_id,
+        session_id: ctx.params.sessionID, source_revision: ctx.query.source_revision, artifact_id: ctx.params.artifact_id, offset: ctx.query.offset })))
+      .handle("quantcodeLegacyTasks", ctx => solution(QuantCodeLegacyHost.list({ limit: ctx.query.limit, cursor: ctx.query.cursor,
+        organization: ctx.query.organization, reports_only: ctx.query.reports_only, group_filter: ctx.query.group_filter })))
+      .handle("quantcodeLegacyDetail", ctx => solution(QuantCodeLegacyHost.detail({ thread_id: ctx.params.thread_id,
+        checkpoint_id: ctx.query.checkpoint_id, trace_cursor: ctx.query.trace_cursor, organization: ctx.query.organization })))
+      .handle("quantcodeLegacyResume", ctx => solution(QuantCodeLegacyHost.resume(ctx.payload)))
+      .handle("quantcodeLegacyRequestApproval", ctx => solution(QuantCodeLegacyHost.requestApproval(ctx.payload)))
+      .handle("quantcodeBudgetReviewState", ctx => solution(QuantCodeBudget.reviewState(ctx.params.sessionID)))
+      .handle("quantcodeBudgetReview", ctx => solution(QuantCodeBudget.reviewUsage(ctx.params.sessionID, ctx.payload)))
+      .handle("quantcodeBudgetRecoverLock", ctx => solution(QuantCodeBudget.recoverLock(ctx.params.sessionID, ctx.payload)))
+      .handle("quantcodeNativeGates", ctx => solution(QuantCodeGate.list(ctx.query.cursor)))
+      .handle("quantcodeNativeGateRead", ctx => solution(QuantCodeGate.read(ctx.params.gateID)))
+      .handle("quantcodeNativeGateDecision", ctx => solution(QuantCodeGate.decide(ctx.payload)))
+      .handle("quantcodeGitHubCommit", ctx => Effect.tryPromise({ try: () => githubCommit(ctx.query.repo, ctx.query.sha), catch: () => new HttpApiError.BadRequest({}) }))
+      .handle("quantcodeGitHubStatus", () => Effect.tryPromise({ try: () => githubConnection(), catch: () => new HttpApiError.BadRequest({}) }))
+      .handle("quantcodeGitHubCredentialPrepare", () => Effect.tryPromise({ try: prepareGitHubCredential, catch: () => new HttpApiError.BadRequest({}) }))
+      .handle("quantcodeGitHubCredentialImport", ctx => Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        if (request.headers.origin) return yield* new HttpApiError.BadRequest({})
+        return yield* Effect.tryPromise({ try: () => importGitHubCredential(ctx.payload), catch: () => new HttpApiError.BadRequest({}) })
+      }))
+      .handle("quantcodeGitHubConnect", (ctx) => Effect.tryPromise({ try: () => githubConnection(ctx.payload.mode), catch: () => new HttpApiError.BadRequest({}) }))
       .handle("worktree", worktree)
       .handle("worktreeCreate", worktreeCreate)
       .handle("worktreeRemove", worktreeRemove)

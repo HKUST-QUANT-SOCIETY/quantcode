@@ -1,3 +1,11 @@
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { QuantCodeWriteReceipt } from "@/quantcode/write-receipt"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWritePolicy } from "@/quantcode/write-policy"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeProcessSandbox, type ProcessSandbox } from "@/quantcode/process-sandbox"
 import { Effect, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
@@ -339,6 +347,9 @@ export const ShellTool = Tool.define(
   ShellID.ToolID,
   Effect.gen(function* () {
     const config = yield* Config.Service
+    const database = yield* Database.Service
+    const processes = yield* AppProcess.Service
+    const events = yield* EventV2Bridge.Service
     const spawner = yield* ChildProcessSpawner
     const fs = yield* FSUtil.Service
     const trunc = yield* Truncate.Service
@@ -432,6 +443,8 @@ export const ShellTool = Tool.define(
         cwd: string
         env: NodeJS.ProcessEnv
         timeout: number
+        sandbox?: ProcessSandbox
+        admittedFiles?: string[]
       },
       ctx: Tool.Context,
     ) {
@@ -475,13 +488,17 @@ export const ShellTool = Tool.define(
       yield* ctx.metadata({
         metadata: {
           output: "",
+          ...(input.admittedFiles ? { quantcodeWrite: { files: input.admittedFiles } } : {}),
         },
       })
 
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
+          const launch = input.sandbox
+            ? ChildProcess.make(input.sandbox.command, input.sandbox.args, { cwd: input.sandbox.cwd, env: input.sandbox.env, stdin: "ignore", detached: true })
+            : cmd(input.shell, input.command, input.cwd, input.env)
+          const handle = yield* spawner.spawn(launch)
 
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -627,6 +644,31 @@ export const ShellTool = Tool.define(
                   yield* ask(ctx, scan, params)
                 }),
               )
+
+              if (QuantCodeIdentity.enabled()) {
+                return yield* QuantCodeWritePolicy.guarded(ctx.sessionID, [], admitted => Effect.scoped(Effect.gen(function* () {
+                  const target = yield* Effect.promise(() => QuantCodeWorkspace.target(admitted.grant, cwd))
+                  const sandbox = yield* Effect.acquireRelease(
+                    Effect.promise(() => QuantCodeProcessSandbox.prepare({ grant: { ...admitted.grant, directory: target },
+                      command: shell, args: ["-c", params.command], writePaths: admitted.files })),
+                    value => Effect.promise(() => value.dispose()),
+                  )
+                  const execute = run({ shell, command: params.command, cwd: target,
+                    env: sandbox.env, timeout, sandbox, admittedFiles: admitted.files }, ctx)
+                  const result = admitted.files.length ? yield* QuantCodeWriteReceipt.run({
+                    sessionID: ctx.sessionID, messageID: ctx.messageID, callID: ctx.callID, tool: "shell", args: params,
+                    files: admitted.files, planHashes: admitted.planHashes,
+                  }, begin => Effect.gen(function* () {
+                    ctx.abort.throwIfAborted()
+                    yield* begin
+                    const output = yield* execute
+                    if (output.metadata.exit !== 0) throw new QuantCodeWriteReceipt.OutcomeUnknown()
+                    return output
+                  })) : yield* execute
+                  return { ...result, metadata: { ...result.metadata,
+                    quantcodeWrite: { files: admitted.files, planHashes: admitted.planHashes }, sandboxed: true } }
+                })), true).pipe(Effect.provideService(Database.Service, database), Effect.provideService(AppProcess.Service, processes), Effect.provideService(EventV2Bridge.Service, events))
+              }
 
               return yield* run(
                 {

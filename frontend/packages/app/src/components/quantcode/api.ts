@@ -206,14 +206,13 @@ export async function reviewQuantCodeCandidate(client: OpencodeClient, candidate
 
 
 export function createLocalIdentityConnect(client: OpencodeClient, onConnected: () => void): SshConnectFn {
-  return async ({ identityId, group, log }) => {
-    if (identityId !== "host-default") return { status: "error", reason: "未知本机身份" }
-    if (group && !QUANTCODE_GROUPS.includes(group as QuantCodeGroup)) return { status: "error", reason: "无效的组" }
+  return async ({ identityId, log }) => {
+    if (!identityId) return { status: "error", reason: "请选择本机 SSH 公钥身份" }
     log("正在请求 SSH agent 签名并验证正式 roster…")
-    const response = await client.quantcode.identity.login({ group: group as QuantCodeGroup | undefined }).catch(() => undefined)
+    const response = await client.quantcode.identity.login({}).catch(() => undefined)
     const result = response?.data
     if (!response || response.error || !result || typeof result !== "object" || !("status" in result) || result.status !== "connected" || !("fingerprint" in result) || typeof result.fingerprint !== "string"
-      || !("group" in result) || typeof result.group !== "string" || (group && result.group !== group)) {
+      || !("group" in result) || typeof result.group !== "string" || !QUANTCODE_GROUPS.includes(result.group as QuantCodeGroup)) {
       return { status: "error", reason: "身份认证未完成，请检查本机 SSH agent、gateway 和 roster 配置" }
     }
     onConnected()

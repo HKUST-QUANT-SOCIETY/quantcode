@@ -29,6 +29,8 @@ OpenCode 配置（``opencode.jsonc`` 的 ``mcp`` 段）::
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import logging
 import os
 import sys
@@ -80,6 +82,63 @@ _ADMIN_ONLY_META_TOOLS = frozenset(
     {"admin_list_runs", "admin_errors", "admin_blackboard_read", "admin_task_history", "admin_report_history", "admin_get_task_history"}
 )
 _APPROVER_META_TOOLS = frozenset({"review_distill_candidate", "list_distill_candidates", "list_pending_gates"})
+# These implementations own the legacy Python runner/checkpoints or a separate
+# model configuration. New native tasks cannot discover or invoke them.
+_LEGACY_EXECUTOR_TOOLS = frozenset({"run_agent", "spawn_subagent", "spawn_agent_python"})
+_NATIVE_EXCLUDED_TOOLS = _LEGACY_EXECUTOR_TOOLS | frozenset({
+    "check_subagent", "kill_subagent", "list_subagents",
+    "draft_solution", "revise_solution", "freeze_solution", "solution_status",
+    "match_main", "gen_schema",
+})
+
+
+def _same_json(left: Any, right: Any) -> bool:
+    """JSON equality without Python's True == 1 authorization ambiguity."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(_same_json(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(_same_json(a, b) for a, b in zip(left, right))
+    if isinstance(left, float) and (not math.isfinite(left) or not math.isfinite(right)):
+        return False
+    return left == right
+
+
+def _native_call_context(meta: Any, arguments: dict, context: dict) -> dict:
+    """Only the stdio transport may supply native-call metadata, never args.
+
+    Identifiers correlate a call; they do not grant permissions. Shared writes
+    separately verify the gateway's current exact operation approval.
+    """
+    if meta is None:
+        return {}
+    if not isinstance(arguments, dict):
+        raise PermissionError("native tool arguments must be an object")
+    if not isinstance(meta, dict):
+        raise PermissionError("invalid MCP transport metadata")
+    native = meta.get("quantcode")
+    if native is None:
+        return {}
+    required = {"version", "login_session_id", "native_session_id", "root_session_id", "message_id", "call_id",
+                "server", "catalog_digest", "arguments_json", "arguments_digest"}
+    if not isinstance(native, dict) or not required <= set(native) or set(native) - required - {"gate_id", "operation_digest"}:
+        raise PermissionError("invalid native call binding")
+    if type(native["version"]) is not int or native["version"] != 1:
+        raise PermissionError("unsupported native call version")
+    for field in required - {"version", "arguments_json"} | ({"gate_id", "operation_digest"} & set(native)):
+        if not isinstance(native[field], str) or not native[field] or len(native[field]) > 512:
+            raise PermissionError("invalid native call identifier")
+    if not isinstance(native["arguments_json"], str) or len(native["arguments_json"].encode("utf-8")) > 2_000_000:
+        raise PermissionError("invalid native argument envelope")
+    if context.get("identity_source") != "ssh_roster" or context.get("session_id") != native["login_session_id"]:
+        raise PermissionError("native call login no longer matches the authenticated session")
+    if not os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE"):
+        raise PermissionError("native calls require a live gateway session")
+    digest = hashlib.sha256(native["arguments_json"].encode("utf-8")).hexdigest()
+    if digest != native["arguments_digest"] or not _same_json(json.loads(native["arguments_json"]), arguments):
+        raise PermissionError("native argument binding does not match the actual tool arguments")
+    return {"_native_call": dict(native), "thread_id": native["native_session_id"]}
 
 
 def _get_ssh_fingerprint() -> str | None:
@@ -505,15 +564,28 @@ class SearchMemoryArgs(BaseModel):
 
 def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
     """Search maintained long-term Memory with group ACL; never auto-reconciles disk."""
-    if os.environ.get("QUANTCODE_SHARED_MEMORY", "").strip().lower() == "gateway":
+    native = os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" or "_native_call" in (ctx or {})
+    if native or os.environ.get("QUANTCODE_SHARED_MEMORY", "").strip().lower() == "gateway":
         session_file = os.environ.get("QUANTCODE_IDENTITY_SESSION_FILE", "").strip()
         if not session_file:
             raise RuntimeError("AUTHENTICATION_REQUIRED: shared Memory requires a gateway session")
-        from quantcode.identity_login import _session_record
+        from quantcode.identity_login import _session_record, read_session_file
         import httpx
-        record = _session_record(Path(session_file))
-        expected = (ctx or {}).get("session_id")
-        payload = {"query": args.query, "limit": args.limit, "expected_session_id": expected}
+        path = Path(session_file)
+        if not path.is_absolute() or path.is_symlink():
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory requires a private host session file")
+        record = _session_record(path)
+        current = read_session_file(path)
+        fields = ("session_id", "actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject", "identity_source")
+        if any(current.get(field) != (ctx or {}).get(field) for field in fields) or \
+                set(current.get("resource_scopes") or []) != set((ctx or {}).get("resource_scopes") or []):
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory identity changed")
+        binding = (ctx or {}).get("_native_call")
+        if binding is not None and (not isinstance(binding, dict) or binding.get("login_session_id") != current["session_id"]):
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory task login changed")
+        if _session_record(path) != record:
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory host credential changed")
+        payload = {"query": args.query, "limit": args.limit, "expected_session_id": current["session_id"]}
         with httpx.Client(base_url=record["gateway"], timeout=15, follow_redirects=False, trust_env=False) as client:
             response = client.post("/memory/search", json=payload,
                                    headers={"Authorization": f"Bearer {record['token']}"})
@@ -521,7 +593,10 @@ def _search_memory_execute(args: SearchMemoryArgs, ctx: dict) -> dict:
             raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory session is expired or revoked")
         if response.status_code != 200:
             raise RuntimeError(f"shared Memory unavailable ({response.status_code})")
-        return response.json()
+        result = response.json()
+        if _session_record(path) != record or read_session_file(path) != current or _session_record(path) != record:
+            raise PermissionError("AUTHENTICATION_REQUIRED: shared Memory identity changed before disclosure")
+        return result
     # MemoryService.root is the project root.  It owns the canonical
     # ``<project>/.quantcode/memory/...`` layout; passing ``.quantcode`` here
     # would create a second ``.quantcode/.quantcode`` prefix on disk.
@@ -588,6 +663,7 @@ search_memory_tool = ToolDef(
     schema=SearchMemoryArgs,
     execute=_search_memory_execute,
 )
+search_memory_tool._meta = True  # type: ignore[attr-defined]
 registry._tools[search_memory_tool.id] = search_memory_tool
 
 
@@ -605,7 +681,18 @@ class ConsumeStatusArgs(BaseModel):
 def _consume_status_execute(args: ConsumeStatusArgs, ctx: dict) -> dict:
     """执行 consume_status：候选数 / 最近消费时间 / rlhf 行数。只读，best-effort。"""
     from runner.dream_consumer import consume_status
-
+    if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" or "_native_call" in (ctx or {}):
+        from runner.distill.governance import candidate_storage, _load_index
+        root = candidate_storage(ctx)
+        index = _load_index(root / "index.json")
+        visible = [item for item in index["candidates"]
+                   if ctx.get("role") == "admin" or item.get("group") == ctx.get("group")]
+        result = {"candidates": len(visible), "last_consumed": index.get("updated_at"),
+                  "rlhf_lines": None, "source": "native_tool_events"}
+        if ctx.get("role") == "admin":
+            from runner.admin_scope import audited_read_result
+            return audited_read_result("consume_status", {**ctx, "evidence_dir": root / "audit"}, result)
+        return result
     return consume_status()
 
 
@@ -645,7 +732,7 @@ import tools.portfolio._register  # noqa: F401,E402  触发 portfolio 三工具�
 
 
 def _get_model():
-    """从环境变量实例化 LLM 模型，供 run_agent tool 使用（P0-6/C30 收敛：仅 env）。
+    """Legacy-only model factory; new tasks use the native Provider.
 
     - QUANTCODE_API_KEY：API key（唯一 key 入口）
     - QUANTCODE_MODEL_PROVIDER：deepseek | anthropic | stepfun | qwen（默认 deepseek）
@@ -655,6 +742,8 @@ def _get_model():
     返回一个可调用对象，签名 ``(messages, tools=...) -> AIMessage``，
     适配 AgentRunner 的 model 接口。配置失败返回 None。
     """
+    if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1":
+        raise PermissionError("native QuantCode tasks use the host Provider; a second Python model loop is unavailable")
     api_key = os.environ.get("QUANTCODE_API_KEY", "").strip()
     if not api_key:
         # ★ 诊断：列出所有包含 KEY / API 的环境变量键名，帮助定位问题
@@ -876,6 +965,10 @@ def _tools_for_session(group: str | None, role: str | None = None) -> list[ToolD
         visible = registry.get_tools_for_group(group)
     else:
         visible = registry.list_all()
+    if group == "model" and os.environ.get("QUANTCODE_UNIFIED_RUNTIME") != "1":
+        # The model group's newly admitted reader is a native shared-store
+        # contract; keep it out of the old model executor's tool list.
+        visible = [tool for tool in visible if tool.id != "read_blackboard"]
 
     if not _is_admin_session(group):
         visible = [tool for tool in visible if tool.id not in _ADMIN_ONLY_TOOLS]
@@ -888,6 +981,8 @@ def _tools_for_session(group: str | None, role: str | None = None) -> list[ToolD
         if tool.id in _APPROVER_META_TOOLS and effective_role not in {"approver", "admin"}:
             continue
         visible.append(tool)
+    if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1":
+        visible = [tool for tool in visible if tool.id not in _NATIVE_EXCLUDED_TOOLS]
     return sorted(visible, key=lambda tool: tool.id)
 
 
@@ -897,8 +992,8 @@ def list_tools() -> dict:
     未设置 ``QUANTCODE_GROUP`` 环境变量时保持原行为（返回全部已注册 tool）。
     设置后仅返回该组 ``.opencode/groups/<group>/tool_allowlist.yaml`` 内的 tool。
 
-    Day 4 俞高磊: 在列表末尾附加 run_agent meta tool（若存在），
-    让 OpenCode compose agent 能发现并调用它。
+    Native mode removes legacy runner/checkpoint and independently configured
+    model tools. The native host applies the same published effect catalog.
     """
     _mcp_group = _get_mcp_group()
     tools = _tools_for_session(_mcp_group, _session_role(_mcp_group))
@@ -916,7 +1011,7 @@ def list_tools() -> dict:
     }
 
 
-def call_tool(name: str, arguments: dict) -> dict:
+def call_tool(name: str, arguments: dict, *, meta: dict | None = None) -> dict:
     """实现 MCP 的 ``tools/call``：执行 tool 并返回结果。
 
     返回 MCP 规定的格式::
@@ -926,12 +1021,19 @@ def call_tool(name: str, arguments: dict) -> dict:
             "isError": False
         }
 
-    Day 4 俞高磊：ctx 注入 group（当前活跃组）+ _model（LLM 实例），
-    供 run_agent 等需要完整 AgentRunner 上下文的 tool 使用。
+    Native calls use roster identity and host-provided task metadata. Only an
+    explicit legacy executor receives a legacy Python model instance.
     """
     try:
         mcp_group = _get_mcp_group()
         session_context = _session_context_for_call(mcp_group)
+        native = _native_call_context(meta, arguments, session_context)
+        if (native or os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1") and name in _NATIVE_EXCLUDED_TOOLS:
+            raise PermissionError("this tool belongs to the legacy executor; use the native QuantCode task workflow")
+        if name in {"write_blackboard", "read_blackboard"} and os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" and not native:
+            raise PermissionError("native Blackboard calls require transport-owned session and approval metadata")
+        if name == "read_blackboard" and mcp_group == "model" and not native:
+            raise PermissionError("model Blackboard read requires the native shared-store binding")
         session_role = str(session_context.get("role") or "analyst")
         allowed_tools = {tool.id for tool in _tools_for_session(mcp_group, session_role)}
         if name not in allowed_tools:
@@ -941,13 +1043,15 @@ def call_tool(name: str, arguments: dict) -> dict:
         ctx: dict[str, Any] = {
             **session_context,
             "session_id": session_context.get("session_id") or _SESSION_ID,
-            "_model": _get_model(),
+            # Deterministic organization calls, including raw host lookups,
+            # never initialize a model. Only an explicit legacy runner does.
+            "_model": _get_model() if name in _LEGACY_EXECUTOR_TOOLS and not native else None,
             "_allowed_tool_ids": allowed_tools,
+            **native,
         }
-        logger.info("call_tool: %s(%s) group=%s model=%s",
-                     name, json.dumps(arguments, default=str)[:200],
-                     mcp_group or "(unset)",
-                     "present" if ctx["_model"] else "missing")
+        logger.info("call_tool: %s group=%s model=%s native=%s",
+                     name, mcp_group or "(unset)",
+                     "present" if ctx["_model"] else "missing", bool(native))
         result = registry.call(name, arguments, ctx=ctx)
         text = result if isinstance(result, str) else json.dumps(result, default=str, ensure_ascii=False)
         return {
@@ -992,7 +1096,7 @@ def handle_request(req: dict) -> dict:
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "result": call_tool(name, arguments),
+            "result": call_tool(name, arguments, meta=params.get("_meta")),
         }
     elif method == "ping":
         return {"jsonrpc": "2.0", "id": req_id, "result": {}}
@@ -1022,11 +1126,9 @@ def serve_stdio() -> None:
     协议：每行一条 JSON。响应可选（notifications 无 id 时不写）。
     """
     _configure_stdio_encoding()
-    logger.info("MCP server starting: cwd=%s python=%s group=%s "
-                "QUANTCODE_API_KEY=%s",
-                os.getcwd(), sys.executable,
+    logger.info("QuantCode organization tools starting: group=%s executor=%s",
                 _get_mcp_group() or "(unset)",
-                "set" if os.environ.get("QUANTCODE_API_KEY") else "MISSING")
+                "native" if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" else "legacy-compatible")
     for line in sys.stdin:
         line = line.strip()
         if not line:

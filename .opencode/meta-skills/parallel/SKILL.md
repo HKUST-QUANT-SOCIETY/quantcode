@@ -5,6 +5,8 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 # Dispatching Parallel Agents
 
+QuantCode integration: parallel work uses native child sessions under the current root task. Preserve inherited roster identity, workspace, budget and frozen-plan constraints even when prompts have isolated context. Use only the advertised native child-task tool; no second model configuration or Python executor is needed. Shared writes still require an approval for the exact resource, parameters and version.
+
 ## Overview
 
 You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.

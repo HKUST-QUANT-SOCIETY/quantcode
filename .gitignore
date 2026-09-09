@@ -50,3 +50,8 @@ docs/Day2_to_Day5_Roadmap.md
 # 本地工具状态不入库
 .mimosa/
 .zcode/
+
+# Local acceptance-run artifacts
+.playwright-cli/
+:memory:*
+/tests/fixtures/blackboard.json

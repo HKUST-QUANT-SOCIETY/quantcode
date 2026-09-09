@@ -10,6 +10,8 @@ tools:
 
 # Options Vol Surface Skill
 
+在当前原生任务中只调用实际已公布的曲面组件，沿用roster身份和宿主Provider。本文样本CSV与sample_csv_stub结果仅用于明确的开发fixture验证，不作为默认研究数据或生产曲面证据。组件不可用时保留UNAVAILABLE，不在QuantCode中补写曲面算法。
+
 ## 何时使用
 
 `options-brainstorm` 完成且已有 `OptionsSpec`；或研究员直接提供清洗后的期权链数据。

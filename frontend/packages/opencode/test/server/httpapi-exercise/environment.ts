@@ -2,6 +2,14 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { Effect } from "effect"
 import path from "path"
 
+// Auth probes run without scenario seeds. Never let them inherit a member's
+// host connection, SSH agent, or GitHub credentials from the invoking shell.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("QUANTCODE_") || ["OPENCODE_CHANNEL", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN"].includes(key)) {
+    delete process.env[key]
+  }
+}
+
 const preserveExerciseGlobalRoot = !!process.env.OPENCODE_HTTPAPI_EXERCISE_GLOBAL
 export const exerciseGlobalRoot =
   process.env.OPENCODE_HTTPAPI_EXERCISE_GLOBAL ??

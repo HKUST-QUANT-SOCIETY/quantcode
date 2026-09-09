@@ -1,3 +1,4 @@
+import { isQuantCode } from "@/brand"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -109,10 +110,11 @@ export const SettingsProvidersV2: Component = () => {
   return (
     <>
       <div class="settings-v2-tab-header">
-        <h2 class="settings-v2-tab-title">{language.t("settings.providers.title")}</h2>
+        <h2 class="settings-v2-tab-title">{isQuantCode ? "模型供应商" : language.t("settings.providers.title")}</h2>
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
+        <Show when={isQuantCode}><p class="qc-catalog-intro">通过接口 URL 和 API Key 配置当前研究宿主的模型。添加供应商后可获取模型列表，在任务中选择模型。</p></Show>
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
           <SettingsListV2>
@@ -137,6 +139,7 @@ export const SettingsProvidersV2: Component = () => {
                         <Tag>{type(item)}</Tag>
                       </div>
                     </div>
+                    <Show when={isQuantCode && isConfigCustom(item.id)}><ButtonV2 size="normal" variant="ghost-muted" onClick={() => dialog.show(() => <DialogCustomProvider providerID={item.id} />)}>编辑</ButtonV2></Show>
                     <Show
                       when={canDisconnect(item)}
                       fallback={

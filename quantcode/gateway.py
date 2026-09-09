@@ -201,6 +201,10 @@ def handler(gateway: IdentityGateway):
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
+            # This HTTP/1.0 handler closes each response. Explicitly signal it
+            # so native fetch clients do not race to reuse the closing socket.
+            self.send_header("Connection", "close")
+            self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
 
@@ -234,11 +238,42 @@ def handler(gateway: IdentityGateway):
                 if self.headers.get("Origin"):
                     return self.reply(403, {"error": "host identity bridge required"})
                 size = int(self.headers.get("Content-Length", "0"))
-                if size < 1 or size > 16384:
+                # Native task publication may carry a bounded set of small
+                # artifact previews. Other gateway mutations stay tiny.
+                max_size = 1_000_000 if self.path == "/native-tasks/publish" else 131072 if self.path == "/native-tasks/artifacts/publish" else 16384
+                if size < 1 or size > max_size:
                     return self.reply(400, {"error": "invalid request size"})
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
                     raise ValueError("object payload required")
+                if self.path == "/native-reviews/authorize":
+                    from quantcode import native_review
+                    return self.reply(200, native_review.authorize(gateway, self.token(), payload))
+                if self.path in {"/native-tasks/publish", "/native-tasks/read", "/native-tasks/list",
+                                  "/native-tasks/artifacts/publish", "/native-tasks/artifacts/list", "/native-tasks/artifacts/read"}:
+                    from quantcode import native_tasks
+                    from quantcode.native_task_migration import NativeTaskMigrationRequired
+                    action = {"/native-tasks/publish": native_tasks.publish,
+                              "/native-tasks/read": native_tasks.read,
+                              "/native-tasks/list": native_tasks.list_tasks,
+                              "/native-tasks/artifacts/publish": native_tasks.publish_artifact,
+                              "/native-tasks/artifacts/list": native_tasks.list_artifacts,
+                              "/native-tasks/artifacts/read": native_tasks.read_artifact}[self.path]
+                    try:
+                        result = action(gateway, self.token(), payload)
+                    except NativeTaskMigrationRequired:
+                        return self.reply(409, {"error": "migration_required", "code": "NATIVE_TASK_INDEX_REBUILD_REQUIRED",
+                                                "message": "历史任务正在等待恢复索引，请稍后刷新。"})
+                    return self.reply(200, result)
+                if self.path in {"/native-gates/publish", "/native-gates/read", "/native-gates/list",
+                                  "/native-gates/decide", "/native-gates/cancel"}:
+                    from quantcode import native_gate
+                    action = {"/native-gates/publish": native_gate.publish,
+                              "/native-gates/read": native_gate.read,
+                              "/native-gates/list": native_gate.list_gates,
+                              "/native-gates/decide": native_gate.decide,
+                              "/native-gates/cancel": native_gate.cancel}[self.path]
+                    return self.reply(200, action(gateway, self.token(), payload))
                 if self.path == "/session/validate-checkpoint":
                     return self.reply(200, gateway.validate_checkpoint(self.token(), payload))
                 if self.path == "/memory/search":

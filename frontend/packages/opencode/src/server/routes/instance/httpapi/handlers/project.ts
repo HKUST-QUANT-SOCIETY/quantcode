@@ -6,6 +6,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProjectNotFoundError } from "../errors"
 import { markInstanceForReload } from "../lifecycle"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
 
 export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", (handlers) =>
   Effect.gen(function* () {
@@ -17,7 +19,11 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
-      return (yield* InstanceState.context).project
+      const context = yield* InstanceState.context
+      if (!QuantCodeIdentity.enabled()) return context.project
+      const current = yield* svc.get(context.project.id)
+      if (!current) throw new QuantCodeWorkspace.WorkspaceDenied()
+      return current
     })
 
     const initGit = Effect.fn("ProjectHttpApi.initGit")(function* () {
@@ -49,9 +55,19 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       )
     })
 
-    const directories = Effect.fn("ProjectHttpApi.directories")((ctx: { params: { projectID: ProjectV2.ID } }) =>
-      project.directories({ projectID: ctx.params.projectID }),
-    )
+    const directories = Effect.fn("ProjectHttpApi.directories")(function* (ctx: { params: { projectID: ProjectV2.ID } }) {
+      if (!QuantCodeIdentity.enabled()) return yield* project.directories({ projectID: ctx.params.projectID })
+      if (!(yield* svc.get(ctx.params.projectID))) return []
+      const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+      const entries = yield* project.directories({ projectID: ctx.params.projectID })
+      const visible = yield* Effect.forEach(entries, entry => Effect.promise(async () => {
+        const grant = await QuantCodeWorkspace.authorize(entry.directory, "read", identity).catch(() => undefined)
+        if (!grant) return undefined
+        await QuantCodeWorkspace.revalidate(grant)
+        return entry
+      }))
+      return visible.filter(entry => entry !== undefined)
+    })
 
     return handlers
       .handle("list", list)

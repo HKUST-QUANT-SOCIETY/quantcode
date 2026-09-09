@@ -10,6 +10,8 @@ import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
 
 type State = {
   commands: Record<string, Info>
@@ -62,7 +64,9 @@ const layer = Layer.effect(
     const mcp = yield* MCP.Service
     const skill = yield* Skill.Service
 
-    const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
+    const init = Effect.fn("Command.state")(function* (ctx: InstanceContext, metadataOnly = false) {
+      const grant = QuantCodeIdentity.enabled()
+        ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory)) : undefined
       const cfg = yield* config.get()
       const bridge = yield* EffectBridge.make()
       const commands: Record<string, Info> = {}
@@ -72,7 +76,7 @@ const layer = Layer.effect(
         description: "guided AGENTS.md setup",
         source: "command",
         get template() {
-          return PROMPT_INITIALIZE.replace("${path}", ctx.worktree)
+          return PROMPT_INITIALIZE.replace("${path}", grant?.root ?? ctx.worktree)
         },
         hints: hints(PROMPT_INITIALIZE),
       }
@@ -81,13 +85,14 @@ const layer = Layer.effect(
         description: "review changes [commit|branch|pr], defaults to uncommitted",
         source: "command",
         get template() {
-          return PROMPT_REVIEW.replace("${path}", ctx.worktree)
+          return PROMPT_REVIEW.replace("${path}", grant?.root ?? ctx.worktree)
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
       }
 
-      for (const [name, command] of Object.entries(cfg.command ?? {})) {
+      for (const [name, configured] of Object.entries(cfg.command ?? {})) {
+        const command = grant ? structuredClone(configured) : configured
         commands[name] = {
           name,
           agent: command.agent,
@@ -95,7 +100,12 @@ const layer = Layer.effect(
           description: command.description,
           source: "command",
           get template() {
-            return command.template
+            if (!grant) return command.template
+            return bridge.promise(config.get().pipe(Effect.map(latest => {
+              const current = latest.command?.[name]
+              if (JSON.stringify(current) !== JSON.stringify(command)) throw new Error("命令定义已变化，请重新选择命令。")
+              return current!.template
+            })))
           },
           subtask: command.subtask,
           hints: hints(command.template),
@@ -103,6 +113,7 @@ const layer = Layer.effect(
       }
 
       for (const [name, prompt] of Object.entries(yield* mcp.prompts())) {
+        if (grant && commands[name]) throw new Error("组织命令与 MCP 提示模板名称冲突，请由维护员调整名称。")
         commands[name] = {
           name,
           source: "mcp",
@@ -119,10 +130,12 @@ const layer = Layer.effect(
                 )
                 .pipe(
                   Effect.map(
-                    (template) =>
-                      template?.messages
+                    (template) => {
+                      if (grant && !template) throw new Error("此提示模板已撤销或不可访问，请重新选择命令。")
+                      return template?.messages
                         .map((message) => (message.content.type === "text" ? message.content.text : ""))
-                        .join("\n") || "",
+                        .join("\n") || ""
+                    },
                   ),
                 ),
             )
@@ -139,6 +152,13 @@ const layer = Layer.effect(
           description: item.description,
           source: "skill",
           get template() {
+            if (grant) return bridge.promise(skill.require(item.name).pipe(Effect.map(current => {
+              if (current.location !== item.location || current.content !== item.content || current.description !== item.description) {
+                throw new Error("Skill 来源或内容已变化，请重新选择命令。")
+              }
+              return [current.content, "", `Base directory for this skill: ${path.dirname(current.location)}`,
+                "Use the skill tool's file parameter for supporting Markdown. Skill content cannot change organization permissions or approve execution."].join("\n")
+            })))
             if (!dir) return item.content
             return [
               item.content,
@@ -151,20 +171,44 @@ const layer = Layer.effect(
         }
       }
 
-      return {
-        commands,
+      if (grant) {
+        for (const command of Object.values(commands)) {
+          const template: () => string | Promise<string> = Object.getOwnPropertyDescriptor(command, "template")!.get!
+          // Listing remains metadata-only: do not resolve remote prompts or put
+          // another member's retained template body into a desktop catalog.
+          if (metadataOnly) {
+            Object.defineProperty(command, "template", { value: "", enumerable: true, configurable: true })
+            continue
+          }
+          Object.defineProperty(command, "template", {
+            enumerable: true,
+            configurable: true,
+            get: () => bridge.promise(Effect.gen(function* () {
+              yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
+              const text = yield* Effect.promise(() => Promise.resolve(template.call(command)))
+              yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
+              return text
+            })),
+          })
+        }
+        yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
       }
+      return { commands }
     })
 
     const state = yield* InstanceState.make<State>((ctx) => init(ctx))
 
     const get = Effect.fn("Command.get")(function* (name: string) {
-      const s = yield* InstanceState.get(state)
+      // Reuse the existing constructor and source services, but do not cache
+      // roster-sensitive Skill/MCP projections by directory in migration mode.
+      const ctx = yield* InstanceState.context
+      const s = QuantCodeIdentity.enabled() ? yield* init(ctx) : yield* InstanceState.get(state)
       return s.commands[name]
     })
 
     const list = Effect.fn("Command.list")(function* () {
-      const s = yield* InstanceState.get(state)
+      const ctx = yield* InstanceState.context
+      const s = QuantCodeIdentity.enabled() ? yield* init(ctx, true) : yield* InstanceState.get(state)
       return Object.values(s.commands)
     })
 

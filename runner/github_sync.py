@@ -15,7 +15,7 @@ from runner.github_tree import repository_files
 from schemas.pop import Pop, PopType
 
 
-def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
+def sync_graph(ctx: dict, *, db_path: Path | None = None, refresh_limit: int | None = None) -> dict:
     from runner.langgraph_base import PROJECT_ROOT
     from tools.admin._register import GH_ORG, _gh_get, _resolve_github_token, _safe_repo, _visible_repos
 
@@ -36,6 +36,14 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
     ]).encode()).hexdigest()
     with store._conn() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS graph_snapshots (scope TEXT, repo TEXT, payload TEXT NOT NULL, PRIMARY KEY(scope,repo))")
+    with store._conn() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS graph_refresh_attempts (scope TEXT, repo TEXT, attempted_at TEXT NOT NULL, PRIMARY KEY(scope,repo))")
+        attempts = dict(conn.execute("SELECT repo,attempted_at FROM graph_refresh_attempts WHERE scope=?", (scope,)))
+        saved = {name: json.loads(payload) for name, payload in conn.execute(
+            "SELECT repo,payload FROM graph_snapshots WHERE scope=?", (scope,))}
+    if refresh_limit is not None:
+        repos = sorted(repos, key=lambda repo: attempts.get(f"{GH_ORG}/{repo.get('name')}", saved.get(f"{GH_ORG}/{repo.get('name')}", {}).get("observed_at", "")))
+    refreshed = 0
     output = []
     for repo in repos:
         name = _safe_repo(repo.get("name"))
@@ -50,9 +58,19 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
         if (previous and 0 <= (now - datetime.fromisoformat(previous["observed_at"])).total_seconds() < 60
                 and previous.get("default_branch") == repo.get("default_branch")
                 and previous.get("archived") == bool(repo.get("archived"))):
-            output.append(previous)
+            output.append({**previous, "description": repo.get("description")})
             continue
-        graph = dict(repo=full_name, default_branch=repo.get("default_branch"),
+        if refresh_limit is not None and refreshed >= refresh_limit:
+            output.append({**previous, "description": repo.get("description"), "refresh_pending": True} if previous else dict(
+                repo=full_name, description=repo.get("description"), default_branch=repo.get("default_branch"), observed_at=None,
+                heads=[], commit_nodes=[], dependency_changes=[], errors=[],
+                sync_status="UNVERIFIED", refresh_pending=True))
+            continue
+        refreshed += 1
+        if refresh_limit is not None:
+            with store._conn() as conn:
+                conn.execute("INSERT INTO graph_refresh_attempts VALUES(?,?,?) ON CONFLICT(scope,repo) DO UPDATE SET attempted_at=excluded.attempted_at", (scope, full_name, now.isoformat()))
+        graph = dict(repo=full_name, description=repo.get("description"), default_branch=repo.get("default_branch"),
                      archived=bool(repo.get("archived")), visibility_source=visibility,
                      observed_at=now.isoformat(), branches=[], heads=[], commit_nodes=[],
                      parent_edges=[], dependency_files=[], dependency_changes=[], package_changes=[], errors=[],
@@ -189,7 +207,8 @@ def sync_graph(ctx: dict, *, db_path: Path | None = None) -> dict:
                          (scope, full_name, json.dumps(graph)))
         output.append(graph)
     result = {"repos": output, "visibility_source": visibility,
-              "sync_status": "PARTIAL" if any(repo["sync_status"] == "PARTIAL" for repo in output) else "CONNECTED"}
+              "refresh_pending": sum(bool(repo.get("refresh_pending")) for repo in output),
+              "sync_status": "PARTIAL" if any(repo["sync_status"] != "CONNECTED" or repo.get("refresh_pending") for repo in output) else "CONNECTED"}
     if ctx.get("role") == "admin":
         from runner.admin_scope import audited_read_result
         return audited_read_result("get_gitgraph", ctx, result)

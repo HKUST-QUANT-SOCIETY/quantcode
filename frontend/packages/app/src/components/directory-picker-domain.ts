@@ -321,14 +321,26 @@ export function displayPickerPath(path: string, input: string, home: string) {
   return pickerTilde(value, home) || value
 }
 
-export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string | undefined; home: () => string }) {
+export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string | undefined; home: () => string;
+  roots?: () => readonly string[] | undefined }) {
   const cache = new Map<string, Promise<Array<{ name: string; absolute: string }>>>()
   let current = 0
+  const permitted = (directory: string) => !args.roots?.() || args.roots()!.some(root => pickerRelativePath(root, directory) !== undefined)
 
   const scoped = (value: string) => {
     const base = args.base()
     if (!base) return
     const raw = normalizePickerDrive(value)
+    const authorized = args.roots?.()
+    if (authorized) {
+      const target = pickerAbsoluteInput(raw, args.home(), base)
+      const root = [...authorized].sort((left, right) => right.length - left.length)
+        .find(root => pickerRelativePath(root, target) !== undefined)
+      if (!root) return
+      // Absolute paths begin at an authorized root, never filesystem '/'.
+      if (pickerRoot(raw) || raw.startsWith("~")) return { directory: trimPickerPath(root), path: pickerRelativePath(root, target)! }
+      if (!permitted(base)) return
+    }
     if (!raw) return { directory: trimPickerPath(base), path: "" }
     const home = args.home()
     if (raw === "~") return { directory: trimPickerPath(home || base), path: "" }
@@ -339,6 +351,7 @@ export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string
   }
 
   const directories = async (directory: string) => {
+    if (!permitted(directory)) return []
     const key = trimPickerPath(directory)
     const existing = cache.get(key)
     if (existing) return existing
@@ -348,7 +361,7 @@ export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string
       .catch(() => [])
       .then((nodes) =>
         nodes
-          .filter((node) => node.type === "directory")
+          .filter((node) => node.type === "directory" && permitted(node.absolute))
           .map((node) => ({ name: node.name, absolute: trimPickerPath(normalizePickerDrive(node.absolute)) })),
       )
     cache.set(key, request)
@@ -376,7 +389,7 @@ export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string
         .then((result) => result.data ?? [])
         .catch(() => [])
       if (!active()) return []
-      return results.map((path) => joinPickerPath(input.directory, path)).slice(0, 50)
+      return results.map((path) => joinPickerPath(input.directory, path)).filter(permitted).slice(0, 50)
     }
     const segments = query.replace(/^\/+/, "").split("/")
     const head = segments.slice(0, -1).filter((part) => part && part !== ".")
@@ -385,7 +398,7 @@ export function createDirectorySearch(args: { sdk: ServerSDK; base: () => string
     for (const part of head) {
       if (!active()) return []
       if (part === "..") {
-        paths = paths.map(pickerParent)
+        paths = paths.map(pickerParent).filter(permitted)
         continue
       }
       paths = Array.from(new Set((await Promise.all(paths.map((path) => match(path, part, 4)))).flat())).slice(0, 12)

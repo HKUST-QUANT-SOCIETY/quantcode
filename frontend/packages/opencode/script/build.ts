@@ -4,6 +4,7 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
+import { parseArgs } from "node:util"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -17,12 +18,23 @@ const generated = await import("./generate.ts")
 import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
 
-const singleFlag = process.argv.includes("--single")
-const baselineFlag = process.argv.includes("--baseline")
-const skipInstall = process.argv.includes("--skip-install")
-const sourcemapsFlag = process.argv.includes("--sourcemaps")
+const { values } = parseArgs({
+  args: process.argv.slice(2).filter(arg => arg !== "--"),
+  options: {
+    single: { type: "boolean" }, baseline: { type: "boolean" }, "skip-install": { type: "boolean" },
+    sourcemaps: { type: "boolean" }, "skip-embed-web-ui": { type: "boolean" },
+    target: { type: "string" }, outdir: { type: "string" },
+  },
+})
+const singleFlag = values.single
+const baselineFlag = values.baseline
+const skipInstall = values["skip-install"]
+const sourcemapsFlag = values.sourcemaps
 const plugin = createSolidTransformPlugin()
-const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
+const skipEmbedWebUi = values["skip-embed-web-ui"]
+const outputDirectory = path.resolve(dir, values.outdir ?? "dist")
+if (values.target && singleFlag) throw new Error("Use either --target or --single")
+if (values.outdir && fs.existsSync(outputDirectory)) throw new Error("--outdir must be a new directory")
 
 const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
@@ -47,8 +59,6 @@ const createEmbeddedWebUIBundle = async () => {
     `}`,
   ].join("\n")
 }
-
-const embeddedFileMap = skipEmbedWebUi ? null : await createEmbeddedWebUIBundle()
 
 const allTargets: {
   os: string
@@ -113,8 +123,15 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
-  ? allTargets.filter((item) => {
+const namedTargets = allTargets.map(item => ({ ...item, id: [
+  item.os === "win32" ? "windows" : item.os, item.arch,
+  item.avx2 === false ? "baseline" : undefined, item.abi,
+].filter(Boolean).join("-") }))
+if (values.target && !namedTargets.some(item => item.id === values.target)) {
+  throw new Error(`Unsupported target: ${values.target}; choose ${namedTargets.map(item => item.id).join(", ")}`)
+}
+const targets = values.target ? namedTargets.filter(item => item.id === values.target) : singleFlag
+  ? namedTargets.filter((item) => {
       if (item.os !== process.platform || item.arch !== process.arch) {
         return false
       }
@@ -132,9 +149,11 @@ const targets = singleFlag
 
       return true
     })
-  : allTargets
+  : namedTargets
 
-await $`rm -rf dist`
+const embeddedFileMap = skipEmbedWebUi ? null : await createEmbeddedWebUIBundle()
+
+if (!values.outdir) await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
@@ -143,18 +162,10 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
 for (const item of targets) {
-  const name = [
-    pkg.name,
-    // changing to win32 flags npm for some reason
-    item.os === "win32" ? "windows" : item.os,
-    item.arch,
-    item.avx2 === false ? "baseline" : undefined,
-    item.abi === undefined ? undefined : item.abi,
-  ]
-    .filter(Boolean)
-    .join("-")
+  const name = `${pkg.name}-${item.id}`
+  const targetDirectory = path.join(outputDirectory, name)
   console.log(`building ${name}`)
-  await $`mkdir -p dist/${name}/bin`
+  await $`mkdir -p ${targetDirectory}/bin`
 
   const localPath = path.resolve(dir, "node_modules/@opentui/core/parser.worker.js")
   const rootPath = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
@@ -180,7 +191,7 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist/${name}/bin/opencode`,
+      outfile: path.join(targetDirectory, "bin/opencode"),
       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
@@ -200,7 +211,7 @@ for (const item of targets) {
 
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
-    const binaryPath = `dist/${name}/bin/opencode`
+    const binaryPath = path.join(targetDirectory, "bin/opencode")
     console.log(`Running smoke test: ${binaryPath} --version`)
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
@@ -211,8 +222,8 @@ for (const item of targets) {
     }
   }
 
-  await $`rm -rf ./dist/${name}/bin/tui`
-  await Bun.file(`dist/${name}/package.json`).write(
+  await $`rm -rf ${targetDirectory}/bin/tui`
+  await Bun.file(path.join(targetDirectory, "package.json")).write(
     JSON.stringify(
       {
         name,
@@ -232,12 +243,13 @@ for (const item of targets) {
 if (Script.release) {
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
-      await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
+      await $`tar -czf ../../${key}.tar.gz *`.cwd(path.join(outputDirectory, key, "bin"))
     } else {
-      await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
+      await $`zip -r ../../${key}.zip *`.cwd(path.join(outputDirectory, key, "bin"))
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  const archives = (await Array.fromAsync(new Bun.Glob("*.{zip,tar.gz}").scan({ cwd: outputDirectory, absolute: true })))
+  await $`gh release upload v${Script.version} ${archives} --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }

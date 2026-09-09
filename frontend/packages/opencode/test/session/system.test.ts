@@ -64,9 +64,9 @@ const it = testEffect(
     ],
     [
       Skill.node,
-      Layer.succeed(
+      Layer.mock(
         Skill.Service,
-        Skill.Service.of({
+        {
           get: (name) => Effect.succeed(skills.find((skill) => skill.name === name)),
           require: (name) => {
             const info = skills.find((skill) => skill.name === name)
@@ -76,7 +76,7 @@ const it = testEffect(
           all: () => Effect.succeed(skills),
           dirs: () => Effect.succeed([]),
           available: () => Effect.succeed(skills),
-        }),
+        },
       ),
     ],
   ]),

@@ -17,7 +17,9 @@ import type { Revert } from "@opencode-ai/schema/revert"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
-type V1PartData = Omit<SessionV1.Part, "id" | "sessionID" | "messageID">
+type V1PartData<Part = SessionV1.Part> = Part extends SessionV1.Part
+  ? Omit<Part, "id" | "sessionID" | "messageID">
+  : never
 
 export const SessionTable = sqliteTable(
   "session",

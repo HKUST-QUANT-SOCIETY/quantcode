@@ -1,0 +1,174 @@
+{
+  "mode": "verify-existing-native-cross-boundaries",
+  "started_at": "2026-09-09T01:22:28.756143+00:00",
+  "source_report": "/tmp/quantcode-serverc-all8-native-e2e-release9-rg.json",
+  "source_report_sha256": "98bfe0bbb35e12e901b963fd0efb11ae5cbd1f7f556fcc5f79c2515426385205",
+  "script_sha256": "68f2eac39204b7d3733dc50c6ad9fdd10483a77ae22cea592e09cb443209a46f",
+  "model_requests": 0,
+  "status": "failed",
+  "members": [
+    {
+      "group": "fundamental",
+      "login": "passed"
+    },
+    {
+      "group": "factor",
+      "login": "passed"
+    },
+    {
+      "group": "model",
+      "login": "passed"
+    },
+    {
+      "group": "risk",
+      "login": "passed"
+    },
+    {
+      "group": "strategy",
+      "login": "passed"
+    },
+    {
+      "group": "options",
+      "login": "passed"
+    },
+    {
+      "group": "infra",
+      "login": "passed"
+    },
+    {
+      "group": "agent",
+      "login": "passed"
+    }
+  ],
+  "cross_member_checks": [
+    {
+      "reader": "fundamental",
+      "owner": "factor",
+      "resource": "task",
+      "source_id": "f09127ec-1a4d-411f-b332-6350ad0978fd",
+      "session_id": "ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+      "source_revision": 164,
+      "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+      "status": "passed",
+      "requests": [
+        {
+          "role": "owner_before",
+          "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+          "http_status": 200,
+          "attempt": 1
+        },
+        {
+          "role": "reader_cross",
+          "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+          "http_status": 400,
+          "attempt": 1,
+          "response": {
+            "_tag": "QuantCodeTaskError",
+            "message": "组织服务拒绝请求（401），请刷新当前任务和身份。"
+          }
+        },
+        {
+          "role": "reader_own_after",
+          "request_target": "/experimental/quantcode/organization-tasks/167a4f36-c96d-4008-9216-fcb21a1e15a4/ses_f7c5ef4c4ffeIWcpLzyEaEHiCN",
+          "http_status": 200,
+          "attempt": 1
+        },
+        {
+          "role": "owner_after",
+          "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+          "http_status": 200,
+          "attempt": 1
+        }
+      ],
+      "revision_discovery": [
+        {
+          "role": "owner_latest_task",
+          "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+          "http_status": 200,
+          "attempt": 1
+        }
+      ],
+      "http_status": 400,
+      "same_target_verified": true
+    },
+    {
+      "reader": "fundamental",
+      "owner": "factor",
+      "resource": "artifact",
+      "source_id": "f09127ec-1a4d-411f-b332-6350ad0978fd",
+      "session_id": "ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+      "source_revision": 164,
+      "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L/artifacts/artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f?source_revision=164&offset=0",
+      "status": "failed",
+      "requests": [
+        {
+          "role": "owner_before",
+          "request_target": "/experimental/quantcode/organization-tasks/f09127ec-1a4d-411f-b332-6350ad0978fd/ses_f7c5ef4fbffeQK67jyAM6S2A5L/artifacts/artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f?source_revision=164&offset=0",
+          "http_status": 400,
+          "attempt": 1,
+          "response": {
+            "_tag": "QuantCodeTaskError",
+            "message": "任务操作未完成，内容可能已变化。请重新读取当前版本后再决定。"
+          }
+        }
+      ],
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "offset": 0,
+      "artifact_sha256": "b900df0e43306f4e4cff8b65900e251398c05e5b3e1df14b1c268e40cc4a90d2"
+    }
+  ],
+  "logout": [
+    {
+      "group": "agent",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "infra",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "options",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "strategy",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "risk",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "model",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "factor",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    },
+    {
+      "group": "fundamental",
+      "status": "passed",
+      "task_after_logout_http": 400,
+      "workspace_after_logout_http": 400
+    }
+  ],
+  "expected_cross_member_checks": 112,
+  "retry_policy": "none; every request is recorded",
+  "error": "Owner artifact read failed: HTTP 400",
+  "finished_at": "2026-09-09T01:22:31.216851+00:00"
+}

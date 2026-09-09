@@ -125,6 +125,29 @@ def test_task_classification_keeps_complexity_and_governance_separate() -> None:
         classify_task("deploy artifact", deploy=True, admin=False)
 
 
+@pytest.mark.parametrize("task", [
+    "Read qa-input.json and create only qa-result.json next to it",
+    "Write the calculated statistics to result.json",
+    "Save the local report as output.csv",
+    "读取输入并创建结果文件",
+])
+def test_explicit_file_output_is_not_classified_as_read_only(task):
+    result = classify_task(task, file_count=1)
+    assert result.business_mode == "engineering"
+    assert result.governance == "personal_workspace_write"
+    assert result.complexity == "L1"
+    assert result.execution_strategy == "build"
+    assert not result.solution_required
+    assert classify_task(task, file_count=2).solution_required
+    assert classify_task(task, shared_write=True).governance == "shared_write"
+
+
+def test_reading_saved_outputs_stays_read_only():
+    result = classify_task("Inspect the saved report")
+    assert result.governance == "read_only"
+    assert result.complexity == "L0"
+
+
 def test_gitgraph_baseline_dependency_diff_and_pop_dedupe(tmp_path: Path) -> None:
     baseline = GitGraphBaselineStore(tmp_path / "baseline.json")
     assert baseline.changed("repo", "a1") == (None, "a1")

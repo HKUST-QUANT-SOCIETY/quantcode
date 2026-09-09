@@ -51,6 +51,6 @@ tools:
 - [ ] `underlying` / `as_of_date` / `data_path` 非空
 - [ ] 下游能解析并调用 `build_vol_surface`
 
-## AgentRunner 提示
+## 原生任务提示
 
-本阶段以对话澄清为主；结构化后由 Agent 调用 `build_vol_surface`，不要跳过 schema 校验。
+本阶段在当前任务内澄清；结构化后只调用实际已公布的曲面组件，不跳过真实 schema 校验，不把示例 CSV 当生产数据。

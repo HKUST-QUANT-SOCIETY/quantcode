@@ -1,10 +1,10 @@
+import { GitHubConnection } from "./github-connection"
 import { For, Show, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode-ai/ui/icon"
 import { userFacingServiceError } from "./workspace-ui"
 
-type Node = { sha: string; message: string; parents: string[] }
-type Repo = { repo: string; default_branch?: string; observed_at: string; sync_status: string; errors: string[]; heads: { branch: string; sha: string; changed?: boolean }[]; commit_nodes: Node[]; dependency_changes: { file: string; old_sha?: string; new_sha?: string }[]; package_changes?: { file: string; package: string; old_value?: string; new_value?: string }[]; dependency_files?: { path: string; version_status?: string }[] }
+import { RepositoryGraph, RepositoryDetail, type GraphRepo } from "./repository-graph"
 type Pop = { pop_id: string; change_summary: string; read_status: string; ack_status: string; observed_at: string; old_value?: unknown; new_value?: unknown }
 
 export function GitHubWorkspace(props: {
@@ -15,7 +15,7 @@ export function GitHubWorkspace(props: {
   notify?: (count: number) => Promise<void>
   notificationPermission?: () => Promise<boolean>
 }) {
-  const [state, setState] = createStore({ repos: [] as Repo[], pops: [] as Pop[], cursor: undefined as string | undefined, error: "", loading: false, busy: "", notifications: false, notificationError: "", enabling: false })
+  const [state, setState] = createStore({ repos: [] as GraphRepo[], selected: "", selectedSha: "", query: "", pops: [] as Pop[], cursor: undefined as string | undefined, error: "", loading: false, busy: "", notifications: false, notificationError: "", enabling: false })
   let generation = 0
   let running = false
   function readPage(result: unknown) {
@@ -66,7 +66,7 @@ export function GitHubWorkspace(props: {
       const graph = await props.fetcher("get_gitgraph")
       if (version !== generation) return
       if (!graph || typeof graph !== "object" || !("repos" in graph) || !Array.isArray(graph.repos)) throw new Error(graph && typeof graph === "object" && "error" in graph ? String(graph.error) : "GitGraph 返回格式错误")
-      setState("repos", graph.repos as Repo[])
+      setState("repos", graph.repos as GraphRepo[])
       const result = await props.fetcher("list_pops")
       if (version !== generation) return
       const page = readPage(result)
@@ -109,7 +109,7 @@ export function GitHubWorkspace(props: {
     const version = ++generation
     running = false
     seen = undefined
-    setState({ repos: [], pops: [], cursor: undefined, error: "", loading: false, busy: "", notifications: false, notificationError: "", enabling: false })
+    setState({ repos: [], selected: "", pops: [], cursor: undefined, error: "", loading: false, busy: "", notifications: false, notificationError: "", enabling: false })
     try {
       const saved = JSON.parse(localStorage.getItem(notificationKey()) ?? "null")
       if (saved && Array.isArray(saved.seen) && saved.seen.every((id: unknown) => typeof id === "string")) {
@@ -123,22 +123,17 @@ export function GitHubWorkspace(props: {
     const timer = setInterval(() => void refresh(version), 60_000)
     onCleanup(() => { clearInterval(timer); generation++ })
   })
+  const repos = createMemo(() => state.repos.filter(repo => repo.repo.toLowerCase().includes(state.query.toLowerCase())).sort((a, b) => a.repo.localeCompare(b.repo)))
+  const selected = createMemo(() => state.repos.find(repo => repo.repo === state.selected))
   return <section style={{ display: props.visible ? undefined : "none" }} hidden={!props.visible} class="qc-detail-body qc-github-sync" aria-label="GitHub 同步工作台">
     <div class="qc-view-toolbar"><div><h3>GitGraph · 仓库与分支</h3><p>同步当前授权范围；首次同步建立基线。</p></div><button type="button" class="qc-icon-action" aria-label="刷新" title="刷新 GitGraph" disabled={state.loading || !props.ready} onClick={() => void refresh(generation)}><Icon name="reset" size="normal" /></button></div>
+    <details class="qc-github-account" open={!state.repos.length}><summary><Icon name="github" size="small" /> GitHub 账号与连接</summary><Show keyed when={props.visible && props.ready ? props.scope : undefined}><GitHubConnection onConnected={() => void refresh(generation)} /></Show></details>
     <Show when={state.loading}><p role="status">正在同步 GitHub…</p></Show>
     <Show when={state.error}><div class="qc-github-error" role="status"><Icon name="github" size="normal" /><div><strong>GitGraph 暂不可用</strong><p>{state.error}</p><p class="qc-muted">连接 GitHub 身份后，这里会显示授权范围内的仓库、分支和更新。</p></div></div></Show>
     <Show when={!state.loading && !state.error && !state.repos.length}><p>当前身份没有可见仓库。</p></Show>
-    <For each={state.repos}>{repo => <details class="qc-detail-section">
-      <summary>{repo.repo} · {repo.heads.length} 个分支 · {repo.sync_status}</summary>
-      <p>默认分支：{repo.default_branch || "—"} · 同步：{repo.observed_at}</p>
-      <For each={repo.errors}>{error => <p role="alert">{error}</p>}</For>
-      <table><thead><tr><th>分支</th><th>HEAD</th><th>变化</th></tr></thead><tbody><For each={repo.heads}>{head => <tr><td>{head.branch}</td><td><code>{head.sha.slice(0, 12)}</code></td><td>{head.changed ? "有更新" : "—"}</td></tr>}</For></tbody></table>
-      <CommitGraph nodes={repo.commit_nodes} />
-      <For each={repo.dependency_changes}>{change => <p>{change.file}：{change.old_sha?.slice(0, 12) || "新增"} → {change.new_sha?.slice(0, 12) || "删除"}（文件版本）</p>}</For>
-      <Show when={repo.package_changes?.length}><h4>依赖版本变化</h4><p>declared 表示清单声明，resolved 表示锁文件解析结果；不代表当前服务器已安装或升级。</p></Show>
-      <For each={repo.package_changes}>{change => <p>{change.file} · {change.package}：{change.old_value ?? "新增"} → {change.new_value ?? "删除"}</p>}</For>
-      <For each={repo.dependency_files?.filter(file => file.version_status !== "PARSED")}>{file => <p>{file.path}：目前仅跟踪文件变化，包版本尚未解析。</p>}</For>
-    </details>}</For>
+    <div class="qc-repo-browser-toolbar"><label><Icon name="magnifying-glass" /><input type="search" aria-label="搜索仓库" placeholder="搜索项目…" value={state.query} onInput={e => setState("query", e.currentTarget.value)} /></label><span>{repos().length} 个项目</span></div>
+    <div class="qc-repo-grid"><For each={repos()}>{repo => <RepositoryGraph repo={repo} onOpen={commit => setState({ selected: repo.repo, selectedSha: commit?.sha ?? "" })} />}</For></div>
+    <Show keyed when={props.visible && selected()}>{repo => <RepositoryDetail repo={repo} sha={state.selectedSha} onClose={() => setState("selected", "")} />}</Show>
     <h3>持久通知</h3><p>已读与确认只影响当前账号；确认通知不会批准任务。</p>
     <Show when={state.cursor}><button type="button" disabled={state.loading || !!state.busy} onClick={() => void loadMore()}>加载更多历史通知</button></Show>
     <Show when={props.notify && props.notificationPermission}>
@@ -153,31 +148,4 @@ export function GitHubWorkspace(props: {
       <button type="button" disabled={state.loading || !!state.busy || pop.ack_status === "acknowledged"} onClick={() => void receipt(pop, { read: true, ack: true })}>{pop.ack_status === "acknowledged" ? "已确认" : "确认更新"}</button>
     </article>}</For>
   </section>
-}
-function CommitGraph(props: { nodes: Node[] }) {
-  const [state, setState] = createStore({ page: 0 })
-  const page = () => Math.min(state.page, Math.max(0, Math.ceil(props.nodes.length / 100) - 1))
-  const visible = createMemo(() => props.nodes.slice(page() * 100, (page() + 1) * 100))
-  const positions = createMemo(() => new Map(visible().map((node, index) => [node.sha, index])))
-  const position = (sha: string) => positions().get(sha) ?? -1
-  const locate = (sha: string) => {
-    const index = props.nodes.findIndex(node => node.sha === sha)
-    if (index >= 0) setState("page", Math.floor(index / 100))
-  }
-  return <div><p>共 {props.nodes.length} 条提交 · 第 {page() + 1} 页</p>
-    <button type="button" disabled={page() === 0} onClick={() => setState("page", page() - 1)}>上一页提交</button>
-    <button type="button" disabled={(page() + 1) * 100 >= props.nodes.length} onClick={() => setState("page", page() + 1)}>下一页提交</button>
-    <div style={{ overflow: "auto", "max-height": "480px" }}><svg width="760" height={Math.max(40, visible().length * 32)} role="img" aria-label="提交父子关系图，分页显示">
-    <For each={visible()}>{(node, index) => <g>
-      <For each={node.parents}>{(parent, lane) => <Show when={position(parent) >= 0}><path d={`M 12 ${index() * 32 + 16} C ${40 + lane() * 12} ${index() * 32 + 16}, ${40 + lane() * 12} ${position(parent) * 32 + 16}, 12 ${position(parent) * 32 + 16}`} fill="none" stroke="currentColor" opacity="0.3" /></Show>}</For>
-      <circle cx="12" cy={index() * 32 + 16} r="4" fill="currentColor" />
-      <text x="64" y={index() * 32 + 20} fill="currentColor" font-size="11">{node.sha.slice(0, 8)} {node.message.slice(0, 80)}{node.parents.some(parent => position(parent) < 0) ? " · 父节点在其他页或本次读取不完整" : ""}</text>
-    </g>}</For>
-  </svg></div>
-    <For each={visible().filter(node => node.parents.some(parent => position(parent) < 0))}>{node => <p>
-      {node.sha.slice(0, 8)} 的跨页父提交：<For each={node.parents.filter(parent => position(parent) < 0)}>{parent =>
-        <button type="button" disabled={!props.nodes.some(item => item.sha === parent)} onClick={() => locate(parent)}>{parent.slice(0, 12)}</button>
-      }</For>
-    </p>}</For>
-  </div>
 }

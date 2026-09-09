@@ -1,0 +1,998 @@
+{
+  "mode": "verify-existing-native-cross-boundaries",
+  "source_report": "/tmp/quantcode-serverc-all8-native-e2e-release9-rg.json",
+  "members": [
+    {
+      "group": "fundamental",
+      "session_id": "ses_f7c5ef4c4ffeIWcpLzyEaEHiCN",
+      "login": "passed"
+    },
+    {
+      "group": "factor",
+      "session_id": "ses_f7c5ef4fbffeQK67jyAM6S2A5L",
+      "login": "passed"
+    },
+    {
+      "group": "model",
+      "session_id": "ses_f7c5dcf76ffemIWztZeht8fte2",
+      "login": "passed"
+    },
+    {
+      "group": "risk",
+      "session_id": "ses_f7c5da653ffexygdyVRBZZDTPs",
+      "login": "passed"
+    },
+    {
+      "group": "strategy",
+      "session_id": "ses_f7c5cd0cdffeKI5caHJq1uDBPV",
+      "login": "passed"
+    },
+    {
+      "group": "options",
+      "session_id": "ses_f7c5cc2ceffesOwvM0rXch2dao",
+      "login": "passed"
+    },
+    {
+      "group": "infra",
+      "session_id": "ses_f7c5bee1fffezTWzs313jZwZb7",
+      "login": "passed"
+    },
+    {
+      "group": "agent",
+      "session_id": "ses_f7c5bc62fffewVjTN3AM8l4dF9",
+      "login": "passed"
+    }
+  ],
+  "owner_positive": [
+    {
+      "owner": "fundamental",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84"
+    },
+    {
+      "owner": "factor",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f"
+    },
+    {
+      "owner": "model",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204"
+    },
+    {
+      "owner": "risk",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e"
+    },
+    {
+      "owner": "strategy",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b"
+    },
+    {
+      "owner": "options",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5"
+    },
+    {
+      "owner": "infra",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5"
+    },
+    {
+      "owner": "agent",
+      "task_http_status": 200,
+      "artifact_list_http_status": 200,
+      "artifact_http_status": 200,
+      "task_status": "completed",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67"
+    }
+  ],
+  "reader_own": [
+    {
+      "reader": "fundamental",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "factor",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "model",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "risk",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "strategy",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "options",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "infra",
+      "http_status": 200,
+      "task_status": "completed"
+    },
+    {
+      "reader": "agent",
+      "http_status": 200,
+      "task_status": "completed"
+    }
+  ],
+  "cross_member_checks": [
+    {
+      "reader": "fundamental",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "fundamental",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "factor",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "model",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "risk",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "strategy",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "options",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "agent",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "infra",
+      "owner": "agent",
+      "resource": "artifact",
+      "artifact_id": "artifact_2190a80ede46dbaf0a6d1fb07f0c3b316a79dcf3c5cbd8c194dc85ae5faf8a67",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "fundamental",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "fundamental",
+      "resource": "artifact",
+      "artifact_id": "artifact_60ea1e8feb461b1ea8945ec0b08968a1eed8ea886bfb7d1aaaffa162229b1e84",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "factor",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "factor",
+      "resource": "artifact",
+      "artifact_id": "artifact_dac96c059a9298b823ed7c3ab8c07461dcff2f54e79aa57ba0d2905ead06a35f",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "model",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "model",
+      "resource": "artifact",
+      "artifact_id": "artifact_74beeb199faff47b1d89d0b7a896ebe7512fedfc640956c2939597095a211204",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "risk",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "risk",
+      "resource": "artifact",
+      "artifact_id": "artifact_ee55a159b4234cda2132affeebc1f84f07353b8aff7950fefed3b204c9ff632e",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "strategy",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "strategy",
+      "resource": "artifact",
+      "artifact_id": "artifact_1158a6363a066434abbf836f59f5ca100f219bc4bda2dd8e4e6665a0905cdb8b",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "options",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "options",
+      "resource": "artifact",
+      "artifact_id": "artifact_ba9ad14f0ac7f4ff3974b0378b36531588e8a6111ef4ed7041ce195042828ae5",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "infra",
+      "resource": "task",
+      "status": "passed",
+      "http_status": 400
+    },
+    {
+      "reader": "agent",
+      "owner": "infra",
+      "resource": "artifact",
+      "artifact_id": "artifact_13af79d3e0f37fe9a02b73d8e0879184ae1c5f8043e2211a71a222c525d3f4b5",
+      "status": "passed",
+      "http_status": 400
+    }
+  ],
+  "expected_cross_member_checks": 112,
+  "status": "passed"
+}

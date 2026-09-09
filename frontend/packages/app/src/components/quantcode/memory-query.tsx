@@ -1,7 +1,7 @@
 /**
  * F-04 Memory 查询视图：搜索框 + 结果列表（snippet 高亮 + 相对分数条）。
  *
- * 数据源：MemoryService FTS 在后端 runner/memory；面板通过 OpenCode 的受限
+ * 数据源：MemoryService FTS 在后端 runner/memory；面板通过执行服务的受限
  * QuantCode read-only surface 注入 fetcher。未连接/空库保持明确空态，绝不造假数据。
  * 跨组读取被拒（MemoryPermissionError fail-closed）→ "无权限" 空态。
  * 纯 DOM 构建（沿 ssh-login 模式，bun test 兼容）。

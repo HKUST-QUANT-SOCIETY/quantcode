@@ -25,7 +25,10 @@ export const layer = Layer.effect(
     const db = yield* makeDatabase
 
     yield* db.run("PRAGMA journal_mode = WAL")
-    yield* db.run("PRAGMA synchronous = NORMAL")
+    // QuantCode records write admission before external effects in this same
+    // event log. WAL NORMAL can lose that admission on power failure.
+    yield* db.run(process.env.OPENCODE_CHANNEL === "quantcode" && process.env.QUANTCODE_UNIFIED_RUNTIME === "1"
+      ? "PRAGMA synchronous = FULL" : "PRAGMA synchronous = NORMAL")
     yield* db.run("PRAGMA busy_timeout = 5000")
     yield* db.run("PRAGMA cache_size = -64000")
     yield* db.run("PRAGMA foreign_keys = ON")
@@ -38,6 +41,22 @@ export const layer = Layer.effect(
 
 export function layerFromPath(filename: string) {
   return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+}
+
+/** Host maintenance of an existing database without schema migration, WAL
+ * mode changes or checkpoints. Read-only inspection must not mutate a source. */
+export function layerFromExistingPath(filename: string, options: { readonly: boolean }) {
+  return Layer.effect(Service, Effect.gen(function* () {
+    const db = yield* makeDatabase
+    yield* db.run("PRAGMA busy_timeout = 5000")
+    if (!options.readonly) {
+      yield* db.run("PRAGMA synchronous = FULL")
+      yield* db.run("PRAGMA foreign_keys = ON")
+    }
+    return { db }
+  }).pipe(Effect.orDie)).pipe(Layer.provide(sqliteLayer({
+    filename, readonly: options.readonly, readwrite: !options.readonly, create: false, disableWAL: true,
+  })))
 }
 
 export function path() {

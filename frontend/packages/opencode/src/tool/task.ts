@@ -1,3 +1,5 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { SessionCancellation } from "@/session/cancellation"
 import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
@@ -18,7 +20,7 @@ import { Database } from "@opencode-ai/core/database/database"
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
-  prompt(input: SessionPrompt.PromptInput): Effect.Effect<SessionV1.WithParts>
+  prompt(input: SessionPrompt.PromptInput, admission?: () => void): Effect.Effect<SessionV1.WithParts>
 }
 
 const id = "task"
@@ -122,6 +124,12 @@ export const TaskTool = Tool.define(
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
       const parent = yield* sessions.get(ctx.sessionID)
+      const parentBinding = QuantCodeIdentity.enabled() ? QuantCodeIdentity.sessionBinding(parent.metadata) : undefined
+      if (QuantCodeIdentity.enabled() && !parentBinding) throw new QuantCodeIdentity.IdentityError()
+      const parentAdmission = parentBinding ? SessionCancellation.admission(parentBinding, parent.id) : undefined
+      if (QuantCodeIdentity.enabled() && params.task_id && (!session || session.parentID !== parent.id)) {
+        return yield* Effect.fail(new Error("子任务只能恢复当前父任务派生的会话，不能接管另一任务。"))
+      }
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -155,7 +163,11 @@ export const TaskTool = Tool.define(
                 ),
             ),
           ],
-        }))
+        }).pipe(Effect.provideService(SessionCancellation.InputAdmission, parentAdmission)))
+      const childBinding = parentBinding ? QuantCodeIdentity.sessionBinding(nextSession.metadata) : undefined
+      if (parentBinding && !childBinding) throw new QuantCodeIdentity.IdentityError()
+      const childAdmission = childBinding ? SessionCancellation.admission(childBinding, nextSession.id) : undefined
+      const admission = parentAdmission && childAdmission ? () => { parentAdmission(); childAdmission() } : undefined
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),
@@ -184,6 +196,7 @@ export const TaskTool = Tool.define(
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
+        admission?.()
         const parts = yield* ops.resolvePromptParts(params.prompt)
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
@@ -195,7 +208,8 @@ export const TaskTool = Tool.define(
           variant: next.model ? undefined : variant,
           agent: next.name,
           parts,
-        })
+        }, admission)
+        admission?.()
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })
 
@@ -203,7 +217,9 @@ export const TaskTool = Tool.define(
         state: "completed" | "error",
         text: string,
       ) {
+        admission?.()
         const currentParent = yield* sessions.get(ctx.sessionID)
+        admission?.()
         yield* ops
           .prompt({
             sessionID: ctx.sessionID,
@@ -224,8 +240,9 @@ export const TaskTool = Tool.define(
                 }),
               },
             ],
-          })
-          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+          }, admission)
+          .pipe(Effect.ignore, Effect.catchDefect(error => error instanceof SessionCancellation.Cancelling ? Effect.void : Effect.die(error)),
+            Effect.forkIn(scope, { startImmediately: true }))
       })
 
       const notify = Effect.fn("TaskTool.notifyBackgroundResult")(function* (jobID: string) {
@@ -235,6 +252,7 @@ export const TaskTool = Tool.define(
             if (result.info?.status === "error") return inject("error", result.info.error ?? "")
             return Effect.void
           }),
+          Effect.catchDefect(error => error instanceof SessionCancellation.Cancelling ? Effect.void : Effect.die(error)),
           Effect.forkIn(scope, { startImmediately: true }),
         )
       })

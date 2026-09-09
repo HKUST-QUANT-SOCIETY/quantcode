@@ -1,3 +1,7 @@
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeReadAccess } from "@/quantcode/read-access"
+import { Config } from "@/config/config"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Context, Effect, Layer } from "effect"
 
@@ -51,22 +55,30 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const skill = yield* Skill.Service
+    const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const locations = yield* LocationServiceMap.Service
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
-        const references = yield* Effect.gen(function* () {
-          return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
-        }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        const grant = QuantCodeIdentity.enabled()
+          ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory)) : undefined
+        const cfg = grant ? yield* config.getGlobal() : undefined
+        const references = grant
+          ? yield* Effect.promise(() => QuantCodeReadAccess.references(ctx.directory, cfg?.references ?? cfg?.reference ?? {}))
+          : yield* Effect.gen(function* () {
+              const service = yield* Reference.Service
+              return (yield* service.list()).filter((reference) => reference.description !== undefined)
+            }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        if (grant) yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
         return [
           [
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
             `  Working directory: ${ctx.directory}`,
-            `  Workspace root folder: ${ctx.worktree}`,
+            `  Workspace root folder: ${grant?.root ?? ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
@@ -137,7 +149,7 @@ const locationServiceMapNode = LayerNode.make({
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Skill.node, MCP.node, locationServiceMapNode],
+  deps: [Skill.node, MCP.node, Config.node, locationServiceMapNode],
 })
 
 export * as SystemPrompt from "./system"

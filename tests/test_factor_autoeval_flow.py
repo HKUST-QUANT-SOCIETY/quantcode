@@ -30,7 +30,9 @@ def _spec(**overrides):
 
 
 def test_validate_factor_spec():
-    assert validate_factor_spec({"input_data": _spec()})["input_spec"]["name"] == "pb_roe_combo"
+    result = validate_factor_spec({"input_data": _spec()})
+    assert result["input_spec"]["name"] == "pb_roe_combo"
+    assert result["input_spec"]["operators"] == ["roe_ttm", "pb", "divide"]
     with pytest.raises(ValidationError):
         validate_factor_spec({"input_data": _spec(operators=["pb", "pb"])})
 

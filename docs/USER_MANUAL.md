@@ -1,5 +1,7 @@
 # QuantCode 用户手册
 
+> Test V1.0 的安装、服务器连接、统一测试模型与首次任务流程请以 [README](../README.md#首次使用) 和 [桌面安装说明](DESKTOP_INSTALLATION.md) 为准。下文保留功能和历史兼容说明。
+
 > **目标用户**：HKUST QUANT SOCIETY 八个业务组的研究与工程成员
 > **版本**：v5.1
 > **最后更新**：2026-09-05

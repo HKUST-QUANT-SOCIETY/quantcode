@@ -1,0 +1,57 @@
+diff --git a/src/terminal.ts b/src/terminal.ts
+index ec248d46a939f8a09cd669e853cefb126922c80a..9fee9c527a5d31b8dad2b324e74fc0b305c1f004 100644
+--- a/src/terminal.ts
++++ b/src/terminal.ts
+@@ -136,6 +136,7 @@ export class Terminal implements IPty {
+ 
+ 	private _readLoop = false;
+ 	private _closing = false;
++	private _exitEvent?: IExitEvent;
+ 
+ 	// TextDecoder with streaming mode to properly handle UTF-8 across chunk boundaries
+ 	// Without this, multi-byte characters (like box-drawing ─) that span chunks become �
+@@ -194,7 +195,22 @@ export class Terminal implements IPty {
+ 		return this._onData.event;
+ 	}
+ 	get onExit() {
+-		return this._onExit.event;
++		return (listener: (event: IExitEvent) => void): IDisposable => {
++			const disposable = this._onExit.event(listener);
++			let active = true;
++			const exited = this._exitEvent;
++			if (exited) {
++				queueMicrotask(() => {
++					if (active) listener(exited);
++				});
++			}
++			return {
++				dispose: () => {
++					active = false;
++					disposable.dispose();
++				},
++			};
++		};
+ 	}
+ 
+ 	/* ------------- IO methods ------------- */
+@@ -217,7 +233,9 @@ export class Terminal implements IPty {
+ 		this._closing = true;
+ 		lib.symbols.bun_pty_kill(this.handle);
+ 		lib.symbols.bun_pty_close(this.handle);
+-		this._onExit.fire({ exitCode: 0, signal });
++		if (this._exitEvent) return;
++		this._exitEvent = { exitCode: 0, signal };
++		this._onExit.fire(this._exitEvent);
+ 	}
+ 
+ 	/* ------------- read-loop ------------- */
+@@ -244,7 +262,8 @@ export class Terminal implements IPty {
+ 					this._onData.fire(remaining);
+ 				}
+ 				const exitCode = lib.symbols.bun_pty_get_exit_code(this.handle);
+-				this._onExit.fire({ exitCode });
++				this._exitEvent = { exitCode };
++				this._onExit.fire(this._exitEvent);
+ 				break;
+ 			} else if (n < 0) {
+ 				// error - flush decoder before breaking

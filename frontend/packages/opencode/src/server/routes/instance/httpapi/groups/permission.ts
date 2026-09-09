@@ -9,10 +9,9 @@ import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware
 import { described } from "./metadata"
 
 const root = "/permission"
-const ReplyPayload = Schema.Struct({
-  reply: PermissionV1.Reply,
-  message: Schema.optional(Schema.String),
-})
+// Preserve the existing flat SDK method arguments while sharing the canonical
+// fields, including the optional exact-operation digest.
+const ReplyPayload = Schema.Struct(PermissionV1.ReplyBody.fields)
 
 export const PermissionApi = HttpApi.make("permission")
   .add(

@@ -30,6 +30,7 @@ Owner: 尹一帆
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any, Callable
 
@@ -213,6 +214,8 @@ def execute_compose_flow(
         KeyError: flow 未注册。
         ValueError: 入参类型错，或 resume=True 但未传 thread_id。
     """
+    if os.environ.get("OPENCODE_CHANNEL") == "quantcode" and os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1":
+        raise PermissionError("Legacy Compose execution is retired for native tasks; use the native task engine and published components")
     if not isinstance(group, str) or not isinstance(flow_name, str):
         raise ValueError("execute_compose_flow: group/flow_name 必须是字符串")
     if not resume and not isinstance(input_data, dict):

@@ -13,6 +13,7 @@ import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 // Query fields this middleware reads from the URL. Spread into every
 // endpoint query schema in groups that apply WorkspaceRoutingMiddleware,
@@ -164,6 +165,15 @@ function planRequest(
   return Effect.gen(function* () {
     const url = requestURL(request)
     const envWorkspaceID = configuredWorkspaceID()
+    if (QuantCodeIdentity.enabled()) {
+      const requested = url.searchParams.get("workspace")
+      // The native host is already placed by its deployment. A browser query
+      // must not select a control-plane adapter and forward host credentials.
+      if ((requested && requested !== envWorkspaceID) || (session?.workspaceID && session.workspaceID !== envWorkspaceID)) {
+        return RequestPlan.InvalidWorkspace()
+      }
+      return RequestPlan.Local({ directory: session?.directory || defaultDirectory(request, url), workspaceID: envWorkspaceID })
+    }
     const workspaceID = url.pathname.startsWith("/api/")
       ? selectedV2WorkspaceID(url, session?.workspaceID)
       : selectedWorkspaceID(url, session?.workspaceID)

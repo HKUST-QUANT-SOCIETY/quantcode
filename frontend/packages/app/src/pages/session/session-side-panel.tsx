@@ -41,6 +41,7 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
 }
 
 export function SessionSidePanel(props: {
+  nativeSessionID?: string
   canReview: () => boolean
   diffs: () => (SnapshotFileDiff | VcsFileDiff)[]
   diffsReady: () => boolean
@@ -268,7 +269,7 @@ export function SessionSidePanel(props: {
               <div class="relative size-full min-w-0 h-full bg-background-base">
                 <Show when={quantcodeOpen()}>
                   <div class="absolute inset-0 z-50 size-full">
-                    <QuantCodePanel onClose={() => view().quantcodePanel.close()} />
+                    <QuantCodePanel nativeSessionID={props.nativeSessionID} onClose={() => view().quantcodePanel.close()} />
                   </div>
                 </Show>
                 <div class="size-full" classList={{ hidden: quantcodeOpen() }}>

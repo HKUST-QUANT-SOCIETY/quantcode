@@ -76,16 +76,17 @@ const getBase = (appId: string): Configuration => ({
     // the other channels.
     ...(channel === "quantcode" ? { name: "quantcode" } : {}),
   },
-  files: ["out/**/*", "resources/**/*"],
-  extraResources: existsSync(nativeDir)
-    ? [
+  files: ["out/**/*", "resources/**/*", "!resources/licenses/**/*"],
+  extraResources: [
+    ...(channel === "quantcode" ? [{ from: "resources/licenses/", to: "licenses/", filter: ["*.txt", "*.md", "*.json"] }] : []),
+    ...(existsSync(nativeDir) ? [
         {
           from: "native/",
           to: "native/",
           filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
         },
-      ]
-    : [],
+      ] : []),
+  ],
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,

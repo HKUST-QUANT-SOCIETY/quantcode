@@ -1,4 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import type {
   Hooks,
   PluginInput,
@@ -130,6 +131,10 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
         const hooks: Hooks[] = []
+        // QuantCode uses its URL/API-key provider and published organization
+        // tools. Arbitrary in-process extensions cannot share host credentials
+        // and then claim to obey a workspace sandbox.
+        if (QuantCodeIdentity.enabled()) return { hooks }
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {

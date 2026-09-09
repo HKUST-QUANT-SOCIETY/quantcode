@@ -6,6 +6,10 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import DESCRIPTION from "./glob.txt"
 import * as Tool from "./tool"
+import { AppProcess } from "@opencode-ai/core/process"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeReadAccess } from "@/quantcode/read-access"
 
 export const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({ description: "The glob pattern to match files against" }),
@@ -19,6 +23,7 @@ export const GlobTool = Tool.define(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const ripgrep = yield* Ripgrep.Service
+    const appProcess = yield* AppProcess.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -37,6 +42,9 @@ export const GlobTool = Tool.define(
 
           let search = params.path ?? ins.directory
           search = path.isAbsolute(search) ? search : path.resolve(ins.directory, search)
+          const grant = QuantCodeIdentity.enabled()
+            ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(ins.directory)) : undefined
+          if (grant) search = yield* Effect.promise(() => QuantCodeWorkspace.target(grant, search))
           const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (info?.type === "File") {
             throw new Error(`glob path must be a directory: ${search}`)
@@ -47,7 +55,13 @@ export const GlobTool = Tool.define(
           })
 
           const limit = 100
-          const files = yield* ripgrep.glob({ cwd: search, pattern: params.pattern, limit })
+          const result = grant
+            ? yield* QuantCodeReadAccess.search(grant, appProcess, service => service.glob({ cwd: search, pattern: params.pattern, limit }))
+            : yield* ripgrep.glob({ cwd: search, pattern: params.pattern, limit })
+          const files = grant ? (yield* Effect.forEach(result, file => Effect.promise(async () =>
+            await QuantCodeReadAccess.visible(grant, path.resolve(search, file.path)) ? file : undefined)))
+              .filter(file => file !== undefined) : result
+          if (grant) yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
           const truncated = files.length === limit
 
           const output = []

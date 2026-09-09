@@ -84,7 +84,11 @@ def main() -> int:
         if read_session_file(path)["session_id"] != context["session_id"]:
             raise PermissionError("identity changed; reconnect")
         command = ssh_command(host, context["actor_id"], Path(os.environ["QUANTCODE_PUBLIC_KEY_FILE"]))
-        return relay(command, {"version": 1, "token": record["token"], "session_id": context["session_id"]})
+        envelope = {"version": 1, "token": record["token"], "session_id": context["session_id"]}
+        if os.environ.get("QUANTCODE_UNIFIED_RUNTIME") == "1" and os.environ.get("OPENCODE_CHANNEL") == "quantcode":
+            # This is the fixed host-to-host prelude, not a tools/call argument.
+            envelope["runtime"] = "quantcode-native-v1"
+        return relay(command, envelope)
     except Exception as exc:
         print(f"Remote MCP unavailable ({type(exc).__name__}); check host identity and SSH configuration", file=sys.stderr)
         return 1

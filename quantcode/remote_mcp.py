@@ -1,8 +1,8 @@
 """Server C SSH entrypoint for one authenticated, sandboxed research MCP process.
 
 Installed code and enrollment/config files are administrator-owned. The wire
-header carries only a short-lived token and expected session id, never a path,
-command, Unix user, group override or private key.
+header carries a short-lived token, expected session id and optional fixed
+native runtime mode, never a path, command, Unix user, group or private key.
 """
 from __future__ import annotations
 
@@ -47,8 +47,10 @@ def read_header(descriptor: int, *, timeout: float = 15) -> dict:
             raise ValueError("identity header incomplete")
         if byte == b"\n":
             header = json.loads(data)
-            if (not isinstance(header, dict) or set(header) != {"version", "token", "session_id"}
+            if (not isinstance(header, dict) or not {"version", "token", "session_id"} <= set(header)
+                    or set(header) - {"version", "token", "session_id", "runtime"}
                     or header["version"] != 1
+                    or ("runtime" in header and header["runtime"] != "quantcode-native-v1")
                     or not isinstance(header["token"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,512}", header["token"])
                     or not isinstance(header["session_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", header["session_id"])):
                 raise ValueError("invalid remote identity header")
@@ -76,7 +78,7 @@ def private_directory(path: Path, uid: int, *, create: bool = False) -> Path:
     return path
 
 
-def sandbox_command(root: Path, workspace: Path, credential: Path, unit: str, ttl: int) -> list[str]:
+def sandbox_command(root: Path, workspace: Path, credential: Path, unit: str, ttl: int, *, native: bool = False) -> list[str]:
     return ["/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--pipe", "--collect", f"--unit={unit}",
             "--property=NoNewPrivileges=yes", "--property=PrivateUsers=yes", "--property=ProtectSystem=strict",
             "--property=ProtectHome=read-only", "--property=InaccessiblePaths=/home /root", "--property=PrivateTmp=yes",
@@ -86,6 +88,7 @@ def sandbox_command(root: Path, workspace: Path, credential: Path, unit: str, tt
             f"--property=WorkingDirectory={workspace}", f"--property=ReadWritePaths={workspace}",
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", f"HOME={workspace}", "LANG=C.UTF-8",
             "PYTHONDONTWRITEBYTECODE=1", "QUANTCODE_ENV=production", "QUANTCODE_SHARED_MEMORY=gateway",
+            *(["QUANTCODE_UNIFIED_RUNTIME=1", "OPENCODE_CHANNEL=quantcode"] if native else []),
             f"QUANTCODE_IDENTITY_SESSION_FILE={credential}",
             str(root / ".venv/bin/python"), "-I", "-c",
             "import sys; sys.path.insert(0, sys.argv[1]); from quantcode.remote_mcp import serve_runtime; serve_runtime()", str(root)]
@@ -130,7 +133,7 @@ def serve() -> int:
         if ttl < 1:
             raise PermissionError("session expired")
         unit = "quantcode-mcp-" + uuid.uuid4().hex
-        command = sandbox_command(root, workspace, credential, unit, ttl)
+        command = sandbox_command(root, workspace, credential, unit, ttl, native=header.get("runtime") == "quantcode-native-v1")
         env = {"PATH": "/usr/bin:/bin", "HOME": user.pw_dir, "LANG": "C.UTF-8", "XDG_RUNTIME_DIR": str(runtime),
                "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus"}
         previous = {}

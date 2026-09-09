@@ -22,6 +22,10 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Project } from "@opencode-ai/schema/project"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeProjectAccess } from "@/quantcode/project-access"
+import { QuantCodeGitAccess } from "@/quantcode/git-access"
 
 export const Info = Project.Info
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
@@ -112,6 +116,7 @@ const layer = Layer.effect(
     const projectDirectories = yield* ProjectDirectories.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const processes = yield* AppProcess.Service
     const { db } = yield* Database.Service
 
     const git = Effect.fnUntraced(
@@ -133,7 +138,7 @@ const layer = Layer.effect(
     const emitUpdated = (data: Info) =>
       Effect.sync(() =>
         GlobalBus.emit("event", {
-          directory: "global",
+          directory: QuantCodeIdentity.enabled() ? data.worktree : "global",
           project: data.id,
           payload: { type: Event.Updated.type, properties: data },
         }),
@@ -213,12 +218,15 @@ const layer = Layer.effect(
     const fromDirectory = Effect.fn("Project.fromDirectory")(function* (directory: string) {
       yield* Effect.logInfo("fromDirectory", { directory })
 
-      const data = yield* projectV2.resolve(AbsolutePath.make(directory))
+      const grant = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory)) : undefined
+      const data = grant ? yield* QuantCodeProjectAccess.resolve(grant).pipe(Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(AppProcess.Service, processes), Effect.provideService(ProjectDirectories.Service, projectDirectories))
+        : yield* projectV2.resolve(AbsolutePath.make(directory))
       const worktree = data.id === ProjectV2.ID.make("global") && !data.vcs ? "/" : data.directory
 
       // Phase 2: upsert
       const projectID = ProjectV2.ID.make(data.id)
-      yield* migrateProjectId(data.previous ? ProjectV2.ID.make(data.previous) : undefined, projectID)
+      if (!grant) yield* migrateProjectId(data.previous ? ProjectV2.ID.make(data.previous) : undefined, projectID)
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get().pipe(Effect.orDie)
       const existing = row
         ? fromRow(row)
@@ -230,7 +238,7 @@ const layer = Layer.effect(
             time: { created: Date.now(), updated: Date.now() },
           }
 
-      if (flags.experimentalIconDiscovery) yield* discover(existing).pipe(Effect.ignore, Effect.forkIn(scope))
+      if (flags.experimentalIconDiscovery && !grant) yield* discover(existing).pipe(Effect.ignore, Effect.forkIn(scope))
 
       const result: Info = {
         ...existing,
@@ -244,7 +252,7 @@ const layer = Layer.effect(
         !result.sandboxes.includes(data.directory)
       )
         result.sandboxes.push(data.directory)
-      result.sandboxes = yield* Effect.forEach(
+      if (!grant) result.sandboxes = yield* Effect.forEach(
         result.sandboxes,
         (s) =>
           fs.exists(s).pipe(
@@ -288,7 +296,7 @@ const layer = Layer.effect(
         .run()
         .pipe(Effect.orDie)
 
-      if (projectID !== ProjectV2.ID.global) {
+      if (projectID !== ProjectV2.ID.global && !grant) {
         yield* db
           .update(SessionTable)
           .set({ project_id: projectID })
@@ -302,14 +310,17 @@ const layer = Layer.effect(
         directory: data.directory,
       })
 
-      yield* emitUpdated(result)
-      if (projectID !== ProjectV2.ID.global && data.vcs?.type === "git") {
+      const exposed = grant ? yield* Effect.promise(() => QuantCodeProjectAccess.visible(result, grant.identity)) : result
+      if (!exposed) throw new QuantCodeWorkspace.WorkspaceDenied()
+      yield* emitUpdated(exposed)
+      if (!grant && projectID !== ProjectV2.ID.global && data.vcs?.type === "git") {
         yield* projectV2.commit({ store: data.vcs.store, id: data.id })
       }
-      return { project: result, sandbox: data.vcs ? data.directory : worktree }
+      return { project: exposed, sandbox: data.vcs ? data.directory : grant ? grant.root : worktree }
     })
 
     const discover = Effect.fn("Project.discover")(function* (input: Info) {
+      if (QuantCodeIdentity.enabled()) return // icon discovery never runs arbitrary workspace-wide host scans
       if (input.vcs !== "git") return
       if (input.icon?.override) return
       if (input.icon?.url) return
@@ -334,15 +345,28 @@ const layer = Layer.effect(
     })
 
     const list = Effect.fn("Project.list")(function* () {
-      return (yield* db.select().from(ProjectTable).all().pipe(Effect.orDie)).map(fromRow)
+      const identity = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeIdentity.currentIdentity()) : undefined
+      const rows = (yield* db.select().from(ProjectTable).all().pipe(Effect.orDie)).map(fromRow)
+      if (!identity) return rows
+      return (yield* Effect.forEach(rows, row => Effect.promise(() => QuantCodeProjectAccess.visible(row, identity))))
+        .filter((item): item is Info => !!item)
     })
 
     const get = Effect.fn("Project.get")(function* (id: ProjectV2.ID) {
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get().pipe(Effect.orDie)
-      return row ? fromRow(row) : undefined
+      if (!row) return undefined
+      if (!QuantCodeIdentity.enabled()) return fromRow(row)
+      const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+      return yield* Effect.promise(() => QuantCodeProjectAccess.visible(fromRow(row), identity))
     })
 
     const update = Effect.fn("Project.update")(function* (input: UpdateInput) {
+      if (QuantCodeIdentity.enabled()) {
+        const project = yield* get(input.projectID)
+        if (!project) return yield* new NotFoundError({ projectID: input.projectID })
+        yield* Effect.promise(() => QuantCodeWorkspace.authorize(project.worktree, "write"))
+        if (input.commands) throw new Error("项目启动命令由宿主管理，不通过项目外观设置修改。")
+      }
       const result = yield* db
         .update(ProjectTable)
         .set({
@@ -364,6 +388,16 @@ const layer = Layer.effect(
     })
 
     const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
+      if (QuantCodeIdentity.enabled()) {
+        yield* Effect.promise(() => QuantCodeWorkspace.authorize(input.directory, "write"))
+        if (input.project.vcs === "git") {
+          const current = yield* get(input.project.id)
+          if (!current) throw new QuantCodeWorkspace.WorkspaceDenied()
+          return current
+        }
+        yield* QuantCodeGitAccess.init(input.directory).pipe(Effect.provideService(AppProcess.Service, processes))
+        return (yield* fromDirectory(input.directory)).project
+      }
       if (input.project.vcs === "git") return input.project
       if (!(yield* Effect.sync(() => which("git")))) throw new Error("Git is not installed")
       const result = yield* git(["init", "--quiet"], { cwd: input.directory })
@@ -375,6 +409,7 @@ const layer = Layer.effect(
     })
 
     const setInitialized = Effect.fn("Project.setInitialized")(function* (id: ProjectV2.ID) {
+      if (QuantCodeIdentity.enabled() && !(yield* get(id))) throw new QuantCodeWorkspace.WorkspaceDenied()
       yield* db
         .update(ProjectTable)
         .set({ time_initialized: Date.now() })
@@ -400,6 +435,7 @@ const layer = Layer.effect(
     })
 
     const sandboxes = Effect.fn("Project.sandboxes")(function* (id: ProjectV2.ID) {
+      if (QuantCodeIdentity.enabled()) return (yield* get(id))?.sandboxes ?? []
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get().pipe(Effect.orDie)
       if (!row) return []
       const data = fromRow(row)
@@ -415,6 +451,10 @@ const layer = Layer.effect(
     })
 
     const addSandbox = Effect.fn("Project.addSandbox")(function* (id: ProjectV2.ID, directory: string) {
+      if (QuantCodeIdentity.enabled()) {
+        if (!(yield* get(id))) throw new QuantCodeWorkspace.WorkspaceDenied()
+        yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory, "write"))
+      }
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get().pipe(Effect.orDie)
       if (!row) throw new Error(`Project not found: ${id}`)
       const sandbox = AbsolutePath.make(directory)
@@ -432,6 +472,10 @@ const layer = Layer.effect(
     })
 
     const removeSandbox = Effect.fn("Project.removeSandbox")(function* (id: ProjectV2.ID, directory: string) {
+      if (QuantCodeIdentity.enabled()) {
+        if (!(yield* get(id))) throw new QuantCodeWorkspace.WorkspaceDenied()
+        yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory, "write"))
+      }
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get().pipe(Effect.orDie)
       if (!row) throw new Error(`Project not found: ${id}`)
       const sandbox = AbsolutePath.make(directory)

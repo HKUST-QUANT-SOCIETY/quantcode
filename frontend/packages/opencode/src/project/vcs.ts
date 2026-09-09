@@ -1,6 +1,21 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer, Context, Schema, Scope } from "effect"
-import { formatPatch, structuredPatch } from "diff"
+import { formatPatch, structuredPatch, parsePatch, applyPatch } from "diff"
+import path from "node:path"
+import { and, eq } from "drizzle-orm"
+import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
+import { MessageID, SessionID } from "@/session/schema"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
+import { QuantCodeAccess } from "@/quantcode/access"
+import { QuantCodeWritePolicy } from "@/quantcode/write-policy"
+import { QuantCodeWriteReceipt } from "@/quantcode/write-receipt"
+import { QuantCodeFileMutation } from "@/quantcode/file-mutation"
+import { FileSystem } from "@opencode-ai/core/filesystem"
+import { join } from "@/util/bom"
 import { InstanceState } from "@/effect/instance-state"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { Git } from "@/git"
@@ -265,6 +280,9 @@ export type FileStatus = Schema.Schema.Type<typeof FileStatus>
 
 export const ApplyInput = Schema.Struct({
   patch: Schema.String,
+  sessionID: Schema.optional(Schema.String),
+  messageID: Schema.optional(Schema.String),
+  callID: Schema.optional(Schema.String),
 })
 export type ApplyInput = Schema.Schema.Type<typeof ApplyInput>
 
@@ -275,7 +293,7 @@ export type ApplyResult = Schema.Schema.Type<typeof ApplyResult>
 
 export class PatchApplyError extends Schema.TaggedErrorClass<PatchApplyError>()("VcsPatchApplyError", {
   message: Schema.String,
-  reason: Schema.Literals(["non-git", "not-clean"]),
+  reason: Schema.Literals(["non-git", "not-clean", "denied"]),
 }) {}
 
 export interface Interface {
@@ -285,7 +303,7 @@ export interface Interface {
   readonly status: () => Effect.Effect<FileStatus[]>
   readonly diff: (mode: Mode, options?: DiffOptions) => Effect.Effect<FileDiff[]>
   readonly diffRaw: () => Effect.Effect<string>
-  readonly apply: (input: ApplyInput) => Effect.Effect<ApplyResult, PatchApplyError>
+  readonly apply: (input: ApplyInput, signal?: AbortSignal) => Effect.Effect<ApplyResult, PatchApplyError>
 }
 
 interface State {
@@ -295,11 +313,15 @@ interface State {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Vcs") {}
 
-const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = Layer.effect(
+const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const git = yield* Git.Service
     const events = yield* EventV2Bridge.Service
+    const database = yield* Database.Service
+    const processes = yield* AppProcess.Service
+    const fs = yield* FSUtil.Service
+    const mutations = yield* QuantCodeFileMutation.make(fs)
     const scope = yield* Scope.Scope
 
     const state = yield* InstanceState.make<State>(
@@ -340,9 +362,13 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         yield* InstanceState.get(state).pipe(Effect.forkIn(scope))
       }),
       branch: Effect.fn("Vcs.branch")(function* () {
+        const ctx = yield* InstanceState.context
+        if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory))
         return yield* InstanceState.use(state, (x) => x.current)
       }),
       defaultBranch: Effect.fn("Vcs.defaultBranch")(function* () {
+        const ctx = yield* InstanceState.context
+        if (QuantCodeIdentity.enabled()) yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory))
         return yield* InstanceState.use(state, (x) => x.root?.name)
       }),
       status: Effect.fn("Vcs.status")(function* () {
@@ -397,13 +423,93 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         )
         return [tracked, ...untracked].filter(Boolean).join("\n")
       }),
-      apply: Effect.fn("Vcs.apply")(function* (input: ApplyInput) {
+      apply: Effect.fn("Vcs.apply")(function* (input: ApplyInput, signal?: AbortSignal) {
+        signal?.throwIfAborted()
         const ctx = yield* InstanceState.context
         if (ctx.project.vcs !== "git") {
           return yield* new PatchApplyError({
             message: "Patch can't be applied because the project is not git-based",
             reason: "non-git",
           })
+        }
+        if (QuantCodeIdentity.enabled()) {
+          if (!input.sessionID || !input.messageID || !input.callID || Buffer.byteLength(input.patch) > MAX_PATCH_BYTES) {
+            return yield* new PatchApplyError({ reason: "denied", message: "补丁写入需要具体原生任务、消息和工具调用标识。" })
+          }
+          const sessionID = input.sessionID
+          const messageID = input.messageID
+          const callID = input.callID
+          const operation = Effect.gen(function* () {
+            const owner = yield* QuantCodeAccess.requireSession(sessionID)
+            if (!owner || owner.directory !== ctx.directory) throw new Error("补丁任务与当前工作区不一致。")
+            const { db } = database
+            // There is no current desktop caller of this legacy route. A
+            // future explicit native tool must supply its real pending part;
+            // invented caller IDs never create permission to write a patch.
+            const checkCall = () => Effect.gen(function* () {
+              signal?.throwIfAborted()
+              const message = yield* db.select({ data: MessageTable.data }).from(MessageTable).where(and(
+                eq(MessageTable.session_id, SessionID.make(sessionID)), eq(MessageTable.id, MessageID.make(messageID)),
+              )).get().pipe(Effect.orDie)
+              const parts = yield* db.select({ data: PartTable.data }).from(PartTable).where(and(
+                eq(PartTable.session_id, SessionID.make(sessionID)), eq(PartTable.message_id, MessageID.make(messageID)),
+              )).all().pipe(Effect.orDie)
+              const part = parts.find(item => item.data.type === "tool" && item.data.callID === callID)?.data
+              if (message?.data.role !== "assistant" || part?.type !== "tool" || part.tool !== "vcs_apply" ||
+                  !["pending", "running"].includes(part.state.status) || part.state.input.patch !== input.patch) {
+                throw new Error("没有与本补丁对应的原生工具调用。")
+              }
+            })
+            yield* checkCall()
+            if (/^(?:GIT binary patch|Binary files |old mode |new mode |copy from |copy to )/m.test(input.patch) ||
+                /^(?:new file mode|deleted file mode|index .*) (?:120000|160000)/m.test(input.patch)) {
+              throw new Error("此入口仅接受普通文件的文本补丁。")
+            }
+            const patches = parsePatch(input.patch)
+            if (!patches.length || patches.some(patch => !patch.oldFileName || !patch.newFileName)) throw new Error("补丁缺少明确文件名。")
+            const filename = (value: string | undefined) => {
+              const file = fileFromDiffPath(value)
+              if (file === undefined) return undefined
+              if (path.isAbsolute(file) || file.includes("\0") || file.includes("\\") || file.split("/").some(part => !part || part === ".." || part === ".")) throw new Error("补丁文件路径无效。")
+              return path.resolve(ctx.directory, file)
+            }
+            const changes = patches.map(patch => ({ patch, before: filename(patch.oldFileName), after: filename(patch.newFileName) }))
+            const requested = changes.flatMap(change => [...new Set([change.before, change.after].filter((file): file is string => !!file))])
+            if (!requested.length || new Set(requested).size !== requested.length) throw new Error("补丁包含重复文件变更。")
+            return yield* QuantCodeWritePolicy.guarded(sessionID, requested, admitted => Effect.gen(function* () {
+              const changesWithContent = yield* Effect.forEach(changes, change => Effect.gen(function* () {
+                const source = yield* mutations.read(sessionID, change.before ?? change.after!, signal)
+                if (!!change.before !== source.exists) throw new Error("补丁与当前文件状态不一致。")
+                const next = applyPatch(source.text, change.patch, { fuzzFactor: 0 })
+                if (next === false || !change.after && next !== "") throw new Error("补丁无法完整应用到当前文件。")
+                const destination = change.after && change.before && change.after !== change.before ? yield* mutations.read(sessionID, change.after, signal) : undefined
+                if (destination?.exists) throw new Error("补丁移动的目标文件已经存在。")
+                return { ...change, source, next, destination }
+              }))
+              return yield* QuantCodeWriteReceipt.run({ sessionID, messageID, callID, tool: "vcs_apply", args: { patch: input.patch },
+                files: admitted.files, planHashes: admitted.planHashes,
+              }, begin => Effect.gen(function* () {
+                yield* checkCall()
+                yield* begin
+                for (const change of changesWithContent) {
+                  yield* checkCall()
+                  if (change.after) {
+                    yield* mutations.write(sessionID, change.after, join(change.next, change.source.bom), change.destination ?? change.source, signal)
+                    yield* events.publish(FileSystem.Event.Edited, { file: change.after })
+                    yield* events.publish(Watcher.Event.Updated, { file: change.after, event: change.before === change.after ? "change" : "add" })
+                  }
+                  if (change.before && change.before !== change.after) {
+                    yield* mutations.remove(sessionID, change.before, change.source, signal)
+                    yield* events.publish(Watcher.Event.Updated, { file: change.before, event: "unlink" })
+                  }
+                }
+                return { applied: true }
+              }))
+            }))
+          }).pipe(Effect.provideService(Database.Service, database), Effect.provideService(AppProcess.Service, processes),
+            Effect.provideService(EventV2Bridge.Service, events),
+            Effect.catchCause(() => Effect.fail(new PatchApplyError({ reason: "denied", message: "补丁未通过任务、文件范围或当前内容校验；请从原生编辑工具执行。" }))))
+          return yield* operation
         }
         const applied = yield* git.applyPatch(ctx.directory, input.patch)
         if (applied.exitCode !== 0) {
@@ -418,6 +524,6 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Git.node, EventV2Bridge.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [Git.node, EventV2Bridge.node, Database.node, AppProcess.node, FSUtil.node] })
 
 export * as Vcs from "./vcs"

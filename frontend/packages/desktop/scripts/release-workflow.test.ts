@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { fileURLToPath } from "node:url"
 
 const root = fileURLToPath(new URL("../../..", import.meta.url))
-const workflow = await Bun.file(`${root}/.github/workflows/quantcode-desktop.yml`).text()
+const workflow = await Bun.file(`${root}/../.github/workflows/quantcode-desktop.yml`).text()
 const action = await Bun.file(`${root}/.github/actions/build-quantcode-desktop/action.yml`).text()
 const setupBun = await Bun.file(`${root}/.github/actions/setup-bun/action.yml`).text()
 const packagedSmoke = await Bun.file(`${root}/packages/desktop/scripts/verify-packaged-launch.ts`).text()
@@ -18,7 +18,7 @@ describe("QuantCode desktop release workflow contract", () => {
   test("supports signed artifact validation without forcing publication", () => {
     expect(workflow).toContain("sign:")
     expect(workflow).toContain("if: needs.version.outputs.sign == 'true'")
-    expect(workflow).toContain('if [[ "$publish" == "true" ]]; then sign=true; fi')
+    expect(workflow).toContain("bun packages/desktop/scripts/release-plan.ts")
     expect(workflow).toContain("needs.version.outputs.publish == 'true'")
     expect(workflow).toContain("RELEASE_SIGNED: ${{ needs.version.outputs.sign }}")
     expect(workflow).toContain("PUBLISH_REQUESTED: ${{ needs.version.outputs.publish }}")
@@ -47,8 +47,26 @@ describe("QuantCode desktop release workflow contract", () => {
     expect(action).toContain("--appimage-extract")
     expect(action).toContain("dpkg-deb --contents")
     expect(action).toContain("rpm -qlp")
+    expect(action).toContain('if ($LASTEXITCODE -ne 0) { throw "QuantCode packaged launch smoke failed with exit code $LASTEXITCODE" }')
     expect(action).toContain('dpkg-deb --fsys-tarfile "$deb" | tar -xOf -')
     expect(action).not.toContain('dpkg-deb --fsys-tarfile "$deb" | tar -xOJf -')
+  })
+
+  test("packaging removes empty signing inputs but preserves nonempty signed credentials", async () => {
+    const parsed = Bun.YAML.parse(action) as { runs: { steps: Array<{ name?: string; run?: string }> } }
+    const packaging = parsed.runs.steps.find(step => step.name === "Package installers")!.run!
+    const cleanup = packaging.slice(0, packaging.indexOf("read -r -a platform_args"))
+    for (const value of ["", "fixture-certificate"]) {
+      const child = Bun.spawn(["bash", "-euc", cleanup + `\n[[ \${CSC_LINK+x} == '${value ? "x" : ""}' ]]\n[[ \${APPLE_API_KEY:-} == fixture-key ]]\n[[ \${CSC_IDENTITY_AUTO_DISCOVERY} == false ]]`], {
+        env: { ...process.env, CSC_LINK: value, CSC_KEY_PASSWORD: "", APPLE_API_KEY: "fixture-key", APPLE_API_KEY_ID: "",
+          APPLE_API_ISSUER: "", AZURE_CLIENT_ID: "", AZURE_TENANT_ID: "", AZURE_SUBSCRIPTION_ID: "",
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "", AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: "",
+          AZURE_TRUSTED_SIGNING_ENDPOINT: "", AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "", CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+        stdout: "pipe", stderr: "pipe",
+      })
+      const [code, error] = await Promise.all([child.exited, new Response(child.stderr).text()])
+      expect(code, error).toBe(0)
+    }
   })
 
   test("fails packaged smoke when the QuantCode research workspace is missing", () => {
@@ -56,9 +74,21 @@ describe("QuantCode desktop release workflow contract", () => {
     expect(packagedSmoke).toContain("renderer did not mount the QuantCode research workspace")
   })
 
-  test("rebuilds installers for changes anywhere in the workspace dependency graph", () => {
-    expect(workflow).toContain('- "packages/**"')
-    expect(workflow).toContain('- "script/sign-windows.ps1"')
+  test("dispatches the actual root workflow with a distinct internal test publication policy", () => {
+    expect(workflow).toContain("workflow_dispatch:")
+    expect(workflow).toContain("internal_test:")
+    expect(workflow).toContain("matrix: ${{ fromJSON(needs.version.outputs.unsigned_matrix) }}")
+    expect(workflow).toContain("Verify internal test policy")
+    expect(workflow).toContain('.distribution.releaseClass == "internal-test"')
+    expect(workflow).toContain('.release.prerelease == true')
+    expect(workflow).toContain("quantcode-test-publish")
+    expect(workflow).toContain("flags+=(--prerelease --latest=false)")
+    expect(workflow).toContain('git rev-parse "$tag^{commit}"')
+    expect(workflow).toContain('gh api "repos/$TARGET_REPOSITORY/git/refs" -f "ref=$ref" -f "sha=$GITHUB_SHA"')
+    expect(workflow).toContain('gh api "repos/$TARGET_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha')
+    expect(workflow).not.toContain('git/ref/$ref')
+    expect(workflow).toContain('gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json assets')
+    expect(workflow).not.toContain('gh api "repos/$TARGET_REPOSITORY/releases/tags/$TAG"')
   })
 
   test("uses the native Node 24 checkout action for every release job", () => {

@@ -28,6 +28,8 @@ import {
 } from "./directory-picker-domain"
 import "./dialog-select-directory-v2.css"
 import { DividerV2 } from "@opencode-ai/ui/v2/divider-v2"
+import { createStore } from "solid-js/store"
+import { pickerRelativePath } from "./directory-picker-domain"
 
 interface DialogSelectDirectoryV2Props {
   title?: string
@@ -36,6 +38,8 @@ interface DialogSelectDirectoryV2Props {
   server: ServerConnection.Any
   mode?: "directory" | "file"
   start?: string
+  authorizedRoots?: ReadonlyArray<{ directory: string; access: "read" | "write" }>
+  validateSelection?: (directory: string) => Promise<string>
 }
 
 export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
@@ -56,6 +60,11 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal(false)
   const [rootValid, setRootValid] = createSignal(false)
+  const [validation, setValidation] = createStore({ pending: false, error: "" })
+  const permitted = (directory: string) => !props.authorizedRoots || props.authorizedRoots.some(item =>
+    pickerRelativePath(item.directory, directory) !== undefined)
+  const activeRoot = createMemo(() => props.authorizedRoots?.filter(item => pickerRelativePath(item.directory, root()) !== undefined)
+    .sort((left, right) => right.directory.length - left.directory.length)[0]?.directory)
   const listings = new Map<string, Promise<Array<{ name: string; type: "file" | "directory" }> | undefined>>()
   const loads = createPriorityTaskQueue<Array<{ name: string; type: "file" | "directory" }> | undefined>(3)
   const advanced = new Set<string>()
@@ -64,7 +73,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   let pathArea: HTMLDivElement | undefined
   let navigation = 0
 
-  const missingBase = createMemo(() => !(sync.data.path.home || sync.data.path.directory))
+  const missingBase = createMemo(() => !props.authorizedRoots && !props.start && !(sync.data.path.home || sync.data.path.directory))
   const [fallbackPath] = createResource(
     () => (missingBase() ? true : undefined),
     () =>
@@ -74,16 +83,16 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         .catch(() => undefined),
     { initialValue: undefined },
   )
-  const home = createMemo(() => sync.data.path.home || fallbackPath()?.home || "")
+  const home = createMemo(() => props.authorizedRoots ? activeRoot() ?? props.start ?? "" : sync.data.path.home || fallbackPath()?.home || "")
   const start = createMemo(
     () =>
-      props.start ||
+      props.authorizedRoots ? props.start : props.start ||
       sync.data.path.home ||
       sync.data.path.directory ||
       fallbackPath()?.home ||
       fallbackPath()?.directory,
   )
-  const search = createDirectorySearch({ sdk, home, base: () => root() || start() })
+  const search = createDirectorySearch({ sdk, home, base: () => root() || start(), roots: () => props.authorizedRoots?.map(item => item.directory) })
   const [suggestions] = createResource(input, async (value) => {
     const typed = cleanPickerInput(value).replace(/\/+$/, "")
     const current = displayPickerPath(root(), value, home()).replace(/\/+$/, "")
@@ -109,6 +118,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     const key = path.replace(/\/+$/, "")
     setError(false)
     const absolute = absoluteTreePath(root(), key)
+    if (!permitted(absolute)) return false
     const existing = listings.get(key)
     if (existing && !eager) loads.promote(`${generation}:${key}`)
     const request =
@@ -117,7 +127,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         if (!activeTreeNavigation(generation, navigation)) return Promise.resolve(undefined)
         return sdk.client.file
           .list({ directory: absolute, path: "" })
-          .then((result) => result.data ?? [])
+          .then((result) => result.error ? undefined : result.data)
           .catch(() => undefined)
       })
     listings.set(key, request)
@@ -137,7 +147,11 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
 
   async function navigate(path: string) {
     const value = policy.navigation(pickerAbsoluteInput(cleanPickerInput(path), home(), root() || start() || home()))
-    if (!value) return
+    if (!value || !permitted(value)) {
+      setValidation("error", "请选择当前身份在研究宿主上的授权工作目录。")
+      return
+    }
+    setValidation("error", "")
     const token = ++navigation
     setLoading(true)
     setRootValid(false)
@@ -208,10 +222,25 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     action()
   }
 
-  function resolve() {
+  async function resolve() {
     const path = policy.result(root(), selected(), rootValid())
-    if (!path) return
-    props.onSelect(props.multiple ? [path] : path)
+    if (!path || validation.pending || !permitted(path)) return
+    const token = navigation
+    setValidation({ pending: true, error: "" })
+    try {
+      const validated = props.validateSelection ? await props.validateSelection(path) : path
+      if (!activeTreeNavigation(token, navigation) || policy.result(root(), selected(), rootValid()) !== path) return
+      props.onSelect(props.multiple ? [validated] : validated)
+      dialog.close()
+    } catch (error) {
+      if (activeTreeNavigation(token, navigation)) setValidation("error", error instanceof Error ? error.message : "工作区授权核对失败，请重试。")
+    } finally { setValidation("pending", false) }
+  }
+
+  function cancel() {
+    // Return cancellation explicitly so callers do not depend on the dialog
+    // provider's close callback ordering.
+    props.onSelect(null)
     dialog.close()
   }
 
@@ -249,6 +278,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         if (change.expanded) void load(change.path, navigation)
       },
       onSelectionChange(paths) {
+        if (validation.pending) return
         const path = paths.at(-1)
         setSelected(path ? (policy.selection(root(), path) ?? "") : "")
       },
@@ -264,7 +294,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     void navigate(path)
   })
 
-  onCleanup(() => tree?.cleanUp())
+  onCleanup(() => { navigation += 1; tree?.cleanUp() })
 
   return (
     <Dialog size="large" class="directory-picker-v2">
@@ -273,12 +303,23 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
       </DialogHeader>
       <DividerV2 />
       <DialogBody class="directory-picker-v2-body pt-4!">
+        <Show when={props.authorizedRoots && props.authorizedRoots.length > 1}>
+          <div class="flex max-h-36 flex-col gap-2 mb-3 overflow-y-auto">
+            <span class="text-12 text-v2-text-text-muted">选择研究宿主上的工作区</span>
+            <For each={props.authorizedRoots}>{item => <ButtonV2 size="normal" variant={activeRoot() === item.directory ? "contrast" : "neutral"}
+              class="justify-start! min-w-0" disabled={validation.pending} onClick={() => void navigate(item.directory)}>
+              <span class="truncate" title={item.directory}>{item.directory}</span>
+              <Show when={item.access === "read"}><span class="shrink-0">只读</span></Show>
+            </ButtonV2>}</For>
+          </div>
+        </Show>
         <div class="directory-picker-v2-path" ref={pathArea}>
           <TextInputV2
             value={input()}
             autofocus
             autocomplete="off"
             spellcheck={false}
+            disabled={validation.pending || !!props.authorizedRoots && !root()}
             class="!w-full"
             onInput={(event) => {
               setInput(cleanPickerInput(event.currentTarget.value))
@@ -296,13 +337,13 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
             onKeyDown={handleInputKey}
           />
           <div class="directory-picker-v2-actions">
-            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(home())}>
+            <ButtonV2 size="small" variant="ghost" disabled={validation.pending || !home()} onClick={() => void navigate(home())}>
               ~
             </ButtonV2>
-            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerRoot(root()) || root())}>
+            <ButtonV2 size="small" variant="ghost" disabled={validation.pending || !root()} onClick={() => void navigate(activeRoot() || pickerRoot(root()) || root())}>
               {language.t("dialog.directory.root")}
             </ButtonV2>
-            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerParent(root()))}>
+            <ButtonV2 size="small" variant="ghost" disabled={validation.pending || !root() || !permitted(pickerParent(root()))} onClick={() => void navigate(pickerParent(root()))}>
               {language.t("dialog.directory.parent")}
             </ButtonV2>
           </div>
@@ -352,15 +393,17 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
           <Show when={!loading() && error()}>
             <div class="directory-picker-v2-state">{language.t("dialog.directory.readError")}</div>
           </Show>
+          <Show when={props.authorizedRoots && !root()}><div class="directory-picker-v2-state">请先选择一个授权工作区</div></Show>
         </div>
         <div class="directory-picker-v2-selection">{policy.result(root(), selected(), rootValid())}</div>
+        <Show when={validation.error}><div role="alert" class="text-12 text-text-critical-base">{validation.error}</div></Show>
       </DialogBody>
       <DialogFooter>
-        <ButtonV2 variant="neutral" onClick={() => dialog.close()}>
+        <ButtonV2 variant="neutral" onClick={cancel}>
           {language.t("common.cancel")}
         </ButtonV2>
-        <ButtonV2 variant="contrast" disabled={!policy.result(root(), selected(), rootValid())} onClick={resolve}>
-          {action[policy.action]}
+        <ButtonV2 variant="contrast" disabled={validation.pending || !policy.result(root(), selected(), rootValid())} onClick={() => void resolve()}>
+          {validation.pending ? "正在核对工作区…" : action[policy.action]}
         </ButtonV2>
       </DialogFooter>
     </Dialog>

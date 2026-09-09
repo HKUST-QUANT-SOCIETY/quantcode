@@ -1,3 +1,5 @@
+import { QuantCodeAccess } from "@/quantcode/access"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -73,11 +75,18 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {
-      return Object.fromEntries(yield* statusSvc.list())
+      const states = yield* statusSvc.list()
+      const visible = yield* QuantCodeAccess.visibleSessions([...states.keys()])
+      return Object.fromEntries([...states].filter(([id]) => visible.has(id)))
     })
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
       return yield* SessionError.mapStorageNotFound(session.get(sessionID))
+    })
+    const requireExecution = Effect.fn("SessionHttpApi.requireExecution")(function* (sessionID: SessionID) {
+      const current = yield* requireSession(sessionID)
+      if (QuantCodeIdentity.enabled() && QuantCodeIdentity.readOnly(current.metadata)) return yield* new HttpApiError.BadRequest({})
+      return current
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -86,7 +95,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const children = Effect.fn("SessionHttpApi.children")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
-      return yield* session.children(ctx.params.sessionID)
+      return yield* SessionError.mapStorageNotFound(session.children(ctx.params.sessionID))
     })
 
     const todo = Effect.fn("SessionHttpApi.todo")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -98,6 +107,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       query: typeof DiffQuery.Type
     }) {
+      yield* requireSession(ctx.params.sessionID)
       return yield* summary.diff({ sessionID: ctx.params.sessionID, messageID: ctx.query.messageID })
     })
 
@@ -145,13 +155,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const message = Effect.fn("SessionHttpApi.message")(function* (ctx: {
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
+      yield* requireSession(ctx.params.sessionID)
       return yield* SessionError.mapStorageNotFound(
         MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }),
       )
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
-      return yield* shareSvc.create(ctx.payload)
+      return yield* shareSvc.create(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {
@@ -174,6 +185,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
+      if (QuantCodeIdentity.enabled()) {
+        yield* requireSession(ctx.params.sessionID)
+        yield* promptSvc.cancel(ctx.params.sessionID)
+      }
       yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
       return true
     })
@@ -228,6 +243,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
+      if (QuantCodeIdentity.enabled()) {
+        yield* requireSession(ctx.params.sessionID).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+      }
       yield* promptSvc.cancel(ctx.params.sessionID)
       return true
     })
@@ -294,7 +312,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       const message = yield* promptSvc
         .prompt({
           ...ctx.payload,
@@ -310,7 +328,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
@@ -330,7 +348,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof CommandPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       return yield* promptSvc
         .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
@@ -340,7 +358,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof ShellPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
     })
 
@@ -348,12 +366,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof RevertPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       return yield* SessionError.mapBusy(revertSvc.revert({ sessionID: ctx.params.sessionID, ...ctx.payload }))
     })
 
     const unrevert = Effect.fn("SessionHttpApi.unrevert")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
+      yield* requireExecution(ctx.params.sessionID)
       return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID }))
     })
 
@@ -362,6 +380,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PermissionResponsePayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      if (QuantCodeIdentity.enabled()) {
+        const pending = (yield* permissionSvc.list()).find(item => item.id === ctx.params.permissionID)
+        if (!pending || pending.sessionID !== ctx.params.sessionID) return yield* new PermissionNotFoundError({ requestID: String(ctx.params.permissionID), message: "审批请求不属于当前任务。" })
+      }
       yield* permissionSvc.reply({ requestID: ctx.params.permissionID, reply: ctx.payload.response }).pipe(
         Effect.catchTag("Permission.NotFoundError", (error) =>
           Effect.fail(
@@ -380,6 +402,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       yield* requireSession(ctx.params.sessionID)
       yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID))
+      if (QuantCodeIdentity.enabled()) {
+        const message = yield* SessionError.mapStorageNotFound(MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }))
+        if (message.info.role !== "user") return yield* new HttpApiError.BadRequest({})
+      }
       yield* session.removeMessage(ctx.params)
       return true
     })
@@ -388,6 +414,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID; partID: PartID }
     }) {
       yield* requireSession(ctx.params.sessionID)
+      if (QuantCodeIdentity.enabled()) {
+        yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID))
+        const message = yield* SessionError.mapStorageNotFound(MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }))
+        if (message.info.role !== "user") return yield* new HttpApiError.BadRequest({})
+      }
       yield* session.removePart(ctx.params)
       return true
     })
@@ -398,6 +429,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       yield* requireSession(ctx.params.sessionID)
       const payload = ctx.payload as SessionV1.Part
+      if (QuantCodeIdentity.enabled()) {
+        // Execution results, usage and approvals must be emitted by the trusted
+        // executor, never fabricated through a generic client PATCH endpoint.
+        const message = yield* SessionError.mapStorageNotFound(MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }))
+        if (message.info.role !== "user" || payload.type !== "text" || payload.synthetic || payload.ignored) return yield* new HttpApiError.BadRequest({})
+        const original = message.parts.find(part => part.id === ctx.params.partID)
+        if (!original || original.type !== "text" || original.synthetic) return yield* new HttpApiError.BadRequest({})
+        yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID))
+      }
       if (
         payload.id !== ctx.params.partID ||
         payload.messageID !== ctx.params.messageID ||

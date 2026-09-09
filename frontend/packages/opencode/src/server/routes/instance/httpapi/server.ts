@@ -1,3 +1,5 @@
+import { quantcodeRuntimeLayer } from "./middleware/quantcode-runtime"
+import { QuantCodeTaskPublisher } from "@/quantcode/task-publisher"
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
@@ -52,6 +54,7 @@ import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { Database } from "@opencode-ai/core/database/database"
+import { AppProcess } from "@opencode-ai/core/process"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -209,9 +212,11 @@ type RouteRequirements =
   | HttpRouter.Request<"GlobalRequires", never>
 
 const app = LayerNode.group([
+  QuantCodeTaskPublisher.node,
   Npm.node,
   FSUtil.node,
   Database.node,
+  AppProcess.node,
   Auth.node,
   Account.node,
   Config.node,
@@ -281,6 +286,7 @@ export function createRoutes(
   ).pipe(
     Layer.provide([
       errorLayer,
+      quantcodeRuntimeLayer,
       compressionLayer,
       corsVaryFix,
       fenceLayer,

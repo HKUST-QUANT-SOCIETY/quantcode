@@ -25,6 +25,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -348,10 +349,29 @@ const layer = Layer.effect(
                 : value.providerMetadata,
             }))
 
-            const parts = yield* MessageV2.parts(ctx.assistantMessage.id).pipe(
+            const recentParts = QuantCodeIdentity.enabled() ? yield* Effect.gen(function* () {
+              // The native runner creates a new assistant message each turn.
+              // Reuse its stored tool parts across turns, stopping at actual
+              // user input rather than synthetic compaction continuations.
+              const history = yield* session.messages({ sessionID: ctx.sessionID })
+              const current = history.findIndex(message => message.info.id === ctx.assistantMessage.id)
+              const recent: SessionV1.ToolPart[] = []
+              for (let index = current; index >= 0 && recent.length < DOOM_LOOP_THRESHOLD; index--) {
+                const message = history[index]
+                if (message.info.role === "user" && message.parts.some(part => part.type === "text" &&
+                  !part.synthetic && !part.ignored && part.text.trim())) break
+                if (message.info.role !== "assistant") continue
+                for (let index = message.parts.length - 1; index >= 0 && recent.length < DOOM_LOOP_THRESHOLD; index--) {
+                  const part = message.parts[index]
+                  // Failed calls remain in the window: retrying the same
+                  // failed action forever does not become a fresh task.
+                  if (part.type === "tool") recent.push(part)
+                }
+              }
+              return recent
+            }) : (yield* MessageV2.parts(ctx.assistantMessage.id).pipe(
               Effect.provideService(Database.Service, database),
-            )
-            const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
+            )).slice(-DOOM_LOOP_THRESHOLD)
 
             if (
               recentParts.length !== DOOM_LOOP_THRESHOLD ||
@@ -364,6 +384,17 @@ const layer = Layer.effect(
               )
             ) {
               return
+            }
+
+            if (QuantCodeIdentity.enabled()) {
+              // Reuse the existing repetition detector and stream cleanup.
+              // A loop is a runtime stop, never a permission the user/model
+              // can grant once or permanently to keep repeating the action.
+              ctx.blocked = true
+              ctx.assistantMessage.finish = "error"
+              const error = new Error("stopped_loop: 检测到连续重复的工具调用，任务已停止。请调整需求后继续。")
+              error.name = "QuantCodeLoopStopped"
+              throw error
             }
 
             const agent = yield* agents.get(ctx.assistantMessage.agent)

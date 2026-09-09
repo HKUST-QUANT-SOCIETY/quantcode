@@ -29,3 +29,9 @@ bun run dev:quantcode
 统一回归入口：`QUANTCODE_TEST_PYTHON=.venv/bin/python PLAYWRIGHT_BASE_URL=http://localhost:4544 bun run check:product`。URL 必须指向从本仓库启动的 QuantCode Dev；脚本使用 `playwright.quantcode.config.ts`，不会自动启动或重启服务。启动器优先使用根目录 `.venv` 中的 Python。
 
 当前验收：Python 1,142 项通过、4 项跳过；Ruff 0 错误；组件 126 项通过；app/opencode/desktop 类型检查和网页构建通过；新构建产物 12 项 Headless 通过；Dev 使用独立端口时 16 项 Headless 通过。详见 [验收台账](audit/FULL_PRODUCT_AUDIT_2026-09-05.md#单仓库验收)。真实身份与组件服务仍按台账单独验收。
+
+## 2026-09-08 源码内化与执行职责
+
+本仓库已包含 OpenCode 来源源码，但当前“双循环+面板转交”尚未完成架构内化。已确认目标：QuantCode 自行维护统一执行引擎；`frontend/packages/core` 和 `frontend/packages/opencode` 是执行能力的现有落点，不作为外部产品。Python 保留组织服务、契约、审批、知识和组件适配；旧 AgentRunner/checkpoint 按兼容计划迁移。内部包名与第三方协议暂保留兼容，不删除来源/许可证。
+
+具体职责、迁移阶段和验收标准见 [执行引擎内化决策](decisions/QUANTCODE_RUNTIME_INTERNALIZATION_2026-09-08.md)。仅将源码放进仓库或修改产品名，不视为任务状态、权限和执行机制已统一。

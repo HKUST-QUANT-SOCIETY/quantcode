@@ -7,6 +7,8 @@ import { Cause, Effect, Exit } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { testEffect } from "../lib/effect"
 import { TestInstance } from "../fixture/fixture"
+import { writeFile } from "node:fs/promises"
+import { QuantCodeToolCatalog } from "../../src/quantcode/tool-catalog"
 
 // --- Mock infrastructure ---
 
@@ -204,6 +206,11 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
       return { tools: this._state?.tools ?? [] }
     }
 
+    async callTool() {
+      if (this._state) this._state.requestCalls++
+      return { content: [{ type: "text", text: "read fixture" }] }
+    }
+
     async request(
       request: { method: string; params?: { cursor?: string } },
       schema: { parse: (value: unknown) => unknown },
@@ -277,6 +284,57 @@ const { MCP } = await import("../../src/mcp/index")
 const { McpOAuthCallback } = await import("../../src/mcp/oauth-callback")
 
 const it = testEffect(LayerNode.compile(MCP.node))
+
+it.instance("native published host reads reconnect once after identity disconnect and reject unpublished access", () =>
+  Effect.gen(function* () {
+    const mcp = yield* MCP.Service
+    const callTool = mcp.callTool
+    if (!callTool) throw new Error("MCP callTool is required for this regression")
+    const { directory } = yield* TestInstance
+    lastCreatedClientName = "quantcode"
+    const transport = getOrCreateClientState("quantcode")
+    const config = { type: "local" as const, command: ["echo", "fixture"], enabled: true }
+    yield* mcp.add("quantcode", config)
+    yield* mcp.disconnect("quantcode")
+    const identity = { session_id: "a".repeat(32), actor_id: "fixture", group: "factor", role: "analyst",
+      workspace_id: "fixture", workspace_path: directory, resource_scopes: [], authorized_groups: ["factor"],
+      issued_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(), identity_source: "ssh_roster" }
+    const gateway = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json(identity) })
+    yield* Effect.addFinalizer(() => Effect.promise(async () => { await gateway.stop(true) }))
+    const credential = path.join(directory, "identity.json")
+    const catalog = path.join(directory, "catalog.json")
+    yield* Effect.promise(() => writeFile(credential, JSON.stringify({ gateway: gateway.url.origin, token: "fixture-token" }), { mode: 0o600 }))
+    const entry = { server: "quantcode", tool: "test_tool", effect: "read", status: "published",
+      groups: ["factor"], roles: ["analyst"], server_config_hash: QuantCodeToolCatalog.digest(config),
+      input_schema_hash: QuantCodeToolCatalog.digest(transport.tools[0].inputSchema) }
+    const publish = (change: object = {}) => Effect.promise(() => writeFile(catalog, JSON.stringify({
+      version: 1, release: "fixture", published_at: new Date().toISOString(), tools: [{ ...entry, ...change }],
+    }), { mode: 0o600 }))
+    yield* publish()
+    const environment = { OPENCODE_CHANNEL: "quantcode", QUANTCODE_UNIFIED_RUNTIME: "1",
+      QUANTCODE_IDENTITY_SESSION_FILE: credential, QUANTCODE_TOOL_CATALOG_FILE: catalog }
+    yield* Effect.acquireRelease(Effect.sync(() => {
+      const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]))
+      Object.assign(process.env, environment)
+      return previous
+    }), previous => Effect.sync(() => {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }))
+    const results = yield* Effect.all(Array.from({ length: 3 }, () => callTool("quantcode", "test_tool")), { concurrency: "unbounded" })
+    expect(results).toEqual(Array.from({ length: 3 }, () => ({ content: [{ type: "text", text: "read fixture" }] })))
+    expect(clientCreateCount).toBe(2)
+    expect(transport.requestCalls).toBe(3)
+    yield* mcp.disconnect("quantcode")
+    for (const change of [{ status: "disabled" }, { groups: ["risk"] }, { server_config_hash: "0".repeat(64) }]) {
+      yield* publish(change)
+      expect(Exit.isFailure(yield* callTool("quantcode", "test_tool").pipe(Effect.exit))).toBe(true)
+      expect(clientCreateCount).toBe(2)
+      expect(transport.requestCalls).toBe(3)
+    }
+  }), { config: { mcp: {} } })
 
 function statusName(status: Record<string, MCPNS.Status> | MCPNS.Status, server: string) {
   if ("status" in status) return status.status

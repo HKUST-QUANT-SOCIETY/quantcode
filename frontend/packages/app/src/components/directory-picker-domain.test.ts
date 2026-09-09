@@ -31,6 +31,25 @@ test("maps server directory entries into Pierre paths", () => {
   ).toEqual(["src/components/", "src/index.ts"])
 })
 
+test("authorized directory search starts at the host grant instead of filesystem root", async () => {
+  const calls: string[] = []
+  const sdk = { client: { file: { list: async ({ directory }: { directory: string }) => {
+    calls.push(directory)
+    return { data: directory === "/srv/member/research" ? [
+      { name: "project", absolute: "/srv/member/research/project", type: "directory" },
+      { name: "outside", absolute: "/srv/other/private", type: "directory" },
+    ] : [] }
+  } } } } as unknown as Parameters<typeof createDirectorySearch>[0]["sdk"]
+  const search = createDirectorySearch({ sdk, base: () => "/srv/member/research", home: () => "/srv/member/research",
+    roots: () => ["/srv/member/research"] })
+  expect(await search("/srv/member/research/pro")).toEqual(["/srv/member/research/project"])
+  expect(calls).toEqual(["/srv/member/research"])
+  calls.length = 0
+  expect(await search("/srv/other/private/")).toEqual([])
+  expect(await search("../../other/private/")).toEqual([])
+  expect(calls).toEqual([])
+})
+
 test("maps Pierre paths back to the selected server root", () => {
   expect(absoluteTreePath("C:/Users/luke", "src/components/")).toBe("C:/Users/luke/src/components")
   expect(absoluteTreePath("C:/", "")).toBe("C:/")

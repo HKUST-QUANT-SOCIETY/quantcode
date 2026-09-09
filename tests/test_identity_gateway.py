@@ -104,6 +104,34 @@ def test_host_lists_live_groups_signs_selected_group_and_revokes_on_logout(host_
     logout(session_file)
 
 
+def test_gateway_declares_connection_close_to_bun_clients(host_gateway):
+    bun = shutil.which("bun")
+    if bun is None:
+        pytest.skip("Bun is required for the gateway transport integration")
+    _, url, key, _ = host_gateway
+    script = """
+      const [url, publicKey] = process.argv.slice(1);
+      for (let index = 0; index < 24; index++) {
+        const describe = index % 2 === 1;
+        const response = await fetch(url + (describe ? '/auth/identity' : '/session'),
+          describe ? {method: 'POST', headers: {'content-type': 'application/json'},
+            body: JSON.stringify({public_key: publicKey})} : undefined);
+        const text = await response.text();
+        if (response.headers.get('connection') !== 'close') throw new Error('Missing explicit connection closure');
+        if (response.status !== (describe ? 200 : 401)) throw new Error('Unexpected gateway status');
+        if (Number(response.headers.get('content-length')) !== Buffer.byteLength(text)) throw new Error('Incomplete gateway body');
+        JSON.parse(text);
+      }
+      console.log('24 complete responses');
+    """
+    env = {name: value for name, value in os.environ.items()
+           if name.lower() not in {"http_proxy", "https_proxy", "all_proxy"}}
+    result = subprocess.run([bun, "-e", script, url, key.read_text().strip()],
+                            env=env, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "24 complete responses" in result.stdout
+
+
 def test_host_logout_does_not_claim_success_when_gateway_is_unreachable(tmp_path):
     import httpx
     from quantcode.identity_login import logout
@@ -116,22 +144,80 @@ def test_host_logout_does_not_claim_success_when_gateway_is_unreachable(tmp_path
     assert session_file.exists()
 
 
-def test_real_host_http_login_mcp_logout(host_gateway):
+def test_real_host_http_and_desktop_agent_login_logout(host_gateway, monkeypatch):
     import sys
 
     bun = shutil.which("bun")
     if bun is None:
         pytest.skip("Bun is required for the real host HTTP integration")
-    _, url, key, session_file = host_gateway
+    gateway, url, key, session_file = host_gateway
+    barrier = session_file.with_name("verify-barrier")
+    verify = gateway.verify
+
+    def delayed_verify(payload):
+        armed = barrier.with_suffix(".armed")
+        if armed.exists():
+            armed.unlink()
+            barrier.with_suffix(".entered").touch()
+            deadline = time.monotonic() + 10
+            while not barrier.with_suffix(".released").exists():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Test did not release the gateway verification barrier")
+                time.sleep(0.01)
+        return verify(payload)
+
+    monkeypatch.setattr(gateway, "verify", delayed_verify)
     root = Path(__file__).resolve().parents[1]
     env = {key: value for key, value in os.environ.items() if not key.startswith("QUANTCODE_")}
-    env.update(QUANTCODE_IDENTITY_INTEGRATION="1", QUANTCODE_HOST_PYTHON=sys.executable,
+    env.update(OPENCODE_CHANNEL="quantcode", QUANTCODE_UNIFIED_RUNTIME="1", QUANTCODE_IDENTITY_INTEGRATION="1", QUANTCODE_HOST_PYTHON=sys.executable,
                QUANTCODE_BACKEND_ROOT=str(root), QUANTCODE_PUBLIC_KEY_FILE=str(key),
-               QUANTCODE_IDENTITY_SESSION_FILE=str(session_file), QUANTCODE_GATEWAY_URL=url)
+               QUANTCODE_IDENTITY_SESSION_FILE=str(session_file), QUANTCODE_GATEWAY_URL=url,
+               QUANTCODE_IDENTITY_TEST_BARRIER=str(barrier),
+               OPENCODE_CONFIG_CONTENT=json.dumps({"formatter": False, "lsp": False, "mcp": {}, "plugin": []}))
     result = subprocess.run([bun, "test", "--timeout", "45000", "test/server/quantcode-identity.integration.test.ts"],
-                            cwd=root / "frontend/packages/opencode", env=env, text=True, capture_output=True, timeout=60)
-    assert result.returncode == 0, result.stderr[-6000:]
+                            cwd=root / "frontend/packages/opencode", env=env, text=True, capture_output=True, timeout=180)
+    assert result.returncode == 0, (result.stderr[-6000:] + result.stdout[-6000:])
+    assert "3 pass" in result.stderr
+    assert "All fibers interrupted" not in result.stdout + result.stderr
     assert not session_file.exists()
+
+
+def test_native_solution_status_waits_for_concurrent_read(host_gateway, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from quantcode.identity_login import login, logout
+    from quantcode.solution_host import handle
+    from runner.solution_workflow import SolutionStore
+
+    _, url, key, session_file = host_gateway
+    identity = login(gateway=url, public_key=key, session_file=session_file)
+    monkeypatch.setenv("QUANTCODE_IDENTITY_SESSION_FILE", str(session_file))
+    monkeypatch.setenv("QUANTCODE_SERVICE_STATE_DIR", str(tmp_path / "native-state"))
+    entered, release = threading.Event(), threading.Event()
+    read = SolutionStore.get
+
+    def held_read(store, doc_id):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5), "Concurrent status test did not release its read"
+        return read(store, doc_id)
+
+    monkeypatch.setattr(SolutionStore, "get", held_read)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(handle, "status", "ses_native_concurrent", identity["session_id"], {"task": "Read the QA input"})
+        try:
+            assert entered.wait(5), "The first status request did not acquire its lock"
+            with pytest.raises(RuntimeError, match="RUN_BUSY"):
+                handle("propose", "ses_native_concurrent", identity["session_id"], {
+                    "task": "Read the QA input", "goal": "Read the QA input",
+                    "acceptance_criteria": ["Inspect the original file"], "file_impact": [],
+                })
+            second = pool.submit(handle, "status", "ses_native_concurrent", identity["session_id"], {"task": "Read the QA input"})
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.1)
+        finally:
+            release.set()
+        assert first.result(timeout=5) == second.result(timeout=5)
+    logout(session_file)
 
 
 def test_shared_memory_is_live_across_actors_and_rejects_scope_overrides(gateway_login, tmp_path, monkeypatch):
@@ -433,3 +519,60 @@ def test_checkpoint_revalidation_requires_live_creator_and_same_group_approver(g
     gateway.logout(creator["token"])
     with pytest.raises(PermissionError, match="creator session expired or revoked"):
         gateway.validate_checkpoint(approver_token, creator["session"])
+
+
+def test_native_gate_reviewer_can_reconcile_own_record_after_relogin_without_reviving_authority(gateway_login):
+    from quantcode import native_gate
+    from schemas.evidence_chain import canonical_json, sha256_hex
+
+    gateway, owner_login, roster, owner_entry = gateway_login
+    owner = owner_login()[0]
+    entries = [owner_entry]
+    keys = {}
+    for name in ("reviewer", "unrelated-reviewer"):
+        key = roster.parent / f"fixture-{name}"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, capture_output=True)
+        public = key.with_suffix(".pub").read_text().strip()
+        keys[name] = (key, public)
+        entries.append({**owner_entry, "fingerprint": fingerprint_of_public_key(public),
+                        "actor_id": f"fixture-{name}", "role": "approver"})
+    roster.write_text(yaml.safe_dump({"bindings": entries}))
+
+    def login(name):
+        key, public = keys[name]
+        challenge = gateway.issue(public)
+        signature = subprocess.run(["ssh-keygen", "-Y", "sign", "-n", "quantcode", "-f", str(key)],
+                                   input=challenge["nonce"], text=True, capture_output=True, check=True).stdout
+        return gateway.verify({"challenge_id": challenge["challenge_id"], "public_key": public, "signature": signature})
+
+    reviewer = login("reviewer")
+    arguments = canonical_json({"fixture": "exact operation"})
+    request = {"expected_session_id": owner["session"]["session_id"], "request_id": "fixture-request",
+               "root_session_id": "ses_fixture", "session_id": "ses_fixture", "message_id": "msg_fixture",
+               "call_id": "call_fixture", "server": "fixture", "tool": "fixture-write", "kind": "merge",
+               "resource": "fixture-resource", "operation_digest": sha256_hex(arguments), "catalog_digest": "a" * 64,
+               "arguments_json": arguments, "arguments_digest": sha256_hex(arguments), "description": "fixture approval",
+               "expires_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 60_000}
+    gate = native_gate.publish(gateway, owner["token"], request)
+    decision = native_gate.decide(gateway, reviewer["token"], {
+        "expected_session_id": reviewer["session"]["session_id"], "gate_id": gate["gate_id"],
+        "expected_digest": gate["record_digest"], "operation_digest": gate["request"]["operation_digest"],
+        "decision": "approve", "note": "fixture evidence reviewed",
+    })
+    gateway.logout(owner["token"])
+    gateway.logout(reviewer["token"])
+    renewed = login("reviewer")
+    receipt = native_gate.read(gateway, renewed["token"], {
+        "expected_session_id": renewed["session"]["session_id"], "gate_id": gate["gate_id"],
+    })
+    assert receipt["decision"] == decision["decision"]
+    assert receipt["valid"] is False
+    assert receipt["status"] == "approved"
+    outsider = login("unrelated-reviewer")
+    with pytest.raises(PermissionError):
+        native_gate.read(gateway, outsider["token"], {"expected_session_id": outsider["session"]["session_id"], "gate_id": gate["gate_id"]})
+    entries[1]["resource_scopes"] = ["changed-scope"]
+    roster.write_text(yaml.safe_dump({"bindings": entries}))
+    changed = login("reviewer")
+    with pytest.raises(PermissionError):
+        native_gate.read(gateway, changed["token"], {"expected_session_id": changed["session"]["session_id"], "gate_id": gate["gate_id"]})

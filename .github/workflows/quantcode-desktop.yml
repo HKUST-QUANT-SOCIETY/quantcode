@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      internal_test:
+        description: "Build an explicitly unsigned Test prerelease (X.Y.Z-test.N, macOS and Windows only)"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: quantcode-desktop-${{ github.ref }}
@@ -38,6 +43,10 @@ jobs:
       publish: ${{ steps.release.outputs.publish }}
       sign: ${{ steps.release.outputs.sign }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      internal_test: ${{ steps.release.outputs.internal_test }}
+      title: ${{ steps.release.outputs.title }}
+      required_targets: ${{ steps.release.outputs.required_targets }}
+      unsigned_matrix: ${{ steps.release.outputs.unsigned_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,33 +62,25 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_PUBLISH: ${{ inputs.publish }}
           INPUT_SIGN: ${{ inputs.sign }}
+          INPUT_INTERNAL_TEST: ${{ inputs.internal_test }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#quantcode-v}"
             if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
               echo "Release tag $GITHUB_REF_NAME must point to a commit reachable from $DEFAULT_BRANCH" >&2
               exit 1
             fi
-          else
-            version="${INPUT_VERSION:-0.1.${GITHUB_RUN_NUMBER}}"
           fi
-
-          publish="${INPUT_PUBLISH:-false}"
-          sign="${INPUT_SIGN:-false}"
-          if [[ "$publish" == "true" ]]; then sign=true; fi
-
-          if [[ "$sign" == "true" && "$GITHUB_REF_TYPE" != "tag" && "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]]; then
-            echo "Signed release builds are restricted to tags or the default branch ($DEFAULT_BRANCH)" >&2
-            exit 1
+          plan="$RUNNER_TEMP/quantcode-release-plan"
+          bun packages/desktop/scripts/release-plan.ts > "$plan"
+          tag="$(sed -n 's/^tag=//p' "$plan")"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            if [[ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ]]; then
+              echo "Existing release tag $tag does not match this source commit" >&2
+              exit 1
+            fi
           fi
-
-          {
-            bun packages/desktop/scripts/release-version.ts "$version"
-            echo "tag=quantcode-v$version"
-            echo "publish=$publish"
-            echo "sign=$sign"
-          } >> "$GITHUB_OUTPUT"
+          cat "$plan" >> "$GITHUB_OUTPUT"
 
   build_unsigned:
     needs: version
@@ -91,28 +92,7 @@ jobs:
     timeout-minutes: 75
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: macOS Intel
-            runner: macos-15-intel
-            target: x86_64-apple-darwin
-            platform: --mac --x64
-            install: --os=darwin --cpu=x64
-          - name: macOS Apple Silicon
-            runner: macos-15
-            target: aarch64-apple-darwin
-            platform: --mac --arm64
-            install: --os=darwin --cpu=arm64
-          - name: Windows x64
-            runner: windows-2025
-            target: x86_64-pc-windows-msvc
-            platform: --win --x64
-            install: --os=win32 --cpu=x64
-          - name: Linux x64
-            runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            platform: --linux --x64
-            install: --os=linux --cpu=x64
+      matrix: ${{ fromJSON(needs.version.outputs.unsigned_matrix) }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -271,9 +251,10 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_SIGNED: ${{ needs.version.outputs.sign }}
+          RELEASE_INTERNAL_TEST: ${{ needs.version.outputs.internal_test }}
           PUBLISH_REQUESTED: ${{ needs.version.outputs.publish }}
           RELEASE_UPDATE_FEED: disabled
-          REQUIRED_TARGETS: aarch64-apple-darwin,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu
+          REQUIRED_TARGETS: ${{ needs.version.outputs.required_targets }}
         run: bun packages/desktop/scripts/finalize-latest-yml.ts
 
       - name: Attest installer and metadata provenance
@@ -294,19 +275,22 @@ jobs:
   release:
     needs:
       - version
+      - build_unsigned
       - build_signed_macos
       - build_signed_windows
       - build_release_linux
       - finalize
     if: >-
-      ${{ always() && needs.version.outputs.publish == 'true' && needs.build_signed_macos.result == 'success' &&
-          needs.build_signed_windows.result == 'success' && needs.build_release_linux.result == 'success' &&
-          needs.finalize.result == 'success' }}
+      ${{ always() && needs.version.outputs.publish == 'true' && needs.finalize.result == 'success' &&
+          ((needs.version.outputs.internal_test == 'true' && needs.build_unsigned.result == 'success' &&
+            needs.build_signed_macos.result == 'skipped' && needs.build_signed_windows.result == 'skipped' && needs.build_release_linux.result == 'skipped') ||
+           (needs.version.outputs.internal_test != 'true' && needs.build_signed_macos.result == 'success' &&
+            needs.build_signed_windows.result == 'success' && needs.build_release_linux.result == 'success')) }}
     runs-on: ubuntu-24.04
     concurrency:
       group: quantcode-release-${{ needs.version.outputs.tag }}
       cancel-in-progress: false
-    environment: quantcode-release-publish
+    environment: ${{ needs.version.outputs.internal_test == 'true' && 'quantcode-test-publish' || 'quantcode-release-publish' }}
     permissions:
       contents: write
     steps:
@@ -324,6 +308,7 @@ jobs:
           path: frontend/release-finalized
 
       - name: Verify approved release policy
+        if: needs.version.outputs.internal_test != 'true'
         shell: bash
         run: |
           jq -e '
@@ -336,6 +321,24 @@ jobs:
             .distribution.platformTrust.linux == "approved-platform-unsigned"
           ' release-finalized/release-manifest.json >/dev/null
 
+      - name: Verify internal test policy
+        if: needs.version.outputs.internal_test == 'true'
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          jq -e --arg tag "$TAG" --arg version "$VERSION" --arg commit "$GITHUB_SHA" '
+            .schemaVersion == 2 and .version == $version and .source.commit == $commit and
+            .release.tag == $tag and .release.prerelease == true and
+            (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+-test\\.[0-9]+$")) and
+            .distribution.releaseClass == "internal-test" and
+            .distribution.publishRequested == true and .distribution.updateFeed == "disabled" and
+            .distribution.platformTrust.macos == "unsigned-test" and
+            .distribution.platformTrust.windows == "unsigned-test" and
+            .distribution.platformTrust.linux == "not-included"
+          ' release-finalized/release-manifest.json >/dev/null
+
       - name: Stage draft GitHub Release
         id: stage
         shell: bash
@@ -344,6 +347,8 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
+          INTERNAL_TEST: ${{ needs.version.outputs.internal_test }}
+          RELEASE_TITLE: ${{ needs.version.outputs.title }}
           TARGET_REPOSITORY: HKUST-QUANT-SOCIETY/quantcode
         run: |
           if [[ -z "$GH_TOKEN" ]]; then
@@ -356,6 +361,10 @@ jobs:
           printf 'Built from [%s@%s](https://github.com/%s/commit/%s).\n\nBuild run: https://github.com/%s/actions/runs/%s\n' \
             "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_SHA" \
             "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > "$notes"
+          if [[ "$INTERNAL_TEST" == "true" ]]; then
+            printf '\nInternal member test build. macOS and Windows packages are unsigned and not notarized. This is not an approved production release. Automatic updates are disabled. Verify SHA256SUMS and release-manifest.json before installation.\n\nInstallation: https://github.com/%s/blob/%s/frontend/packages/desktop/QUANTCODE_INSTALL.md\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$notes"
+          fi
 
           if gh release view "$TAG" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
             draft="$(gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json isDraft --jq .isDraft)"
@@ -369,11 +378,24 @@ jobs:
               echo "Release $TAG is already published; verification will determine whether this rerun is idempotent."
               exit 0
             fi
-            gh release edit "$TAG" --repo "$TARGET_REPOSITORY" --title "QuantCode $VERSION" --notes-file "$notes"
+            gh release edit "$TAG" --repo "$TARGET_REPOSITORY" --title "$RELEASE_TITLE" --notes-file "$notes"
           else
+            # GitHub creates a draft release as an untagged release when the
+            # requested tag does not exist yet. Create the exact ref first so
+            # verification and the published URL cannot drift to untagged-*.
+            ref="refs/tags/$TAG"
+            if ! gh api "repos/$TARGET_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha >/tmp/current-tag-sha 2>/dev/null; then
+              gh api "repos/$TARGET_REPOSITORY/git/refs" -f "ref=$ref" -f "sha=$GITHUB_SHA" >/dev/null
+            else
+              current_sha="$(cat /tmp/current-tag-sha)"
+              if [[ "$current_sha" != "$GITHUB_SHA" ]]; then
+                echo "Existing release tag $TAG points at $current_sha, expected $GITHUB_SHA" >&2
+                exit 1
+              fi
+            fi
             flags=(--draft --target "$GITHUB_SHA")
             if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
-            gh release create "$TAG" --repo "$TARGET_REPOSITORY" --title "QuantCode $VERSION" --notes-file "$notes" "${flags[@]}"
+            gh release create "$TAG" --repo "$TARGET_REPOSITORY" --title "$RELEASE_TITLE" --notes-file "$notes" "${flags[@]}"
           fi
 
           if [[ "$(gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json isDraft --jq .isDraft)" != "true" ]]; then
@@ -411,7 +433,10 @@ jobs:
             printf '%s\t%s\tsha256:%s\n' "$name" "$size" "$digest"
           done < <(find release-assets release-finalized -maxdepth 1 -type f -print | sort) | sort > "$expected"
 
-          gh api "repos/$TARGET_REPOSITORY/releases/tags/$TAG" \
+          # GitHub's public REST release-by-tag endpoint returns 404 for draft
+          # releases. `gh release view` resolves draft releases in the same
+          # authenticated context used by staging, so verify its assets here.
+          gh release view "$TAG" --repo "$TARGET_REPOSITORY" --json assets \
             --jq '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' | sort > "$actual"
 
           diff --unified "$expected" "$actual"
@@ -432,5 +457,5 @@ jobs:
           TARGET_REPOSITORY: HKUST-QUANT-SOCIETY/quantcode
         run: |
           flags=(--draft=false)
-          if [[ "$PRERELEASE" != "true" ]]; then flags+=(--latest); fi
+          if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
           gh release edit "$TAG" --repo "$TARGET_REPOSITORY" "${flags[@]}"

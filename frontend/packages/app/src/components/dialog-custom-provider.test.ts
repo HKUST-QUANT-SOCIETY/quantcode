@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { validateCustomProvider } from "./dialog-custom-provider-form"
+import { modelConnectionURL, validateCustomProvider } from "./dialog-custom-provider-form"
 
 const t = (key: string) => key
 
 describe("validateCustomProvider", () => {
+  test("model endpoint identity includes the API path and excludes URL credentials and redirect-like payloads", () => {
+    expect(modelConnectionURL("https://API.EXAMPLE.com:443/v1/")).toBe("https://api.example.com/v1/")
+    expect(modelConnectionURL("https://api.example.com/v1//")).not.toBe(modelConnectionURL("https://api.example.com/v1/"))
+    expect(modelConnectionURL("https://api.example.com/v2")).not.toBe(modelConnectionURL("https://api.example.com/v1"))
+    for (const url of ["https://user:secret@api.example.com/v1", "https://api.example.com/v1?key=secret", "https://api.example.com/#token", "https://", "file:///tmp/key", "https://${HOST}/v1"]) {
+      expect(modelConnectionURL(url)).toBeUndefined()
+    }
+  })
   test("builds trimmed config payload", () => {
     const result = validateCustomProvider({
       form: {

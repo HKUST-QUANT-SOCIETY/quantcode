@@ -14,6 +14,8 @@ import { ProjectIcon, SessionItem, type SessionItemProps } from "./sidebar-items
 import { displayName, sortedRootSessions } from "./helpers"
 
 export type ProjectSidebarContext = {
+  allowWorktrees: Accessor<boolean>
+  workspaceActionsReady: Accessor<boolean>
   currentDir: Accessor<string>
   currentProject: Accessor<LocalProject | undefined>
   sidebarOpened: Accessor<boolean>
@@ -51,6 +53,8 @@ export const ProjectDragOverlay = (props: {
 }
 
 const ProjectTile = (props: {
+  allowWorktrees: Accessor<boolean>
+  workspaceActionsReady: Accessor<boolean>
   project: LocalProject
   mobile?: boolean
   sidebarHovering: Accessor<boolean>
@@ -154,11 +158,11 @@ const ProjectTile = (props: {
           <ContextMenu.Item
             data-action="project-workspaces-toggle"
             data-project={base64Encode(props.project.worktree)}
-            disabled={props.project.vcs !== "git" && !props.workspacesEnabled(props.project)}
+            disabled={!props.workspaceActionsReady() || props.allowWorktrees() && props.project.vcs !== "git" && !props.workspacesEnabled(props.project)}
             onSelect={() => props.toggleProjectWorkspaces(props.project)}
           >
             <ContextMenu.ItemLabel>
-              {props.workspacesEnabled(props.project)
+              {!props.allowWorktrees() ? "选择授权工作区" : props.workspacesEnabled(props.project)
                 ? props.language.t("sidebar.workspaces.disable")
                 : props.language.t("sidebar.workspaces.enable")}
             </ContextMenu.ItemLabel>
@@ -317,6 +321,8 @@ export const SortableProject = (props: {
   }
   const tile = () => (
     <ProjectTile
+      allowWorktrees={props.ctx.allowWorktrees}
+      workspaceActionsReady={props.ctx.workspaceActionsReady}
       project={props.project}
       mobile={props.mobile}
       sidebarHovering={props.ctx.sidebarHovering}

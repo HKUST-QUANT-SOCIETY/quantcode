@@ -3,6 +3,7 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "quantcode.servers.managedRuntime": "QuantCode 隨桌面應用程式或組織發布更新。連接現有研究主機時，新增其服務位址即可。",
   "command.category.suggested": "建議",
   "command.category.view": "檢視",
   "command.category.project": "專案",
@@ -192,6 +193,7 @@ export const dict = {
   "prompt.placeholder.shell": "輸入 shell 命令... {{example}}",
   "prompt.placeholder.normal": '隨便問點什麼... "{{example}}"',
   "prompt.placeholder.simple": "隨便問點什麼...",
+  "prompt.placeholder.commands": "描述任務，輸入 / 使用命令，輸入 @ 引用上下文…",
   "prompt.placeholder.summarizeComments": "摘要評論…",
   "prompt.placeholder.summarizeComment": "摘要這則評論…",
   "prompt.mode.shell": "Shell",
@@ -500,6 +502,9 @@ export const dict = {
   "session.revertDock.restore": "還原訊息",
 
   "session.new.title": "建構任何東西",
+  "session.new.project.new": "新增專案",
+  "session.new.project.search": "搜尋專案",
+  "session.new.project.add": "選擇研究專案",
   "session.new.worktree.main": "主分支",
   "session.new.worktree.mainWithBranch": "主分支 ({{branch}})",
   "session.new.worktree.create": "建立新的 worktree",

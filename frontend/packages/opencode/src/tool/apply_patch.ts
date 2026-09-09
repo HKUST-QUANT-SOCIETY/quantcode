@@ -14,6 +14,7 @@ import DESCRIPTION from "./apply_patch.txt"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
+import { QuantCodeFileMutation, type Snapshot } from "@/quantcode/file-mutation"
 
 export const Parameters = Schema.Struct({
   patchText: Schema.String.annotate({ description: "The full patch text that describes all changes to be made" }),
@@ -24,6 +25,7 @@ export const ApplyPatchTool = Tool.define(
   Effect.gen(function* () {
     const lsp = yield* LSP.Service
     const afs = yield* FSUtil.Service
+    const mutations = yield* QuantCodeFileMutation.make(afs)
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
 
@@ -65,16 +67,19 @@ export const ApplyPatchTool = Tool.define(
         additions: number
         deletions: number
         bom: boolean
+        source: Snapshot
+        destination?: Snapshot
       }> = []
 
       let totalDiff = ""
 
       for (const hunk of hunks) {
         const filePath = path.resolve(instance.directory, hunk.path)
-        yield* assertExternalDirectoryEffect(ctx, filePath)
+        yield* assertExternalDirectoryEffect(ctx, filePath, { access: "write" })
 
         switch (hunk.type) {
           case "add": {
+            const source = yield* mutations.read(ctx.sessionID, filePath, ctx.abort)
             const oldContent = ""
             const newContent =
               hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
@@ -97,6 +102,7 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom: next.bom,
+              source,
             })
 
             totalDiff += diff + "\n"
@@ -105,14 +111,13 @@ export const ApplyPatchTool = Tool.define(
 
           case "update": {
             // Check if file exists for update
-            const stats = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-            if (!stats || stats.type === "Directory") {
+            const source = yield* mutations.read(ctx.sessionID, filePath, ctx.abort)
+            if (!source.exists) {
               return yield* Effect.fail(
                 new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`),
               )
             }
 
-            const source = yield* Bom.readFile(afs, filePath)
             const oldContent = source.text
             let newContent = oldContent
             let bom = source.bom
@@ -140,7 +145,8 @@ export const ApplyPatchTool = Tool.define(
             }
 
             const movePath = hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined
-            yield* assertExternalDirectoryEffect(ctx, movePath)
+            yield* assertExternalDirectoryEffect(ctx, movePath, { access: "write" })
+            const destination = movePath ? yield* mutations.read(ctx.sessionID, movePath, ctx.abort) : undefined
 
             fileChanges.push({
               filePath,
@@ -152,6 +158,8 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom,
+              source,
+              destination,
             })
 
             totalDiff += diff + "\n"
@@ -159,15 +167,8 @@ export const ApplyPatchTool = Tool.define(
           }
 
           case "delete": {
-            const source = yield* Bom.readFile(afs, filePath).pipe(
-              Effect.catch((error) =>
-                Effect.fail(
-                  new Error(
-                    `apply_patch verification failed: ${error instanceof Error ? error.message : String(error)}`,
-                  ),
-                ),
-              ),
-            )
+            const source = yield* mutations.read(ctx.sessionID, filePath, ctx.abort)
+            if (!source.exists) throw new Error(`apply_patch verification failed: File ${filePath} not found`)
             const contentToDelete = source.text
             const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
 
@@ -182,6 +183,7 @@ export const ApplyPatchTool = Tool.define(
               additions: 0,
               deletions,
               bom: source.bom,
+              source,
             })
 
             totalDiff += deleteDiff + "\n"
@@ -221,37 +223,34 @@ export const ApplyPatchTool = Tool.define(
         const edited = change.type === "delete" ? undefined : (change.movePath ?? change.filePath)
         switch (change.type) {
           case "add":
-            // Create parent directories (recursive: true is safe on existing/root dirs)
-
-            yield* afs.writeWithDirs(change.filePath, Bom.join(change.newContent, change.bom))
+            yield* mutations.write(ctx.sessionID, change.filePath, Bom.join(change.newContent, change.bom), change.source, ctx.abort)
             updates.push({ file: change.filePath, event: "add" })
             break
 
           case "update":
-            yield* afs.writeWithDirs(change.filePath, Bom.join(change.newContent, change.bom))
+            yield* mutations.write(ctx.sessionID, change.filePath, Bom.join(change.newContent, change.bom), change.source, ctx.abort)
             updates.push({ file: change.filePath, event: "change" })
             break
 
           case "move":
             if (change.movePath) {
-              // Create parent directories (recursive: true is safe on existing/root dirs)
-
-              yield* afs.writeWithDirs(change.movePath!, Bom.join(change.newContent, change.bom))
-              yield* afs.remove(change.filePath)
+              if (!change.destination) throw new Error("Patch move is missing its destination snapshot")
+              yield* mutations.write(ctx.sessionID, change.movePath, Bom.join(change.newContent, change.bom), change.destination, ctx.abort)
+              yield* mutations.remove(ctx.sessionID, change.filePath, change.source, ctx.abort)
               updates.push({ file: change.filePath, event: "unlink" })
               updates.push({ file: change.movePath, event: "add" })
             }
             break
 
           case "delete":
-            yield* afs.remove(change.filePath)
+            yield* mutations.remove(ctx.sessionID, change.filePath, change.source, ctx.abort)
             updates.push({ file: change.filePath, event: "unlink" })
             break
         }
 
         if (edited) {
-          if (yield* format.file(edited)) {
-            yield* Bom.syncFile(afs, edited, change.bom)
+          if (yield* format.file(edited, ctx.sessionID, ctx.abort)) {
+            yield* mutations.syncBom(ctx.sessionID, edited, change.bom, ctx.abort)
           }
           yield* events.publish(FileSystem.Event.Edited, { file: edited })
         }

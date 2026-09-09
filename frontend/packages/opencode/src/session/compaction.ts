@@ -1,4 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { QuantCodeIdentity } from "@/quantcode/identity"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { Session } from "./session"
@@ -441,6 +442,9 @@ const layer = Layer.effect(
                 : part
             yield* session.updatePart({
               ...replayPart,
+              ...(QuantCodeIdentity.enabled() && replayPart.type === "text"
+                ? { synthetic: true, metadata: { ...("metadata" in replayPart ? replayPart.metadata : {}), compaction_replay: true } }
+                : {}),
               id: PartID.ascending(),
               messageID: replayMsg.id,
               sessionID: input.sessionID,

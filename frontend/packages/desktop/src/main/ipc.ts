@@ -12,6 +12,8 @@ import { getStore } from "./store"
 import { getPinchZoomEnabled, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import { registerGitHubIpc } from "./github"
+import { registerIdentityIpc } from "./quantcode-identity-ipc"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -40,6 +42,8 @@ type Deps = {
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  registerGitHubIpc(deps.awaitInitialization)
+  registerIdentityIpc(deps.awaitInitialization)
   const updaterSubscriptions = createUpdaterSubscriptions()
   app.once("will-quit", updaterSubscriptions.clear)
 

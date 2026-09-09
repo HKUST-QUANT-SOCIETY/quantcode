@@ -1,3 +1,4 @@
+import { createEffect, getOwner } from "solid-js"
 /**
  * F-09 / P-08 Admin 中枢：语义查询台 + 错误沉淀视图（仅 admin 角色可见导航，panels 负责门禁）。
  *
@@ -7,6 +8,8 @@
  *   admin_* 元工具，结果回流 trace 后在此渲染——无同步 tool.invoke，不伪造数据。
  * 纯 DOM 构建（沿 memory-query 模式，bun test 兼容）。
  */
+import { viewIcon } from "./workspace-ui"
+import "./admin-workspace.css"
 import type { TraceEvent } from "./result-contract"
 
 // ---------------------------------------------------------------------------
@@ -236,6 +239,7 @@ export type AdminConsoleProps = {
   sendInstruction?: (content: string) => void
   /** GitGraph 面板入口按钮（panels 接视图切换） */
   onOpenGitgraph?: () => void
+  onOpenDeployments?: () => void
   onOpenHistory?: (mode: "tasks" | "reports") => void
 }
 
@@ -265,7 +269,6 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const t = props.t
   const root = document.createElement("div")
   root.className = "qc-admin-console"
-  root.style.cssText = "display:grid;gap:12px;align-content:start;"
 
   const sectionLabel = (text: string) => {
     const span = document.createElement("span")
@@ -289,7 +292,6 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const title = document.createElement("h3")
   title.textContent = t("quantcode.admin.title")
   const desc = document.createElement("p")
-  desc.style.cssText = "margin:0;font-size:11px;color:var(--qc-muted);line-height:1.7;"
   desc.textContent = t("quantcode.admin.intro")
   intro.append(sectionLabel("ADMIN CONSOLE"), title, desc)
   root.append(intro)
@@ -300,22 +302,24 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const renderEntryRow = () => {
     const row = document.createElement("div")
     row.className = "qc-admin-entries"
-    row.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;"
-    if (props.onOpenGitgraph) {
-      const open = document.createElement("button")
-      open.type = "button"
-      open.className = "qc-button qc-button-primary qc-admin-open-gitgraph"
-      open.textContent = `⌥ ${t("quantcode.gitgraph.open")}`
-      open.addEventListener("click", () => props.onOpenGitgraph?.())
-      row.append(open)
-    }
-    for (const entry of [{ mode: "reports" as const, label: "报告与产物" }, { mode: "tasks" as const, label: "任务管理" }]) {
+    const entries = [
+      { label: t("quantcode.gitgraph.open"), description: "浏览项目分支、提交与代码变更", icon: "branch" as const, action: props.onOpenGitgraph, cls: "qc-admin-open-gitgraph" },
+      { label: "报告与产物", description: "查看组织研究报告与任务产物", icon: "open-file" as const, action: props.onOpenHistory ? () => props.onOpenHistory?.("reports") : undefined },
+      { label: "任务管理", description: "查看任务状态、历史与执行记录", icon: "checklist" as const, action: props.onOpenHistory ? () => props.onOpenHistory?.("tasks") : undefined },
+      { label: "部署管理", description: "暂存产物、核对版本与部署记录", icon: "server" as const, action: props.onOpenDeployments },
+    ]
+    for (const entry of entries) {
       const button = document.createElement("button")
       button.type = "button"
-      button.className = "qc-button"
-      button.textContent = entry.label
-      button.disabled = !props.onOpenHistory
-      button.addEventListener("click", () => props.onOpenHistory?.(entry.mode))
+      button.className = `qc-admin-entry ${entry.cls ?? ""}`
+      button.setAttribute("aria-label", entry.label)
+      const title = document.createElement("strong")
+      title.textContent = entry.label
+      const description = document.createElement("small")
+      description.textContent = entry.description
+      button.append(viewIcon(entry.icon), title, description, viewIcon("arrow-right"))
+      button.disabled = !entry.action
+      button.addEventListener("click", () => entry.action?.())
       row.append(button)
     }
     return row
@@ -324,28 +328,25 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const renderComposer = () => {
     const wrap = document.createElement("div")
     wrap.className = "qc-admin-query"
-    wrap.style.cssText = "display:grid;gap:8px;padding:14px;border:1px solid var(--qc-line);border-radius:14px;"
 
     const presets = document.createElement("div")
-    presets.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;"
+    presets.className = "qc-admin-presets"
     for (const key of PRESETS) {
       const preset = document.createElement("button")
       preset.type = "button"
       preset.className = "qc-admin-preset"
-      preset.style.cssText =
-        "padding:5px 10px;background:transparent;border:1px solid var(--qc-line);border-radius:999px;font-size:10px;color:var(--qc-ink);cursor:pointer;"
       preset.textContent = t(key)
       preset.addEventListener("click", () => {
         query = t(key)
         render()
-        input?.focus()
+        root.querySelector<HTMLInputElement>(".qc-admin-query-input")?.focus()
       })
       presets.append(preset)
     }
     wrap.append(presets)
 
     const formRow = document.createElement("div")
-    formRow.style.cssText = "display:flex;gap:8px;align-items:center;"
+    formRow.className = "qc-admin-form-row"
     const sendButton = document.createElement("button")
     sendButton.type = "button"
     sendButton.className = "qc-button qc-button-primary qc-admin-send"
@@ -358,6 +359,7 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
     input.className = "qc-select-wide qc-admin-query-input"
     input.type = "text"
     input.value = query
+    input.setAttribute("aria-label", "查询组织运行情况")
     input.placeholder = t("quantcode.admin.inputPlaceholder")
     input.autocomplete = "off"
     input.style.height = "38px"
@@ -387,7 +389,6 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
     const note = document.createElement("p")
     note.className = "qc-admin-sent-note"
     note.setAttribute("aria-live", "polite")
-    note.style.cssText = "margin:0;padding:8px 10px;font-size:11px;color:#206b4a;border:1px solid rgba(32,107,74,0.26);border-radius:10px;background:rgba(32,107,74,0.05);"
     note.textContent = t("quantcode.admin.sent")
     return note
   }
@@ -396,13 +397,11 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const renderRuns = () => {
     const wrap = document.createElement("div")
     wrap.className = "qc-admin-runs"
-    wrap.style.cssText = "display:grid;gap:8px;"
-    wrap.append(sectionLabel("ORG RUNS"))
+    wrap.append(sectionLabel("分组运行记录"))
 
     const grouped = groupRuns(runs())
     if (grouped.length === 0) {
       const hint = document.createElement("p")
-      hint.style.cssText = "margin:0;font-size:11px;color:var(--qc-muted);"
       hint.textContent = sent ? t("quantcode.admin.waiting") : t("quantcode.admin.empty")
       wrap.append(hint)
       return wrap
@@ -410,15 +409,12 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
     for (const summary of grouped) {
       const details = document.createElement("details")
       details.className = "qc-admin-group"
-      details.style.cssText = "border:1px solid var(--qc-line);border-radius:12px;padding:0 12px;background:rgba(18,18,18,0.015);"
       if (grouped.length === 1) details.open = true
 
       const line = document.createElement("summary")
-      line.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0;cursor:pointer;list-style:none;"
       const name = document.createElement("strong")
-      name.style.cssText = "font-size:12px;letter-spacing:0.02em;"
       name.textContent = summary.group
-      line.append(name, chip(`${summary.total} runs`))
+      line.append(name, chip(`${summary.total} 条任务`))
       line.append(chip(`${adminStatusLabel("completed")} ${summary.completed}`, "qc-status-completed"))
       if (summary.failed > 0) line.append(chip(`${adminStatusLabel("error")} ${summary.failed}`, "qc-status-error"))
       details.append(line)
@@ -427,19 +423,15 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
         for (const latest of entry.runs) {
         const row = document.createElement("div")
         row.className = "qc-admin-user-row"
-        row.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:9px 0;border-top:1px solid rgba(18,18,18,0.09);"
         const who = document.createElement("div")
-        who.style.cssText = "display:grid;gap:2px;min-width:0;"
         const userName = document.createElement("strong")
-        userName.style.cssText = "font-size:11px;"
         userName.textContent = entry.user
         const task = document.createElement("small")
-        task.style.cssText = "overflow:hidden;color:var(--qc-muted);font-size:9px;text-overflow:ellipsis;white-space:nowrap;"
         task.textContent = latest?.task ?? latest?.thread_id?.slice(0, 8) ?? ""
+        task.title = task.textContent
         who.append(userName, task)
         row.append(who, chip(adminStatusLabel(latest?.status), adminStatusChipClass(latest?.status)))
         const time = document.createElement("span")
-        time.style.cssText = "color:var(--qc-muted);font-family:'SFMono-Regular',Consolas,monospace;font-size:8px;"
         time.textContent = relativeTimeLabel(latest?.timestamp)
         row.append(time)
         details.append(row)
@@ -454,13 +446,11 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
   const renderErrors = () => {
     const wrap = document.createElement("div")
     wrap.className = "qc-admin-errors"
-    wrap.style.cssText = "display:grid;gap:8px;"
-    wrap.append(sectionLabel("ERROR LOG"))
+    wrap.append(sectionLabel("异常记录"))
 
     const records = errors()
     if (records.length === 0) {
       const hint = document.createElement("p")
-      hint.style.cssText = "margin:0;font-size:11px;color:var(--qc-muted);"
       const latest = adminToolResultEvents(props.run?.execution_trace, "admin_errors").at(-1)
       const verifiedEmpty = isRecord(latest) && !latest.error && latest.ok !== false && Array.isArray(latest.errors)
       hint.textContent = verifiedEmpty ? t("quantcode.admin.errorsEmpty") : t("quantcode.admin.empty")
@@ -470,17 +460,12 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
 
     const groups = [...new Set(records.map((record) => record.group).filter((group): group is string => !!group))]
     const filters = document.createElement("div")
-    filters.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;"
+    filters.className = "qc-admin-filters"
     for (const key of ["all", ...groups]) {
       const selected = groupFilter === key
       const button = document.createElement("button")
       button.type = "button"
       button.className = "qc-admin-filter"
-      button.style.cssText =
-        "padding:4px 9px;border-radius:999px;font-size:10px;cursor:pointer;" +
-        (selected
-          ? "background:var(--qc-ink);color:var(--qc-paper);border:1px solid var(--qc-ink);"
-          : "background:transparent;color:var(--qc-ink);border:1px solid var(--qc-line);")
       button.textContent = key === "all" ? t("quantcode.admin.filterAll") : key
       button.setAttribute("aria-pressed", String(selected))
       button.addEventListener("click", () => {
@@ -497,23 +482,17 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
     visible.forEach((record, index) => {
       const row = document.createElement("div")
       row.className = "qc-admin-error-row"
-      row.style.cssText = "display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid rgba(18,18,18,0.09);align-items:start;"
       const indexSpan = document.createElement("span")
-      indexSpan.style.cssText = "color:#96948e;font-family:'SFMono-Regular',Consolas,monospace;font-size:8px;padding-top:3px;"
       indexSpan.textContent = String(index + 1).padStart(2, "0")
       row.append(indexSpan)
 
       const body = document.createElement("div")
-      body.style.cssText = "display:grid;gap:5px;min-width:0;"
       const head = document.createElement("div")
-      head.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:6px;"
       if (record.type) head.append(chip(record.type, "qc-status-error"))
       if (record.group) head.append(chip(record.group))
       const message = document.createElement("p")
-      message.style.cssText = "margin:0;font-size:11px;line-height:1.65;word-break:break-word;"
       message.textContent = record.message ?? record.thread_id ?? "—"
       const meta = document.createElement("small")
-      meta.style.cssText = "color:var(--qc-muted);font-size:9px;"
       const parts = [record.user, record.group, record.thread_id?.slice(0, 8), relativeTimeLabel(record.timestamp)].filter(Boolean)
       meta.textContent = parts.join(" · ")
       body.append(head, message, meta)
@@ -535,19 +514,22 @@ export function AdminConsoleView(props: AdminConsoleProps): HTMLElement {
       empty.className = "qc-empty-state qc-admin-empty"
       const index = document.createElement("span")
       index.className = "qc-empty-index"
-      index.textContent = "F-09"
+      index.append(viewIcon("checklist"))
       const title = document.createElement("h3")
       title.textContent = t("quantcode.admin.emptyTitle")
       const desc = document.createElement("p")
-      desc.style.cssText = "margin:12px 0 0;color:var(--qc-muted);font-size:12px;line-height:1.7;max-width:340px;"
       desc.textContent = t("quantcode.admin.empty")
       empty.append(index, title, desc)
       root.append(empty)
       return
     }
-    root.append(renderRuns(), renderErrors())
+    const columns = document.createElement("div")
+    columns.className = "qc-admin-results"
+    columns.append(renderRuns(), renderErrors())
+    root.append(columns)
   }
 
-  render()
+  if (getOwner()) createEffect(() => { props.run?.execution_trace; render() })
+  else render()
   return root
 }

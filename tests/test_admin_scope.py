@@ -50,6 +50,8 @@ def _isolated(monkeypatch, tmp_path):
         tmp_path / "opencode" / "authorized_groups.yaml",
     )
     monkeypatch.setattr(metrics, "METRICS_PATH", tmp_path / "metrics.jsonl")
+    monkeypatch.setattr(mcp_server, "_SESSION_GROUP", None)
+    monkeypatch.setattr(mcp_server, "_SESSION_CONTEXT", None)
     importlib.reload(admin_register)  # 幂等覆盖注册（其他测试可能清过 registry）
     yield
     for tid in ALL_ADMIN_TOOL_IDS:  # 卫生：不留全局态给别的测试文件

@@ -19,11 +19,13 @@ export function call(scenario: ActiveScenario, ctx: SeededContext<unknown>, opti
 
 export function callAuthProbe(scenario: ActiveScenario, credentials: "missing" | "valid" = "missing") {
   return Effect.promise(async () => {
+    const modules = await runtime()
+    const project = await authProject(modules)
     const controller = new AbortController()
     return Promise.race([
       Promise.resolve(
-        app(await runtime(), { auth: { password: "secret" } }).request(
-          toAuthProbeRequest(scenario, credentials, controller.signal),
+        app(modules, { auth: { password: "secret" } }).request(
+          toAuthProbeRequest(scenario, credentials, controller.signal, project.path),
         ),
       ).then((response) => capture(response, scenario.capture)),
       Bun.sleep(1_000).then(() => {
@@ -36,11 +38,16 @@ export function callAuthProbe(scenario: ActiveScenario, credentials: "missing" |
           timedOut: true,
         }
       }),
-    ])
+    ]).finally(() => controller.abort("auth probe completed"))
   })
 }
 
 type CachedApp = BackendApp & { readonly dispose: () => Promise<void> }
+let authFixture: Promise<Awaited<ReturnType<Runtime["tmpdir"]>>> | undefined
+
+function authProject(modules: Runtime) {
+  return authFixture ??= modules.tmpdir({ git: true, config: { mcp: {}, provider: {}, lsp: false, formatter: false, plugin: [] } })
+}
 
 const appCache: Partial<Record<string, CachedApp>> = {}
 
@@ -48,6 +55,9 @@ export async function disposeApps() {
   const apps = Object.values(appCache)
   for (const key of Object.keys(appCache)) delete appCache[key]
   await Promise.all(apps.flatMap((app) => (app === undefined ? [] : [app.dispose()])))
+  const fixture = authFixture
+  authFixture = undefined
+  if (fixture) await (await fixture)[Symbol.asyncDispose]()
 }
 
 function app(modules: Runtime, options: CallOptions) {
@@ -86,12 +96,13 @@ function toRequest(scenario: ActiveScenario, ctx: SeededContext<unknown>) {
   })
 }
 
-function toAuthProbeRequest(scenario: ActiveScenario, credentials: "missing" | "valid", signal: AbortSignal) {
+function toAuthProbeRequest(scenario: ActiveScenario, credentials: "missing" | "valid", signal: AbortSignal, directory: string) {
   const spec = scenario.authProbe ?? {
     path: authProbePath(scenario.path),
     body: scenario.method === "GET" ? undefined : {},
   }
   const headers = {
+    "x-opencode-directory": directory,
     ...(spec.body === undefined ? {} : { "content-type": "application/json" }),
     ...spec.headers,
     ...(credentials === "valid" ? { authorization: basic("opencode", "secret") } : {}),

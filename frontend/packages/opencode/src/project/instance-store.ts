@@ -10,6 +10,8 @@ import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
 
 export interface LoadInput {
   directory: string
@@ -44,8 +46,9 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
 
     const boot = (input: LoadInput & { directory: string }) =>
       Effect.gen(function* () {
+        const grant = QuantCodeIdentity.enabled() ? yield* Effect.promise(() => QuantCodeWorkspace.authorize(input.directory)) : undefined
         const ctx: InstanceContext =
-          input.project && input.worktree
+          !grant && input.project && input.worktree
             ? {
                 directory: input.directory,
                 worktree: input.worktree,
@@ -59,6 +62,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
                 })),
               )
         yield* bootstrap.run.pipe(Effect.provideService(InstanceRef, ctx))
+        if (grant) yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
         return ctx
       }).pipe(Effect.withSpan("InstanceStore.boot"))
 
@@ -109,8 +113,17 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       const directory = FSUtil.resolve(input.directory)
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          const grant = QuantCodeIdentity.enabled() ? yield* restore(Effect.promise(() => QuantCodeWorkspace.authorize(directory))) : undefined
           const existing = cache.get(directory)
-          if (existing) return yield* restore(Deferred.await(existing.deferred))
+          if (existing) {
+            const ctx = yield* restore(Deferred.await(existing.deferred))
+            if (!grant) return ctx
+            const current = yield* project.get(ctx.project.id)
+            if (!current) throw new QuantCodeWorkspace.WorkspaceDenied()
+            yield* restore(Effect.promise(() => QuantCodeWorkspace.target(grant, ctx.worktree)))
+            yield* restore(Effect.promise(() => QuantCodeWorkspace.revalidate(grant)))
+            return { ...ctx, project: current }
+          }
 
           const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
           cache.set(directory, entry)
@@ -118,7 +131,9 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
             yield* Effect.logInfo("creating instance", { directory: directory })
             yield* completeLoad(directory, input, entry)
           }).pipe(Effect.forkIn(scope, { startImmediately: true }))
-          return yield* restore(Deferred.await(entry.deferred))
+          const ctx = yield* restore(Deferred.await(entry.deferred))
+          if (grant) yield* restore(Effect.promise(() => QuantCodeWorkspace.revalidate(grant)))
+          return ctx
         }),
       ).pipe(Effect.withSpan("InstanceStore.load"))
     }
@@ -127,6 +142,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       const directory = FSUtil.resolve(input.directory)
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          if (QuantCodeIdentity.enabled()) yield* restore(Effect.promise(() => QuantCodeWorkspace.authorize(directory)))
           const previous = cache.get(directory)
           const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
           cache.set(directory, entry)

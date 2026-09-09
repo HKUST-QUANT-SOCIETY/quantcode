@@ -11,6 +11,9 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiVcsApplyError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
+import { HttpServerRequest } from "effect/unstable/http"
+import { QuantCodeIdentity } from "@/quantcode/identity"
+import { QuantCodeWorkspace } from "@/quantcode/workspace"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
   Effect.gen(function* () {
@@ -20,6 +23,11 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const lsp = yield* LSP.Service
     const skill = yield* Skill.Service
     const vcs = yield* Vcs.Service
+    const authorize = Effect.fn("InstanceHttpApi.quantcodeWorkspace")(function* (write = false) {
+      if (!QuantCodeIdentity.enabled()) return
+      const ctx = yield* InstanceState.context
+      return yield* Effect.promise(() => QuantCodeWorkspace.authorize(ctx.directory, write ? "write" : "read"))
+    })
 
     const dispose = Effect.fn("InstanceHttpApi.dispose")(function* () {
       yield* markInstanceForDisposal(yield* InstanceState.context)
@@ -28,10 +36,11 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
 
     const getPath = Effect.fn("InstanceHttpApi.path")(function* () {
       const ctx = yield* InstanceState.context
+      yield* authorize()
       return {
-        home: Global.Path.home,
-        state: Global.Path.state,
-        config: Global.Path.config,
+        home: QuantCodeIdentity.enabled() ? "" : Global.Path.home,
+        state: QuantCodeIdentity.enabled() ? "" : Global.Path.state,
+        config: QuantCodeIdentity.enabled() ? "" : Global.Path.config,
         worktree: ctx.worktree,
         directory: ctx.directory,
       }
@@ -59,7 +68,9 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const applyVcs = Effect.fn("InstanceHttpApi.vcsApply")(function* (ctx: { payload: Vcs.ApplyInput }) {
-      return yield* vcs.apply(ctx.payload).pipe(
+      yield* authorize(true)
+      const request = yield* HttpServerRequest.HttpServerRequest
+      return yield* vcs.apply(ctx.payload, request.source instanceof Request ? request.source.signal : undefined).pipe(
         Effect.mapError(
           (error) =>
             new ApiVcsApplyError({

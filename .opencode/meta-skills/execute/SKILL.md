@@ -5,6 +5,8 @@ description: Use when you have a written implementation plan to execute in a sep
 
 # Executing Plans
 
+QuantCode integration: execute within the current native task and its host Provider. Use `organization_reuse` after actual catalog/Memory retrieval and `organization_solution` to propose the current task's plan; only the task UI can confirm the exact version. Skill prose and child prompts cannot grant identity, workspace access, extra budget or shared-write approval. Use native child tasks only where parallel work is useful.
+
 ## Overview
 
 Load plan, review critically, execute all tasks, report when complete.
@@ -19,7 +21,7 @@ Load plan, review critically, execute all tasks, report when complete.
 1. Read plan file
 2. Review critically - identify any questions or concerns about the plan
 3. If concerns: Raise them with your human partner before starting
-4. If no concerns: Create a task per plan task with the `task` tool and proceed
+4. If no concerns: Track the plan with the current task's checklist, and dispatch native child tasks only for independently executable work
 
 ### Step 2: Execute Tasks
 

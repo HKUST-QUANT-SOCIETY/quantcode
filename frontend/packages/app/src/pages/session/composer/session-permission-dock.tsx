@@ -11,6 +11,13 @@ export function SessionPermissionDock(props: {
   onDecide: (response: "once" | "always" | "reject") => void
 }) {
   const language = useLanguage()
+  const exactGate = () => {
+    const value = props.request.metadata.quantcodeExactGate
+    if (!value || typeof value !== "object" || !("digest" in value) || typeof value.digest !== "string") return
+    return { kind: "kind" in value && value.kind === "merge" ? "共享写入" : "受限资源访问",
+      description: "description" in value && typeof value.description === "string" ? value.description : "",
+      arguments: "arguments_json" in value && typeof value.arguments_json === "string" ? value.arguments_json : "" }
+  }
 
   const toolDescription = () => {
     const key = `settings.permissions.tool.${props.request.permission}.description`
@@ -27,7 +34,7 @@ export function SessionPermissionDock(props: {
           <span data-slot="permission-icon">
             <Icon name="warning" size="normal" />
           </span>
-          <div data-slot="permission-header-title">{language.t("notification.permission.title")}</div>
+          <div data-slot="permission-header-title">{exactGate() ? `确认${exactGate()!.kind}` : language.t("notification.permission.title")}</div>
         </div>
       }
       footer={
@@ -37,14 +44,14 @@ export function SessionPermissionDock(props: {
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}
             </Button>
-            <Button
+            <Show when={!exactGate()}><Button
               variant="secondary"
               size="normal"
               onClick={() => props.onDecide("always")}
               disabled={props.responding}
             >
               {language.t("ui.permission.allowAlways")}
-            </Button>
+            </Button></Show>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
               {language.t("ui.permission.allowOnce")}
             </Button>
@@ -58,6 +65,14 @@ export function SessionPermissionDock(props: {
           <div data-slot="permission-hint">{toolDescription()}</div>
         </div>
       </Show>
+      <Show when={exactGate()}>{gate => <div data-slot="permission-row">
+        <span data-slot="permission-spacer" aria-hidden="true" />
+        <div class="min-w-0 flex flex-col gap-2">
+          <p class="text-12-regular text-text-base">此次确认只适用于下列操作与参数，需审批员或 Admin 确认；修改参数后需要重新申请。</p>
+          <pre class="text-12-regular text-text-base whitespace-pre-wrap break-all max-h-60 overflow-auto">{gate().description}</pre>
+          <pre class="text-12-regular text-text-base whitespace-pre-wrap break-all max-h-60 overflow-auto">{gate().arguments}</pre>
+        </div>
+      </div>}</Show>
 
       <Show when={props.request.patterns.length > 0}>
         <div data-slot="permission-row">

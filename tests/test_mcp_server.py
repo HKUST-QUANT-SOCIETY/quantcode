@@ -564,6 +564,35 @@ def test_call_tool_enforces_same_group_allowlist(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("group", ("fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"))
+def test_native_memory_inspection_is_discoverable_for_every_group(group):
+    """A cold MCP process must expose required reads without weakening their ACL."""
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "search_memory", "arguments": {"query": "acceptance", "limit": 1}}},
+    ]
+    process = subprocess.run(
+        [sys.executable, "-m", "quantcode.mcp_server"],
+        input="".join(json.dumps(request) + "\n" for request in requests),
+        cwd=Path(__file__).resolve().parents[1],
+        env={"PATH": os.environ.get("PATH", ""), "QUANTCODE_ENV": "test", "QUANTCODE_GROUP": group,
+             "QUANTCODE_ALLOW_UNAUTH": "1", "QUANTCODE_UNIFIED_RUNTIME": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert process.returncode == 0, process.stderr
+    responses = {item["id"]: item for line in process.stdout.splitlines() if (item := json.loads(line))}
+    assert {"list_capabilities", "search_memory"} <= {tool["name"] for tool in responses[1]["result"]["tools"]}
+    call = responses[2]["result"]
+    assert call["isError"] is True
+    assert "AUTHENTICATION_REQUIRED: shared Memory requires a gateway session" in call["content"][0]["text"]
+
+
 def test_mcp_subprocess_stdio_factor_group(tmp_path):
     """🟢Day 4 #E 严格验收:subprocess 跑 python -m quantcode.mcp_server + stdio JSON-RPC。
 

@@ -8,6 +8,7 @@ export type Stdio = "inherit" | "pipe" | "ignore" | number | Stream
 export type Shell = boolean | string
 
 export interface Options {
+  detached?: boolean
   cwd?: string
   env?: NodeJS.ProcessEnv | null
   stdin?: Stdio
@@ -61,6 +62,7 @@ export function spawn(cmd: string[], opts: Options = {}): Child {
   opts.abort?.throwIfAborted()
 
   const proc = launch(cmd[0], cmd.slice(1), {
+    detached: opts.detached,
     cwd: opts.cwd,
     shell: opts.shell,
     env: opts.env === null ? {} : opts.env ? { ...process.env, ...opts.env } : undefined,
@@ -113,6 +115,7 @@ export function spawn(cmd: string[], opts: Options = {}): Child {
 
 export async function run(cmd: string[], opts: RunOptions = {}): Promise<Result> {
   const proc = spawn(cmd, {
+    detached: opts.detached,
     cwd: opts.cwd,
     env: opts.env,
     stdin: opts.stdin,
