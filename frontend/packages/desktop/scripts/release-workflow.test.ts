@@ -52,6 +52,23 @@ describe("QuantCode desktop release workflow contract", () => {
     expect(action).not.toContain('dpkg-deb --fsys-tarfile "$deb" | tar -xOJf -')
   })
 
+  test("packaging removes empty signing inputs but preserves nonempty signed credentials", async () => {
+    const parsed = Bun.YAML.parse(action) as { runs: { steps: Array<{ name?: string; run?: string }> } }
+    const packaging = parsed.runs.steps.find(step => step.name === "Package installers")!.run!
+    const cleanup = packaging.slice(0, packaging.indexOf("read -r -a platform_args"))
+    for (const value of ["", "fixture-certificate"]) {
+      const child = Bun.spawn(["bash", "-euc", cleanup + `\n[[ \${CSC_LINK+x} == '${value ? "x" : ""}' ]]\n[[ \${APPLE_API_KEY:-} == fixture-key ]]\n[[ \${CSC_IDENTITY_AUTO_DISCOVERY} == false ]]`], {
+        env: { ...process.env, CSC_LINK: value, CSC_KEY_PASSWORD: "", APPLE_API_KEY: "fixture-key", APPLE_API_KEY_ID: "",
+          APPLE_API_ISSUER: "", AZURE_CLIENT_ID: "", AZURE_TENANT_ID: "", AZURE_SUBSCRIPTION_ID: "",
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "", AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: "",
+          AZURE_TRUSTED_SIGNING_ENDPOINT: "", AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "", CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+        stdout: "pipe", stderr: "pipe",
+      })
+      const [code, error] = await Promise.all([child.exited, new Response(child.stderr).text()])
+      expect(code, error).toBe(0)
+    }
+  })
+
   test("fails packaged smoke when the QuantCode research workspace is missing", () => {
     expect(packagedSmoke).toContain('[data-quantcode-workspace="true"]')
     expect(packagedSmoke).toContain("renderer did not mount the QuantCode research workspace")

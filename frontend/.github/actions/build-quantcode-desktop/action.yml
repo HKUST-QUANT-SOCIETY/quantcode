@@ -257,6 +257,12 @@ runs:
         AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_endpoint || '' }}
         AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ inputs.signing_mode == 'signed' && runner.os == 'Windows' && inputs.azure_trusted_signing_publisher_name || '' }}
       run: |
+        for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER \
+          AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID \
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE \
+          AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_PUBLISHER_NAME; do
+          if [[ -z "${!name}" ]]; then unset "$name"; fi
+        done
         read -r -a platform_args <<< "$QUANTCODE_PLATFORM_ARGS"
         bunx electron-builder "${platform_args[@]}" --publish never --config electron-builder.config.ts
 
