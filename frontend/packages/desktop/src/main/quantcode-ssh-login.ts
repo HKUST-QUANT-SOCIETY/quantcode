@@ -73,7 +73,9 @@ export async function scanOrgServers(keyFile: string, usernameHint?: string): Pr
     throw new Error("暂时无法连接组织服务器，请检查网络后重试。")
   }
   if (!servers.length) {
-    throw new Error("这把密钥没有在任何组织服务器登记。请确认私钥对应文件名中的用户名，并联系管理员完成公钥登记。")
+    const parsed = usernameFromKeyFile(keyFile)
+    throw new Error(`这把密钥（解析出的用户名：${parsed ?? "未知"}）没有在任何组织服务器登录成功。` +
+      "如果用户名不对，请在下方输入框填写你的 Linux 用户名后重试；若确认用户名正确仍失败，联系管理员核对公钥登记。")
   }
   return { username, servers, failed }
 }

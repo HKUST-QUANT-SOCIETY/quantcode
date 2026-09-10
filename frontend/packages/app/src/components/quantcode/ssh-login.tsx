@@ -439,15 +439,35 @@ export function SshOrgLoginWizard(props: {
     })
     const fileRow = document.createElement("label")
     fileRow.className = "qc-field-label"
-    fileRow.textContent = "SSH 用户名（私钥文件名未带用户名时填写）"
+    fileRow.textContent = "SSH 用户名（私钥文件名不代表登录用户名时，在这里填写并重试）"
     const userField = document.createElement("input")
     userField.type = "text"
     userField.className = "qc-select-wide"
     userField.value = username
-    userField.placeholder = "qc-你的Linux用户名"
+    userField.placeholder = "你的 Linux 用户名"
     userField.addEventListener("input", () => { username = userField.value.trim() })
-    root.replaceChildren(title, pick)
-    if (askUsername) root.append(fileRow, userField)
+    const retry = document.createElement("button")
+    retry.type = "button"
+    retry.className = "qc-button qc-button-secondary"
+    retry.textContent = username ? `用用户名 ${username} 重新探测` : "重新探测"
+    retry.disabled = !username
+    retry.addEventListener("click", () => {
+      if (!username) return
+      scanError = ""
+      stage = "scanning"
+      render()
+      void props.sshScan({ keyFile, username }).then(result => {
+        scanResult = result
+        askUsername = false
+        stage = "groups"
+        render()
+      }).catch(error => {
+        scanError = error instanceof Error ? error.message : String(error)
+        stage = "pick"
+        render()
+      })
+    })
+    root.replaceChildren(title, pick, fileRow, userField, retry)
     if (scanError) {
       const err = document.createElement("p")
       err.setAttribute("role", "alert")
