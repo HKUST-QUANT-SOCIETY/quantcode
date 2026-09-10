@@ -1,3 +1,5 @@
+import type { QuantCodeDesktopIdentity, QuantCodeSshLoginScan, QuantCodeSshLoginResult, QuantCodeSshLoginChoice } from "../../identity"
+
 /**
  * F-05 SSH 登录界面：完整登录流四态（表单 → 连接 → 已连接 / 失败）。
  * 纯 DOM 构建（沿 settings-supplier / notifications 模式，bun test 兼容），
@@ -64,14 +66,6 @@ export type SshLoginProps = {
   disconnect?: SshDisconnectFn
   /** 通过系统文件选择器把私钥加入本机 SSH Agent；私钥正文不上传。 */
   importKey?: () => Promise<{ fingerprint: string } | null>
-  /** 组织 SSH 登录向导：选择本地私钥 → 探测三台内置服务器 → 返回 (组 × 服务器)。 */
-  sshScan?: (input: { keyFile: string; username?: string }) => Promise<
-    { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | null
-  >
-  /** Electron 42+ 移除了 File.path：主进程 webUtils 把 File 映射回绝对路径。 */
-  resolveFilePath?: (file: File) => string
-  /** 选定组后对该服务器做一次登录校验。 */
-  sshProbe?: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 export function SshLoginView(props: SshLoginProps): HTMLElement {
@@ -374,226 +368,150 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
   return root
 }
 
-/**
- * 组织 SSH 重新登录向导：选本地私钥 → 自动探测三台内置服务器 → (组 × 服务器) 清单 → 选组进入。
- * 成员全程只碰两样东西：私钥文件、组清单。服务器地址内置，无 URL/端口/密码。
- * desktop 桥未注入（web/dev）时组件不渲染任何内容。
- */
+/** 选私钥 → 探测 → 点组选宿主并认证；只有正式会话才能进入工作台。 */
 export function SshOrgLoginWizard(props: {
-  sshScan: (input: { keyFile?: string; username?: string }) => Promise<
-    { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | null
-  >
-  resolveFilePath: (file: File) => string
-  sshProbe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
-  /** 选定 (组, 服务器) 后的进入动作。 */
-  onEnter: (input: { group: string; serverId: string; serverLabel: string; username: string }) => void
-  /** 记住的最近一次用户名（可选，向导里可改）。 */
-  rememberedUsername?: string
+  sshScan: QuantCodeDesktopIdentity["sshScan"]
+  sshConnect: QuantCodeDesktopIdentity["sshConnect"]
+  onEnter: (result: QuantCodeSshLoginResult) => Promise<void>
+  autoStart?: boolean
+  onStarted?: () => void
 }): HTMLElement {
   const root = document.createElement("div")
   root.className = "qc-ssh"
+  let scan: QuantCodeSshLoginScan | undefined
+  let username = ""
+  let showUsername = false
+  let busy = false
+  let error = ""
+  let progress = ""
 
-  type Stage = "pick" | "scanning" | "groups" | "done"
-  type Scan = { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
-  let stage: Stage = "pick"
-  let keyFile = ""
-  let username = props.rememberedUsername ?? ""
-  let scanError = ""
-  let scanResult: Scan | undefined
-  let selectedGroup = ""
-  let enterBusy = false
-
-  const runScan = () => {
-    stage = "scanning"
+  const scanKey = async (chooseKey: boolean) => {
+    if (busy) return
+    busy = true
+    error = ""
+    progress = "正在探测组织服务器（Server A / B / C）…"
     render()
-    void props.sshScan({ keyFile, username: username || undefined }).then(result => {
-      if (!result) {
-        scanError = "SSH 用户名无效，请检查后重试。"
-        stage = "pick"
-        render()
-        return
-      }
-      scanResult = result
+    try {
+      const result = await props.sshScan({ chooseKey, username: username || undefined })
+      if (!result) return
       username = result.username
-      keyFile = result.keyFile
-      stage = "groups"
+      showUsername = !!result.needsUsername
+      scan = result.needsUsername ? undefined : result
+    } catch (cause) {
+      error = loginError(cause, "登录探测失败，请重试。")
+      showUsername = true
+      scan = undefined
+    } finally {
+      busy = false
       render()
-    }).catch(error => {
-      scanError = error instanceof Error ? error.message : String(error)
-      stage = "pick"
-      render()
-    })
-  }
-
-  const renderPick = () => {
-    const title = document.createElement("p")
-    title.className = "qc-ssh-hint"
-    title.textContent = "选择你本地保存的 SSH 私钥文件（私钥不会离开这台电脑）。"
-    const pick = document.createElement("button")
-    pick.type = "button"
-    pick.className = "qc-button qc-button-primary"
-    pick.textContent = "重新登录：选择本地私钥"
-    pick.addEventListener("click", () => {
-      const input = document.createElement("input")
-      input.type = "file"
-      input.onchange = () => {
-        const file = input.files?.[0]
-        if (!file) return
-        keyFile = props.resolveFilePath(file)
-        runScan()
-      }
-      input.click()
-    })
-    const fileRow = document.createElement("label")
-    fileRow.className = "qc-field-label"
-    fileRow.textContent = "SSH 用户名（私钥文件名不代表登录用户名时，在这里填写并重试）"
-    const userField = document.createElement("input")
-    userField.type = "text"
-    userField.className = "qc-select-wide"
-    userField.value = username
-    userField.placeholder = "你的 Linux 用户名"
-    userField.addEventListener("input", () => { username = userField.value.trim() })
-    const retry = document.createElement("button")
-    retry.type = "button"
-    retry.className = "qc-button qc-button-secondary"
-    retry.textContent = username ? `用用户名 ${username} 重新探测` : "重新探测"
-    retry.disabled = !username
-    retry.addEventListener("click", () => {
-      if (!username) return
-      scanError = ""
-      runScan()
-    })
-    root.replaceChildren(title, pick, fileRow, userField, retry)
-    if (scanError) {
-      const err = document.createElement("p")
-      err.setAttribute("role", "alert")
-      err.className = "qc-status qc-status-error"
-      err.textContent = scanError
-      root.append(err)
     }
   }
 
-  const renderScanning = () => {
-    const pill = document.createElement("span")
-    pill.className = "qc-connection-pill"
-    const dot = document.createElement("i")
-    dot.className = "qc-ssh-spinner"
-    dot.style.animation = "pulse-opacity 1.2s ease-in-out infinite"
-    pill.append(dot, document.createTextNode("正在探测组织服务器（Server A / B / C）…"))
-    root.replaceChildren(pill)
-  }
-
-  const renderGroups = () => {
-    const result = scanResult
-    if (!result) {
-      stage = "pick"
-      render()
-      return
-    }
-    const title = document.createElement("p")
-    title.className = "qc-ssh-hint"
-    title.textContent = `登录成功（用户名 ${result.username}）。选择要进入的工作组：`
-    root.replaceChildren(title)
-    for (const server of result.servers) {
-      for (const group of server.groups) {
-        const row = document.createElement("button")
-        row.type = "button"
-        row.className = "qc-button qc-button-secondary qc-ssh-group-option"
-        row.style.cssText = "display:flex;justify-content:space-between;width:100%;margin-bottom:6px;"
-        const name = document.createElement("span")
-        name.textContent = group
-        const srv = document.createElement("span")
-        srv.textContent = server.label
-        row.append(name, srv)
-        row.addEventListener("click", () => {
-          if (enterBusy) return
-          enterBusy = true
-          row.disabled = true
-          stage = "scanning"
-          render()
-          void props.sshProbe({ keyFile, username: result.username }).then(probe => {
-            if (!probe.ok) {
-              scanError = probe.reason
-              stage = "groups"
-              enterBusy = false
-              render()
-              return
-            }
-            selectedGroup = group
-            stage = "done"
-            enterBusy = false
-            render()
-          })
-        })
-        root.append(row)
-      }
-    }    for (const item of result.failed) {
-      const note = document.createElement("p")
-      note.className = "qc-ssh-hint"
-      note.textContent = item.reason === "unreachable"
-        ? "一台组织服务器暂时无法连接，已跳过。"
-        : "有一台服务器未登记这把密钥，已跳过。"
-      root.append(note)
-      break
-    }
-    const back = document.createElement("button")
-    back.type = "button"
-    back.className = "qc-button qc-button-secondary"
-    back.textContent = "换一把私钥"
-    back.addEventListener("click", () => {
-      stage = "pick"
-      scanError = ""
-      render()
-    })
-    root.append(back)
-  }
-
-  const renderDone = () => {
-    const result = scanResult
-    const pill = document.createElement("span")
-    pill.className = "qc-connection-pill"
-    pill.append(document.createElement("i"), document.createTextNode("登录成功"))
-    const detail = document.createElement("div")
-    detail.className = "qc-detail-section"
-    const rows: [string, string][] = [
-      ["当前账号", username],
-      ["业务组", selectedGroup],
-      ["工作环境", scanResult?.servers.find(server => server.groups.includes(selectedGroup))?.label ?? ""],
-    ]
-    for (const [label, value] of rows) {
-      const row = document.createElement("div")
-      row.className = "qc-setting-row"
-      const left = document.createElement("div")
-      const labelEl = document.createElement("span")
-      labelEl.className = "qc-section-label"
-      labelEl.textContent = label
-      const valueEl = document.createElement("strong")
-      valueEl.textContent = value
-      left.append(labelEl, valueEl)
-      row.append(left)
-      detail.append(row)
-    }
-    const enter = document.createElement("button")
-    enter.type = "button"
-    enter.className = "qc-button qc-button-primary"
-    enter.textContent = "进入工作台"
-    enter.addEventListener("click", () => {
-      const server = scanResult?.servers.find(item => item.groups.includes(selectedGroup))
-      props.onEnter({ group: selectedGroup, serverId: server?.id ?? "server-c", serverLabel: server?.label ?? "Server C", username })
-    })
-    const actions = document.createElement("div")
-    actions.className = "qc-gate-actions"
-    actions.append(enter)
-    root.replaceChildren(pill, detail, actions)
+  const enter = async (choice: QuantCodeSshLoginChoice, label: string) => {
+    if (busy) return
+    busy = true
+    error = ""
+    progress = `正在连接${label}…`
+    render()
+    try { await props.onEnter(await props.sshConnect(choice)) }
+    catch (cause) { error = loginError(cause, "登录失败，请重试。") }
+    finally { busy = false; render() }
   }
 
   const render = () => {
-    if (stage === "pick") renderPick()
-    else if (stage === "scanning") renderScanning()
-    else if (stage === "done") renderDone()
-    else renderGroups()
+    root.replaceChildren()
+    if (busy) {
+      const status = document.createElement("p")
+      status.className = "qc-connection-pill"
+      status.setAttribute("role", "status")
+      status.textContent = progress
+      root.append(status)
+      return
+    }
+    if (error) {
+      const alert = document.createElement("p")
+      alert.setAttribute("role", "alert")
+      alert.textContent = error
+      root.append(alert)
+    }
+    if (scan) {
+      const hint = document.createElement("p")
+      hint.className = "qc-ssh-hint"
+      hint.textContent = scan.administrators?.length ? "管理员入口：组织管理与服务器运维独立认证。" : "选择工作组，直接进入对应服务器的工作区。"
+      root.append(hint)
+      for (const server of scan.servers) {
+        for (const group of server.groups) {
+          const row = document.createElement("button")
+          row.type = "button"
+          row.className = "qc-button qc-button-secondary qc-ssh-group-option"
+          row.style.cssText = "display:flex;justify-content:space-between;width:100%;margin-bottom:6px"
+          const labels: Record<string, string> = { factor: "因子组", model: "Model 组", fundamental: "基本面组", risk: "风控组", strategy: "策略组", options: "期权组", infra: "基建组", agent: "Agent 组" }
+          row.textContent = `✓ ${labels[group] ?? group} · ${server.label}`
+          row.addEventListener("click", () => void enter({ serverId: server.id, group }, `${server.label} 的${labels[group] ?? group}`))
+          root.append(row)
+        }
+      }
+      if (scan.administrators?.length) {
+        const organization = document.createElement("button")
+        organization.type = "button"
+        organization.className = "qc-button qc-button-secondary qc-ssh-admin-option"
+        organization.style.cssText = "display:block;width:100%;margin-bottom:6px;text-align:left"
+        organization.textContent = "组织管理 · Server C"
+        organization.disabled = !scan.administrators.some(server => server.id === "server-c")
+        organization.addEventListener("click", () => void enter({ serverId: "server-c", administrator: "organization" }, "组织管理"))
+        root.append(organization)
+      }
+      for (const server of scan.administrators ?? []) {
+        const row = document.createElement("button")
+        row.type = "button"
+        row.className = "qc-button qc-button-secondary qc-ssh-admin-option"
+        row.style.cssText = "display:block;width:100%;margin-bottom:6px;text-align:left"
+        row.textContent = `服务器运维 · ${server.label}`
+        row.addEventListener("click", () => void enter({ serverId: server.id, administrator: "servers" }, `${server.label} 服务器运维`))
+        root.append(row)
+      }
+      for (const failed of scan.failed) {
+        const note = document.createElement("p")
+        note.className = "qc-ssh-hint"
+        note.textContent = `✗ ${failed.id.replace("server-", "Server ").toUpperCase()}：${failed.reason}`
+        root.append(note)
+      }
+    }
+    if (showUsername) {
+      const label = document.createElement("label")
+      label.className = "qc-field-label"
+      label.textContent = "SSH 用户名（确认后会记住）"
+      const input = document.createElement("input")
+      input.type = "text"
+      input.className = "qc-select-wide"
+      input.value = username
+      input.placeholder = "例如 qc-chenzhenhong"
+      const retry = document.createElement("button")
+      retry.type = "button"
+      retry.className = "qc-button qc-button-primary"
+      retry.textContent = "确认并重新探测"
+      retry.disabled = !username.trim()
+      input.addEventListener("input", () => {
+        username = input.value.trim()
+        retry.disabled = !username
+      })
+      input.addEventListener("keydown", event => { if (event.key === "Enter" && username) void scanKey(false) })
+      retry.addEventListener("click", () => void scanKey(false))
+      label.append(input)
+      root.append(label, retry)
+    }
+    const pick = document.createElement("button")
+    pick.type = "button"
+    pick.className = "qc-button qc-button-secondary"
+    pick.textContent = scan ? "换一把私钥" : "重新登录"
+    pick.addEventListener("click", () => { username = ""; void scanKey(true) })
+    root.append(pick)
   }
-
   render()
+  if (props.autoStart) queueMicrotask(() => { props.onStarted?.(); void scanKey(true) })
   return root
+}
+
+export function loginError(error: unknown, fallback = "登录失败，请重试。") {
+  return error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, "") : fallback
 }

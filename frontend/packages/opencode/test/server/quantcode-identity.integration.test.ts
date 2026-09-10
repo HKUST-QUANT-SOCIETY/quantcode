@@ -79,6 +79,16 @@ live("real host binds the roster group, rejects group overrides and revokes logo
   expect(restored.body).toMatchObject({ session: null })
   const again = yield* call("identity/logout", {})
   expect(again.status).toBe(200)
+  // The two-step desktop wizard selects a server AND an authorized group.
+  // Exercise the real main-process signer and gateway, not a simulated UI grant.
+  const host = yield* HttpServer.HttpServer
+  const connection = { url: HttpServer.formatAddress(host.address).replace("0.0.0.0", "127.0.0.1").replace("[::]", "[::1]") }
+  const secondary = yield* Effect.promise(() => connect(connection, {}, undefined, "factor"))
+  expect(secondary).toMatchObject({ status: "connected", group: "factor" })
+  expect((yield* call("tool?tool=session_context")).body).toMatchObject({ group: "factor", session_id: secondary.session_id })
+  yield* Effect.promise(async () => { await expect(connect(connection, {}, undefined, "risk")).rejects.toThrow() })
+  expect((yield* Effect.promise(() => inspect(connection))).session?.session_id).toBe(secondary.session_id)
+  yield* Effect.promise(() => disconnect(connection))
 }))
 
 // Exercise the exact Electron main-process implementation against the real

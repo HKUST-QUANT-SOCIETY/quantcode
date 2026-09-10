@@ -22,7 +22,10 @@ const api: ElectronAPI = {
     disconnect: (input) => ipcRenderer.invoke("quantcode-identity-disconnect", input),
     cancel: (input) => ipcRenderer.invoke("quantcode-identity-cancel", input),
     sshScan: (input) => ipcRenderer.invoke("quantcode-ssh-login-scan", input),
-    sshProbe: (input) => ipcRenderer.invoke("quantcode-ssh-login-probe", input),
+    sshConnect: (input) => ipcRenderer.invoke("quantcode-ssh-login-connect", input),
+    sshRestore: () => ipcRenderer.invoke("quantcode-ssh-login-restore"),
+    sshAdminStatus: () => ipcRenderer.invoke("quantcode-ssh-login-admin-status"),
+    sshAdminDisconnect: () => ipcRenderer.invoke("quantcode-ssh-login-admin-disconnect"),
   },
   wslServers: {
     getState: () => ipcRenderer.invoke("wsl-servers-get-state"),

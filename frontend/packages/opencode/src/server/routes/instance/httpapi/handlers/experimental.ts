@@ -370,7 +370,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         ? ctx.payload.group : undefined,
     ))
     const quantcodeIdentityChallenge = (ctx: { payload?: unknown }) => withIdentityOperation(Effect.tryPromise({
-      try: () => createIdentityChallenge(ctx.payload && typeof ctx.payload === "object" && "identity_id" in ctx.payload ? String(ctx.payload.identity_id) : undefined),
+      try: () => createIdentityChallenge(ctx.payload && typeof ctx.payload === "object" && "identity_id" in ctx.payload ? String(ctx.payload.identity_id) : undefined,
+        ctx.payload && typeof ctx.payload === "object" && "group" in ctx.payload ? String(ctx.payload.group) : undefined),
       catch: () => new QuantCodeIdentityApiError({ message: "无法准备登录，请检查研究宿主配置与组织身份服务。" }),
     }))
     const quantcodeIdentityVerify = (ctx: { payload: typeof QuantCodeIdentityVerifyPayload.Type }) => withIdentityOperation(Effect.gen(function* () {

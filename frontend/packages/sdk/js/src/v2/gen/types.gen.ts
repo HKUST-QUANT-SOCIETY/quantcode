@@ -11132,6 +11132,7 @@ export type QuantcodeWorkspacesListResponse = QuantcodeWorkspacesListResponses[k
 export type QuantcodeIdentityChallengeData = {
   body?: {
     identity_id?: string
+    group?: "fundamental" | "factor" | "model" | "risk" | "strategy" | "options" | "infra" | "agent"
   }
   path?: never
   query?: {

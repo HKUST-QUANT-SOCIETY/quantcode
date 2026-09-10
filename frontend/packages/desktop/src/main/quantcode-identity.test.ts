@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { connect, disconnect, inspect } from "./quantcode-identity"
+import { connect, disconnect, inspect, requireAdminSession } from "./quantcode-identity"
 
 // HTTP boundary regressions need no SSH agent or credentials. The end-to-end
 // signature regression lives in opencode/test/server and uses pytest's isolated
@@ -14,6 +14,23 @@ const identity = { id: "host-default", label: "Fixture SSH identity", fingerprin
   host: "fixture.example", user: "SSH agent", group: "model", groups: ["model", "factor"] }
 
 describe("desktop identity HTTP bridge", () => {
+  test("organization management requires the authority's admin role on the exact signed session", async () => {
+    let role = "analyst"
+    let sessionId = summary.session_id
+    const host = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      const url = new URL(request.url)
+      expect(url.pathname).toBe("/experimental/quantcode/tool")
+      expect(url.searchParams.get("tool")).toBe("session_context")
+      return Response.json({ actor_id: summary.actor_id, group: summary.group, session_id: sessionId, role })
+    } })
+    try {
+      await expect(requireAdminSession({ url: host.url.origin }, summary as never)).rejects.toThrow("授权为管理员")
+      role = "admin"
+      await requireAdminSession({ url: host.url.origin }, summary as never)
+      sessionId = "b".repeat(32)
+      await expect(requireAdminSession({ url: host.url.origin }, summary as never)).rejects.toThrow("身份已变化")
+    } finally { await host.stop(true) }
+  })
   test("preserves the saved host base path, accepts null sidecar credentials and strips credential fields", async () => {
     const requests: string[] = []
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {

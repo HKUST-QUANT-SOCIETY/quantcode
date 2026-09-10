@@ -3408,6 +3408,7 @@ export class Identity extends HeyApiClient {
       directory?: string
       workspace?: string
       identity_id?: string
+      group?: "fundamental" | "factor" | "model" | "risk" | "strategy" | "options" | "infra" | "agent"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3419,6 +3420,7 @@ export class Identity extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "identity_id" },
+            { in: "body", key: "group" },
           ],
         },
       ],

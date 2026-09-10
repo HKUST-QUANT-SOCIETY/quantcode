@@ -67,7 +67,8 @@ const QuantCodeWorkspaces = Schema.Struct({
 }).annotate({ identifier: "QuantCodeWorkspaces" })
 
 export const QuantCodeIdentityVerifyPayload = Schema.Struct({ challenge_id: Schema.String, signature: Schema.String })
-export const QuantCodeIdentityChallengePayload = Schema.Struct({ identity_id: Schema.optional(Schema.String) })
+export const QuantCodeIdentityChallengePayload = Schema.Struct({ identity_id: Schema.optional(Schema.String),
+  group: Schema.optional(Schema.Literals(["fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"])) })
 export const QuantCodeIdentityLoginPayload = Schema.Struct({ identity_id: Schema.optional(Schema.String), group: Schema.optional(Schema.String) })
 
 const QuantCodeIdentityChallenge = Schema.Struct({

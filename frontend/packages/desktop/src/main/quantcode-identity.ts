@@ -56,9 +56,11 @@ function serverConfiguration(input: ResearchConnection) {
     ...(value.password == null || value.password === "" ? {} : { password: string(value.password, 4096) }) }
 }
 
-async function request(server: ResearchConnection, route: "identities" | "identity/challenge" | "identity/verify" | "identity/logout", body: unknown, options: IdentityOperationOptions): Promise<unknown> {
+async function request(server: ResearchConnection, route: "identities" | "identity/challenge" | "identity/verify" | "identity/logout" | "session-context", body: unknown, options: IdentityOperationOptions): Promise<unknown> {
   await checkTarget(options)
-  const response = await fetch(researchEndpoint(server, `/experimental/quantcode/${route}`), {
+  const endpoint = researchEndpoint(server, `/experimental/quantcode/${route === "session-context" ? "tool" : route}`)
+  if (route === "session-context") endpoint.searchParams.set("tool", "session_context")
+  const response = await fetch(endpoint, {
     method: body === undefined ? "GET" : "POST", redirect: "error",
     signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
     headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -127,7 +129,7 @@ function executable(name: "ssh-add" | "ssh-keygen") {
 }
 
 /** Internal only: never expose arbitrary challenge signing through an IPC. */
-async function signChallenge(value: unknown, deadline: number, options: IdentityOperationOptions) {
+async function signChallenge(value: unknown, deadline: number, options: IdentityOperationOptions, selectedGroup?: QuantCodeIdentityGroup) {
   const data = object(value)
   const id = string(data.challenge_id, 32)
   if (!/^[a-f0-9]{32}$/.test(id) || typeof data.ttl_seconds !== "number" || !Number.isInteger(data.ttl_seconds) || data.ttl_seconds < 1 || data.ttl_seconds > 60) throw new Error("登录挑战无效，请重新连接。")
@@ -141,6 +143,7 @@ async function signChallenge(value: unknown, deadline: number, options: Identity
   if (Object.keys(challenge).sort().join(",") !== "group,nonce,purpose" || challenge.purpose !== "quantcode-login" ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(string(challenge.nonce, 256))) throw new Error("登录挑战不属于 QuantCode 身份认证。")
   group(challenge.group)
+  if (selectedGroup && challenge.group !== selectedGroup) throw new Error("研究宿主尚未支持所选工作组，请联系管理员更新宿主。")
   const expires = Math.min(deadline, Date.now() + data.ttl_seconds * 1000)
   await checkTarget(options)
   const identities = await execFileAsync(executable("ssh-add"), ["-L"], { encoding: "utf8", timeout: 10000, maxBuffer: 262144, windowsHide: true, signal: options.signal })
@@ -185,14 +188,15 @@ export async function inspect(input: ResearchConnection, options: IdentityOperat
   return result
 }
 
-export async function connect(input: ResearchConnection, options: IdentityOperationOptions = {}, identityId?: string): Promise<QuantCodeIdentitySession> {
+export async function connect(input: ResearchConnection, options: IdentityOperationOptions = {}, identityId?: string, selectedGroup?: QuantCodeIdentityGroup): Promise<QuantCodeIdentitySession> {
   if (signing) throw new Error("已有 SSH 身份连接正在进行，请稍候。")
   const server = serverConfiguration(input)
   signing = true
   try {
     const deadline = Date.now() + 60000
-    const challenge = await request(server, "identity/challenge", identityId ? { identity_id: identityId } : {}, options)
-    const signed = await signChallenge(challenge, deadline, options)
+    const challenge = await request(server, "identity/challenge", { ...(identityId ? { identity_id: identityId } : {}),
+      ...(selectedGroup ? { group: group(selectedGroup) } : {}) }, options)
+    const signed = await signChallenge(challenge, deadline, options, selectedGroup)
     await checkTarget(options)
     const result = await request(server, "identity/verify", { challenge_id: signed.challenge_id, signature: signed.signature }, options)
       .then(session).catch(() => { throw new Error("认证结果尚未确认，请刷新该研究宿主的登录状态；如已连接，可明确退出。") })
@@ -212,4 +216,13 @@ export async function disconnect(input: ResearchConnection, options: IdentityOpe
     await checkTarget(options)
     return { status: "disconnected", execution_status: "disconnected" }
   } finally { signing = false }
+}
+
+/** Admin routing never promotes a Linux username/group into an application role. */
+export async function requireAdminSession(input: ResearchConnection, expected: QuantCodeIdentitySession, options: IdentityOperationOptions = {}) {
+  const context = object(await request(serverConfiguration(input), "session-context", undefined, options))
+  if (context.session_id !== expected.session_id || context.actor_id !== expected.actor_id || context.group !== expected.group) {
+    throw new Error("组织管理身份已变化，请重新登录。")
+  }
+  if (context.role !== "admin") throw new Error("这把公钥尚未被组织名册授权为管理员，不能进入组织管理。")
 }

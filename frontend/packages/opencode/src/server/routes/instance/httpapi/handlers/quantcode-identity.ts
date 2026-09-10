@@ -18,7 +18,7 @@ const sessionSchema = z.object({
   identity_source: z.literal("ssh_roster"), github_subject: z.string().nullable().optional(),
 })
 const credentialSchema = z.object({ gateway: z.string(), token: z.string().regex(/^[A-Za-z0-9_-]{32,512}$/), fingerprint: z.string().optional() }).strict()
-const pendingChallenges = new Map<string, { configuration: string; credential: string | null; expires: number; key: string; fingerprint: string }>()
+const pendingChallenges = new Map<string, { configuration: string; credential: string | null; expires: number; key: string; fingerprint: string; group: z.infer<typeof groupSchema> }>()
 
 function gatewayOrigin(input: string) {
   const url = new URL(input)
@@ -116,8 +116,10 @@ export async function localIdentity() {
 }
 
 /** Only the host's configured public key and authority enter this challenge.
- * The caller cannot supply group, actor, key, workspace, path or gateway. */
-export async function createIdentityChallenge(identityId?: string) {
+ * A selected group must be authorized by the gateway roster and is signed into
+ * the nonce. Actor, key, workspace, path and gateway remain host-owned. */
+export async function createIdentityChallenge(identityId?: string, group?: string) {
+  const requestedGroup = group === undefined ? undefined : groupSchema.parse(group)
   const config = await configuration()
   const selected = config.keys.find(key => key.fingerprint === identityId) ?? (identityId ? undefined : config.keys[0])
   if (!selected) throw new Error("请选择当前研究宿主登记的 SSH 公钥身份。")
@@ -130,10 +132,11 @@ export async function createIdentityChallenge(identityId?: string) {
   const started = Date.now()
   const result = z.object({ challenge_id: z.string().regex(/^[a-f0-9]{32}$/), nonce: z.string().min(1).max(8192),
     ttl_seconds: z.number().int().positive().max(60), group: groupSchema, groups: z.array(groupSchema) }).parse(
-    await request(config.gateway, "/auth/challenge", { public_key: selected.key }))
+    await request(config.gateway, "/auth/challenge", { public_key: selected.key, ...(requestedGroup ? { group: requestedGroup } : {}) }))
+  if (!result.groups.includes(result.group) || requestedGroup && result.group !== requestedGroup) throw new Error("组织身份服务未授权所选工作组。")
   await assertConfiguration(config.digest)
   pendingChallenges.set(result.challenge_id, { configuration: config.digest, credential: prior?.digest ?? null,
-    expires: started + result.ttl_seconds * 1000, key: selected.key, fingerprint: selected.fingerprint })
+    expires: started + result.ttl_seconds * 1000, key: selected.key, fingerprint: selected.fingerprint, group: result.group })
   return { challenge_id: result.challenge_id, public_key: selected.key, fingerprint: selected.fingerprint,
     nonce: result.nonce, ttl_seconds: result.ttl_seconds, gateway_origin: config.gateway }
 }
@@ -183,7 +186,7 @@ export async function verifyIdentityChallenge(payload: { challenge_id: string; s
   await revokeFile(`${config.session}.pending`)
   await assertConfiguration(config.digest)
   if (!config.keys.some(key => key.key === pending.key && key.fingerprint === pending.fingerprint)) throw new Error("所选 SSH 公钥已从研究宿主配置中移除，请重新选择。")
-  const verified = await request(config.gateway, "/auth/verify", { ...input, public_key: pending.key })
+  const verified = await request(config.gateway, "/auth/verify", { ...input, public_key: pending.key, group: pending.group })
   const parsed = z.object({ token: credentialSchema.shape.token, session: sessionSchema }).safeParse(verified)
   if (!parsed.success) throw new Error("组织身份服务未返回有效的登录结果。")
   const staged = `${config.session}.pending`

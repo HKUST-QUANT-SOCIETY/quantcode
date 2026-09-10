@@ -306,6 +306,10 @@ render(() => {
   // Fetch sidecar credentials (available immediately, before health check)
   const [sidecar] = createResource(() => window.api.awaitInitialization())
 
+  const [orgRestore] = createResource(async () => {
+    if (import.meta.env.VITE_OPENCODE_CHANNEL !== "quantcode") return null
+    return window.api.identity.sshRestore().catch(() => null)
+  })
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
 
@@ -349,7 +353,7 @@ render(() => {
     )
 
     const ready = createMemo(
-      () => !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
+      () => !orgRestore.loading && !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
     )
     const servers = createMemo(() => {
       const data = initializationData(sidecar)
@@ -366,11 +370,14 @@ render(() => {
           },
         })
       }
+      const restored = orgRestore.latest?.connection
+      if (restored) list.push({ type: "http", displayName: restored.displayName, organizationAdmin: restored.organizationAdmin,
+        http: { url: restored.url, username: restored.username, password: restored.password } })
       list.push(...readyWslConnections(wslServers.data))
       return list
     })
     const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data)),
+      ServerConnection.Key.make(availableStartupServer(orgRestore.latest?.needsLogin ? "sidecar" : orgRestore.latest?.connection?.url ?? defaultServer.latest, wslServers.data)),
     )
 
     return (

@@ -146,7 +146,7 @@ export function resolveServerList(input: {
 }
 
 export namespace ServerConnection {
-  type Base = { displayName?: string; label?: string }
+  type Base = { displayName?: string; label?: string; organizationAdmin?: boolean }
 
   export type HttpBase = {
     url: string
