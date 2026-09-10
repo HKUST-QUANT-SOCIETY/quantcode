@@ -48,7 +48,7 @@ const SettingsProvidersV2 = lazy(() => import("../settings-v2/providers").then(m
 const DialogSelectServer = lazy(() => import("../dialog-select-server").then(m => ({ default: m.DialogSelectServer })))
 const QuantCodePreferences = lazy(() => import("./settings-preferences").then(m => ({ default: m.QuantCodePreferences })))
 const QuantCodeTaskReview = lazy(() => import("./task-review").then(m => ({ default: m.QuantCodeTaskReview })))
-import { SshLoginView, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
+import { SshLoginView, SshOrgLoginWizard, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
 import { CapabilityCatalogView } from "./capability-catalog"
 import { ApprovalQueue } from "./approval-queue"
 import { NativeApprovalQueue } from "./native-approval-queue"
@@ -531,6 +531,12 @@ function SettingsPanel(props: {
   githubSubject?: string
   onOpenGitgraph: () => void
   importKey?: () => Promise<{ fingerprint: string } | null>
+  /** 组织 SSH 登录向导桥（desktop 提供）；未注入时回退到服务器驱动的 SshLoginView。 */
+  orgSshLogin?: { scan: (input: { keyFile: string; username?: string }) => Promise<{
+    username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[]
+  }>; probe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }> }
+  orgSshRemembered?: string
+  orgSshOnEnter?: (input: { group: string; serverId: string; serverLabel: string; username: string }) => void
 }): JSX.Element {
   const dialog = useDialog()
   const [tab, setTab] = createSignal("account")
@@ -569,9 +575,17 @@ function SettingsPanel(props: {
       <div class="qc-detail-section">
         <span class="qc-section-label">本机 SSH 身份</span>
         <Show when={props.sshIdentityError}><p role="alert">{props.sshIdentityError}</p></Show>
-        <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
-          {identity => <SshLoginView t={props.sshT} connect={props.sshConnect} disconnect={props.sshDisconnect}
-            identities={identity.identities} session={identity.session} importKey={props.importKey} />}
+        <Show when={props.orgSshLogin}>
+          <SshOrgLoginWizard sshScan={input => props.orgSshLogin!.scan(input)}
+            sshProbe={input => props.orgSshLogin!.probe(input)}
+            rememberedUsername={props.orgSshRemembered}
+            onEnter={input => props.orgSshOnEnter?.(input)} />
+        </Show>
+        <Show when={!props.orgSshLogin}>
+          <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
+            {identity => <SshLoginView t={props.sshT} connect={props.sshConnect} disconnect={props.sshDisconnect}
+              identities={identity.identities} session={identity.session} importKey={props.importKey} />}
+          </Show>
         </Show>
       </div>
       </section>
@@ -676,6 +690,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     sshIdentities: [] as SshIdentity[],
     sshSession: undefined as SshSession | undefined,
     sshIdentityError: "",
+    orgSshUsername: "",
+    orgSshSession: undefined as { group: string; serverId: string; serverLabel: string; username: string } | undefined,
     adminHistory: "overview" as "overview" | "tasks" | "reports" | "deployments",
     submit: "idle" as SubmitState,
     error: "",
@@ -873,7 +889,18 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         setState("sshSession", data.session as SshSession)
       }
       if (!data.identities.length) setState("sshIdentityError", "宿主尚未提供可用公钥身份，请完成本机身份桥配置。")
-    }).catch(error => { if (!cancelled) setState("sshIdentityError", error instanceof Error ? error.message : "读取身份失败，请检查研究宿主连接。") })
+    }).catch(error => {
+      if (cancelled) return
+      // Electron IPC 拒绝会带上远端方法前缀；剥掉后按服务器给出可操作的指引
+      const raw = error instanceof Error ? error.message : "读取身份失败，请检查研究宿主连接。"
+      const message = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, "")
+      if (serverKey === "sidecar" && message.includes("尚未配置组织身份连接")) {
+        setState("sshIdentityError",
+          "当前选中的是本机研究宿主（开发用），不支持组织登录。请点右侧「管理服务器」，添加组织分配给你的个人研究宿主地址并切换过去。")
+        return
+      }
+      setState("sshIdentityError", message)
+    })
     onCleanup(() => { cancelled = true })
     activeThreadCacheKey = undefined
     setSessionId(undefined)
@@ -1766,6 +1793,20 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                       if (result) setState("identityRevision", value => value + 1)
                       return result
                     } : undefined}
+                    orgSshLogin={platform.identity ? {
+                      scan: input => platform.identity!.sshScan(input),
+                      probe: input => platform.identity!.sshProbe(input),
+                    } : undefined}
+                    orgSshRemembered={state.orgSshUsername}
+                    orgSshOnEnter={input => {
+                      setState("orgSshUsername", input.username)
+                      setState("orgSshSession", input)
+                      setState("sessionStatus", "ready")
+                      setState("sessionActor", input.username)
+                      setState("sessionRole", "analyst")
+                      setState("workspacePath", input.serverLabel)
+                      setState("view", "compose")
+                    }}
                   />
                 </Match>
               </Switch>

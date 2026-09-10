@@ -64,6 +64,12 @@ export type SshLoginProps = {
   disconnect?: SshDisconnectFn
   /** 通过系统文件选择器把私钥加入本机 SSH Agent；私钥正文不上传。 */
   importKey?: () => Promise<{ fingerprint: string } | null>
+  /** 组织 SSH 登录向导：选择本地私钥 → 探测三台内置服务器 → 返回 (组 × 服务器)。 */
+  sshScan?: (input: { keyFile: string; username?: string }) => Promise<
+    { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
+  >
+  /** 选定组后对该服务器做一次登录校验。 */
+  sshProbe?: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 export function SshLoginView(props: SshLoginProps): HTMLElement {
@@ -360,6 +366,174 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
     else if (status === "connecting") renderConnecting()
     else if (status === "connected" || status === "disconnecting") renderConnected()
     else renderFailed()
+  }
+
+  render()
+  return root
+}
+
+/**
+ * 组织 SSH 重新登录向导：选本地私钥 → 自动探测三台内置服务器 → (组 × 服务器) 清单 → 选组进入。
+ * 成员全程只碰两样东西：私钥文件、组清单。服务器地址内置，无 URL/端口/密码。
+ * desktop 桥未注入（web/dev）时组件不渲染任何内容。
+ */
+export function SshOrgLoginWizard(props: {
+  sshScan: (input: { keyFile: string; username?: string }) => Promise<
+    { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
+  >
+  sshProbe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
+  /** 选定 (组, 服务器) 后的进入动作。 */
+  onEnter: (input: { group: string; serverId: string; serverLabel: string; username: string }) => void
+  /** 记住的最近一次用户名（可选，向导里可改）。 */
+  rememberedUsername?: string
+}): HTMLElement {
+  const root = document.createElement("div")
+  root.className = "qc-ssh"
+
+  type Stage = "pick" | "scanning" | "groups"
+  let stage: Stage = "pick"
+  let keyFile = ""
+  let username = props.rememberedUsername ?? ""
+  let askUsername = false
+  let scanError = ""
+  let scanResult: { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | undefined
+  let enterBusy = false
+
+  const renderPick = () => {
+    const title = document.createElement("p")
+    title.className = "qc-ssh-hint"
+    title.textContent = "选择你本地保存的 SSH 私钥文件（私钥不会离开这台电脑）。"
+    const pick = document.createElement("button")
+    pick.type = "button"
+    pick.className = "qc-button qc-button-primary"
+    pick.textContent = "重新登录：选择本地私钥"
+    pick.addEventListener("click", () => {
+      const input = document.createElement("input")
+      input.type = "file"
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return
+        keyFile = (file as File & { path?: string }).path ?? file.name
+        stage = "scanning"
+        render()
+        void props.sshScan({ keyFile, username: username || undefined }).then(result => {
+          scanResult = result
+          username = result.username
+          askUsername = false
+          stage = "groups"
+          render()
+        }).catch(error => {
+          const message = error instanceof Error ? error.message : String(error)
+          if (message.includes("无法从私钥文件名解析")) {
+            stage = "pick"
+            askUsername = true
+            render()
+            return
+          }
+          scanError = message
+          stage = "pick"
+          render()
+        })
+      }
+      input.click()
+    })
+    const fileRow = document.createElement("label")
+    fileRow.className = "qc-field-label"
+    fileRow.textContent = "SSH 用户名（私钥文件名未带用户名时填写）"
+    const userField = document.createElement("input")
+    userField.type = "text"
+    userField.className = "qc-select-wide"
+    userField.value = username
+    userField.placeholder = "qc-你的Linux用户名"
+    userField.addEventListener("input", () => { username = userField.value.trim() })
+    root.replaceChildren(title, pick)
+    if (askUsername) root.append(fileRow, userField)
+    if (scanError) {
+      const err = document.createElement("p")
+      err.setAttribute("role", "alert")
+      err.className = "qc-status qc-status-error"
+      err.textContent = scanError
+      root.append(err)
+    }
+  }
+
+  const renderScanning = () => {
+    const pill = document.createElement("span")
+    pill.className = "qc-connection-pill"
+    const dot = document.createElement("i")
+    dot.className = "qc-ssh-spinner"
+    dot.style.animation = "pulse-opacity 1.2s ease-in-out infinite"
+    pill.append(dot, document.createTextNode("正在探测组织服务器（Server A / B / C）…"))
+    root.replaceChildren(pill)
+  }
+
+  const renderGroups = () => {
+    const result = scanResult
+    if (!result) {
+      stage = "pick"
+      render()
+      return
+    }
+    const title = document.createElement("p")
+    title.className = "qc-ssh-hint"
+    title.textContent = `登录成功（用户名 ${result.username}）。选择要进入的工作组：`
+    root.replaceChildren(title)
+    for (const server of result.servers) {
+      for (const group of server.groups) {
+        const row = document.createElement("button")
+        row.type = "button"
+        row.className = "qc-button qc-button-secondary qc-ssh-group-option"
+        row.style.cssText = "display:flex;justify-content:space-between;width:100%;margin-bottom:6px;"
+        const name = document.createElement("span")
+        name.textContent = group
+        const srv = document.createElement("span")
+        srv.textContent = server.label
+        row.append(name, srv)
+        row.addEventListener("click", () => {
+          if (enterBusy) return
+          enterBusy = true
+          row.disabled = true
+          stage = "scanning"
+          render()
+          void props.sshProbe({ keyFile, username: result.username }).then(probe => {
+            if (!probe.ok) {
+              scanError = probe.reason
+              stage = "groups"
+              enterBusy = false
+              render()
+              return
+            }
+            props.onEnter({ group, serverId: server.id, serverLabel: server.label, username: result.username })
+          })
+        })
+        root.append(row)
+      }
+    }
+    for (const item of result.failed) {
+      const note = document.createElement("p")
+      note.className = "qc-ssh-hint"
+      note.textContent = item.reason === "unreachable"
+        ? "一台组织服务器暂时无法连接，已跳过。"
+        : "有一台服务器未登记这把密钥，已跳过。"
+      root.append(note)
+      break
+    }
+    const back = document.createElement("button")
+    back.type = "button"
+    back.className = "qc-button qc-button-secondary"
+    back.textContent = "换一把私钥"
+    back.addEventListener("click", () => {
+      stage = "pick"
+      scanError = ""
+      render()
+    })
+    root.append(back)
+  }
+
+  const render = () => {
+    if (stage === "pick") renderPick()
+    else if (stage === "scanning") renderScanning()
+    else renderGroups()
   }
 
   render()

@@ -3,6 +3,7 @@ import type { IpcMainInvokeEvent, WebContentsDidStartNavigationEventParams } fro
 import type { ServerReadyData } from "../preload/types"
 import { inspect, connect, disconnect, importKey } from "./quantcode-identity"
 import { resolveResearchConnection } from "./quantcode-connection"
+import { scanOrgServers, probeOrgServer } from "./quantcode-ssh-login"
 
 function requireDesktopFrame(event: IpcMainInvokeEvent) {
   const origin = new URL(event.senderFrame?.url ?? "")
@@ -84,5 +85,27 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
     const file = picked.filePaths[0]
     const result = await importKey(connection, file)
     return result
+  })
+  // 组织 SSH 登录向导：选私钥 → 三台内置服务器探测 → 返回 (组 × 服务器) 清单
+  ipcMain.handle("quantcode-ssh-login-scan", async (event: IpcMainInvokeEvent, input: unknown) => {
+    requireDesktopFrame(event)
+    if (!input || typeof input !== "object") throw new Error("参数无效。")
+    const record = input as { keyFile?: unknown; username?: unknown }
+    if (typeof record.keyFile !== "string" || !record.keyFile || record.keyFile.length > 4096) throw new Error("请选择本地私钥文件。")
+    if (record.username !== undefined && (typeof record.username !== "string" || record.username.length > 64)) throw new Error("用户名无效。")
+    return scanOrgServers(record.keyFile, typeof record.username === "string" ? record.username : undefined)
+  })
+  ipcMain.handle("quantcode-ssh-login-probe", async (event: IpcMainInvokeEvent, input: unknown) => {
+    requireDesktopFrame(event)
+    if (!input || typeof input !== "object") throw new Error("参数无效。")
+    const record = input as { keyFile?: unknown; username?: unknown }
+    if (typeof record.keyFile !== "string" || !record.keyFile) throw new Error("请选择本地私钥文件。")
+    if (typeof record.username !== "string" || !record.username) throw new Error("请输入 SSH 用户名。")
+    try {
+      await probeOrgServer(record.keyFile, record.username)
+      return { ok: true as const }
+    } catch (error) {
+      return { ok: false as const, reason: error instanceof Error ? error.message : String(error) }
+    }
   })
 }
