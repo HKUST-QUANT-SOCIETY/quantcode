@@ -86,14 +86,23 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
     const result = await importKey(connection, file)
     return result
   })
-  // 组织 SSH 登录向导：选私钥 → 三台内置服务器探测 → 返回 (组 × 服务器) 清单
+  // 组织 SSH 登录向导：主进程弹系统选择器拿私钥绝对路径（Electron 42+ 渲染层
+  // 拿不到 File.path）→ 三台内置服务器探测 → 返回 (组 × 服务器) 与后续探测所需路径
   ipcMain.handle("quantcode-ssh-login-scan", async (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)
-    if (!input || typeof input !== "object") throw new Error("参数无效。")
-    const record = input as { keyFile?: unknown; username?: unknown }
-    if (typeof record.keyFile !== "string" || !record.keyFile || record.keyFile.length > 4096) throw new Error("请选择本地私钥文件。")
-    if (record.username !== undefined && (typeof record.username !== "string" || record.username.length > 64)) throw new Error("用户名无效。")
-    return scanOrgServers(record.keyFile, typeof record.username === "string" ? record.username : undefined)
+    const record = (input && typeof input === "object" ? input : {}) as { keyFile?: unknown; username?: unknown }
+    let keyFile = typeof record.keyFile === "string" ? record.keyFile : ""
+    if (!keyFile) {
+      const picked = await dialog.showOpenDialog({ properties: ["openFile"], title: "选择本地 SSH 私钥", filters: [{ name: "SSH 私钥", extensions: ["*"] }] })
+      if (picked.canceled || !picked.filePaths[0]) return null
+      keyFile = picked.filePaths[0]
+    } else if (keyFile.length > 4096) {
+      throw new Error("私钥路径无效。")
+    }
+    const username = typeof record.username === "string" && record.username.trim() ? record.username.trim() : undefined
+    if (username !== undefined && username.length > 64) throw new Error("用户名无效。")
+    const result = await scanOrgServers(keyFile, username)
+    return { ...result, keyFile }
   })
   ipcMain.handle("quantcode-ssh-login-probe", async (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)

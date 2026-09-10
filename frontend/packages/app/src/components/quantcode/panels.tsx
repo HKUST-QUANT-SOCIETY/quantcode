@@ -532,9 +532,10 @@ function SettingsPanel(props: {
   onOpenGitgraph: () => void
   importKey?: () => Promise<{ fingerprint: string } | null>
   /** 组织 SSH 登录向导桥（desktop 提供）；未注入时回退到服务器驱动的 SshLoginView。 */
-  orgSshLogin?: { scan: (input: { keyFile: string; username?: string }) => Promise<{
-    username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[]
-  }>; probe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }> }
+  orgSshLogin?: { scan: (input: { keyFile?: string; username?: string }) => Promise<{
+    keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[]
+  } | null>; probe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }> }
+  resolveFilePath: (file: File) => string
   orgSshRemembered?: string
   orgSshOnEnter?: (input: { group: string; serverId: string; serverLabel: string; username: string }) => void
 }): JSX.Element {
@@ -577,6 +578,7 @@ function SettingsPanel(props: {
         <Show when={props.sshIdentityError}><p role="alert">{props.sshIdentityError}</p></Show>
         <Show when={props.orgSshLogin}>
           <SshOrgLoginWizard sshScan={input => props.orgSshLogin!.scan(input)}
+            resolveFilePath={props.resolveFilePath}
             sshProbe={input => props.orgSshLogin!.probe(input)}
             rememberedUsername={props.orgSshRemembered}
             onEnter={input => props.orgSshOnEnter?.(input)} />
@@ -1797,6 +1799,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                       scan: input => platform.identity!.sshScan(input),
                       probe: input => platform.identity!.sshProbe(input),
                     } : undefined}
+                    resolveFilePath={file => platform.getPathForFile?.(file) ?? file.name}
                     orgSshRemembered={state.orgSshUsername}
                     orgSshOnEnter={input => {
                       setState("orgSshUsername", input.username)

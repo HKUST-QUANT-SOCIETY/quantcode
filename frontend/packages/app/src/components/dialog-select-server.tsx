@@ -522,6 +522,48 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     }
   }
 
+  const importConnectionFile = () => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.accept = ".json,application/json"
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const raw = await file.text()
+        if (raw.length > 16384) throw new Error("too large")
+        const profile = JSON.parse(raw) as Record<string, unknown>
+        const required = ["version", "release", "ssh_host", "ssh_port", "ssh_user", "remote_port", "local_port", "url", "username", "password"]
+        if (!profile || typeof profile !== "object" || Array.isArray(profile) || profile.version !== 1 ||
+            required.some((key) => !(key in profile)) || typeof profile.url !== "string" ||
+            !profile.url.startsWith("http://127.0.0.1:") || profile.username !== "quantcode" ||
+            typeof profile.password !== "string" || !/^[A-Za-z0-9_-]{32,128}$/.test(profile.password) ||
+            typeof profile.ssh_user !== "string" || !profile.ssh_user) {
+          throw new Error("invalid profile")
+        }
+        resetEdit()
+        setStore("addServer", {
+          showForm: true,
+          url: profile.url,
+          name: `个人研究宿主 · ${profile.ssh_user}`,
+          username: String(profile.username),
+          password: String(profile.password),
+          error: "",
+          status: undefined,
+        })
+        void previewStatus(String(profile.url), String(profile.username), String(profile.password),
+          (next) => setStore("addServer", { status: next }))
+      } catch {
+        resetEdit()
+        setStore("addServer", {
+          showForm: true,
+          error: "连接文件无效：请选择组织下发的 connection.json",
+        })
+      }
+    }
+    input.click()
+  }
+
   return {
     defaultKey,
     canDefault,
@@ -543,6 +585,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     startAdd,
     startEdit,
     resetForm,
+    importConnectionFile,
     submitForm,
     handleRemove,
     handleFormChange: () => (isAddMode() ? handleAddChange : handleEditChange),

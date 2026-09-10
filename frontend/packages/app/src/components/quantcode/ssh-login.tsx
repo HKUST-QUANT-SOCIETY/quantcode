@@ -66,8 +66,10 @@ export type SshLoginProps = {
   importKey?: () => Promise<{ fingerprint: string } | null>
   /** 组织 SSH 登录向导：选择本地私钥 → 探测三台内置服务器 → 返回 (组 × 服务器)。 */
   sshScan?: (input: { keyFile: string; username?: string }) => Promise<
-    { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
+    { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | null
   >
+  /** Electron 42+ 移除了 File.path：主进程 webUtils 把 File 映射回绝对路径。 */
+  resolveFilePath?: (file: File) => string
   /** 选定组后对该服务器做一次登录校验。 */
   sshProbe?: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
@@ -378,9 +380,10 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
  * desktop 桥未注入（web/dev）时组件不渲染任何内容。
  */
 export function SshOrgLoginWizard(props: {
-  sshScan: (input: { keyFile: string; username?: string }) => Promise<
-    { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
+  sshScan: (input: { keyFile?: string; username?: string }) => Promise<
+    { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | null
   >
+  resolveFilePath: (file: File) => string
   sshProbe: (input: { keyFile: string; username: string }) => Promise<{ ok: true } | { ok: false; reason: string }>
   /** 选定 (组, 服务器) 后的进入动作。 */
   onEnter: (input: { group: string; serverId: string; serverLabel: string; username: string }) => void
@@ -390,14 +393,37 @@ export function SshOrgLoginWizard(props: {
   const root = document.createElement("div")
   root.className = "qc-ssh"
 
-  type Stage = "pick" | "scanning" | "groups"
+  type Stage = "pick" | "scanning" | "groups" | "done"
+  type Scan = { keyFile: string; username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] }
   let stage: Stage = "pick"
   let keyFile = ""
   let username = props.rememberedUsername ?? ""
-  let askUsername = false
   let scanError = ""
-  let scanResult: { username: string; servers: { id: string; label: string; groups: string[] }[]; failed: { id: string; reason: string }[] } | undefined
+  let scanResult: Scan | undefined
+  let selectedGroup = ""
   let enterBusy = false
+
+  const runScan = () => {
+    stage = "scanning"
+    render()
+    void props.sshScan({ keyFile, username: username || undefined }).then(result => {
+      if (!result) {
+        scanError = "SSH 用户名无效，请检查后重试。"
+        stage = "pick"
+        render()
+        return
+      }
+      scanResult = result
+      username = result.username
+      keyFile = result.keyFile
+      stage = "groups"
+      render()
+    }).catch(error => {
+      scanError = error instanceof Error ? error.message : String(error)
+      stage = "pick"
+      render()
+    })
+  }
 
   const renderPick = () => {
     const title = document.createElement("p")
@@ -413,27 +439,8 @@ export function SshOrgLoginWizard(props: {
       input.onchange = () => {
         const file = input.files?.[0]
         if (!file) return
-        keyFile = (file as File & { path?: string }).path ?? file.name
-        stage = "scanning"
-        render()
-        void props.sshScan({ keyFile, username: username || undefined }).then(result => {
-          scanResult = result
-          username = result.username
-          askUsername = false
-          stage = "groups"
-          render()
-        }).catch(error => {
-          const message = error instanceof Error ? error.message : String(error)
-          if (message.includes("无法从私钥文件名解析")) {
-            stage = "pick"
-            askUsername = true
-            render()
-            return
-          }
-          scanError = message
-          stage = "pick"
-          render()
-        })
+        keyFile = props.resolveFilePath(file)
+        runScan()
       }
       input.click()
     })
@@ -454,18 +461,7 @@ export function SshOrgLoginWizard(props: {
     retry.addEventListener("click", () => {
       if (!username) return
       scanError = ""
-      stage = "scanning"
-      render()
-      void props.sshScan({ keyFile, username }).then(result => {
-        scanResult = result
-        askUsername = false
-        stage = "groups"
-        render()
-      }).catch(error => {
-        scanError = error instanceof Error ? error.message : String(error)
-        stage = "pick"
-        render()
-      })
+      runScan()
     })
     root.replaceChildren(title, pick, fileRow, userField, retry)
     if (scanError) {
@@ -523,13 +519,15 @@ export function SshOrgLoginWizard(props: {
               render()
               return
             }
-            props.onEnter({ group, serverId: server.id, serverLabel: server.label, username: result.username })
+            selectedGroup = group
+            stage = "done"
+            enterBusy = false
+            render()
           })
         })
         root.append(row)
       }
-    }
-    for (const item of result.failed) {
+    }    for (const item of result.failed) {
       const note = document.createElement("p")
       note.className = "qc-ssh-hint"
       note.textContent = item.reason === "unreachable"
@@ -550,9 +548,49 @@ export function SshOrgLoginWizard(props: {
     root.append(back)
   }
 
+  const renderDone = () => {
+    const result = scanResult
+    const pill = document.createElement("span")
+    pill.className = "qc-connection-pill"
+    pill.append(document.createElement("i"), document.createTextNode("登录成功"))
+    const detail = document.createElement("div")
+    detail.className = "qc-detail-section"
+    const rows: [string, string][] = [
+      ["当前账号", username],
+      ["业务组", selectedGroup],
+      ["工作环境", scanResult?.servers.find(server => server.groups.includes(selectedGroup))?.label ?? ""],
+    ]
+    for (const [label, value] of rows) {
+      const row = document.createElement("div")
+      row.className = "qc-setting-row"
+      const left = document.createElement("div")
+      const labelEl = document.createElement("span")
+      labelEl.className = "qc-section-label"
+      labelEl.textContent = label
+      const valueEl = document.createElement("strong")
+      valueEl.textContent = value
+      left.append(labelEl, valueEl)
+      row.append(left)
+      detail.append(row)
+    }
+    const enter = document.createElement("button")
+    enter.type = "button"
+    enter.className = "qc-button qc-button-primary"
+    enter.textContent = "进入工作台"
+    enter.addEventListener("click", () => {
+      const server = scanResult?.servers.find(item => item.groups.includes(selectedGroup))
+      props.onEnter({ group: selectedGroup, serverId: server?.id ?? "server-c", serverLabel: server?.label ?? "Server C", username })
+    })
+    const actions = document.createElement("div")
+    actions.className = "qc-gate-actions"
+    actions.append(enter)
+    root.replaceChildren(pill, detail, actions)
+  }
+
   const render = () => {
     if (stage === "pick") renderPick()
     else if (stage === "scanning") renderScanning()
+    else if (stage === "done") renderDone()
     else renderGroups()
   }
 

@@ -21,6 +21,7 @@ export type QuantCodeIdentityDisconnected = { status: "disconnected"; execution_
 /** 组织 SSH 登录向导：成员只提供本地私钥，服务器地址内置。 */
 export type QuantCodeSshLoginServer = { id: string; label: string; host: string; username: string; groups: string[] }
 export type QuantCodeSshLoginScan = {
+  keyFile: string
   username: string
   servers: QuantCodeSshLoginServer[]
   failed: { id: string; reason: "unreachable" | "not-enrolled" }[]
@@ -32,7 +33,7 @@ export type QuantCodeDesktopIdentity = {
   disconnect(server: QuantCodeIdentityServer): Promise<QuantCodeIdentityDisconnected>
   /** Cancels a pending handshake; it does not revoke an already issued login. */
   cancel(server: QuantCodeIdentityServer): Promise<void>
-  /** SSH 登录向导：选本地私钥 → 三台组织服务器探测 → 返回可达的 (组 × 服务器)。 */
-  sshScan(input: { keyFile: string; username?: string }): Promise<QuantCodeSshLoginScan>
+  /** SSH 登录向导：选本地私钥（未给路径则弹系统选择器）→ 三台组织服务器探测。 */
+  sshScan(input: { keyFile?: string; username?: string }): Promise<QuantCodeSshLoginScan | null>
   sshProbe(input: { keyFile: string; username: string }): Promise<{ ok: true } | { ok: false; reason: string }>
 }
