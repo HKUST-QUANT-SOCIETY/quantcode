@@ -111,9 +111,10 @@ export function parseResearchProfile(raw: string, username: string): ResearchPro
   }
 }
 
+type WorkspaceRoute = { serverId: string; username: string; fingerprints: string[] }
 export type OrgAccount = { groups: QuantCodeIdentityGroup[]; profile: ResearchProfile }
-  | { administrator: true; groups: QuantCodeIdentityGroup[]; systemGroups: string[] }
-  | { routes: { serverId: string; username: string; fingerprints: string[] }[] }
+  | { administrator: true; groups: QuantCodeIdentityGroup[]; systemGroups: string[]; routes?: WorkspaceRoute[] }
+  | { routes: WorkspaceRoute[] }
 
 export function parseWorkspaceRoutes(raw: string): Extract<OrgAccount, { routes: unknown }> {
   const value = JSON.parse(raw)
@@ -136,7 +137,14 @@ export async function readOrgAccount(server: OrgServer, username: string, keyFil
   const groups = businessGroups(systemGroups.join(" "))
   // This selects the SSH operations path only. Organization admin still
   // requires the gateway's verified role; sudo membership grants nothing here.
-  if (systemGroups.includes("quant-admin")) return { administrator: true, groups, systemGroups }
+  if (systemGroups.includes("quant-admin")) {
+    const raw = await runRemote(server, username, keyFile,
+      "if test -x /usr/local/bin/quantcode-connect; then /usr/local/bin/quantcode-connect; else printf '{\"version\":1,\"status\":\"not_configured\",\"routes\":[]}'; fi", signal)
+    const description = JSON.parse(raw)
+    if (description?.status === 'registered') return { administrator: true, groups, systemGroups, ...parseWorkspaceRoutes(raw) }
+    if (description?.version !== 1 || description.status !== 'not_configured') throw new Error('SSH 管理权限已确认，但工作区登记配置无效，请联系管理员。')
+    return { administrator: true, groups, systemGroups }
+  }
   const raw = await runRemote(server, username, keyFile,
     "if test -e ~/.quantcode/test-v1/connection.json; then printf 'QUANTCODE_PROFILE\\n'; cat ~/.quantcode/test-v1/connection.json; elif test -x /usr/local/bin/quantcode-connect; then /usr/local/bin/quantcode-connect; else printf '{\"version\":1,\"status\":\"not_configured\",\"routes\":[]}'; fi", signal)
     .catch(error => { if (signal?.aborted) throw error; throw new Error('SSH 已连接，但无法读取工作区配置，请检查文件权限、服务状态或网络。') })

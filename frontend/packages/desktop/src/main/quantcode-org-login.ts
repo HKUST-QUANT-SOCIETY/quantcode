@@ -234,7 +234,7 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
             operation.check()
             log(`${server.label} SSH 身份验证通过，正在读取组授权`)
             if ('routes' in account) {
-              const routes = account.routes.filter(route => route.fingerprints.includes(fingerprint))
+              const routes = (account.routes ?? []).filter(route => route.fingerprints.includes(fingerprint))
               if (!routes.length) throw new Error('SSH 已连接，但这把公钥尚未关联 QuantCode 工作区，请联系管理员核对公钥登记。')
               for (const route of routes) {
                 const target = ORG_SERVERS.find(item => item.id === route.serverId)
