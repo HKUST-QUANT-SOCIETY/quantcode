@@ -167,8 +167,10 @@ export async function listQuantCodeCapabilities(client: OpencodeClient) {
   return result.capabilities
 }
 
-export async function getQuantCodeSessionContext(client: OpencodeClient) {
-  const result = (await readQuantCodeTool(client, "session_context")) as QuantCodeSessionContext | undefined
+export async function getQuantCodeSessionContext(client: OpencodeClient, signal?: AbortSignal) {
+  const response = await client.quantcode.tool.readOnly({ tool: 'session_context' }, { signal: signal ?? AbortSignal.timeout(8000) })
+  if (response.error || !response.data) throw new Error('暂时无法核验组织身份，请检查连接后重试。')
+  const result = response.data as QuantCodeSessionContext | undefined
   if (result?.error) throw new Error(result.error)
   if (!result?.group) throw new Error("QuantCode session context has no bound group")
   if (result.role !== undefined && !["analyst", "approver", "admin"].includes(result.role)) {

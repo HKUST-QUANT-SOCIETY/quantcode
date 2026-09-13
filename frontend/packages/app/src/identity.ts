@@ -39,6 +39,12 @@ export type QuantCodeDesktopIdentity = {
   sshProgress?(): Promise<string[]>
   sshSelectKey?(): Promise<boolean>
   sshCancel?(): Promise<void>
+  sshUnlockKey?(): Promise<void>
+  sshAgentKeys?(): Promise<{ fingerprint: string; label: string }[]>
+  sshSelectAgent?(input: { fingerprint: string }): Promise<void>
+  sshResolve?(): Promise<QuantCodeSshLoginResult | null>
+  sshExitAttempt?(): Promise<void>
+  sshAcknowledge?(input: { sessionId: string }): Promise<void>
   sshConnectionState?(server: QuantCodeIdentityServer): Promise<QuantCodeConnectionState | null>
   sshReconnect?(server: QuantCodeIdentityServer): Promise<void>
   onSshConnectionState?(listener: (state: QuantCodeConnectionState) => void): () => void
@@ -54,6 +60,6 @@ export type QuantCodeDesktopIdentity = {
   sshAdminStatus(input?: { serverId?: string }): Promise<QuantCodeServerAdminStatus | null>
   sshAdminDisconnect(): Promise<void>
   /** 恢复隧道并检查既有会话，不重新签发登录。 */
-  sshRestore(): Promise<{ connection: QuantCodeSshConnection; session: QuantCodeIdentitySession | null; admin?: QuantCodeServerAdminSession; needsLogin?: false }
+  sshRestore(): Promise<{ connection: QuantCodeSshConnection; session: QuantCodeIdentitySession | null; admin?: QuantCodeServerAdminSession; needsLogin?: false; requiresConfirmation?: boolean }
     | { connection?: undefined; session?: undefined; admin?: undefined; needsLogin: true } | null>
 }

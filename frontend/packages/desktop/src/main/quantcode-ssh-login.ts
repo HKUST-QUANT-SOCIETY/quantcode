@@ -1,6 +1,9 @@
 import { execFile, spawn } from "node:child_process"
 import { createConnection, createServer } from "node:net"
 import { isAbsolute, win32 } from "node:path"
+import { readFile, mkdtemp, writeFile } from "node:fs/promises"
+import { homedir, userInfo, tmpdir } from "node:os"
+import { join } from "node:path"
 import { promisify } from "node:util"
 import { superviseSshTunnel } from "./ssh-tunnel-supervisor"
 import type { QuantCodeIdentityGroup, QuantCodeSshConnection } from "@opencode-ai/app/identity"
@@ -11,8 +14,22 @@ export const ORG_SERVERS = [
   { id: "server-b", label: "Server B", host: "150.109.79.42" },
   { id: "server-c", label: "Server C", host: "150.109.115.216" },
 ] as const
-export type OrgServer = (typeof ORG_SERVERS)[number]
+export type OrgServer = (typeof ORG_SERVERS)[number] & { sshHost?: string }
 const groupNames = new Set<QuantCodeIdentityGroup>(["fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"])
+// Public host keys verified through the administrator's existing SSH connections.
+const orgHostKeys = `43.154.17.120 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIInsv+7UYNIlVm2CVNhHS4YkWX6C5GA8aYclRMm2yx5j
+150.109.79.42 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIkhPeBbgyVniaa+lsFYOQZewxATVYFdkpyTuEWbmPOo
+150.109.115.216 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHo9wycmjTpXiX6loNgBBb2C2hIhWSvsDDBuUlt0I7zJ
+`
+let hostKeysFile: Promise<string> | undefined
+function organizationHostKeys() {
+  return hostKeysFile ??= (async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'quantcode-hosts-'))
+    const file = join(directory, 'known_hosts')
+    await writeFile(file, orgHostKeys, { mode: 0o600, flag: 'wx' })
+    return file
+  })()
+}
 
 export function usernameFromKeyFile(filename: string): string | undefined {
   const base = filename.split(/[\\/]/).pop() ?? ""
@@ -33,15 +50,38 @@ export function systemSshExecutable(name: "ssh" | "ssh-add" | "ssh-keygen") {
   return win32.join(root, "System32", "OpenSSH", `${name}.exe`)
 }
 
-export function sshArguments(keyFile: string, username: string, host: string) {
+export function sshArguments(keyFile: string, username: string, host: string, alias = host, knownHosts?: string) {
   if (!isAbsolute(keyFile) || keyFile.includes("\0")) throw new Error("请通过系统选择器选择本地私钥文件。")
   requireUsername(username)
-  return ["-F", process.platform === "win32" ? "NUL" : "/dev/null", "-i", keyFile, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=no", "-l", username, host]
+  return ["-T", "-i", keyFile, "-o", 'RemoteCommand=none', "-o", `HostName=${host}`, "-o", `HostKeyAlias=${host}`, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes",
+    ...(knownHosts ? ['-o', `UserKnownHostsFile="${knownHosts.replace(/\\/g, '/').replace(/"/g, '\\"')}"`, '-o', 'GlobalKnownHostsFile=none', '-o', 'HostKeyAlgorithms=ssh-ed25519'] : []),
+    "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=no", "-l", username, alias]
+}
+
+export async function resolveSshTarget(server: OrgServer, fallback: string, signal?: AbortSignal, preferConfig = true) {
+  const deadline = AbortSignal.any([AbortSignal.timeout(8000), ...(signal ? [signal] : [])])
+  const config = await readFile(join(homedir(), '.ssh', 'config'), 'utf8').catch(() => '')
+  const aliases = [...config.matchAll(/^\s*Host\s+(.+)$/gmi)].flatMap(match => match[1].split(/\s+/))
+    .filter(host => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(host))
+  for (const alias of [...new Set([...aliases.slice(0, 64), server.host])]) {
+    signal?.throwIfAborted()
+    if (deadline.aborted) break
+    const resolved = await execFileAsync(systemSshExecutable('ssh'), ['-G', alias], {
+      encoding: 'utf8', timeout: 3000, maxBuffer: 65536, windowsHide: true, signal: deadline,
+    }).catch(() => undefined)
+    if (!resolved) continue
+    const values = Object.fromEntries(resolved.stdout.split(/\r?\n/).map(line => {
+      const index = line.indexOf(' '); return [line.slice(0, index), line.slice(index + 1)]
+    }))
+    if (values.hostname !== server.host) continue
+    const configured = values.user && (aliases.includes(alias) || values.user !== userInfo().username) ? values.user : ''
+    return { server: { ...server, sshHost: alias }, username: preferConfig ? configured || fallback : fallback || configured }
+  }
+  return { server, username: fallback }
 }
 
 async function runRemote(server: OrgServer, username: string, keyFile: string, command: string, signal?: AbortSignal) {
-  const result = await execFileAsync(systemSshExecutable("ssh"), [...sshArguments(keyFile, username, server.host), command],
+  const result = await execFileAsync(systemSshExecutable("ssh"), [...sshArguments(keyFile, username, server.host, server.sshHost, await organizationHostKeys()), command],
     { encoding: "utf8", timeout: 15000, maxBuffer: 32768, windowsHide: true, signal })
   return result.stdout
 }
@@ -73,6 +113,21 @@ export function parseResearchProfile(raw: string, username: string): ResearchPro
 
 export type OrgAccount = { groups: QuantCodeIdentityGroup[]; profile: ResearchProfile }
   | { administrator: true; groups: QuantCodeIdentityGroup[]; systemGroups: string[] }
+  | { routes: { serverId: string; username: string; fingerprints: string[] }[] }
+
+export function parseWorkspaceRoutes(raw: string): Extract<OrgAccount, { routes: unknown }> {
+  const value = JSON.parse(raw)
+  if (value?.version !== 1 || !Array.isArray(value.routes) || value.routes.length > 8) throw new Error('工作区发现协议无效，请联系管理员更新连接入口。')
+  if (value.status !== 'registered') throw new Error(value.status === 'invalid'
+    ? 'SSH 已连接，但工作区登记配置无效，请联系管理员。' : 'SSH 已连接，但此账号尚未登记 QuantCode 工作区，请联系管理员。')
+  for (const route of value.routes) {
+    if (!route || !ORG_SERVERS.some(server => server.id === route.serverId) || typeof route.username !== 'string' ||
+      !Array.isArray(route.fingerprints) || !route.fingerprints.length || route.fingerprints.length > 16 ||
+      !route.fingerprints.every((key: unknown) => typeof key === 'string' && /^SHA256:[A-Za-z0-9+/]{43}$/.test(key))) throw new Error('工作区登记包含无效目标，请联系管理员。')
+    requireUsername(route.username)
+  }
+  return { routes: value.routes }
+}
 
 export async function readOrgAccount(server: OrgServer, username: string, keyFile: string, signal?: AbortSignal): Promise<OrgAccount> {
   const identity = (await runRemote(server, username, keyFile, "id -un && groups", signal)).trim().split(/\r?\n/)
@@ -82,9 +137,11 @@ export async function readOrgAccount(server: OrgServer, username: string, keyFil
   // This selects the SSH operations path only. Organization admin still
   // requires the gateway's verified role; sudo membership grants nothing here.
   if (systemGroups.includes("quant-admin")) return { administrator: true, groups, systemGroups }
-  const raw = await runRemote(server, username, keyFile, "cat ~/.quantcode/test-v1/connection.json", signal)
-    .catch(() => { throw new Error("SSH 登录成功，但个人研究宿主尚未开通，请联系管理员。") })
-  return { groups, profile: parseResearchProfile(raw, username) }
+  const raw = await runRemote(server, username, keyFile,
+    "if test -e ~/.quantcode/test-v1/connection.json; then printf 'QUANTCODE_PROFILE\\n'; cat ~/.quantcode/test-v1/connection.json; elif test -x /usr/local/bin/quantcode-connect; then /usr/local/bin/quantcode-connect; else printf '{\"version\":1,\"status\":\"not_configured\",\"routes\":[]}'; fi", signal)
+    .catch(error => { if (signal?.aborted) throw error; throw new Error('SSH 已连接，但无法读取工作区配置，请检查文件权限、服务状态或网络。') })
+  if (raw.startsWith('QUANTCODE_PROFILE\n')) return { groups, profile: parseResearchProfile(raw.slice('QUANTCODE_PROFILE\n'.length), username) }
+  return parseWorkspaceRoutes(raw)
 }
 
 export async function readAdminProfile(server: OrgServer, username: string, keyFile: string, signal?: AbortSignal) {
@@ -101,7 +158,7 @@ export function sshFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   if (/Permission denied|publickey/i.test(message)) return "这把密钥或用户名未登记"
   if (/REMOTE HOST IDENTIFICATION|Host key verification/i.test(message)) return "服务器指纹发生变化，请联系管理员核对"
-  if (/个人研究宿主|工作组|组织身份|组织管理|本机 SSH/.test(message)) return message
+  if (/个人研究宿主|工作组|工作区|组织身份|组织管理|本机 SSH|系统 SSH|私钥需要解锁/.test(message)) return message
   return "暂时无法连接，请检查网络后重试"
 }
 
@@ -127,7 +184,7 @@ export async function openResearchTunnel(server: OrgServer, username: string, ke
   initialSignal?.throwIfAborted()
   const port = await availablePort(localPort ?? profile.local_port)
   initialSignal?.throwIfAborted()
-  const base = sshArguments(keyFile, username, server.host)
+  const base = sshArguments(keyFile, username, server.host, server.sshHost, await organizationHostKeys())
   const supervised = superviseSshTunnel({
     signal,
     launch: () => spawn(systemSshExecutable("ssh"), ["-v", "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15",

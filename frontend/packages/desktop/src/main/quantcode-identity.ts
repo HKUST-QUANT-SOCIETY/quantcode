@@ -12,12 +12,36 @@ const execFileAsync = promisify(execFile)
 const groups = new Set(["fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"])
 let signing = false
 export type IdentityOperationOptions = { signal?: AbortSignal; checkTarget?: () => Promise<void> }
+export class IdentityResultUncertain extends Error {}
+
+export async function agentIdentities() {
+  const result = await execFileAsync(executable("ssh-add"), ["-L"], { encoding: "utf8", timeout: 5000, maxBuffer: 262144, windowsHide: true })
+    .catch(error => {
+      if (error.code === 1) return { stdout: "" }
+      throw new Error("系统 SSH Agent 未运行。请先启动系统 SSH Agent，再重试。")
+    })
+  return result.stdout.split(/\r?\n/).filter(Boolean).map(line => publicKey(line))
+}
 
 export async function importKey(_input: ResearchConnection, filename: string) {
   if (!filename || filename.length > 4096) throw new Error("SSH 私钥路径无效。")
-  await execFileAsync(executable("ssh-add"), [filename], { encoding: "utf8", timeout: 30000, maxBuffer: 65536, windowsHide: true })
-  const derived = await execFileAsync(executable("ssh-keygen"), ["-y", "-f", filename], { encoding: "utf8", timeout: 10000, maxBuffer: 65536, windowsHide: true })
+  const identities = await agentIdentities()
+  // OpenSSH stores the public fingerprint outside the encrypted key payload.
+  // Reuse the unlocked Agent identity instead of prompting for the file again.
+  const described = await execFileAsync(executable("ssh-keygen"), ["-l", "-f", filename], { encoding: "utf8", timeout: 5000, maxBuffer: 65536, windowsHide: true }).catch(() => undefined)
+  const fingerprint = described?.stdout.match(/SHA256:[A-Za-z0-9+/]+/)?.[0]
+  if (fingerprint && identities.some(key => key.fingerprint === fingerprint)) return { fingerprint }
+  const derived = await execFileAsync(executable("ssh-keygen"), ["-y", "-P", "", "-f", filename], {
+    encoding: "utf8", timeout: 5000, maxBuffer: 65536, windowsHide: true,
+    env: { ...process.env, SSH_ASKPASS_REQUIRE: "never" },
+  }).catch(error => {
+    if (/passphrase|encrypted/i.test(String(error.stderr))) throw new Error("私钥需要解锁。请在本机终端解锁所选私钥，然后点击重新探测；已解锁的 Agent 身份会直接复用。")
+    throw new Error("无法读取所选密钥，请确认文件完整、当前用户可读，并且是 SSH 私钥。")
+  })
   const key = publicKey(derived.stdout.trim())
+  if (identities.some(identity => identity.fingerprint === key.fingerprint)) return { fingerprint: key.fingerprint }
+  await execFileAsync(executable("ssh-add"), [filename], { encoding: "utf8", timeout: 10000, maxBuffer: 65536, windowsHide: true,
+    env: { ...process.env, SSH_ASKPASS_REQUIRE: "never" } }).catch(() => { throw new Error('系统 SSH Agent 未能加载所选私钥，请检查 Agent 状态后重试。') })
   return { fingerprint: key.fingerprint }
 }
 
@@ -199,9 +223,9 @@ export async function connect(input: ResearchConnection, options: IdentityOperat
     const signed = await signChallenge(challenge, deadline, options, selectedGroup)
     await checkTarget(options)
     const result = await request(server, "identity/verify", { challenge_id: signed.challenge_id, signature: signed.signature }, options)
-      .then(session).catch(() => { throw new Error("认证结果尚未确认，请刷新该研究宿主的登录状态；如已连接，可明确退出。") })
-    if (result.fingerprint !== signed.fingerprint) throw new Error("已认证身份与本机签名身份不匹配，请退出后重新连接。")
-    await checkTarget(options).catch(() => { throw new Error("身份已认证，但窗口或连接已变化。请刷新原研究宿主的登录状态；取消不会自动退出。") })
+      .then(session).catch(() => { throw new IdentityResultUncertain("认证结果尚未确认，请核对该研究宿主的登录状态；如已连接，可明确退出。") })
+    if (result.fingerprint !== signed.fingerprint) throw new IdentityResultUncertain("已认证身份与本机签名身份不匹配，请核对原登录结果。")
+    await checkTarget(options).catch(() => { throw new IdentityResultUncertain("身份已认证，但窗口或连接已变化。请核对原研究宿主的登录状态；取消不会自动退出。") })
     return result
   } finally { signing = false }
 }

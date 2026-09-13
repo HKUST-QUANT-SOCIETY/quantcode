@@ -13,11 +13,13 @@ import {
   ServerConnection,
   useCommand,
   useWslServers,
+  useServer,
 } from "@opencode-ai/app"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
-import { MemoryRouter } from "@solidjs/router"
+import { MemoryRouter, useNavigate } from "@solidjs/router"
+import { createStore } from 'solid-js/store'
 import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
@@ -323,6 +325,9 @@ render(() => {
 
   function Inner() {
     const cmd = useCommand()
+    const server = useServer()
+    const navigate = useNavigate()
+    const [restore, setRestore] = createStore({ stopped: false, applied: false })
     menuTrigger = (id) => cmd.trigger(id)
 
     const theme = useTheme()
@@ -336,7 +341,33 @@ render(() => {
       }
     })
 
-    return null
+    createEffect(() => {
+      if (orgRestore.loading || restore.stopped || restore.applied) return
+      const result = orgRestore.latest
+      if (!result?.connection) return
+      setRestore('applied', true)
+      // A user-selected connection takes precedence over background restoration.
+      if (String(server.key) !== 'sidecar') return
+      const connection = result.connection
+      server.add({ type: 'http', displayName: connection.displayName, organizationAdmin: connection.organizationAdmin,
+        managedId: connection.managedId, previousUrls: connection.previousUrls, verifiedAt: connection.verifiedAt,
+        http: { url: connection.url, username: connection.username, password: connection.password } })
+      void platform.setDefaultServer?.(server.key)
+      if (!result.session || result.requiresConfirmation) {
+        navigate('/?settings=1')
+        queueMicrotask(() => window.dispatchEvent(new Event('quantcode-login-recovery')))
+      }
+    })
+    return <Show when={orgRestore.loading && !restore.stopped}>
+      <div role="status" class="fixed bottom-4 left-4 z-50 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-3 rounded-lg border border-border-weak-base bg-background-stronger p-4 shadow-lg">
+        <span>正在恢复上次 SSH 连接…</span>
+        <button type="button" class="rounded border border-border-weak-base px-3 py-2" onClick={() => {
+          setRestore('stopped', true)
+          void window.api.identity.sshCancel?.()
+          navigate('/?settings=1')
+        }}>停止恢复，重新登录</button>
+      </div>
+    </Show>
   }
 
   function App() {
@@ -353,7 +384,7 @@ render(() => {
     )
 
     const ready = createMemo(
-      () => !orgRestore.loading && !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
+      () => !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
     )
     const servers = createMemo(() => {
       const data = initializationData(sidecar)
@@ -370,15 +401,11 @@ render(() => {
           },
         })
       }
-      const restored = orgRestore.latest?.connection
-      if (restored) list.push({ type: "http", displayName: restored.displayName, organizationAdmin: restored.organizationAdmin,
-        managedId: restored.managedId, previousUrls: restored.previousUrls, verifiedAt: restored.verifiedAt,
-        http: { url: restored.url, username: restored.username, password: restored.password } })
       list.push(...readyWslConnections(wslServers.data))
       return list
     })
     const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(orgRestore.latest?.needsLogin ? "sidecar" : orgRestore.latest?.connection?.managedId ?? orgRestore.latest?.connection?.url ?? defaultServer.latest, wslServers.data)),
+      ServerConnection.Key.make(availableStartupServer(import.meta.env.VITE_OPENCODE_CHANNEL === 'quantcode' ? 'sidecar' : defaultServer.latest, wslServers.data)),
     )
 
     return (
