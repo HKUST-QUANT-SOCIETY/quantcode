@@ -39,7 +39,7 @@ export function usernameFromKeyFile(filename: string): string | undefined {
 }
 
 export function requireUsername(username: string) {
-  if (!/^[a-z_][a-z0-9_-]{0,63}$/i.test(username)) throw new Error("请输入有效的 Linux 用户名，例如 qc-chenzhenhong。")
+  if (!/^[a-z_][a-z0-9_-]{0,63}$/i.test(username)) throw new Error("请输入有效的 Linux 用户名，填写平时 SSH 登录使用的账号即可。")
   return username
 }
 

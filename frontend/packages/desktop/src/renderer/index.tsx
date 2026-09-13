@@ -348,6 +348,11 @@ render(() => {
       setRestore('applied', true)
       // A user-selected connection takes precedence over background restoration.
       if (String(server.key) !== 'sidecar') return
+      if (!result.session) {
+        navigate('/?settings=1')
+        if (result.requiresConfirmation) queueMicrotask(() => window.dispatchEvent(new Event('quantcode-login-recovery')))
+        return
+      }
       const connection = result.connection
       server.add({ type: 'http', displayName: connection.displayName, organizationAdmin: connection.organizationAdmin,
         managedId: connection.managedId, previousUrls: connection.previousUrls, verifiedAt: connection.verifiedAt,

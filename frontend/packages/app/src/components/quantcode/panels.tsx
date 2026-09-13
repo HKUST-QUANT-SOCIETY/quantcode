@@ -891,9 +891,10 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     const client = serverSDK().client
     const serverKey = String(server.key)
     let cancelled = false
+    const loginOnly = serverKey === 'sidecar' && !!platform.identity?.sshScan
     setState({ sshIdentities: [], sshSession: undefined, sshIdentityError: "" })
     setState({ unifiedRuntime: false, runtimeStatus: "loading" })
-    const identityRequest = platform.identity
+    const identityRequest = loginOnly ? Promise.resolve({ data: { identities: [], session: null }, error: undefined }) : platform.identity
       ? platform.identity.inspect({ server: serverKey }).then(data => ({ data, error: undefined }))
       : client.quantcode.identity.list()
     void identityRequest.then(response => {
@@ -946,7 +947,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     resetQuantCodeState()
     setGroup("")
     setState({ historyScope: "", sessionStatus: "loading", identityPending: false, sessionRole: "未连接", sessionActor: "未连接", workspacePath: "", sessionId: "", githubSubject: "", skills: [], skill: "", memoryTab: "knowledge" })
-    void getQuantCodeSessionContext(client).then(
+    void (loginOnly ? Promise.reject(new Error('请先连接组织工作区。')) : getQuantCodeSessionContext(client)).then(
       (context) => {
         if (cancelled) return
         const group = context.group
@@ -983,6 +984,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
   createEffect(() => {
     const client = serverSDK().client
     const serverKey = String(server.key)
+    if (serverKey === 'sidecar' && platform.identity?.sshScan) return
     let live = true
     const monitor = monitorIdentity({
       read: signal => getQuantCodeSessionContext(client, signal),

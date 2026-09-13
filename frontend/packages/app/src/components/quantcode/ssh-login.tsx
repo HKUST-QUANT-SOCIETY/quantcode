@@ -666,12 +666,12 @@ export function SshOrgLoginWizard(props: {
     if (showUsername) {
       const label = document.createElement("label")
       label.className = "qc-field-label"
-      label.textContent = "SSH 用户名（确认后会记住）"
+      label.textContent = "SSH 用户名（沿用原账号，确认后记住）"
       const input = document.createElement("input")
       input.type = "text"
       input.className = "qc-select-wide"
       input.value = username
-      input.placeholder = "例如 qc-chenzhenhong"
+      input.placeholder = "填写平时 SSH 登录使用的用户名"
       const retry = document.createElement("button")
       retry.type = "button"
       retry.className = "qc-button qc-button-primary"

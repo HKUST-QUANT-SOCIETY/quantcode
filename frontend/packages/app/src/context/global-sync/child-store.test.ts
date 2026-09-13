@@ -18,6 +18,22 @@ const persist: typeof import("@/utils/persist").persisted = (_target, store) => 
 const child = () => createStore({} as State)
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
 
+test('login-only sidecar retains project metadata without starting workspace or MCP queries', () => {
+  const offset = querySingles.length
+  let requests = 0
+  const dispose = createOwner(owner => {
+    const manager = createChildStoreManager({ owner, scope: ServerScope.local, persist, workspaceQueries: false,
+      isBooting: () => false, isLoadingSessions: () => false, onBootstrap: () => { requests++ },
+      onMcp: () => { requests++ }, onDispose: () => {}, translate: key => key, queryOptions: queryOptionsApi, global: { provider } })
+    manager.child('/cached-project', { bootstrap: true, mcp: true })
+    manager.peek('/cached-project', { bootstrap: true, mcp: true })
+  })
+  try {
+    expect(requests).toBe(0)
+    expect(querySingles.slice(offset).every(query => query().enabled === false)).toBe(true)
+  } finally { dispose() }
+})
+
 test("metadata-only cached projects remain passive until explicitly opened", () => {
   const bootstraps: string[] = []
   let manager: ReturnType<typeof createChildStoreManager> | undefined
