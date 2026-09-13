@@ -198,8 +198,11 @@ def test_concurrency_is_bounded_per_member_and_globally_then_released():
         with gateway(upstream, max_concurrency=2, per_member_concurrency=1) as (client, _), ThreadPoolExecutor(max_workers=2) as pool:
             one = pool.submit(client.post, "/v1/chat/completions", headers=headers("one"), json=payload())
             assert entered[0].wait(5)
-            busy = client.post("/v1/chat/completions", headers=headers("one"), json=payload())
+            request_id = "ea8f54b0-641c-4938-8ab4-3690b5cd0ad2"
+            busy = client.post("/v1/chat/completions", headers={**headers("one"), "X-QuantCode-Request-Id": request_id}, json=payload())
             assert busy.status_code == 429 and busy.headers["retry-after"] == "1"
+            assert busy.headers["x-quantcode-request-id"] == request_id
+            assert busy.headers["x-quantcode-request-status"] == "not-started"
             two = pool.submit(client.post, "/v1/chat/completions", headers=headers("two"), json=payload())
             assert entered[1].wait(5)
             assert client.post("/v1/chat/completions", headers=headers("three"), json=payload()).status_code == 429
@@ -208,6 +211,16 @@ def test_concurrency_is_bounded_per_member_and_globally_then_released():
             assert client.post("/v1/chat/completions", headers=headers("three"), json=payload()).status_code == 200
     finally:
         released.set()
+
+
+def test_upstream_rejection_does_not_attest_zero_usage():
+    request_id = "ea8f54b0-641c-4938-8ab4-3690b5cd0ad2"
+    with gateway(lambda request: httpx.Response(429, json={"error": "provider limited"}, headers={
+        "X-QuantCode-Request-Id": request_id, "X-QuantCode-Request-Status": "not-started",
+    })) as (client, _):
+        response = client.post("/v1/chat/completions", headers={**headers(), "X-QuantCode-Request-Id": request_id}, json=payload())
+    assert response.status_code == 429
+    assert "x-quantcode-request-status" not in response.headers
 
 
 def test_default_member_limit_allows_main_and_auxiliary_requests_together():

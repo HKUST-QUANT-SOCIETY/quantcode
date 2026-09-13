@@ -310,6 +310,32 @@ class MemoryService:
         # 8) slice
         return out[:limit]
 
+    def documents(self, *, query: str, scope: str, scope_id: str | None = None, limit: int = 50) -> dict:
+        """Browse maintained knowledge; substring search also handles Chinese terms.
+
+        The gateway supplies authorized scopes. Runtime checkpoints never enter
+        this view, and content is read from the same maintained index as search.
+        """
+        if scope not in {"global", "groups", "projects"} or not 1 <= limit <= 50:
+            raise ValueError("invalid knowledge scope or limit")
+        if scope == "groups":
+            _check_group_read_allowed(scope, scope_id or "", self.requester_group)
+        conditions = ["scope = ?", "scope_id = ?", "type NOT IN ('checkpoint', 'progress')"]
+        params: list[Any] = [scope, scope_id or ""]
+        words = query.strip().split()
+        if words:
+            conditions.append("(" + " OR ".join("instr(lower(body), lower(?)) > 0" for _ in words) + ")")
+            params.extend(words)
+        where = " AND ".join(conditions)
+        with self._conn() as conn:
+            total = conn.execute("SELECT count(*) FROM memory_fts WHERE " + where, params).fetchone()[0]
+            rows = conn.execute("SELECT path,scope,scope_id,type,body,last_indexed_at FROM memory_fts WHERE " + where
+                                + " ORDER BY last_indexed_at DESC,path LIMIT ?", [*params, limit]).fetchall()
+        return {"total": total, "hits": [{"path": row["path"], "scope": row["scope"], "scope_id": row["scope_id"],
+            "type": row["type"], "title": next((line.lstrip("# ").strip() for line in row["body"].splitlines() if line.strip()), Path(row["path"]).stem),
+            "snippet": row["body"][:240], "content": row["body"][:65536], "content_truncated": len(row["body"]) > 65536,
+            "indexed_at": row["last_indexed_at"], "score": 0} for row in rows]}
+
     # ---------------- reconcile（与 service.ts reconcileEffect 一致） ----------------
 
     def reconcile(self) -> dict[str, int]:

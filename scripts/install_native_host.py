@@ -314,7 +314,8 @@ def render_unit(plan: dict) -> str:
         f'ExecStart="{release}/bin/{plan["source"]["binary_name"]}" serve --hostname 127.0.0.1 --port {plan["port"]} --no-mdns --cors oc://renderer',
         "Restart=no", "KillMode=control-group", "TimeoutStopSec=10", "UMask=0077", "NoNewPrivileges=true",
         "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=true", "RestrictSUIDSGID=true",
-        f'ReadWritePaths="{member["workspace_path"]}" "{state}"', "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+        # Bubblewrap configures loopback inside its private network namespace using NETLINK_ROUTE.
+        f'ReadWritePaths="{member["workspace_path"]}" "{state}"', "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK",
         "", "[Install]", "WantedBy=multi-user.target", "",
     ])
 

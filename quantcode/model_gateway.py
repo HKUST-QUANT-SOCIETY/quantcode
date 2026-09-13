@@ -151,7 +151,7 @@ class ModelHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def reply(self, status, message):
+    def reply(self, status, message, *, not_started=False):
         data = json.dumps(message).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -160,6 +160,10 @@ class ModelHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         if status == 429:
             self.send_header("Retry-After", "1")
+        request_ids = self.headers.get_all("X-QuantCode-Request-Id", [])
+        if not_started and len(request_ids) == 1 and re.fullmatch(r"[a-f0-9-]{36}", request_ids[0]):
+            self.send_header("X-QuantCode-Request-Id", request_ids[0])
+            self.send_header("X-QuantCode-Request-Status", "not-started")
         self.end_headers()
         self.close_connection = True
         try:
@@ -223,7 +227,7 @@ class ModelHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, UnicodeError, OSError, RecursionError):
             return self.reply(400, {"error": "invalid request for the authorized model or gateway limits"})
         if not self.server.acquire(actor):
-            return self.reply(429, {"error": "member or gateway concurrency limit reached"})
+            return self.reply(429, {"error": "member or gateway concurrency limit reached"}, not_started=True)
         sent = False
         try:
             with self.server.upstream.stream("POST", UPSTREAM, json=payload,

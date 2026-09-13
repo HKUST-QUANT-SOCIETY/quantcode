@@ -33,6 +33,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { QuantCodeIdentity } from "@/quantcode/identity"
 import { QuantCodeAccess } from "@/quantcode/access"
 import { QuantCodeBudget } from "@/quantcode/budget"
+import { unexecutedUsage } from "@/quantcode/model-rejection"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -387,6 +388,13 @@ const live: Layer.Layer<
         Stream.unwrap(
           Effect.gen(function* () {
             const accounting: Accounting = { completed: false }
+            const rejected = (cause: Cause.Cause<unknown>) => Effect.sync(() => {
+              if (!accounting.reservation || accounting.completed) return
+              const usage = unexecutedUsage(Cause.squash(cause), accounting.reservation.requestID)
+              if (!usage) return
+              accounting.usage = usage
+              accounting.completed = true
+            })
             const ctrl = yield* Effect.acquireRelease(
               Effect.sync(() => new AbortController()),
               (ctrl) => Effect.sync(() => ctrl.abort()),
@@ -424,7 +432,7 @@ const live: Layer.Layer<
               }))
             }
 
-            const result = yield* run({ ...input, abort: ctrl.signal }, accounting)
+            const result = yield* run({ ...input, abort: ctrl.signal }, accounting).pipe(Effect.tapCause(rejected))
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
@@ -466,7 +474,7 @@ const live: Layer.Layer<
                 const current = yield* QuantCodeAccess.requireSession(input.sessionID)
                 if (!current || current.identity.session_id !== accounting.reservation!.loginID) throw new QuantCodeIdentity.IdentityError()
               }
-            })))
+            })), Stream.tapCause(rejected))
           }),
         ),
       ).pipe(Stream.provideService(Database.Service, database),

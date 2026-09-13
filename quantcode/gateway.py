@@ -21,6 +21,39 @@ from quantcode.identity_challenge import ChallengeStore, authenticate
 from schemas.session_context import SessionContext
 
 
+class GatewayHTTPServer(ThreadingHTTPServer):
+    """Bound control-plane workers; an overloaded request never enters a handler."""
+    daemon_threads = True
+
+    def __init__(self, address, request_handler, *, max_workers=64):
+        if not 1 <= max_workers <= 256:
+            raise ValueError("invalid control-plane worker limit")
+        self._workers = threading.BoundedSemaphore(max_workers)
+        super().__init__(address, request_handler)
+
+    def process_request(self, request, client_address):
+        if not self._workers.acquire(blocking=False):
+            try:
+                request.settimeout(1)
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._workers.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._workers.release()
+
+
 class IdentityGateway:
     def __init__(self, *, roster: Path, database: Path, memory_root: Path | None = None):
         self.roster = roster.resolve()
@@ -148,23 +181,20 @@ class IdentityGateway:
         db_path = self.memory_root / ".quantcode" / "memory.db"
         if not db_path.is_file():
             return {"status": "UNAVAILABLE", "error": "Memory store is not initialized", "hits": []}
-        service = MemoryService(db_path, root=self.memory_root, requester_group=context.group)
-        hits = service.search(query=query, scope="global", limit=limit, long_term_only=True, strict_errors=True)
-        if context.role == "admin":
-            for scope_id in self._authorized_memory_groups():
-                group_service = MemoryService(db_path, root=self.memory_root, requester_group=scope_id)
-                hits.extend(group_service.search(query=query, scope="groups", scope_id=scope_id, limit=limit,
-                                                 long_term_only=True, strict_errors=True))
-        elif context.group:
-            hits.extend(service.search(query=query, scope="groups", scope_id=context.group, limit=limit,
-                                       long_term_only=True, strict_errors=True))
+        query = "" if query.strip() == "*" else query
         from runner.memory.grants import project_read_grants
-        for project_id in project_read_grants(context.model_dump(mode="json")):
-            hits.extend(service.search(query=query, scope="projects", scope_id=project_id, limit=limit,
-                                       long_term_only=True, strict_errors=True))
-        hits.sort(key=lambda hit: hit.score, reverse=True)
-        result = {"status": "CONNECTED" if hits else "EMPTY",
-                  "hits": [{**hit.to_dict(), "path": self._memory_public_path(hit.path)} for hit in hits[:limit]]}
+        scopes = [("global", None)]
+        scopes.extend(("groups", group) for group in (self._authorized_memory_groups() if context.role == "admin" else [context.group]))
+        scopes.extend(("projects", project) for project in project_read_grants(context.model_dump(mode="json")))
+        hits, total = [], 0
+        for scope, scope_id in scopes:
+            service = MemoryService(db_path, root=self.memory_root, requester_group=scope_id if scope == "groups" else context.group)
+            page = service.documents(query=query, scope=scope, scope_id=scope_id, limit=limit)
+            total += page["total"]
+            hits.extend(page["hits"])
+        hits.sort(key=lambda hit: (-hit["indexed_at"], hit["path"]))
+        result = {"status": "CONNECTED" if hits else "EMPTY", "total": total, "has_more": total > limit,
+                  "hits": [{**hit, "path": self._memory_public_path(hit["path"])} for hit in hits[:limit]]}
         if context.role == "admin":
             from runner.admin_scope import audited_read_result
             audit_context = context.model_dump(mode="json")
@@ -190,6 +220,10 @@ class IdentityGateway:
 def handler(gateway: IdentityGateway):
     class Handler(BaseHTTPRequestHandler):
         server_version = "QuantCodeGateway"
+
+        def setup(self):
+            self.request.settimeout(15)
+            super().setup()
 
         def log_message(self, format, *args):
             # Request bodies, bearer tokens, and signatures never enter logs.
@@ -240,7 +274,7 @@ def handler(gateway: IdentityGateway):
                 size = int(self.headers.get("Content-Length", "0"))
                 # Native task publication may carry a bounded set of small
                 # artifact previews. Other gateway mutations stay tiny.
-                max_size = 1_000_000 if self.path == "/native-tasks/publish" else 131072 if self.path == "/native-tasks/artifacts/publish" else 16384
+                max_size = 1_000_000 if self.path in {"/native-tasks/publish", "/knowledge/distill"} else 131072 if self.path == "/native-tasks/artifacts/publish" else 16384
                 if size < 1 or size > max_size:
                     return self.reply(400, {"error": "invalid request size"})
                 payload = json.loads(self.rfile.read(size))
@@ -276,6 +310,9 @@ def handler(gateway: IdentityGateway):
                     return self.reply(200, action(gateway, self.token(), payload))
                 if self.path == "/session/validate-checkpoint":
                     return self.reply(200, gateway.validate_checkpoint(self.token(), payload))
+                if self.path in {"/knowledge/list", "/knowledge/review", "/knowledge/distill"}:
+                    from quantcode.shared_knowledge import handle
+                    return self.reply(200, handle(gateway, self.token(), self.path.rsplit("/", 1)[1], payload))
                 if self.path == "/memory/search":
                     return self.reply(200, gateway.search_memory(self.token(), payload))
                 if self.path == "/receipts/reconcile":
@@ -342,7 +379,7 @@ def main():
     if args.dream_min_occurrences < 1:
         parser.error("Dream min occurrences must be at least 1")
     gateway = IdentityGateway(roster=args.roster, database=args.database)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(gateway))
+    server = GatewayHTTPServer(("127.0.0.1", args.port), handler(gateway))
     stop = threading.Event()
     if args.github_sync_interval:
         from runner.github_worker import serve

@@ -25,6 +25,8 @@ import argparse
 import base64
 import hashlib
 import sys
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -60,7 +62,14 @@ def _load_entries(path: Path | str | None = None) -> list[dict]:
     p = Path(path) if path is not None else Path(DEFAULT_BINDINGS_PATH)
     if not p.exists():
         return []
-    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    # Read current bytes on every check. Content-keyed parsing avoids stale
+    # grants even when a replacement deliberately preserves the old mtime.
+    return deepcopy(_parse_entries(p.read_text(encoding="utf-8")))
+
+
+@lru_cache(maxsize=8)
+def _parse_entries(content: str) -> list[dict]:
+    data = yaml.safe_load(content) or {}
     if data.get("status") == "REVIEW_REQUIRED":
         raise ValueError("roster candidate requires review before activation")
     entries = []

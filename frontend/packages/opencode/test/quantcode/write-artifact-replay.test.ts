@@ -44,6 +44,7 @@ import { QuantCodeToolCatalog } from "../../src/quantcode/tool-catalog"
 import { QuantCodeWritePolicy } from "../../src/quantcode/write-policy"
 import { QuantCodeWriteReceipt } from "../../src/quantcode/write-receipt"
 import { QuantCodeTaskContext } from "../../src/quantcode/task-context"
+import { QuantCodeTaskIndex } from "../../src/quantcode/task-index"
 import { TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -62,6 +63,18 @@ const model: Provider.Model = {
   status: "active", options: {}, headers: {}, release_date: "2026-09-09",
 }
 const resultSchema = Schema.Struct({ title: Schema.String, output: Schema.String, metadata: Schema.Record(Schema.String, Schema.Unknown) })
+
+it.instance("publication revision includes root changes and excludes unrelated sessions", () => Effect.gen(function* () {
+  const fixture = yield* setup
+  const sessions = yield* Session.Service
+  const child = yield* sessions.create({ parentID: fixture.session.id, title: "Revision child" })
+  const unrelated = yield* sessions.create({ title: "Unrelated task" })
+  const before = yield* QuantCodeTaskIndex.revision(child.id, fixture.session.id)
+  yield* sessions.setTitle({ sessionID: unrelated.id, title: "Changed unrelated task" })
+  expect(yield* QuantCodeTaskIndex.revision(child.id, fixture.session.id)).toBe(before)
+  yield* sessions.setTitle({ sessionID: fixture.session.id, title: "Changed root task" })
+  expect(yield* QuantCodeTaskIndex.revision(child.id, fixture.session.id)).toBeGreaterThan(before)
+}), { config: { formatter: false, lsp: false, mcp: {}, plugin: [] } })
 
 const setup = Effect.gen(function* () {
   const instance = yield* TestInstance
