@@ -139,3 +139,21 @@ test("out-of-order requests with the same query only display the latest result",
   expect(view.querySelector(".qc-memory-hit-row strong")?.textContent).toBe("latest")
   view.remove()
 })
+
+test("opens the knowledge library without a search and shows source content", async () => {
+  const queries: string[] = []
+  const view = mount(async query => { queries.push(query); return { total: 2, hits: [
+    { id: "groups/factor/card.md", title: "因子卡", scope: "groups/factor", content: "# 接口\nFactorEngine.compute", snippet: "因子接口" },
+    { id: "global/contract.md", title: "契约", scope: "global", content: "公共契约", snippet: "公共" },
+  ] } })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(queries).toEqual([""])
+  expect(view.querySelectorAll(".qc-memory-hit-row")).toHaveLength(2)
+  expect(view.textContent).toContain("FactorEngine.compute")
+  const select = view.querySelector<HTMLSelectElement>('select[aria-label="知识范围"]')!
+  select.value = "groups/factor"
+  select.dispatchEvent(new Event("change"))
+  expect(view.querySelectorAll(".qc-memory-hit-row")).toHaveLength(1)
+  expect(view.textContent).toContain("groups/factor/card.md")
+  view.remove()
+})

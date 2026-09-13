@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from "electron"
+import { app, BrowserWindow, dialog, ipcMain } from "electron"
 import type { IpcMainInvokeEvent, WebContentsDidStartNavigationEventParams } from "electron"
 import type { ServerReadyData } from "../preload/types"
 import { inspect, connect, disconnect, importKey } from "./quantcode-identity"
@@ -31,12 +31,15 @@ function identityId(input: unknown) {
 }
 
 export function registerIdentityIpc(awaitInitialization: () => Promise<ServerReadyData>) {
-  const active = new Map<number, { server: string; controller: AbortController }>()
+  const active = new Map<number, { server: string; controller: AbortController; action: string }>()
   const orgLogins = new Map<number, ReturnType<typeof createOrgLogin>>()
+  const resolveConnection = async (sender: number, server: string) => orgLogins.get(sender)?.connection(server) ?? resolveResearchConnection(server, awaitInitialization)
   const orgLogin = (event: IpcMainInvokeEvent) => {
     const cached = orgLogins.get(event.sender.id)
     if (cached) return cached
-    const login = createOrgLogin(getStore("quantcode.identity.dat"))
+    const login = createOrgLogin(getStore("quantcode.identity.dat"), undefined, state => {
+      if (!event.sender.isDestroyed()) event.sender.send("quantcode-ssh-connection-state", state)
+    })
     const id = event.sender.id
     const close = () => {
       login.close()
@@ -54,6 +57,29 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
   }
   app.once("will-quit", () => { for (const login of orgLogins.values()) login.close() })
   app.once("will-quit", () => { for (const operation of active.values()) operation.controller.abort() })
+  const pickKey = async (event: IpcMainInvokeEvent) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner || owner.isDestroyed()) throw new Error("登录窗口已关闭，请重新打开 QuantCode。")
+    owner.show()
+    owner.focus()
+    return dialog.showOpenDialog(owner, { properties: ["openFile"], title: "选择本地 SSH 私钥" })
+  }
+  ipcMain.handle("quantcode-ssh-login-cancel", (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    const operation = active.get(event.sender.id)
+    if (operation?.server !== "org" || operation.action === "select-key") return
+    operation.controller.abort()
+  })
+  ipcMain.handle("quantcode-ssh-connection-state", (event: IpcMainInvokeEvent, input: unknown) => {
+    requireDesktopFrame(event)
+    return orgLogins.get(event.sender.id)?.connectionState(serverKey(input)) ?? null
+  })
+  ipcMain.handle("quantcode-ssh-reconnect", (event: IpcMainInvokeEvent, input: unknown) => {
+    requireDesktopFrame(event)
+    const login = orgLogins.get(event.sender.id)
+    if (!login) throw new Error("请先完成组织登录。")
+    return login.reconnect(serverKey(input))
+  })
   ipcMain.handle("quantcode-identity-cancel", (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)
     const server = serverKey(input)
@@ -73,12 +99,12 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
         if (details.isMainFrame && !details.isSameDocument) stop()
       }
       const frame = event.senderFrame
-      active.set(sender, { server, controller })
+      active.set(sender, { server, controller, action })
       event.sender.once("destroyed", stop)
       event.sender.once("render-process-gone", stop)
       event.sender.on("did-start-navigation", navigation)
       try {
-        const resolve = () => orgLogins.get(sender)?.connection(server) ?? resolveResearchConnection(server, awaitInitialization)
+        const resolve = () => resolveConnection(sender, server)
         const connection = await resolve()
         const checkTarget = async () => {
           controller.signal.throwIfAborted()
@@ -88,69 +114,100 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
           }
         }
         await checkTarget()
-        return action === "connect"
+        const result = action === "connect"
           ? await actions[action](connection, { signal: controller.signal, checkTarget }, identityId(input))
           : await actions[action](connection, { signal: controller.signal, checkTarget })
+        if (action === "disconnect") orgLogins.get(sender)?.released(server)
+        return result
       } finally {
         event.sender.removeListener("destroyed", stop)
         event.sender.removeListener("render-process-gone", stop)
         event.sender.removeListener("did-start-navigation", navigation)
         controller.abort()
-        active.delete(sender)
+        if (active.get(sender)?.controller === controller) active.delete(sender)
       }
     })
   }
   ipcMain.handle("quantcode-identity-import-key", async (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)
     const server = serverKey(input)
-    const connection = await resolveResearchConnection(server, awaitInitialization)
-    const picked = await dialog.showOpenDialog({ properties: ["openFile"], title: "导入 SSH 私钥到本机 Agent" })
+    const connection = await resolveConnection(event.sender.id, server)
+    const picked = await pickKey(event)
     if (picked.canceled || !picked.filePaths[0]) return null
     const file = picked.filePaths[0]
     const result = await importKey(connection, file)
     return result
   })
-  for (const action of ["scan", "connect", "restore", "admin-status", "admin-disconnect"] as const) {
+  for (const action of ["select-key", "scan", "connect", "restore", "progress", "admin-status", "admin-disconnect"] as const) {
     ipcMain.handle(`quantcode-ssh-login-${action}`, async (event: IpcMainInvokeEvent, input: unknown) => {
       requireDesktopFrame(event)
       const sender = event.sender.id
-      if (action === "admin-status") return orgLogin(event).adminStatus()
+      if (action === "progress") return orgLogin(event).progress()
+      if (action === "admin-status") {
+        if (input !== undefined && (!input || typeof input !== "object" || !("serverId" in input) || typeof input.serverId !== "string" || Object.keys(input).some(key => key !== "serverId"))) throw new Error("服务器参数无效。")
+        return orgLogin(event).adminStatus(input as { serverId?: string } | undefined)
+      }
+      const previous = active.get(sender)
+      if ((action === "select-key" || action === "scan") && previous?.action === "inspect") {
+        previous.controller.abort()
+        active.delete(sender)
+      }
       if (active.has(sender)) throw new Error("身份操作正在进行，请稍候。")
       const controller = new AbortController()
-      active.set(sender, { server: "org", controller })
+      active.set(sender, { server: "org", controller, action })
       const frame = event.senderFrame
       const login = orgLogin(event)
-      const cancel = () => { login.close(); orgLogins.delete(sender) }
+      const cancel = () => {
+        login.cancelAttempt()
+        if (active.get(sender)?.controller === controller) active.delete(sender)
+      }
       controller.signal.addEventListener("abort", cancel, { once: true })
+      let deadline = action === "connect" ? setTimeout(() => controller.abort(), 90000) : undefined
       try {
+        if (action === "select-key") {
+          login.beginSelection()
+          const picked = await pickKey(event)
+          if (picked.canceled || !picked.filePaths[0]) return false
+          requireDesktopFrame(event)
+          if (event.sender.mainFrame !== frame) throw new Error("登录窗口已变化，请重试。")
+          login.selectKey(picked.filePaths[0])
+          return true
+        }
         if (action === "admin-disconnect") return login.adminDisconnect()
         if (action === "restore") return await login.restore().catch(() => ({ needsLogin: true as const }))
         if (action === "connect") {
           if (!input || typeof input !== "object" || !("serverId" in input) || typeof input.serverId !== "string") throw new Error("请选择登录入口。")
           if ("administrator" in input) {
             if (!["servers", "organization"].includes(String(input.administrator)) || Object.keys(input).some(key => key !== "serverId" && key !== "administrator")) throw new Error("管理员入口无效。")
-            return await login.login({ serverId: input.serverId, administrator: input.administrator as "servers" | "organization" })
+            return await login.login({ serverId: input.serverId, administrator: input.administrator as "servers" | "organization" }, controller.signal)
           }
           if (!("group" in input) || typeof input.group !== "string" || Object.keys(input).some(key => key !== "serverId" && key !== "group")) throw new Error("请选择工作组。")
           const group = businessGroups(input.group)[0]
           if (!group || group !== input.group) throw new Error("工作组无效。")
-          return await login.login({ serverId: input.serverId, group })
+          return await login.login({ serverId: input.serverId, group }, controller.signal)
         }
         if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "chooseKey" && key !== "username")) throw new Error("登录参数无效。")
         const selected = input as { chooseKey?: unknown; username?: unknown }
         if (selected.chooseKey !== undefined && typeof selected.chooseKey !== "boolean" ||
           selected.username !== undefined && (typeof selected.username !== "string" || selected.username.length > 64)) throw new Error("登录参数无效。")
         const username = typeof selected.username === "string" ? selected.username : undefined
-        if (!selected.chooseKey) return await login.scan({ username })
-        const picked = await dialog.showOpenDialog({ properties: ["openFile"], title: "选择本地 SSH 私钥" })
+        if (!selected.chooseKey) {
+          deadline = setTimeout(() => controller.abort(), 90000)
+          return await login.scan({ username }, controller.signal)
+        }
+        login.beginSelection()
+        const picked = await pickKey(event)
         if (picked.canceled || !picked.filePaths[0]) return null
         requireDesktopFrame(event)
         if (event.sender.mainFrame !== frame) throw new Error("登录窗口已变化，请重试。")
-        return await login.scan({ keyFile: picked.filePaths[0], username })
+        deadline = setTimeout(() => controller.abort(), 90000)
+        return await login.scan({ keyFile: picked.filePaths[0], username }, controller.signal)
       } finally {
+        if (deadline) clearTimeout(deadline)
         controller.signal.removeEventListener("abort", cancel)
-        active.delete(sender)
+        if (active.get(sender)?.controller === controller) active.delete(sender)
       }
     })
   }
+  return resolveConnection
 }

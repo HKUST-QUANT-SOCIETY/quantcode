@@ -53,6 +53,10 @@ export type QuantCodeAlgorithmsResult = {
 }
 
 export type QuantCodeMemoryHit = {
+  title?: string
+  content?: string
+  content_truncated?: boolean
+  indexed_at?: number
   path?: string
   scope?: string
   scope_id?: string
@@ -62,6 +66,8 @@ export type QuantCodeMemoryHit = {
 }
 
 export type QuantCodeMemoryResult = {
+  total?: number
+  has_more?: boolean
   status?: string
   hits?: QuantCodeMemoryHit[]
   error?: string
@@ -124,17 +130,22 @@ export async function listQuantCodeSkills(client: OpencodeClient, group: string)
   return result.skills.filter((skill) => typeof skill?.id === "string" && skill.id.trim())
 }
 
-export async function searchQuantCodeMemory(client: OpencodeClient, query: string, limit = 10) {
-  const result = (await readQuantCodeTool(client, "search_memory", undefined, { query, limit })) as
+export async function searchQuantCodeMemory(client: OpencodeClient, query: string, limit = 50) {
+  const result = (await readQuantCodeTool(client, "search_memory", undefined, { query: query.trim() || "*", limit })) as
     | QuantCodeMemoryResult
     | undefined
   if (result?.error && result.status === "UNAVAILABLE") return null
   if (result?.error) throw new Error(result.error)
   if (!Array.isArray(result?.hits)) throw new Error("Invalid QuantCode memory response")
   return {
+    total: result.total,
+    hasMore: result.has_more,
     hits: (result?.hits ?? []).map((hit) => ({
       id: hit.path,
-      title: hit.path?.split("/").pop() ?? "Memory",
+      title: hit.title ?? hit.path?.split("/").pop() ?? "Memory",
+      content: hit.content,
+      contentTruncated: hit.content_truncated,
+      indexedAt: hit.indexed_at,
       snippet: hit.snippet,
       score: hit.score,
       scope: hit.scope_id ? `${hit.scope}/${hit.scope_id}` : hit.scope,

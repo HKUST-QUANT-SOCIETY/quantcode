@@ -21,26 +21,94 @@ function button(view: HTMLElement, text: string) {
 }
 
 describe("organization login wizard", () => {
-  test("administrators get separate organization and operations entries without Linux group choices", async () => {
+  test("key selection is a distinct phase and does not display stale restore logs as a scan", async () => {
+    const picked = Promise.withResolvers<boolean>()
+    const calls: unknown[] = []
+    const view = SshOrgLoginWizard({ sshSelectKey: () => picked.promise,
+      sshScan: async input => { calls.push(input); return scan }, sshConnect: async () => connected,
+      sshProgress: async () => ["旧的恢复会话日志"], onEnter: async () => {} })
+    button(view, "重新登录").click()
+    await flush()
+    expect(calls).toEqual([])
+    expect(view.textContent).toContain("文件选择窗口")
+    expect(view.textContent).not.toContain("正在探测")
+    expect(view.textContent).not.toContain("旧的恢复")
+    expect(button(view, "正在选择私钥")).toBeTruthy()
+    picked.resolve(true)
+    await flush()
+    expect(calls).toEqual([{ chooseKey: false, username: undefined }])
+  })
+  test("cancelling the native picker returns to a usable login button", async () => {
+    let scans = 0
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => false,
+      sshScan: async () => { scans++; return scan }, sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, "重新登录").click()
+    await flush()
+    expect(scans).toBe(0)
+    expect(button(view, "重新登录").disabled).toBe(false)
+    expect(view.querySelector('[role="alert"]')).toBeNull()
+  })
+  test("a hanging scan can be cancelled; its late result cannot replace a later attempt", async () => {
+    const pending = Promise.withResolvers<QuantCodeSshLoginScan>()
+    let calls = 0, cancelled = 0
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => true,
+      sshScan: async () => ++calls === 1 ? pending.promise : scan,
+      sshCancel: async () => { cancelled++ }, sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, "重新登录").click()
+    await flush()
+    expect(button(view, "重新登录")).toBeTruthy()
+    button(view, "取消本次登录").click()
+    expect(button(view, "重新登录").disabled).toBe(false)
+    expect(cancelled).toBe(1)
+    pending.resolve(scan)
+    await flush()
+    expect(view.querySelector(".qc-ssh-group-option")).toBeNull()
+    button(view, "重新登录").click()
+    await flush()
+    expect(view.querySelectorAll(".qc-ssh-group-option")).toHaveLength(2)
+  })
+  test("scan deadline restores the login form instead of leaving a permanent spinner", async () => {
+    let cancelled = 0
+    const view = SshOrgLoginWizard({ timeoutMs: 10, sshSelectKey: async () => true,
+      sshScan: () => new Promise(() => {}), sshCancel: async () => { cancelled++ },
+      sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, "重新登录").click()
+    await new Promise(resolve => setTimeout(resolve, 35))
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain("超时")
+    expect(button(view, "重新登录").disabled).toBe(false)
+    expect(cancelled).toBe(1)
+  })
+  test("a cancelled connection cannot enter a workspace when its old response arrives", async () => {
+    const pending = Promise.withResolvers<QuantCodeSshLoginResult>()
+    let entered = 0
+    const view = SshOrgLoginWizard({ sshScan: async () => scan, sshConnect: () => pending.promise,
+      sshCancel: async () => {}, onEnter: async () => { entered++ } })
+    button(view, "重新登录").click()
+    await flush()
+    button(view, "Server B").click()
+    button(view, "取消本次登录").click()
+    pending.resolve(connected)
+    await flush()
+    expect(entered).toBe(0)
+    expect(button(view, "重新登录").disabled).toBe(false)
+  })
+  test("administrators have one full-workspace login, with no work-versus-operations choice", async () => {
     let selected: unknown
     const view = SshOrgLoginWizard({
       sshScan: async () => ({ username: "quantadmin", servers: [], failed: [], administrators: [
         { id: "server-c", label: "Server C", host: "fixture", username: "quantadmin", systemGroups: ["sudo", "quant-admin"] },
       ] }),
-      sshConnect: async input => { selected = input; return { mode: "server-admin", admin: {
-        username: "quantadmin", serverId: "server-c", serverLabel: "Server C", fingerprint: "fixture", expires_at: "2099-01-01T00:00:00Z",
-      } } },
-      onEnter: async result => { expect(result.mode).toBe("server-admin") },
+      sshConnect: async input => { selected = input; return { ...connected, mode: "organization-admin" } },
+      onEnter: async result => { expect(result.session).toBeTruthy() },
     })
     button(view, "重新登录").click()
     await flush()
-    expect(button(view, "组织管理")).toBeTruthy()
-    expect(button(view, "服务器运维")).toBeTruthy()
-    expect(view.textContent).not.toContain("sudo")
-    expect(view.querySelector(".qc-ssh-group-option")).toBeNull()
-    button(view, "服务器运维").click()
+    expect(view.querySelectorAll(".qc-ssh-admin-option").length).toBe(1)
+    expect(view.textContent).not.toContain("服务器运维")
+    expect(view.textContent).not.toContain("独立认证")
+    button(view, "管理员登录").click()
     await flush()
-    expect(selected).toEqual({ serverId: "server-c", administrator: "servers" })
+    expect(selected).toEqual({ serverId: "server-c", administrator: "organization" })
   })
   test("the workbench re-login action opens the picker without a second button", async () => {
     let scans = 0
@@ -121,4 +189,14 @@ describe("organization login wizard", () => {
     await flush()
     expect(attempts).toBe(2)
   })
+})
+
+test("connection details display main-process progress and remain available after scanning", async () => {
+  const view = SshOrgLoginWizard({sshScan: async () => scan, sshConnect: async () => connected,
+    sshProgress: async () => ["Server A SSH 身份验证通过", "已读取工作组授权"], onEnter: async () => {}})
+  button(view, "重新登录").click()
+  await flush()
+  expect(view.querySelector("summary")?.textContent).toBe("SSH 连接详情")
+  expect(view.querySelector(".qc-ssh-log")?.textContent).toContain("Server A SSH 身份验证通过")
+  expect(view.textContent).toContain("已读取工作组授权")
 })

@@ -207,6 +207,9 @@ const layer = Layer.effect(
       providerID: ProviderV2.ID
       modelID: ModelV2.ID
     }) {
+      // QuantCode tasks are named explicitly before conversation. An auxiliary
+      // model request must not compete with the user's first turn for admission.
+      if (QuantCodeIdentity.enabled()) return
       if (input.session.parentID) return
       if (!Session.isDefaultTitle(input.session.title)) return
 

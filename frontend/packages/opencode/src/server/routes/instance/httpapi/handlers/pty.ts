@@ -2,6 +2,7 @@ import { QuantCodeIdentity } from "@/quantcode/identity"
 import { QuantCodeWorkspace } from "@/quantcode/workspace"
 import { QuantCodeProcessSandbox } from "@/quantcode/process-sandbox"
 import { QuantCodeTerminalAccess } from "@/quantcode/terminal-access"
+import { terminalCommand } from "@/quantcode/terminal-command"
 import * as InstanceState from "@/effect/instance-state"
 import { registerDisposer } from "@/effect/instance-registry"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
@@ -82,9 +83,10 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
         const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(directory, "write"))
         const target = yield* Effect.promise(() => QuantCodeWorkspace.target(grant, cwd, "write"))
         const executable = Shell.acceptable(ctx.payload.command)
+        const terminal = terminalCommand(executable, ctx.payload.args ?? [])
         const sandbox = yield* Effect.promise(() => QuantCodeProcessSandbox.prepare({
-          grant: { ...grant, directory: target }, command: executable,
-          args: ctx.payload.args ? [...ctx.payload.args] : [], writePaths: [grant.root],
+          grant: { ...grant, directory: target }, command: terminal.command,
+          args: terminal.args, writePaths: [grant.root],
         }))
         const service = yield* pty(Pty.Service)
         const info = yield* service.create({ command: sandbox.command, args: sandbox.args,

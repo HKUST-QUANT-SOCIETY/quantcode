@@ -132,7 +132,7 @@ export function GitHubWorkspace(props: {
     <Show when={state.error}><div class="qc-github-error" role="status"><Icon name="github" size="normal" /><div><strong>GitGraph 暂不可用</strong><p>{state.error}</p><p class="qc-muted">连接 GitHub 身份后，这里会显示授权范围内的仓库、分支和更新。</p></div></div></Show>
     <Show when={!state.loading && !state.error && !state.repos.length}><p>当前身份没有可见仓库。</p></Show>
     <div class="qc-repo-browser-toolbar"><label><Icon name="magnifying-glass" /><input type="search" aria-label="搜索仓库" placeholder="搜索项目…" value={state.query} onInput={e => setState("query", e.currentTarget.value)} /></label><span>{repos().length} 个项目</span></div>
-    <div class="qc-repo-grid"><For each={repos()}>{repo => <RepositoryGraph repo={repo} onOpen={commit => setState({ selected: repo.repo, selectedSha: commit?.sha ?? "" })} />}</For></div>
+    <Show when={props.visible}><div class="qc-repo-grid"><For each={repos()}>{repo => <RepositoryGraph repo={repo} onOpen={commit => setState({ selected: repo.repo, selectedSha: commit?.sha ?? "" })} />}</For></div></Show>
     <Show keyed when={props.visible && selected()}>{repo => <RepositoryDetail repo={repo} sha={state.selectedSha} onClose={() => setState("selected", "")} />}</Show>
     <h3>持久通知</h3><p>已读与确认只影响当前账号；确认通知不会批准任务。</p>
     <Show when={state.cursor}><button type="button" disabled={state.loading || !!state.busy} onClick={() => void loadMore()}>加载更多历史通知</button></Show>

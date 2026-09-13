@@ -35,6 +35,8 @@ const layer = Layer.effect(
     const dirty = new Set<SessionID>()
     const delivered = new Map<SessionID, { revision: number; at: number }>()
     const failed = new Set<SessionID>()
+    const retries = new Map<SessionID, { attempts: number; at: number }>()
+    let identityRetryAt = 0
     const observation: { login?: string; attempt?: number; success?: number; publishing?: SessionID; error?: QuantCodePublication.Status["last_error"] } = {}
     let scanAt = 0
     let scanAfter = ""
@@ -42,15 +44,19 @@ const layer = Layer.effect(
       const off = yield* events.listen((event) =>
         Effect.sync(() => {
           const id = event.durable?.aggregateID
-          if (Schema.is(SessionID)(id)) dirty.add(id)
+          if (Schema.is(SessionID)(id)) { dirty.add(id); retries.delete(id); identityRetryAt = 0 }
         }),
       )
       yield* Effect.addFinalizer(() => off)
       yield* Effect.gen(function* () {
         while (true) {
           yield* Effect.sleep("2 seconds")
+          // An idle host has no reason to rebuild projections or hammer an
+          // expired login. Foreground authorization keeps its own fresh checks.
+          if (Date.now() < identityRetryAt || !dirty.size && Date.now() - scanAt < 30000) continue
           yield* Effect.gen(function* () {
             const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+            identityRetryAt = 0
             if (observation.login !== identity.session_id) {
               // No delivery observations or cursors carry across a login.
               observation.login = identity.session_id
@@ -59,6 +65,7 @@ const layer = Layer.effect(
               observation.error = undefined
               delivered.clear()
               failed.clear()
+              retries.clear()
               scanAt = 0
               scanAfter = ""
             }
@@ -83,7 +90,7 @@ const layer = Layer.effect(
               scanAfter = rows.length === 100 ? rows.at(-1)!.id : ""
               if (!scanAfter) scanAt = Date.now()
             }
-            for (const sessionID of [...dirty].slice(0, 32)) {
+            for (const sessionID of [...dirty].filter(id => (retries.get(id)?.at ?? 0) <= Date.now()).slice(0, 32)) {
               const row = yield* db
                 .select({ metadata: SessionTable.metadata })
                 .from(SessionTable)
@@ -96,6 +103,7 @@ const layer = Layer.effect(
               ) {
                 dirty.delete(sessionID)
                 failed.delete(sessionID)
+                retries.delete(sessionID)
                 continue
               }
               // Capture a generation by consuming first. Events arriving during
@@ -104,9 +112,12 @@ const layer = Layer.effect(
               observation.publishing = sessionID
               yield* Effect.gen(function* () {
                 yield* QuantCodeTaskIndex.reconcileExecution(sessionID)
+                const prior = delivered.get(sessionID)
+                const binding = QuantCodeIdentity.sessionBinding(row.metadata ?? undefined)!
+                const revision = yield* QuantCodeTaskIndex.revision(sessionID, binding.root_session_id)
+                if (prior?.revision === revision && Date.now() - prior.at < 60000) return
                 const detail = yield* QuantCodeTaskIndex.read(sessionID)
                 const summary = detail.task
-                const prior = delivered.get(sessionID)
                 if (prior?.revision === summary.source_revision && Date.now() - prior.at < 60000) return
                 observation.attempt = Date.now()
                 const {
@@ -193,12 +204,15 @@ const layer = Layer.effect(
                 }
                 delivered.set(sessionID, { revision: summary.source_revision, at: Date.now() })
                 failed.delete(sessionID)
+                retries.delete(sessionID)
                 observation.success = Date.now()
                 observation.error = failed.size ? "projection_unavailable" : undefined
               }).pipe(
                 Effect.catchCause(() => Effect.sync(() => {
                   dirty.add(sessionID)
                   failed.add(sessionID)
+                  const attempts = (retries.get(sessionID)?.attempts ?? 0) + 1
+                  retries.set(sessionID, { attempts, at: Date.now() + Math.min(60000, 2000 * 2 ** Math.min(attempts, 5)) })
                   observation.error = "projection_unavailable"
                 })),
                 Effect.ensuring(Effect.sync(() => { observation.publishing = undefined })),
@@ -207,7 +221,7 @@ const layer = Layer.effect(
           }).pipe(
             Effect.provideService(Database.Service, database),
             Effect.provideService(EventV2Bridge.Service, events),
-            Effect.catchCause(() => Effect.sync(() => { observation.error = "identity_unavailable" })),
+            Effect.catchCause(() => Effect.sync(() => { observation.error = "identity_unavailable"; identityRetryAt = Date.now() + 30000 })),
           )
         }
       }).pipe(Effect.forkScoped)
@@ -215,6 +229,7 @@ const layer = Layer.effect(
     const status = Effect.fn("QuantCodeTaskPublisher.status")(function* () {
       if (!QuantCodeIdentity.enabled()) throw new Error("组织同步尚未启用。")
       const identity = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
+      identityRetryAt = 0
       const source_id = yield* Effect.promise(QuantCodeTaskIndex.sourceID)
       if (observation.login !== identity.session_id) return { source_id, state: "starting", pending_tasks: 0, failed_tasks: 0 } satisfies QuantCodePublication.Status
       const ids = [...new Set([...dirty, ...(observation.publishing ? [observation.publishing] : [])])]

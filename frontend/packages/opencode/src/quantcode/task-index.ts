@@ -69,19 +69,20 @@ export async function sourceID() {
 
 /** Derived only from native messages, parts and durable accounting. Each
  * child carries its own usage; root totals are not added again to every row. */
+export const revision = Effect.fn("QuantCodeTaskIndex.revision")(function* (sessionID: string, rootID: string) {
+  const { db } = yield* Database.Service
+  const value = yield* db.select({ seq: sql<number>`coalesce(sum(${EventSequenceTable.seq}), 0)` })
+    .from(EventSequenceTable).where(inArray(EventSequenceTable.aggregate_id, [...new Set([sessionID, rootID])]))
+    .get().pipe(Effect.orDie)
+  return value?.seq ?? 0
+})
+
 const summary = Effect.fn("QuantCodeTaskIndex.summary")(function* (row: Row, identity: QuantCodeIdentity.Identity) {
   const binding = QuantCodeIdentity.sessionBinding(row.metadata ?? undefined)
   if (!binding || !QuantCodeIdentity.owns(binding, identity)) throw new QuantCodeIdentity.IdentityError()
   const grant = yield* Effect.promise(() => QuantCodeWorkspace.authorize(row.directory, "read", identity))
   const { db } = yield* Database.Service
-  const revision = () =>
-    db
-      .select({ seq: sql<number>`coalesce(sum(${EventSequenceTable.seq}), 0)` })
-      .from(EventSequenceTable)
-      .where(inArray(EventSequenceTable.aggregate_id, [...new Set([row.id, binding.root_session_id])]))
-      .get()
-      .pipe(Effect.orDie)
-  const before = (yield* revision())?.seq ?? 0
+  const before = yield* revision(row.id, binding.root_session_id)
   const currentRow = yield* db.select().from(SessionTable).where(eq(SessionTable.id, row.id)).get().pipe(Effect.orDie)
   if (!currentRow) throw new QuantCodeIdentity.IdentityError()
   row = currentRow
@@ -229,7 +230,7 @@ const summary = Effect.fn("QuantCodeTaskIndex.summary")(function* (row: Row, ide
     .where(and(eq(EventTable.aggregate_id, row.id), eq(EventTable.type, "quantcode.knowledge.candidates.observed.1")))
     .orderBy(desc(EventTable.seq)).limit(1).get().pipe(Effect.orDie)
   const knowledge = knowledgeRow ? Schema.decodeUnknownSync(QuantCodeKnowledge.CandidatesObserved.data)(knowledgeRow.data).result : undefined
-  if (((yield* revision())?.seq ?? 0) !== before) throw new Error("任务正在更新，请刷新索引。")
+  if ((yield* revision(row.id, binding.root_session_id)) !== before) throw new Error("任务正在更新，请刷新索引。")
   const artifactRefs = captured.artifacts
   yield* Effect.promise(() => QuantCodeWorkspace.revalidate(grant))
   const current = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
@@ -327,7 +328,7 @@ export const list = Effect.fn("QuantCodeTaskIndex.list")(function* (input: { lim
     after = { id: last.id }
   }
   const page = selected.slice(0, limit)
-  const tasks = yield* Effect.forEach(page, (row) => summary(row, identity).pipe(Effect.map(result => result.task)))
+  const tasks = yield* Effect.forEach(page, (row) => summary(row, identity).pipe(Effect.map(result => result.task)), { concurrency: 4 })
   const current = yield* Effect.promise(() => QuantCodeIdentity.currentIdentity())
   if (current.session_id !== identity.session_id) throw new QuantCodeIdentity.IdentityError()
   const last = page.at(-1)

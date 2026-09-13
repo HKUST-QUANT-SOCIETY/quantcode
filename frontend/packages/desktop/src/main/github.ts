@@ -2,44 +2,13 @@ import { app, ipcMain } from "electron"
 import type { IpcMainInvokeEvent } from "electron"
 import { execFile, spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { researchEndpoint, resolveResearchConnection } from "./quantcode-connection"
+import { GitHubConnectionError, prepare, sameIdentity, hostRequest, connectCredential } from "./github-host"
+import type { Prepared } from "./github-host"
 import type { ResearchConnection } from "./quantcode-connection"
-import type { ServerReadyData } from "../preload/types"
 import type { DesktopGitHubResult } from "@opencode-ai/app/github"
 
-type Prepared = { version: 1; nonce: string; session_id: string; owner_digest: string; github_subject: string; expires_at: number }
 type Attempt = { server: string; target: ResearchConnection; identity: Prepared; abort: AbortController;
   child?: ChildProcess; code?: string; error?: string; done: boolean; failed: boolean; connected: boolean; timer: ReturnType<typeof setTimeout> }
-
-class GitHubConnectionError extends Error {}
-
-function sameIdentity(a: Prepared, b: Prepared) {
-  return a.session_id === b.session_id && a.owner_digest === b.owner_digest && a.github_subject === b.github_subject
-}
-
-async function hostRequest(connection: ResearchConnection, route: string, signal: AbortSignal, input?: unknown): Promise<unknown> {
-  const headers: Record<string, string> = { Accept: "application/json" }
-  if (connection.password) headers.Authorization = `Basic ${Buffer.from(`${connection.username ?? "opencode"}:${connection.password}`).toString("base64")}`
-  if (input !== undefined) headers["Content-Type"] = "application/json"
-  const response = await fetch(researchEndpoint(connection, route), { method: input === undefined ? "GET" : "POST", headers,
-    body: input === undefined ? undefined : JSON.stringify(input), redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(45000)]) })
-  if (!response.ok) throw new GitHubConnectionError("研究宿主不支持本机 GitHub 接入或登录已失效，请更新宿主并重新登录。")
-  const bytes = await response.text()
-  if (bytes.length > 65536) throw new GitHubConnectionError("研究宿主返回异常的 GitHub 连接结果。")
-  return JSON.parse(bytes)
-}
-
-async function prepare(connection: ResearchConnection, signal: AbortSignal): Promise<Prepared> {
-  const value = await hostRequest(connection, "/experimental/quantcode/github/credential/prepare", signal)
-  if (!value || typeof value !== "object") throw new GitHubConnectionError("研究宿主未提供本机凭据接入协议。")
-  const result = value as Prepared
-  if (result.version !== 1 || typeof result.nonce !== "string" || result.nonce.length > 128 ||
-    typeof result.session_id !== "string" || !result.session_id || result.session_id.length > 256 ||
-    !/^[a-f0-9]{64}$/.test(result.owner_digest) || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(result.github_subject) ||
-    !Number.isFinite(result.expires_at) || result.expires_at <= Date.now()) throw new GitHubConnectionError("研究宿主返回的 GitHub 身份绑定无效。")
-  return result
-}
 
 const localEnvironment = () => {
   const env: NodeJS.ProcessEnv = { ...process.env, GH_TOKEN: undefined, GITHUB_TOKEN: undefined,
@@ -77,29 +46,7 @@ async function localCredential(subject: string, signal: AbortSignal) {
   return fields.password
 }
 
-async function connectCredential(target: ResearchConnection, initial: Prepared, token: string, signal: AbortSignal, checkTarget: () => Promise<void>) {
-  if (!token || token.length > 16384 || /\s/.test(token)) throw new GitHubConnectionError("此电脑返回的 GitHub 凭据无效。")
-  const response = await fetch("https://api.github.com/user", { headers: {
-    Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
-  }, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) })
-  if (!response.ok || String((await response.json()).login ?? "").toLowerCase() !== initial.github_subject.toLowerCase()) {
-    throw new GitHubConnectionError("本机 GitHub 账号与组织名册不一致，未将凭据发送给研究宿主。")
-  }
-  const fresh = await prepare(target, signal)
-  if (!sameIdentity(initial, fresh)) throw new GitHubConnectionError("研究宿主的组织身份已变化，已取消凭据接入。")
-  await checkTarget()
-  signal.throwIfAborted()
-  const result = await hostRequest(target, "/experimental/quantcode/github/credential/import", signal, {
-    version: 1, nonce: fresh.nonce, session_id: fresh.session_id, owner_digest: fresh.owner_digest, token,
-  })
-  if (!result || typeof result !== "object" || !("status" in result) || result.status !== "connected" ||
-    !("subject" in result) || typeof result.subject !== "string" || result.subject.toLowerCase() !== initial.github_subject.toLowerCase()) {
-    throw new GitHubConnectionError("研究宿主未确认 GitHub 连接，请刷新连接状态后再决定是否重试。")
-  }
-  return { status: "connected" as const, subject: result.subject, host: new URL(target.url).host }
-}
-
-export function registerGitHubIpc(awaitInitialization: () => Promise<ServerReadyData>) {
+export function registerGitHubIpc(resolveConnection: (sender: number, server: string) => Promise<ResearchConnection>) {
   const attempts = new Map<number, Attempt>()
   const busy = new Set<number>()
   const epochs = new Map<number, number>()
@@ -114,10 +61,9 @@ export function registerGitHubIpc(awaitInitialization: () => Promise<ServerReady
   }
   app.once("will-quit", () => { for (const sender of attempts.keys()) stop(sender) })
 
-  const connection = (server: string) => resolveResearchConnection(server, awaitInitialization)
-
   ipcMain.handle("quantcode-github-request", async (event: IpcMainInvokeEvent, input: unknown): Promise<DesktopGitHubResult> => {
     const sender = event.sender.id
+    const connection = (server: string) => resolveConnection(sender, server)
     let acquired = false
     try {
       const origin = new URL(event.senderFrame?.url ?? "")

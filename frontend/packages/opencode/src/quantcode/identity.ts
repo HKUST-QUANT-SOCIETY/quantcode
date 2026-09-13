@@ -55,20 +55,34 @@ async function credential() {
   return { ...parsed.data, digest: createHash("sha256").update(raw).digest("hex") }
 }
 
-/** Always validate with the authority. Cached display state is never an execution grant. */
+const verifying = new Map<string, Promise<Identity>>()
+
+/** Coalesce only concurrent authority reads. A completed result is never a
+ * cached execution grant; sequential checks still observe revocation. */
 export async function currentIdentity(): Promise<Identity> {
   const record = await credential().catch(() => { throw new IdentityError() })
-  const response = await fetch(new URL("/session", record.gateway), {
-    headers: { Authorization: `Bearer ${record.token}` },
-    redirect: "error", signal: AbortSignal.timeout(10000),
-  }).catch(() => { throw new IdentityError("QuantCode 身份服务暂不可用，无法验证当前权限。") })
-  if (!response.ok) throw new IdentityError()
-  const parsed = identitySchema.safeParse(await response.json())
-  if (!parsed.success || Date.parse(parsed.data.expires_at) <= Date.now() ||
-    (parsed.data.authorized_groups.length && !parsed.data.authorized_groups.includes(parsed.data.group))) throw new IdentityError()
+  let pending = verifying.get(record.digest)
+  if (!pending) {
+    pending = (async () => {
+      const response = await fetch(new URL("/session", record.gateway), {
+        headers: { Authorization: `Bearer ${record.token}` },
+        redirect: "error", signal: AbortSignal.timeout(10000),
+      }).catch(() => { throw new IdentityError("QuantCode 身份服务暂不可用，无法验证当前权限。") })
+      if (!response.ok) throw new IdentityError()
+      const parsed = identitySchema.safeParse(await response.json())
+      if (!parsed.success || (parsed.data.authorized_groups.length && !parsed.data.authorized_groups.includes(parsed.data.group))) throw new IdentityError()
+      return parsed.data
+    })()
+    verifying.set(record.digest, pending)
+    const current = pending
+    const clear = () => { if (verifying.get(record.digest) === current) verifying.delete(record.digest) }
+    void pending.then(clear, clear)
+  }
+  const identity = await pending
+  if (Date.parse(identity.expires_at) <= Date.now()) throw new IdentityError()
   // A logout/relogin while the authority was responding must not release the old identity.
   if ((await credential()).digest !== record.digest) throw new IdentityError("登录身份正在变化，请重试。")
-  return parsed.data
+  return structuredClone(identity)
 }
 
 /** Host-only gateway transport. Callers select a fixed organization endpoint;

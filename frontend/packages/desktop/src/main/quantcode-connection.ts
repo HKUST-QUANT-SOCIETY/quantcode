@@ -15,7 +15,7 @@ export async function resolveResearchConnection(server: string, awaitInitializat
   const saved = typeof raw === "string" ? JSON.parse(raw) : raw
   const items = saved && typeof saved === "object" && "list" in saved && Array.isArray(saved.list) ? saved.list : []
   const found = items.find((item: unknown) => typeof item === "string" ? item === server : item && typeof item === "object" &&
-    ("http" in item && item.http && typeof item.http === "object" && "url" in item.http ? item.http.url === server : "url" in item && item.url === server))
+    (("managedId" in item && item.managedId === server) || ("http" in item && item.http && typeof item.http === "object" && "url" in item.http ? item.http.url === server : "url" in item && item.url === server)))
   if (!found) throw new Error("请先在 QuantCode 中保存并选择研究宿主连接。")
   const value = typeof found === "string" ? { url: found } : "http" in found ? found.http : found
   if (!value || typeof value.url !== "string" || (value.username !== undefined && typeof value.username !== "string") ||

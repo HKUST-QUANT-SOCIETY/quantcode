@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
+import os
 
 from quantcode import identity
 from quantcode import mcp_server
@@ -13,6 +14,26 @@ TEST_PUBKEY = (
     "/lxi3C quantcode-test"
 )
 TEST_FP = "SHA256:oVDaaoONrPL38IxAoGR14Do45YIKvDt5o7ASsv0jiaA"
+
+
+def test_roster_parse_cache_is_content_bound_and_does_not_share_mutable_grants(tmp_path, monkeypatch):
+    path = tmp_path / "roster.yaml"
+    path.write_text("bindings:\n- fingerprint: fixture\n  group: factor\n  role: analyst\n  resource_scopes: [workspace:read]\n")
+    identity._parse_entries.cache_clear()
+    original = yaml.safe_load
+    calls = []
+    monkeypatch.setattr(identity.yaml, "safe_load", lambda text: (calls.append(1), original(text))[1])
+    first = identity.resolve_identity("fixture", path)
+    first["resource_scopes"].append("must-not-leak")
+    assert identity.resolve_identity("fixture", path)["resource_scopes"] == ["workspace:read"]
+    assert len(calls) == 1
+    stat = path.stat()
+    path.write_text(path.read_text().replace("analyst", "admin"))
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert identity.resolve_identity("fixture", path)["role"] == "admin"
+    assert len(calls) == 2
+    path.unlink()
+    assert identity.resolve_identity("fixture", path) is None
 
 
 @pytest.fixture(autouse=True)

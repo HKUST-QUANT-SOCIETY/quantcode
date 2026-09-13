@@ -77,10 +77,6 @@ def handle(action: str, expected_login: str, payload: dict) -> dict:
         raise PermissionError("native knowledge login expired")
     if context.get("authorized_groups") and context["group"] not in context["authorized_groups"]:
         raise PermissionError("native knowledge group is no longer authorized")
-    owner = {field: context.get(field) for field in (
-        "actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject",
-    )}
-    owner["resource_scopes"] = sorted(set(context.get("resource_scopes") or []))
     root = candidate_storage()
 
     def revalidate() -> None:
@@ -89,6 +85,27 @@ def handle(action: str, expected_login: str, payload: dict) -> dict:
         if candidate_storage() != root:
             raise PermissionError("native knowledge store changed")
 
+    if os.environ.get("QUANTCODE_SHARED_KNOWLEDGE", "gateway") == "gateway":
+        import httpx
+        revalidate()
+        with httpx.Client(base_url=credential["gateway"], trust_env=False, timeout=40, follow_redirects=False) as client:
+            response = client.post("/knowledge/" + action,
+                headers={"Authorization": f"Bearer {credential['token']}"},
+                json={"expected_session_id": expected_login, "payload": payload})
+        if response.status_code != 200:
+            raise PermissionError("组织知识服务拒绝请求，请刷新身份或检查知识服务配置。")
+        result = response.json()
+        revalidate()
+        return result
+    return handle_scoped(action, value, context, root, candidate_publish_root(), revalidate)
+
+
+def handle_scoped(action, value, context, root, publish_root, revalidate) -> dict:
+    """Reuse the same draft governance for host-local and organization stores."""
+    owner = {field: context.get(field) for field in (
+        "actor_id", "group", "role", "workspace_id", "workspace_path", "github_subject",
+    )}
+    owner["resource_scopes"] = sorted(set(context.get("resource_scopes") or []))
     if action == "list":
         revalidate()
         result = list_candidates(context, candidates_dir=root)
@@ -99,7 +116,7 @@ def handle(action: str, expected_login: str, payload: dict) -> dict:
         item = review_candidate(
             value.candidate_name, value.action,
             reviewer_id=context["actor_id"], reviewer_role=context["role"], reviewer_group=context["group"],
-            candidates_dir=root, publish_root=candidate_publish_root() if value.action == "promote" else None,
+            candidates_dir=root, publish_root=publish_root if value.action == "promote" else None,
             expected_digest=value.expected_digest, superseded_by=value.superseded_by,
             before_commit=revalidate,
         )

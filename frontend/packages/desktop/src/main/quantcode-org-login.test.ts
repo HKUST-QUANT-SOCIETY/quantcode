@@ -15,6 +15,7 @@ function fixture() {
   const calls: string[] = []
   let current: QuantCodeIdentitySession | null = null
   const deps: NonNullable<Parameters<typeof createOrgLogin>[1]> = {
+    disconnect: async () => { current = null; calls.push("logout"); return { status: "disconnected", execution_status: "disconnected" } },
     readAdminProfile: async () => profile,
     readServerAdminStatus: async () => "Linux 6.8\nup 3 days\nFilesystem 20% used",
     requireAdminSession: async () => {},
@@ -44,6 +45,23 @@ function fixture() {
 }
 
 describe("organization SSH login", () => {
+  test("cancelling a scan rejects late discovery without closing the active workspace", async () => {
+    const f = fixture(), login = createOrgLogin(f.store, f.deps)
+    await login.scan({ keyFile })
+    const connected = await login.login({ serverId: "server-b", group: "model" })
+    const entered = Promise.withResolvers<void>(), late = Promise.withResolvers<Awaited<ReturnType<typeof f.deps.readOrgAccount>>>()
+    f.deps.readOrgAccount = async () => { entered.resolve(); return late.promise }
+    const signal = new AbortController()
+    const pending = login.scan({}, signal.signal).then(() => undefined, error => error)
+    await entered.promise
+    signal.abort()
+    login.cancelAttempt()
+    late.resolve({ profile, groups: ["model"] })
+    expect(await pending).toBeDefined()
+    expect(login.connection(connected.connection.url)?.url).toBe(connected.connection.url)
+    expect(f.calls).not.toContain("stop:server-b")
+    login.close()
+  })
   test("server administrators bypass member profiles and receive separate management entries", async () => {
     const f = fixture()
     f.deps.readOrgAccount = async () => ({ administrator: true, groups: [], systemGroups: ["quantadmin", "quant-admin"] })
@@ -55,24 +73,33 @@ describe("organization SSH login", () => {
     expect(scan.failed).toEqual([])
     login.close()
   })
-  test("SSH operations has its own session, restore and logout without organization login", async () => {
+  test("administrator login always signs the full identity, including the legacy operations entry", async () => {
     const f = fixture()
     f.deps.readOrgAccount = async () => ({ administrator: true, groups: [], systemGroups: ["quant-admin"] })
-    f.deps.connect = async () => { throw new Error("operations must not authenticate a research host") }
+    let checked = 0
+    f.deps.requireAdminSession = async () => { checked++ }
     const login = createOrgLogin(f.store, f.deps)
     await login.scan({ keyFile, username: "quantadmin" })
     const result = await login.login({ serverId: "server-c", administrator: "servers" })
-    expect(result).toMatchObject({ mode: "server-admin", admin: { username: "quantadmin", serverId: "server-c" } })
-    expect(result.session).toBeUndefined()
-    expect(result.connection).toBeUndefined()
-    expect((await login.adminStatus())?.report).toContain("Linux")
+    expect(result.mode).toBe("organization-admin")
+    expect(result.session.session_id).toBeTruthy()
+    expect(result.admin?.expires_at).toBe(result.session.expires_at)
+    expect(f.calls.some(call => call.startsWith("login:"))).toBe(true)
+    expect(checked).toBe(1)
+    expect((await login.adminStatus({ serverId: "server-a" }))?.session.serverId).toBe("server-a")
+    expect(checked).toBe(2)
+    await login.adminDisconnect()
+    expect(f.calls).toContain("logout")
+    expect(await login.adminStatus()).toBeNull()
     login.close()
-    const next = createOrgLogin(f.store, f.deps)
-    expect(await next.restore()).toMatchObject({ admin: { username: "quantadmin", serverId: "server-c" } })
-    next.adminDisconnect()
-    expect(await next.adminStatus()).toBeNull()
-    expect(f.data.get("lastLogin")).toBeUndefined()
-    next.close()
+  })
+  test("old operations-only records cannot restore a claimed administrator login", async () => {
+    const f = fixture()
+    f.data.set("lastMode", "server-admin")
+    const login = createOrgLogin(f.store, f.deps)
+    expect(await login.restore()).toEqual({ needsLogin: true })
+    expect(await login.adminStatus()).toBeNull()
+    login.close()
   })
   test("organization administration uses its dedicated profile and verified role", async () => {
     const f = fixture()
@@ -100,21 +127,15 @@ describe("organization SSH login", () => {
     expect(await login.adminStatus()).toBeNull()
     login.close()
   })
-  test("revoked SSH administrator membership and expired operations sessions cannot query status", async () => {
+  test("revoked organization authority denies server operations too", async () => {
     const f = fixture()
     f.deps.readOrgAccount = async () => ({ administrator: true, groups: [], systemGroups: ["quant-admin"] })
     const login = createOrgLogin(f.store, f.deps)
     await login.scan({ keyFile, username: "quantadmin" })
-    await login.login({ serverId: "server-c", administrator: "servers" })
-    f.deps.readOrgAccount = async () => ({ groups: ["model"], profile })
-    await expect(login.adminStatus()).rejects.toThrow("授权已变化")
+    await login.login({ serverId: "server-c", administrator: "organization" })
+    f.deps.requireAdminSession = async () => { throw new Error("admin session revoked") }
+    await expect(login.adminStatus()).rejects.toThrow("admin session revoked")
     login.close()
-    const saved = f.data.get("lastServerAdmin") as { session: { expires_at: string } }
-    saved.session.expires_at = "2000-01-01T00:00:00Z"
-    const next = createOrgLogin(f.store, f.deps)
-    expect(await next.restore()).toBeNull()
-    expect(await next.adminStatus()).toBeNull()
-    next.close()
   })
   test("key names preserve qc usernames; generic names prompt; shell-like usernames are rejected", () => {
     expect(usernameFromKeyFile(keyFile)).toBe("qc-chenzhenhong")

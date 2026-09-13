@@ -1,4 +1,4 @@
-import { createEffect, createMemo, Suspense, type ParentProps } from "solid-js"
+import { createEffect, createMemo, Show, Suspense, type ParentProps } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { HelpButton } from "@/components/help-button"
@@ -7,6 +7,7 @@ import { usePlatform } from "@/context/platform"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, ToastRegion } from "@/utils/toast"
 import { isQuantCode } from "@/brand"
+import { QuantCodeConnectionNotice } from "@/components/quantcode/connection-notice"
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
@@ -36,6 +37,7 @@ export default function NewLayout(props: ParentProps) {
       }}
     >
       <Titlebar update={update} compactQuantCodeHome={compactQuantCodeHome()} />
+      <Show when={isQuantCode}><QuantCodeConnectionNotice /></Show>
       <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
         <Suspense>{props.children}</Suspense>
       </main>

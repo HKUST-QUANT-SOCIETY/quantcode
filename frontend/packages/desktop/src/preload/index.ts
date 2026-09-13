@@ -22,9 +22,19 @@ const api: ElectronAPI = {
     disconnect: (input) => ipcRenderer.invoke("quantcode-identity-disconnect", input),
     cancel: (input) => ipcRenderer.invoke("quantcode-identity-cancel", input),
     sshScan: (input) => ipcRenderer.invoke("quantcode-ssh-login-scan", input),
+    sshSelectKey: () => ipcRenderer.invoke("quantcode-ssh-login-select-key"),
+    sshCancel: () => ipcRenderer.invoke("quantcode-ssh-login-cancel"),
     sshConnect: (input) => ipcRenderer.invoke("quantcode-ssh-login-connect", input),
+    sshProgress: () => ipcRenderer.invoke("quantcode-ssh-login-progress"),
+    sshConnectionState: input => ipcRenderer.invoke("quantcode-ssh-connection-state", input),
+    sshReconnect: input => ipcRenderer.invoke("quantcode-ssh-reconnect", input),
+    onSshConnectionState: listener => {
+      const handler = (_: unknown, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on("quantcode-ssh-connection-state", handler)
+      return () => { ipcRenderer.removeListener("quantcode-ssh-connection-state", handler) }
+    },
     sshRestore: () => ipcRenderer.invoke("quantcode-ssh-login-restore"),
-    sshAdminStatus: () => ipcRenderer.invoke("quantcode-ssh-login-admin-status"),
+    sshAdminStatus: (input) => ipcRenderer.invoke("quantcode-ssh-login-admin-status", input),
     sshAdminDisconnect: () => ipcRenderer.invoke("quantcode-ssh-login-admin-disconnect"),
   },
   wslServers: {

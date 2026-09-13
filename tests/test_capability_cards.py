@@ -342,3 +342,10 @@ def test_json_schema_matches_pydantic_contract():
     assert schema["properties"]["type"]["enum"] == ["asset", "contract"]
     assert schema["properties"]["owner_group"]["enum"] == list(pyd_schema["properties"]["owner_group"]["enum"])
     assert schema["additionalProperties"] is False
+
+
+def test_catalog_preserves_authorized_api_surface_details():
+    from runner.distill.cards import _list_capabilities_execute, load_cards, visible_cards
+    cards = visible_cards(load_cards(), "factor", "admin")
+    response = _list_capabilities_execute(None, {"group": "factor", "role": "admin"})
+    assert {item["id"]: item["api_surface"] for item in response["capabilities"]} == {card.id: list(card.api_surface) for card in cards}

@@ -51,7 +51,7 @@ const SettingsProvidersV2 = lazy(() => import("../settings-v2/providers").then(m
 const DialogSelectServer = lazy(() => import("../dialog-select-server").then(m => ({ default: m.DialogSelectServer })))
 const QuantCodePreferences = lazy(() => import("./settings-preferences").then(m => ({ default: m.QuantCodePreferences })))
 const QuantCodeTaskReview = lazy(() => import("./task-review").then(m => ({ default: m.QuantCodeTaskReview })))
-import { SshLoginView, SshOrgLoginWizard, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
+import { SshLoginView, SshOrgLoginWizard, loginError, type SshConnectFn, type SshIdentity, type SshSession, type SshDisconnectFn } from "./ssh-login"
 import { CapabilityCatalogView } from "./capability-catalog"
 import { ApprovalQueue } from "./approval-queue"
 import { NativeApprovalQueue } from "./native-approval-queue"
@@ -63,6 +63,7 @@ import { MemoryQueryView } from "./memory-query"
 import { SolutionPanelView } from "./solution-panel"
 import { AdminConsoleView } from "./admin-console"
 import { ServerAdminView } from "./server-admin"
+import { workspaceAccount } from "./account-status"
 import { GitHubWorkspace } from "./github-workspace"
 import { WorkspaceEmpty, navigateViewTabs } from "./workspace-ui"
 import {
@@ -537,13 +538,16 @@ function SettingsPanel(props: {
   onOpenGitgraph: () => void
   importKey?: () => Promise<{ fingerprint: string } | null>
   /** 组织 SSH 登录向导桥（desktop 提供）；未注入时回退到服务器驱动的 SshLoginView。 */
-  orgSshLogin?: Pick<QuantCodeDesktopIdentity, "sshScan" | "sshConnect">
-  orgSshOnEnter?: (result: QuantCodeSshLoginResult) => Promise<void>
+  orgSshLogin?: Pick<QuantCodeDesktopIdentity, "sshScan" | "sshConnect" | "sshProgress" | "sshSelectKey" | "sshCancel">
+  orgSshOnEnter?: (result: QuantCodeSshLoginResult, signal?: AbortSignal) => Promise<void>
   orgSshStart?: boolean
+  serverAdminSession?: QuantCodeServerAdminSession
   orgSshOnStarted?: () => void
 }): JSX.Element {
   const dialog = useDialog()
   const [tab, setTab] = createSignal("account")
+  const accountStatus = createMemo(() => workspaceAccount({ view: "settings", organizationStatus: props.sessionStatus,
+    actor: props.sessionActor, role: props.sessionRole, operations: props.serverAdminSession }))
   const tabs = [{ id: "account", label: "账号与连接" }, { id: "providers", label: "模型供应商" }, { id: "preferences", label: "桌面偏好" }]
   return (
     <>
@@ -559,17 +563,17 @@ function SettingsPanel(props: {
       <div class="qc-setting-row">
         <div>
           <span class="qc-section-label">当前账号</span>
-          <strong>{props.sessionStatus === "ready" ? props.sessionActor : "尚未登录"}</strong>
+          <strong>{accountStatus().organizationLabel}</strong>
           <Show when={props.sessionStatus === "ready"}><span class="qc-status">{props.sessionRole === "admin" ? "管理员" : props.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
         </div>
         <span class="qc-connection-pill" classList={{ "is-disconnected": props.sessionStatus !== "ready" }}>
-          <i /> {props.sessionStatus === "ready" ? "会话已认证" : "未认证"}
+          <i /> {props.sessionStatus === "ready" ? "组织会话已认证" : "未认证"}
         </span>
       </div>
-      <div class="qc-setting-row">
+            <div class="qc-setting-row">
         <div>
           <span class="qc-section-label">业务组</span>
-          <strong>{props.sessionStatus === "ready" ? _group() : "尚未绑定"}</strong>
+          <strong>{props.sessionStatus === "ready" ? props.sessionRole === "admin" ? "全部业务组" : _group() : "尚未绑定"}</strong>
         </div>
         <span class="qc-status">{props.sessionStatus === "ready" ? "服务端绑定" : "等待登录"}</span>
       </div>
@@ -581,9 +585,11 @@ function SettingsPanel(props: {
         <Show when={props.sshIdentityError && !props.orgSshLogin}><p role="alert">{props.sshIdentityError}</p></Show>
         <Show when={props.orgSshLogin}>
           <SshOrgLoginWizard sshScan={input => props.orgSshLogin!.sshScan(input)}
+            sshSelectKey={props.orgSshLogin!.sshSelectKey} sshCancel={props.orgSshLogin!.sshCancel}
             sshConnect={input => props.orgSshLogin!.sshConnect(input)}
+            sshProgress={props.orgSshLogin!.sshProgress}
             autoStart={props.orgSshStart} onStarted={props.orgSshOnStarted}
-            onEnter={async result => { await props.orgSshOnEnter?.(result) }} />
+            onEnter={async (result, signal) => { await props.orgSshOnEnter?.(result, signal) }} />
         </Show>
         <Show when={props.sshSession || !props.orgSshLogin}>
           <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
@@ -627,7 +633,12 @@ function SettingsPanel(props: {
         <For each={props.skills}>{(skill) => <option value={skill.id}>{skillLabel(skill)}</option>}</For>
       </select>
       </>}>
-        <div class="qc-setting-row"><div><span class="qc-section-label">组 Skill</span><strong>按组织身份自动加载</strong><p class="qc-muted">开始任务时读取当前业务组的已安装 Skill；无法读取时会在任务中说明。</p></div></div>
+        <div class="qc-setting-row"><div><span class="qc-section-label">已安装的组 Skill</span><strong>按组织身份自动加载</strong>
+          <Show when={props.skillsStatus === "loading"}><p role="status">正在读取 Skill…</p></Show>
+          <Show when={props.skillsStatus === "error"}><p role="alert">无法读取当前组的 Skill 目录。</p></Show>
+          <For each={props.skills}>{skill => <details class="qc-detail-section"><summary>{skillLabel(skill)}</summary><p>{skill.description || "当前业务组的研究流程"}</p><code>{skill.id}</code></details>}</For>
+          <Show when={props.skillsStatus === "ready" && !props.skills.length}><p class="qc-muted">当前组尚未安装 Skill。</p></Show>
+        </div></div>
       </Show>
       <div class="qc-detail-section">
         <span class="qc-section-label">研究服务</span>
@@ -653,6 +664,7 @@ function SettingsPanel(props: {
 export type QuantCodePanelProps = {
   onClose?: () => void
   nativeSessionID?: string
+  onCreateTask?: () => unknown
   /**
    * Root-home entry point. Session panels keep the default prompt bridge;
    * the standalone home delegates submission to the draft/session router.
@@ -661,9 +673,9 @@ export type QuantCodePanelProps = {
 }
 
 export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
-  const prompt = props.onSubmitInstruction ? undefined : usePrompt()
-  const directorySDK = props.onSubmitInstruction ? undefined : useSDK()
-  const local = props.onSubmitInstruction ? undefined : useLocal()
+  const prompt = props.onCreateTask || props.onSubmitInstruction ? undefined : usePrompt()
+  const directorySDK = props.onCreateTask || props.onSubmitInstruction ? undefined : useSDK()
+  const local = props.onCreateTask || props.onSubmitInstruction ? undefined : useLocal()
   const server = useServer()
   const navigate = useNavigate()
   const serverSDK = useServerSDK()
@@ -703,6 +715,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     submit: "idle" as SubmitState,
     error: "",
   })
+  const accountStatus = createMemo(() => workspaceAccount({ view: state.view, organizationStatus: state.sessionStatus,
+    actor: state.sessionActor, role: state.sessionRole, operations: state.adminSession }))
   createEffect(() => { if (searchParams.settings) setState("view", "settings") })
   let taskInput: HTMLTextAreaElement | undefined
   let slashPopoverRef: HTMLDivElement | undefined
@@ -858,9 +872,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     let disposed = false
     onCleanup(() => { disposed = true })
     void platform.identity?.sshAdminStatus?.().then(current => {
-      if (disposed || !current) return
+      if (disposed || !current || state.adminSession) return
       setState("adminSession", current.session)
-      if (!server.current?.organizationAdmin) setState("view", "server-admin")
     }).catch(() => undefined)
   })
 
@@ -939,7 +952,6 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         resetQuantCodeState()
         if (activeThreadCacheKey) loadScopedThreadCache(activeThreadCacheKey)
         setQuantCodeSessionGroup(group)
-        if (server.current?.organizationAdmin && context.role === "admin") setState("view", "admin")
         setState({ historyScope: activeThreadCacheKey ?? "", sessionStatus: "ready", sessionRole: context.role ?? "analyst", sessionActor: context.actor_id ?? "已认证身份", workspacePath: context.workspace_path ?? "", sessionId: context.session_id ?? "", githubSubject: context.github_subject ?? "" })
       },
       () => {
@@ -996,7 +1008,6 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     const group = _group()
     if (state.sessionStatus !== "ready") return
     if (state.runtimeStatus !== "ready") return
-    if (state.unifiedRuntime) { setState({ skills: [], skill: "", skillsStatus: "ready" }); return }
     const request = ++skillsRequest
     onCleanup(() => { skillsRequest++ })
     setState({ skillsStatus: "loading", skills: [], skill: "" })
@@ -1023,9 +1034,9 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     return state.skillsStatus === "loading" ? "正在加载 Skill 目录…" : "Skill 目录未连接"
   })
   const gateWaiting = createMemo(() => _trace()?.status === "waiting_for_human")
-  const serverName = createMemo(() => server.name || "当前服务器")
-  const serverReady = createMemo(() => server.ready())
-  const serverTransport = createMemo(() => (server.isLocal() ? "本机研究宿主" : "远程研究宿主"))
+  const serverName = createMemo(() => accountStatus().operationsContext && state.adminSession ? state.adminSession.serverLabel : server.name || "当前服务器")
+  const serverReady = createMemo(() => accountStatus().operationsContext ? accountStatus().operationsConnected : server.ready())
+  const serverTransport = createMemo(() => accountStatus().operationsContext ? "SSH 管理连接" : server.isLocal() ? "本机研究宿主" : "远程研究宿主")
   const sshConnect = createMemo<SshConnectFn>(() => {
     const bridge = platform.identity
     const selected = String(server.key)
@@ -1052,32 +1063,31 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
       } catch (error) { return { status: "error", reason: error instanceof Error ? error.message : "退出未完成，请重试。" } }
     }
   })
-  const enterSshWorkspace = async (result: QuantCodeSshLoginResult) => {
-    if (result.mode === "server-admin") {
-      setState({ adminSession: result.admin, view: "server-admin" })
-      navigate("/")
-      return
-    }
+  const enterSshWorkspace = async (result: QuantCodeSshLoginResult, signal?: AbortSignal) => {
+    signal?.throwIfAborted()
     if (!result.connection || !result.session) throw new Error("登录结果缺少连接信息，请重试。")
     const organizationAdmin = result.mode === "organization-admin"
     const context = await getQuantCodeSessionContext(createSdkForServer({ server: result.connection, fetch: platform.fetch }))
+    signal?.throwIfAborted()
     if (context.session_id !== result.session.session_id || context.actor_id !== result.session.actor_id || context.group !== result.session.group) {
       throw new Error("登录身份正在变化，请重试。")
     }
     if (organizationAdmin && context.role !== "admin") throw new Error("当前身份没有组织管理员权限。")
-    if (!organizationAdmin && !context.workspace_path) throw new Error("组织尚未分配个人工作区，请联系管理员。")
+    if (!context.workspace_path) throw new Error("组织尚未分配个人工作区，请联系管理员。")
     batch(() => {
       const connection = server.add({ type: "http", displayName: result.connection.displayName, organizationAdmin,
+        managedId: result.connection.managedId, previousUrls: result.connection.previousUrls, verifiedAt: result.connection.verifiedAt,
         http: { url: result.connection.url, username: result.connection.username, password: result.connection.password } })
       if (!connection) throw new Error("无法保存个人研究宿主连接，请重试。")
-      if (!organizationAdmin && context.workspace_path) {
+      if (context.workspace_path) {
         server.projects.open(context.workspace_path)
         server.projects.touch(context.workspace_path)
       }
       setState("identityRevision", value => value + 1)
     })
     await platform.setDefaultServer?.(server.key)
-    setState("view", organizationAdmin ? "admin" : "compose")
+    signal?.throwIfAborted()
+    setState("view", "compose")
     setState("adminSession", organizationAdmin ? result.admin : undefined)
     navigate("/")
   }
@@ -1309,7 +1319,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
   })
 
   const navItems: { id: DetailView; label: string; icon: IconProps["name"] }[] = [
-    { id: "compose", label: "新建研究", icon: "plus" },
+    { id: "compose", label: props.nativeSessionID ? "当前任务" : "我的任务", icon: "task" },
     { id: "activity", label: "执行记录", icon: "checklist" },
     { id: "gate", label: "HumanGate", icon: "review" },
     { id: "memory", label: "Memory", icon: "brain" },
@@ -1342,9 +1352,9 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
               return bell
             })()}
           </Show>
-          <Show when={state.adminSession}>
+          <Show when={adminViewable()}>
             <button type="button" class="qc-rail-button" classList={{ "is-active": state.view === "server-admin" }}
-              aria-label="服务器运维" title="服务器运维" onClick={() => setState("view", "server-admin")}><Icon name="settings-gear" /></button>
+              aria-label="服务器运维" title="服务器运维" onClick={() => setState("view", "server-admin")}><Icon name="settings-gear" /><span class="qc-nav-label">服务器运维</span></button>
           </Show>
           <For each={[...navItems, ...adminNavItems.filter((item) => item.id === "gitgraph" ? state.sessionStatus === "ready" : adminViewable())]}>
             {(item) => (
@@ -1408,10 +1418,10 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
 
       <main class="qc-main">
         <header class="qc-identity-bar">
-          <button type="button" class="qc-identity" aria-label="账号与登录" title="账号与登录" onClick={() => setState({ view: "settings", orgSshStart: !state.adminSession && state.sessionStatus !== "ready" && !!platform.identity?.sshConnect })}>
+          <button type="button" class="qc-identity" aria-label="账号与登录" title="账号与登录" onClick={() => setState({ view: "settings", orgSshStart: accountStatus().showLoginNotice && !!platform.identity?.sshConnect })}>
             <Icon name="shield" size="small" />
-            <span>{state.view === "server-admin" && state.adminSession ? `${state.adminSession.username} · 服务器运维` : state.sessionStatus === "ready" ? state.sessionActor : "重新登录"}</span>
-            <Show when={state.sessionStatus === "ready" && state.view !== "server-admin"}><strong>{_group()} 组</strong><span class="qc-role">{state.sessionRole === "admin" ? "管理员" : state.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
+            <span>{accountStatus().label}</span>
+            <Show when={state.sessionStatus === "ready"}><strong>{adminViewable() ? "全部权限" : `${_group()} 组`}</strong><span class="qc-role">{state.sessionRole === "admin" ? "管理员" : state.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
             <Icon name="chevron-down" size="small" />
           </button>
           <div class="qc-environment">
@@ -1424,6 +1434,23 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
         </header>
 
         <div class="qc-canvas">
+          <Show when={props.onCreateTask && state.view === "compose"}>
+            <section class="qc-detail-panel" id="qc-research-prompt" aria-label="我的任务">
+              <div class="qc-detail-header"><div><span>QUANTCODE / TASKS</span><h2>我的任务</h2></div>
+                <div><button type="button" class="qc-button qc-button-primary" disabled={state.sessionStatus !== "ready" || !serverReady()} onClick={() => props.onCreateTask?.()}><Icon name="plus" size="small" />新建任务</button></div>
+              </div>
+              <div class="qc-view-content">
+              <div class="qc-detail-body">
+              <p class="qc-muted">选择任务后继续对话。新建任务时先确认工作目录，后续消息、文件和执行记录保存在同一任务中。</p>
+              <Show when={accountStatus().showLoginNotice}>
+                <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录</button></div>
+              </Show>
+              </div>
+              <NativeTaskHistory scope={state.historyScope} ready={state.sessionStatus === "ready"} source={nativeTasks()} onOpen={openNativeTask} openOnSelect />
+              </div>
+            </section>
+          </Show>
+          <Show when={!props.onCreateTask}>
           <section
             ref={stage}
             class="qc-stage"
@@ -1445,7 +1472,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
             <div ref={focusLens} class="qc-focus-lens" aria-hidden="true" />
             <div class="qc-lens-action">
               <button type="button" class="qc-lens-title-button" onClick={() => focusComposer()}>
-                <h1 id="qc-lens-title">新建多智能体研究</h1>
+                <h1 id="qc-lens-title">{props.nativeSessionID ? "继续当前任务" : "新建研究"}</h1>
               </button>
               <button type="button" class="qc-lens-meta-row" onClick={() => setState("view", "settings")}>
                 <span>组:</span>
@@ -1463,7 +1490,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
           </section>
 
           <section class="qc-compose-zone" id="qc-research-prompt" aria-label="研究任务">
-            <Show when={state.sessionStatus !== "ready"}>
+            <Show when={accountStatus().showLoginNotice}>
               <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录<Icon name="arrow-right" size="small" /></button></div>
             </Show>
             <div class="qc-compose-grid">
@@ -1552,7 +1579,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                           when={state.submit === "starting"}
                           fallback={
                             <>
-                              开始研究 <Icon name="arrow-right" size="small" />
+                              {props.nativeSessionID ? "发送消息" : "开始研究"} <Icon name="arrow-right" size="small" />
                             </>
                           }
                         >
@@ -1632,6 +1659,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
             </div>
           </section>
 
+          </Show>
             <section class="qc-detail-panel" aria-label="QuantCode 详情" hidden={state.view === "compose"}>
               <div class="qc-detail-header">
                 <div>
@@ -1647,16 +1675,20 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                               ? "能力目录"
                               : state.view === "solution"
                                 ? "方案"
+                                : state.view === "server-admin"
+                                  ? "服务器运维"
                                 : state.view === "admin"
-                                  ? "Admin 中枢"
+                                  ? "组织管理"
                                   : state.view === "gitgraph"
                                     ? "GitGraph"
                                     : "工作区设置"}
                   </h2>
                 </div>
-                <button type="button" aria-label="关闭详情" onClick={() => setState("view", "compose")}>
-                  <Icon name="close" size="normal" />
-                </button>
+                <Show when={state.view !== "compose"}>
+                  <button type="button" aria-label="关闭详情" onClick={() => setState("view", "compose")}>
+                    <Icon name="close" size="normal" />
+                  </button>
+                </Show>
               </div>
               <div class="qc-view-content">
           <GitHubWorkspace
@@ -1718,8 +1750,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                       if (!state.unifiedRuntime) return readQuantCodeTool(client, tool, undefined, params)
                       const response = tool === "get_run_history" && params.thread_id
                         ? await client.quantcode.legacy.detail({ thread_id: params.thread_id, checkpoint_id: params.checkpoint_id,
-                            trace_cursor: params.trace_cursor === undefined ? undefined : String(params.trace_cursor) })
-                        : await client.quantcode.legacy.list({ limit: "20", cursor: params.cursor })
+                            trace_cursor: params.trace_cursor === undefined ? undefined : String(params.trace_cursor), organization: state.sessionRole === "admin" ? "true" : "false" })
+                        : await client.quantcode.legacy.list({ limit: "20", cursor: params.cursor, organization: state.sessionRole === "admin" ? "true" : "false" })
                       if (response.error || !response.data) throw new Error("归档任务读取失败，请核对归档宿主配置。")
                       return response.data
                     }}
@@ -1782,11 +1814,9 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                     {sessionID => <QuantCodeTaskReview sessionID={sessionID()} expanded />}
                   </Show>
                 </Match>
-                <Match when={state.view === "server-admin" && state.adminSession && platform.identity?.sshAdminStatus}>
-                  <ServerAdminView status={() => platform.identity!.sshAdminStatus()}
-                    disconnect={() => platform.identity!.sshAdminDisconnect()}
-                    organization={async () => { await enterSshWorkspace(await platform.identity!.sshConnect({ serverId: "server-c", administrator: "organization" })) }}
-                    onDisconnected={() => setState({ adminSession: undefined, view: "settings" })} />
+                <Match when={state.view === "server-admin" && adminViewable() && platform.identity?.sshAdminStatus}>
+                  <ServerAdminView status={input => platform.identity!.sshAdminStatus(input)}
+                    onDisconnected={() => { setState("identityRevision", value => value + 1); setState("view", "settings") }} />
                 </Match>
                 <Match when={state.view === "admin" && adminViewable()}>
                   <div class="qc-view-tabs qc-admin-tabs" role="tablist" aria-label="Admin 管理视图" onKeyDown={navigateViewTabs}>
@@ -1853,6 +1883,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                     } : undefined}
                     orgSshLogin={platform.identity?.sshConnect ? platform.identity : undefined}
                     orgSshStart={state.orgSshStart}
+                    serverAdminSession={state.adminSession}
                     orgSshOnStarted={() => setState("orgSshStart", false)}
                     orgSshOnEnter={enterSshWorkspace}
                   />

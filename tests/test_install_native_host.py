@@ -85,6 +85,8 @@ def test_unit_runs_existing_cli_as_enrolled_user_without_inline_password():
     assert "OPENCODE_SERVER_PASSWORD=" not in unit
     assert "Restart=no" in unit and "KillMode=control-group" in unit
     assert "mcp_server" not in unit
+    assert "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK\n" in unit
+    assert "NoNewPrivileges=true" in unit and "ProtectSystem=strict" in unit
 
 
 def test_fresh_control_storage_is_separate_from_workspace_and_model_credentials():

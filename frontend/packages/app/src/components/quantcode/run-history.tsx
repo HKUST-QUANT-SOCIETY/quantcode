@@ -134,7 +134,7 @@ export function RunHistoryView(props: {
       <Show when={state.loading}><p class="qc-loading" role="status">正在读取执行记录…</p></Show>
       <Show when={state.error}><p role="alert">{state.error}</p></Show>
       <Show when={props.ready && !state.loading && !state.error && !state.runs.length}>
-        <WorkspaceEmpty icon="checklist" title="暂无执行记录" description="当前工作区还没有已保存的任务。">
+        <WorkspaceEmpty icon="checklist" title="暂无执行记录" description={props.legacy ? "当前已接入的归档源没有匹配记录。新任务请在任务记录中查看。" : "当前工作区还没有已保存的任务。"}>
           <Show when={props.onNew}><button type="button" class="qc-button qc-button-primary" onClick={props.onNew}><Icon name="plus" size="small" />新建研究</button></Show>
         </WorkspaceEmpty>
       </Show>

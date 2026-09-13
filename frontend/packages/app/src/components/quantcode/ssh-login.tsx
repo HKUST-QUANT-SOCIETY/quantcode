@@ -1,4 +1,5 @@
 import type { QuantCodeDesktopIdentity, QuantCodeSshLoginScan, QuantCodeSshLoginResult, QuantCodeSshLoginChoice } from "../../identity"
+import { getOwner, onCleanup } from "solid-js"
 
 /**
  * F-05 SSH 登录界面：完整登录流四态（表单 → 连接 → 已连接 / 失败）。
@@ -370,11 +371,15 @@ export function SshLoginView(props: SshLoginProps): HTMLElement {
 
 /** 选私钥 → 探测 → 点组选宿主并认证；只有正式会话才能进入工作台。 */
 export function SshOrgLoginWizard(props: {
+  sshSelectKey?: QuantCodeDesktopIdentity["sshSelectKey"]
+  sshCancel?: QuantCodeDesktopIdentity["sshCancel"]
+  sshProgress?: QuantCodeDesktopIdentity["sshProgress"]
   sshScan: QuantCodeDesktopIdentity["sshScan"]
   sshConnect: QuantCodeDesktopIdentity["sshConnect"]
-  onEnter: (result: QuantCodeSshLoginResult) => Promise<void>
+  onEnter: (result: QuantCodeSshLoginResult, signal?: AbortSignal) => Promise<void>
   autoStart?: boolean
   onStarted?: () => void
+  timeoutMs?: number
 }): HTMLElement {
   const root = document.createElement("div")
   root.className = "qc-ssh"
@@ -384,38 +389,123 @@ export function SshOrgLoginWizard(props: {
   let busy = false
   let error = ""
   let progress = ""
+  let phase: "selecting" | "scanning" | "connecting" | undefined
+  let revision = 0
+  let disposed = false
+  let active: AbortController | undefined
+  let cleanup: (() => void) | undefined
+  const details = document.createElement("details")
+  const detailTitle = document.createElement("summary")
+  detailTitle.textContent = "SSH 连接详情"
+  const log = document.createElement("pre")
+  log.className = "qc-code-block qc-ssh-log"
+  log.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:18rem;overflow:auto"
+  log.textContent = "选择私钥后，这里会显示服务器、身份验证和工作区连接进度。"
+  details.append(detailTitle, log)
+  let readingProgress = false
+  const readProgress = async (request: number) => {
+    if (!props.sshProgress || readingProgress || disposed || request !== revision) return
+    readingProgress = true
+    try { const lines = await props.sshProgress(); if (!disposed && request === revision && lines.length) log.textContent = lines.join("\n") }
+    catch { /* Progress is informational; login errors stay in the form. */ }
+    finally { readingProgress = false }
+  }
+  const watchProgress = (request: number) => {
+    details.open = true
+    void readProgress(request)
+    const timer = setInterval(() => void readProgress(request), 500)
+    return () => { clearInterval(timer); void readProgress(request) }
+  }
+
+  const cancelled = (promise: Promise<unknown>, signal: AbortSignal) => new Promise<unknown>((resolve, reject) => {
+    const abort = () => reject(new Error("本次登录已取消。"))
+    if (signal.aborted) { abort(); return }
+    signal.addEventListener("abort", abort, { once: true })
+    void promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
+  })
+  const cancel = (message = "") => {
+    if (!active) return
+    const previous = active
+    active = undefined
+    revision++
+    cleanup?.()
+    cleanup = undefined
+    previous.abort()
+    busy = false
+    phase = undefined
+    scan = undefined
+    error = message
+    void props.sshCancel?.().catch(() => {})
+    if (!disposed) render()
+  }
+  const watch = (request: number) => {
+    const stop = watchProgress(request)
+    const timer = setTimeout(() => cancel("本次登录等待超时。可以重试或重新选择私钥。"), props.timeoutMs ?? 90000)
+    const finish = () => { clearTimeout(timer); stop() }
+    cleanup = finish
+    return finish
+  }
+  if (getOwner()) onCleanup(() => { disposed = true; cancel() })
 
   const scanKey = async (chooseKey: boolean) => {
     if (busy) return
+    const controller = new AbortController()
+    active = controller
+    const request = ++revision
+    const current = () => !disposed && revision === request
     busy = true
     error = ""
-    progress = "正在探测组织服务器（Server A / B / C）…"
+    phase = chooseKey && props.sshSelectKey ? "selecting" : "scanning"
+    progress = phase === "selecting" ? "请在文件选择窗口选择本地私钥，取消可返回登录。" : "正在探测组织服务器（Server A / B / C）…"
+    log.textContent = "本次登录的连接进度将在选好私钥后显示。"
+    details.open = false
+    let stopProgress: (() => void) | undefined
     render()
     try {
-      const result = await props.sshScan({ chooseKey, username: username || undefined })
+      if (chooseKey && props.sshSelectKey) {
+        const picked = await cancelled(props.sshSelectKey(), controller.signal)
+        if (!current() || !picked) return
+      }
+      if (!current()) return
+      phase = "scanning"
+      progress = "正在探测组织服务器（Server A / B / C）…"
+      stopProgress = watch(request)
+      render()
+      const result = await cancelled(props.sshScan({ chooseKey: chooseKey && !props.sshSelectKey, username: username || undefined }), controller.signal) as QuantCodeSshLoginScan | null
+      if (!current()) return
       if (!result) return
       username = result.username
       showUsername = !!result.needsUsername
       scan = result.needsUsername ? undefined : result
     } catch (cause) {
+      if (!current()) return
       error = loginError(cause, "登录探测失败，请重试。")
       showUsername = true
       scan = undefined
     } finally {
-      busy = false
-      render()
+      stopProgress?.()
+      if (current()) { cleanup = undefined; active = undefined; busy = false; phase = undefined; render() }
     }
   }
 
   const enter = async (choice: QuantCodeSshLoginChoice, label: string) => {
     if (busy) return
+    const controller = new AbortController()
+    active = controller
+    const request = ++revision
+    const current = () => !disposed && revision === request
     busy = true
+    phase = "connecting"
     error = ""
     progress = `正在连接${label}…`
+    const stopProgress = watch(request)
     render()
-    try { await props.onEnter(await props.sshConnect(choice)) }
-    catch (cause) { error = loginError(cause, "登录失败，请重试。") }
-    finally { busy = false; render() }
+    try {
+      const result = await cancelled(props.sshConnect(choice), controller.signal) as QuantCodeSshLoginResult
+      if (current()) await props.onEnter(result, controller.signal)
+    }
+    catch (cause) { if (current()) error = loginError(cause, "登录失败，请重试。") }
+    finally { stopProgress(); if (current()) { cleanup = undefined; active = undefined; busy = false; phase = undefined; render() } }
   }
 
   const render = () => {
@@ -425,7 +515,21 @@ export function SshOrgLoginWizard(props: {
       status.className = "qc-connection-pill"
       status.setAttribute("role", "status")
       status.textContent = progress
-      root.append(status)
+      const pick = document.createElement("button")
+      pick.type = "button"
+      pick.className = "qc-button qc-button-primary"
+      pick.textContent = phase === "selecting" ? "正在选择私钥文件…" : "重新登录"
+      pick.disabled = true
+      root.append(status, pick)
+      if (phase !== "selecting") {
+        const stop = document.createElement("button")
+        stop.type = "button"
+        stop.className = "qc-button qc-button-secondary"
+        stop.textContent = "取消本次登录"
+        stop.addEventListener("click", () => cancel())
+        root.append(stop)
+      }
+      root.append(details)
       return
     }
     if (error) {
@@ -437,7 +541,7 @@ export function SshOrgLoginWizard(props: {
     if (scan) {
       const hint = document.createElement("p")
       hint.className = "qc-ssh-hint"
-      hint.textContent = scan.administrators?.length ? "管理员入口：组织管理与服务器运维独立认证。" : "选择工作组，直接进入对应服务器的工作区。"
+      hint.textContent = scan.administrators?.length ? "检测到管理员身份，登录后进入完整工作台。" : "选择工作组，直接进入对应服务器的工作区。"
       root.append(hint)
       for (const server of scan.servers) {
         for (const group of server.groups) {
@@ -456,19 +560,10 @@ export function SshOrgLoginWizard(props: {
         organization.type = "button"
         organization.className = "qc-button qc-button-secondary qc-ssh-admin-option"
         organization.style.cssText = "display:block;width:100%;margin-bottom:6px;text-align:left"
-        organization.textContent = "组织管理 · Server C"
+        organization.textContent = "管理员登录 · 全部权限"
         organization.disabled = !scan.administrators.some(server => server.id === "server-c")
-        organization.addEventListener("click", () => void enter({ serverId: "server-c", administrator: "organization" }, "组织管理"))
+        organization.addEventListener("click", () => void enter({ serverId: "server-c", administrator: "organization" }, "管理员工作台"))
         root.append(organization)
-      }
-      for (const server of scan.administrators ?? []) {
-        const row = document.createElement("button")
-        row.type = "button"
-        row.className = "qc-button qc-button-secondary qc-ssh-admin-option"
-        row.style.cssText = "display:block;width:100%;margin-bottom:6px;text-align:left"
-        row.textContent = `服务器运维 · ${server.label}`
-        row.addEventListener("click", () => void enter({ serverId: server.id, administrator: "servers" }, `${server.label} 服务器运维`))
-        root.append(row)
       }
       for (const failed of scan.failed) {
         const note = document.createElement("p")
@@ -505,10 +600,10 @@ export function SshOrgLoginWizard(props: {
     pick.className = "qc-button qc-button-secondary"
     pick.textContent = scan ? "换一把私钥" : "重新登录"
     pick.addEventListener("click", () => { username = ""; void scanKey(true) })
-    root.append(pick)
+    root.append(pick, details)
   }
   render()
-  if (props.autoStart) queueMicrotask(() => { props.onStarted?.(); void scanKey(true) })
+  if (props.autoStart) queueMicrotask(() => { if (!disposed) { props.onStarted?.(); void scanKey(true) } })
   return root
 }
 

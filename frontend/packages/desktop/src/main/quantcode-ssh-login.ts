@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process"
 import { createConnection, createServer } from "node:net"
 import { isAbsolute, win32 } from "node:path"
 import { promisify } from "node:util"
-import { setTimeout } from "node:timers/promises"
+import { superviseSshTunnel } from "./ssh-tunnel-supervisor"
 import type { QuantCodeIdentityGroup, QuantCodeSshConnection } from "@opencode-ai/app/identity"
 
 const execFileAsync = promisify(execFile)
@@ -89,7 +89,7 @@ export async function readOrgAccount(server: OrgServer, username: string, keyFil
 
 export async function readAdminProfile(server: OrgServer, username: string, keyFile: string, signal?: AbortSignal) {
   const raw = await runRemote(server, username, keyFile, "cat ~/.quantcode/admin/connection.json", signal)
-    .catch(() => { throw new Error("组织管理通道尚未配置。服务器运维可以独立使用；请为管理员开通独立组织管理宿主。") })
+    .catch(() => { throw new Error("管理员服务尚未开通，请完成服务器端管理员配置后重试。") })
   return parseResearchProfile(raw, username)
 }
 
@@ -105,7 +105,9 @@ export function sshFailure(error: unknown) {
   return "暂时无法连接，请检查网络后重试"
 }
 
-export type ResearchTunnel = { connection: QuantCodeSshConnection; alive: () => boolean; stop: () => void }
+export type ResearchTunnel = { connection: QuantCodeSshConnection; alive: () => boolean; stop: () => void;
+  ensureConnected?: (timeoutMs?: number) => Promise<void>; status?: ReturnType<typeof superviseSshTunnel>["status"];
+  subscribe?: ReturnType<typeof superviseSshTunnel>["subscribe"]; reconnect?: () => Promise<void> }
 
 async function availablePort(preferred: number) {
   const reserve = (port: number) => new Promise<number>((resolve, reject) => {
@@ -120,38 +122,37 @@ async function availablePort(preferred: number) {
 }
 
 export async function openResearchTunnel(server: OrgServer, username: string, keyFile: string, profile: ResearchProfile,
-  signal?: AbortSignal, localPort?: number): Promise<ResearchTunnel> {
+  signal?: AbortSignal, localPort?: number, initialSignal?: AbortSignal): Promise<ResearchTunnel> {
   signal?.throwIfAborted()
+  initialSignal?.throwIfAborted()
   const port = await availablePort(localPort ?? profile.local_port)
+  initialSignal?.throwIfAborted()
   const base = sshArguments(keyFile, username, server.host)
-  const child = spawn(systemSshExecutable("ssh"), ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
-    "-o", "ServerAliveCountMax=3", "-L", `127.0.0.1:${port}:127.0.0.1:${profile.remote_port}`, ...base],
-    { stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
-  let failed = false
-  child.once("error", () => { failed = true })
-  child.stderr.resume()
-  const stop = () => { if (!child.killed) child.kill() }
-  const alive = () => !failed && !child.killed && child.exitCode === null && child.signalCode === null
-  signal?.addEventListener("abort", stop, { once: true })
-  child.once("exit", () => signal?.removeEventListener("abort", stop))
-  try {
-    const deadline = Date.now() + 12000
-    while (Date.now() < deadline && alive()) {
-      signal?.throwIfAborted()
-      const listening = await new Promise<boolean>(resolve => {
+  const supervised = superviseSshTunnel({
+    signal,
+    launch: () => spawn(systemSshExecutable("ssh"), ["-v", "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15",
+      "-o", "ServerAliveCountMax=2", "-L", `127.0.0.1:${port}:127.0.0.1:${profile.remote_port}`, ...base],
+      { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }),
+    // A different local process may take the port between retries. A TCP
+    // connect alone must never certify that our SSH process owns the listener.
+    forwardingReady: stderr => stderr.includes(`debug1: Local forwarding listening on 127.0.0.1 port ${port}.`),
+    probe: () => new Promise<boolean>(resolve => {
         const socket = createConnection({ host: "127.0.0.1", port })
         const done = (ok: boolean) => { socket.destroy(); resolve(ok) }
         socket.once("connect", () => done(true))
         socket.once("error", () => done(false))
         socket.setTimeout(300, () => done(false))
-      })
-      if (listening && alive()) return { connection: { url: `http://127.0.0.1:${port}`, username: profile.username,
-        password: profile.password, displayName: `${server.label} · ${username}` }, alive, stop }
-      await setTimeout(100, undefined, { signal })
-    }
-    throw new Error("无法建立个人研究宿主连接，请检查 SSH 和网络。")
+    }),
+  })
+  const cancelInitial = () => supervised.stop()
+  initialSignal?.addEventListener("abort", cancelInitial, { once: true })
+  try {
+    await supervised.ensureConnected()
+    initialSignal?.throwIfAborted()
+    return { ...supervised, connection: { url: `http://127.0.0.1:${port}`, username: profile.username,
+      password: profile.password, displayName: `${server.label} · ${username}` } }
   } catch (error) {
-    stop()
+    supervised.stop()
     throw error
-  }
+  } finally { initialSignal?.removeEventListener("abort", cancelInitial) }
 }

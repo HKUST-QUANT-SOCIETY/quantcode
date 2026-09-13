@@ -576,3 +576,81 @@ def test_native_gate_reviewer_can_reconcile_own_record_after_relogin_without_rev
     changed = login("reviewer")
     with pytest.raises(PermissionError):
         native_gate.read(gateway, changed["token"], {"expected_session_id": changed["session"]["session_id"], "gate_id": gate["gate_id"]})
+
+
+def test_knowledge_browse_and_chinese_search_preserve_group_authority(gateway_login, tmp_path):
+    from runner.memory.service import MemoryService
+    gateway, login, roster, entry = gateway_login
+    root = tmp_path / "knowledge"
+    gateway.memory_root = root
+    store = MemoryService(root / ".quantcode/memory.db", root=root, requester_group="factor")
+    store.write(scope="groups", scope_id="factor", key="card", type="reference", body="# CapabilityCard\n因子计算引擎与接口说明")
+    store.write(scope="global", key="public", type="reference", body="# 公共契约\n适用于所有业务组")
+    store.write(scope="sessions", scope_id="private", key="checkpoint", body="因子 private runtime")
+    MemoryService(store.db_path, root=root, requester_group="model").write(scope="groups", scope_id="model", key="private", body="因子 model secret")
+    session, _ = login()
+    request = {"expected_session_id": session["session"]["session_id"], "query": "*", "limit": 50}
+    result = gateway.search_memory(session["token"], request)
+    assert result["total"] == 2
+    assert all("private" not in hit["content"] for hit in result["hits"])
+    for query in ["因子", "capability"]:
+        hits = gateway.search_memory(session["token"], {**request, "query": query})["hits"]
+        assert len(hits) == 1 and hits[0]["title"] == "CapabilityCard"
+        assert "接口说明" in hits[0]["content"]
+    gateway.logout(session["token"])
+    with pytest.raises(PermissionError):
+        gateway.search_memory(session["token"], request)
+
+
+@pytest.mark.parametrize("role,expected", [("admin", {"factor", "model"}), ("approver", {"factor"})])
+def test_shared_candidates_review_uses_organization_store_and_current_role(gateway_login, role, expected):
+    from quantcode.shared_knowledge import handle
+    from runner.distill.governance import store_candidates
+    gateway, login, roster, entry = gateway_login
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "role": role}]}))
+    session, _ = login()
+    root = gateway.database.parent / "knowledge/candidates"
+    for group in ["factor", "model"]:
+        store_candidates([{"name": group+"-recipe", "group": group, "tool_sequence": ["read", "write"], "occurrences": 3}], candidates_dir=root, run_ids=[group+"-run"])
+    request = {"expected_session_id": session["session"]["session_id"], "payload": {}}
+    items = handle(gateway, session["token"], "list", request)["candidates"]
+    assert {item["group"] for item in items} == expected
+    if role == "admin":
+        assert list((gateway.database.parent / "knowledge/audit").glob("admin-read-*.jsonl"))
+    assert all(item["content"] and item["digest"] for item in items)
+    item = next(item for item in items if item["group"] == "factor")
+    reviewed = handle(gateway, session["token"], "review", {**request, "payload": {"candidate_name": item["name"], "action": "reject", "expected_digest": item["digest"]}})
+    assert reviewed["candidate"]["status"] == "rejected"
+    if role == "approver":
+        with pytest.raises(PermissionError):
+            handle(gateway, session["token"], "review", {**request, "payload": {"candidate_name": "model-recipe", "action": "reject", "expected_digest": "a"*64}})
+    gateway.logout(session["token"])
+    with pytest.raises(PermissionError):
+        handle(gateway, session["token"], "list", request)
+
+
+def test_shared_distillation_requires_own_published_source_and_is_idempotent(gateway_login):
+    from quantcode.shared_knowledge import handle
+    from quantcode import native_tasks
+    from schemas.evidence_chain import canonical_json, sha256_hex
+    gateway, login, roster, entry = gateway_login
+    session, _ = login()
+    expected = session["session"]["session_id"]
+    value = {"source_id": "test-host", "session_id": "test-task", "root_session_id": "test-task", "source_revision": 7,
+             "tools": [{"call_id": "call-one", "tool": "read"}, {"call_id": "call-two", "tool": "write"}]}
+    request = {"expected_session_id": expected, "payload": value}
+    with pytest.raises(PermissionError, match="not published"):
+        handle(gateway, session["token"], "distill", request)
+    native_tasks.publish(gateway, session["token"], {"expected_session_id": expected, "task": {
+        "source_id": value["source_id"], "session_id": value["session_id"], "root_session_id": value["root_session_id"],
+        "source_revision": 7, "title": "fixture", "status": "completed", "created_at": 1, "updated_at": 2,
+        "tokens_input": 0, "tokens_output": 0, "cost": None, "artifact_manifest_hash": sha256_hex(canonical_json([])),
+    }})
+    first = handle(gateway, session["token"], "distill", request)
+    assert len(first["candidates"]) == 1
+    assert handle(gateway, session["token"], "distill", request) == first
+    # Changing the principal cannot adopt the already published source.
+    roster.write_text(yaml.safe_dump({"bindings": [{**entry, "actor_id": "other", "role": "admin"}]}))
+    second, _ = login()
+    with pytest.raises(PermissionError, match="ownership"):
+        handle(gateway, second["token"], "distill", {**request, "expected_session_id": second["session"]["session_id"]})

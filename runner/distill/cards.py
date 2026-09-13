@@ -211,6 +211,7 @@ def _list_capabilities_execute(args: Any, ctx: dict) -> dict:
                 "id": c.id,
                 "name": c.name,
                 "type": c.type,
+                "api_surface": list(c.api_surface),
                 "when_to_use": c.when_to_use,
                 "when_not_to_reinvent": c.when_not_to_reinvent,
                 "owner_group": c.owner_group,

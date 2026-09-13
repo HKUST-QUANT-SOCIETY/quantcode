@@ -58,11 +58,12 @@ function MessagePartView(props: { part: Part }) {
  * summaries never grant access to another member's local session endpoints. */
 export function NativeTaskHistory(props: {
   scope: string; ready: boolean; currentSessionID?: string; mode?: "tasks" | "reports" | "overview";
-  source: NativeTaskSource; organization?: boolean; onOpen?: (sessionID: string) => void; onNew?: () => void;
+  source: NativeTaskSource; organization?: boolean; onOpen?: (sessionID: string) => void; onNew?: () => void; openOnSelect?: boolean;
 }) {
   const serverSDK = useServerSDK()
   const [state, setState] = createStore({ tasks: [] as NativeTaskRecord[], legacy: [] as QuantCodeLegacyProjectionPending[], cursor: undefined as string | undefined,
     detail: undefined as Detail | undefined, loading: false, error: "", query: "", filter: "all",
+    overviewTab: "groups" as "groups" | "errors",
     tab: "activity" as "activity" | "tree" | "reports", stopping: false, stopError: "",
     publication: undefined as QuantCodePublicationStatus | undefined, publicationError: "" })
   const [tree, setTree] = createStore({ tasks: [] as NativeTaskRecord[], cursor: undefined as string | undefined, loading: false, error: "" })
@@ -292,6 +293,19 @@ export function NativeTaskHistory(props: {
       <div><small>待审批</small><strong>{state.tasks.filter(task => task.status === "waiting_for_human").length}</strong></div>
       <div><small>异常或预算停止</small><strong>{state.tasks.filter(task => task.status === "error" || task.status === "stopped_budget").length}</strong></div>
     </div></Show>
+    <Show when={props.mode === "overview" && props.ready && !state.error}>
+      <div class="qc-view-tabs" role="tablist" aria-label="组织概览内容">
+        <button type="button" role="tab" aria-selected={state.overviewTab === "groups"} onClick={() => setState("overviewTab", "groups")}>分组运行</button>
+        <button type="button" role="tab" aria-selected={state.overviewTab === "errors"} onClick={() => setState("overviewTab", "errors")}>错误沉淀</button>
+      </div>
+      <Show when={state.overviewTab === "groups"}><div class="qc-native-summary">
+        <For each={[...new Set(state.tasks.map(task => task.group))]}>{group => <div><small>{group} 组</small><strong>{state.tasks.filter(task => task.group === group).length} 项</strong><span>{state.tasks.filter(task => task.group === group && ["error", "stopped_budget"].includes(task.status)).length} 项异常</span></div>}</For>
+      </div></Show>
+      <Show when={state.overviewTab === "errors"}>
+        <For each={state.tasks.filter(task => task.last_error || ["error", "stopped_budget"].includes(task.status))}>{task => <details class="qc-detail-section"><summary>{task.title} · {task.actor_id} · {task.group}</summary><p>{task.last_error || label(task.status)}</p><button type="button" class="qc-button" onClick={() => void refresh(task)}>查看任务与来源</button></details>}</For>
+        <Show when={!state.tasks.some(task => task.last_error || ["error", "stopped_budget"].includes(task.status))}><p class="qc-muted">已加载的任务中暂无错误记录。</p></Show>
+      </Show>
+    </Show>
     <Show when={!props.currentSessionID}><div class="qc-filter-bar"><label class="qc-search-field"><Icon name="magnifying-glass" /><input type="search" aria-label="搜索任务" placeholder="任务、成员或组" value={state.query} onInput={event => setState("query", event.currentTarget.value)} /></label>
       <select aria-label="任务状态" value={state.filter} onChange={event => setState("filter", event.currentTarget.value)}><option value="all">全部状态</option><For each={[...new Set(state.tasks.map(task => task.status))]}>{status => <option value={status}>{label(status)}</option>}</For></select></div></Show>
     <Show when={!props.ready}><WorkspaceEmpty icon="shield" title="登录后查看任务" /></Show>
@@ -302,8 +316,8 @@ export function NativeTaskHistory(props: {
     </div></Show>
     <Show when={props.ready && !state.loading && !state.error && !state.detail && !visible().length && !state.legacy.length}><WorkspaceEmpty icon="checklist" title="暂无任务"><Show when={props.onNew}><button type="button" class="qc-button qc-button-primary" onClick={props.onNew}><Icon name="plus" size="small" />新建任务</button></Show></WorkspaceEmpty></Show>
     <div class="qc-history-layout" classList={{ "has-detail": !!state.detail && !props.currentSessionID }}>
-      <Show when={!props.currentSessionID}><div class="qc-history-list"><For each={visible()}>{task => <button type="button" class="qc-history-row" aria-pressed={!!state.detail && taskKey(state.detail.task) === taskKey(task)} onClick={() => void refresh(task)}>
-        <Icon name="task" /><span class="qc-history-copy"><strong>{task.title || task.session_id}</strong><small>{task.actor_id} · {task.group} · {date(task.updated_at)}</small></span><span class={`qc-status qc-status-${task.status}`}>{label(task.status)}</span><Icon name="chevron-right" size="small" />
+      <Show when={!props.currentSessionID}><div class="qc-history-list"><For each={visible()}>{task => <button type="button" class="qc-history-row" aria-pressed={!!state.detail && taskKey(state.detail.task) === taskKey(task)} onClick={() => props.openOnSelect && !props.organization && !task.read_only && props.onOpen ? props.onOpen(task.session_id) : void refresh(task)}>
+        <Icon name="task" /><span class="qc-history-copy"><strong>{task.title || task.session_id}</strong><small>{task.actor_id} · {task.group} · {date(task.updated_at)}</small><Show when={task.directory}><small title={task.directory}>{task.directory}</small></Show></span><span class={`qc-status qc-status-${task.status}`}>{label(task.status)}</span><Icon name="chevron-right" size="small" />
       </button>}</For><Show when={state.cursor}><button type="button" disabled={state.loading} onClick={() => void refresh(undefined, state.cursor)}>加载更多</button></Show></div></Show>
       <Show when={state.detail}>{detail => <div class="qc-history-detail qc-native-detail" classList={{ "is-current": !!props.currentSessionID }}>
         <div class="qc-view-toolbar"><span class={`qc-status qc-status-${detail().task.status}`}>{label(detail().task.status)}</span>
