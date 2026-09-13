@@ -54,7 +54,7 @@ export function sshArguments(keyFile: string, username: string, host: string, al
   if (!isAbsolute(keyFile) || keyFile.includes("\0")) throw new Error("请通过系统选择器选择本地私钥文件。")
   requireUsername(username)
   return ["-T", "-i", keyFile, "-o", 'RemoteCommand=none', "-o", `HostName=${host}`, "-o", `HostKeyAlias=${host}`, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes",
-    ...(knownHosts ? ['-o', `UserKnownHostsFile="${knownHosts.replace(/\\/g, '/').replace(/"/g, '\\"')}"`, '-o', 'GlobalKnownHostsFile=none', '-o', 'HostKeyAlgorithms=ssh-ed25519'] : []),
+    ...(knownHosts ? ['-o', `UserKnownHostsFile="${knownHosts.replace(/\\/g, '/').replace(/"/g, '\\"')}"`, '-o', `GlobalKnownHostsFile=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-o', 'HostKeyAlgorithms=ssh-ed25519'] : []),
     "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=no", "-l", username, alias]
 }
 
