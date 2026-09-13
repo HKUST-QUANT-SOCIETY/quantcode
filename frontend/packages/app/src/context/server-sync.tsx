@@ -313,7 +313,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   async function bootstrapInstance(directory: string) {
     const key = directoryKey(directory)
-    if (!key) return
+    if (!key || !children.active(key)) return
     const pending = booting.get(key)
     if (pending) return pending
 
@@ -373,7 +373,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return
         for (const directory of Object.keys(children.children)) {
-          queue.push(directory)
+          if (children.active(directory)) queue.push(directory)
         }
       }
       return

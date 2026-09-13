@@ -42,8 +42,8 @@ type Deps = {
 }
 
 export function registerIpcHandlers(deps: Deps) {
-  registerGitHubIpc(deps.awaitInitialization)
-  registerIdentityIpc(deps.awaitInitialization)
+  const resolveConnection = registerIdentityIpc(deps.awaitInitialization)
+  registerGitHubIpc(resolveConnection)
   const updaterSubscriptions = createUpdaterSubscriptions()
   app.once("will-quit", updaterSubscriptions.clear)
 

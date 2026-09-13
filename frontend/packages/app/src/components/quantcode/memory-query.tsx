@@ -9,6 +9,9 @@
 import { viewEmpty, viewIcon } from "./workspace-ui"
 
 export type MemoryHit = {
+  content?: string
+  contentTruncated?: boolean
+  indexedAt?: number
   id?: string
   title?: string
   snippet?: string
@@ -18,7 +21,7 @@ export type MemoryHit = {
 }
 
 /** null = 通道未接通；denied = 跨组无权限（fail-closed） */
-export type MemoryQueryResult = { hits: MemoryHit[] } | { denied: true } | null
+export type MemoryQueryResult = { hits: MemoryHit[]; total?: number; hasMore?: boolean } | { denied: true } | null
 
 export type MemoryQueryFetcher = (query: string) => Promise<MemoryQueryResult>
 
@@ -64,6 +67,14 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
   let searching = false
   let requestId = 0
   let resultQuery = ""
+  let lastHits: MemoryHit[] = []
+  let total = 0
+  let hasMore = false
+  const groupFilter = document.createElement("select")
+  groupFilter.className = "qc-select-wide"
+  groupFilter.setAttribute("aria-label", "知识范围")
+  const option = (text: string, value: string) => Object.assign(document.createElement("option"), { textContent: text, value })
+  groupFilter.append(option("全部授权范围", ""))
   const results = document.createElement("div")
   results.className = "qc-memory-results"
   results.setAttribute("aria-live", "polite")
@@ -97,7 +108,8 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     return wrap
   }
 
-  const renderHits = (hits: MemoryHit[]) => {
+  const renderHits = (all: MemoryHit[]) => {
+    const hits = groupFilter.value ? all.filter(hit => hit.scope === groupFilter.value) : all
     if (hits.length === 0) {
       results.append(emptyState("quantcode.memory.noResults"))
       return
@@ -107,7 +119,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     list.className = "qc-memory-hits"
     const count = document.createElement("p")
     count.className = "qc-results-count"
-    count.textContent = `${hits.length} 条匹配知识`
+    count.textContent = `${hits.length} / ${total || all.length} 份知识${hasMore ? "（当前显示前 50 份，请搜索缩小范围）" : ""}`
     results.append(count)
     for (const hit of hits) {
       const row = document.createElement("div")
@@ -128,6 +140,28 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
       row.append(head)
 
       row.append(renderSnippet(hit))
+      if (hit.content !== undefined) {
+        const detail = document.createElement("details")
+        const summary = document.createElement("summary")
+        summary.textContent = "查看正文与来源"
+        const body = document.createElement("pre")
+        body.className = "qc-code-block"
+        body.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:32rem;overflow:auto"
+        body.textContent = hit.content
+        detail.append(summary, body)
+        if (hit.contentTruncated) {
+          const note = document.createElement("p")
+          note.textContent = "文档较长，此处展示前 64K 字符。"
+          detail.append(note)
+        }
+        if (hit.indexedAt) {
+          const date = document.createElement("p")
+          date.className = "qc-muted"
+          date.textContent = `索引更新：${new Date(hit.indexedAt).toLocaleString()}`
+          detail.append(date)
+        }
+        row.append(detail)
+      }
       if (hit.id) {
         const path = document.createElement("code")
         path.className = "qc-memory-path"
@@ -161,19 +195,21 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
       results.append(emptyState("quantcode.memory.denied", true))
       return
     }
+    lastHits = result.hits
+    total = result.total ?? result.hits.length
+    hasMore = !!result.hasMore
+    const selected = groupFilter.value
+    groupFilter.replaceChildren(option("全部授权范围", ""))
+    for (const scope of [...new Set(result.hits.map(hit => hit.scope).filter((value): value is string => !!value))]) {
+      groupFilter.append(option(scope === "global" ? "全组织共享" : scope.replace("groups/", "业务组 · ").replace("projects/", "项目 · "), scope))
+    }
+    groupFilter.value = selected
     renderHits(result.hits)
   }
 
   const runSearch = async () => {
     const query = lastQuery.trim()
     const request = ++requestId
-    if (!query) {
-      searching = false
-      submit.disabled = true
-      results.replaceChildren(emptyState("quantcode.memory.empty"))
-      results.setAttribute("aria-busy", "false")
-      return
-    }
     searching = true
     submit.disabled = true
     results.replaceChildren()
@@ -194,7 +230,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     } finally {
       if (request === requestId) {
         searching = false
-        submit.disabled = !lastQuery.trim()
+        submit.disabled = false
         results.setAttribute("aria-busy", "false")
       }
     }
@@ -212,12 +248,12 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
       sectionLabel("GROUP MEMORY"),
       (() => {
         const title = document.createElement("h3")
-        title.textContent = t("quantcode.memory.title")
+        title.textContent = "长期知识库"
         return title
       })(),
       (() => {
         const desc = document.createElement("p")
-        desc.textContent = t("quantcode.memory.intro")
+        desc.textContent = "浏览已有知识、能力卡与公共契约，按关键词检索并查看正文和来源。"
         return desc
       })(),
     )
@@ -234,7 +270,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     input.value = lastQuery
     input.addEventListener("input", () => {
       lastQuery = input.value
-      submit.disabled = searching || !lastQuery.trim()
+      submit.disabled = false
     })
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.isComposing) {
@@ -245,9 +281,15 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     submit.type = "button"
     submit.className = "qc-button qc-button-primary qc-memory-search-submit"
     submit.append(viewIcon("magnifying-glass"), document.createTextNode(t("quantcode.memory.search")))
-    submit.disabled = searching || !lastQuery.trim()
+    submit.disabled = searching
     submit.addEventListener("click", () => void runSearch())
-    form.append(input, submit)
+    const reset = document.createElement("button")
+    reset.type = "button"
+    reset.className = "qc-button qc-button-secondary"
+    reset.textContent = "全部知识"
+    reset.onclick = () => { lastQuery = ""; input.value = ""; groupFilter.value = ""; void runSearch() }
+    groupFilter.onchange = () => { results.replaceChildren(); renderHits(lastHits) }
+    form.append(input, submit, reset, groupFilter)
     root.append(form)
 
     root.append(results)
@@ -255,7 +297,7 @@ export function MemoryQueryView(props: MemoryQueryProps): HTMLElement {
     return results
   }
 
-  // 首屏：空查询 → 空态提示
   render()
+  if (props.fetcher) void runSearch()
   return root
 }

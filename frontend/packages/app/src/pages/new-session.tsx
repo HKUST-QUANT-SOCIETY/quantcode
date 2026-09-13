@@ -1,6 +1,8 @@
-import { Show, createEffect, createMemo, createResource, untrack } from "solid-js"
+import { Show, createEffect, createMemo, createResource, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
-import { useSearchParams } from "@solidjs/router"
+import { useNavigate, useSearchParams } from "@solidjs/router"
+import { base64Encode } from "@opencode-ai/core/util/encode"
+import { Button } from "@opencode-ai/ui/button"
 import { NewSessionDesignView } from "@/components/session"
 import { PromptInput } from "@/components/prompt-input"
 import { useSettingsCommand } from "@/components/settings-dialog"
@@ -21,6 +23,9 @@ import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
 import { isQuantCode } from "@/brand"
+import { useTabs } from "@/context/tabs"
+import { useLocal } from "@/context/local"
+import { prepareResearchWorkspace } from "@/components/quantcode/workspaces"
 
 const showWorkspaceBar = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
 
@@ -31,6 +36,9 @@ const showWorkspaceBar = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
  */
 export default function NewSessionPage() {
   const prompt = usePrompt()
+  const tabs = useTabs()
+  const local = useLocal()
+  const navigate = useNavigate()
   const sdk = useSDK()
   const sync = useSync()
   const serverSync = useServerSync()
@@ -62,7 +70,40 @@ export default function NewSessionPage() {
     worktree: undefined as string | undefined,
     autoSubmit: false,
     autoSubmitStarted: false,
+    title: "",
+    creating: false,
+    error: "",
   })
+  let alive = true
+  onCleanup(() => { alive = false })
+  const createTask = async (event: SubmitEvent) => {
+    event.preventDefault()
+    if (store.creating || !store.title.trim() || !prompt.ready()) return
+    const target = sdk()
+    const draftID = searchParams.draftId
+    const current = () => alive && sdk() === target && searchParams.draftId === draftID
+    setStore({ creating: true, error: "" })
+    try {
+      const workspace = await prepareResearchWorkspace(target.client, { preferred: target.directory, current })
+      const directory = await workspace.validate(target.directory)
+      const response = await target.client.session.create({ directory, title: store.title.trim() }, { throwOnError: true })
+      if (!response.data) throw new Error("未收到任务创建结果，请先在任务列表中检查。")
+      if (!current()) return
+      const session = response.data
+      // Carry an older unsent draft forward without executing it. This creates
+      // only the native session; all following messages use that same session.
+      const next = prompt.capture({ dir: base64Encode(directory), id: session.id })
+      next.set(prompt.current(), prompt.cursor())
+      prompt.context.items().forEach(next.context.add)
+      local.session.promote(directory, session.id)
+      if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
+      else navigate(`/${base64Encode(directory)}/session/${session.id}`)
+    } catch (error) {
+      if (current()) setStore("error", error instanceof Error ? error.message : "任务创建失败，请重试。")
+    } finally {
+      if (current()) setStore("creating", false)
+    }
+  }
 
   const submitWhenReady = () => {
     const controls = inputController()
@@ -99,7 +140,7 @@ export default function NewSessionPage() {
       const text = searchParams.prompt
       if (!text) return
       prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-      setStore("autoSubmit", searchParams.submit === "true")
+      setStore("autoSubmit", !isQuantCode && searchParams.submit === "true")
       setSearchParams({ ...searchParams, prompt: undefined })
     })
   })
@@ -136,6 +177,15 @@ export default function NewSessionPage() {
                   }
                 >
                   <div class="flex flex-col" classList={{ "gap-8": showWorkspaceBar, "gap-3": !showWorkspaceBar }}>
+                    <Show when={!isQuantCode} fallback={
+                      <form onSubmit={createTask} class="flex flex-col gap-5 rounded-xl border border-border-weak-base p-6" aria-label="新建任务">
+                        <p class="text-text-weak">先确定任务和工作目录，再开始对话。</p>
+                        <label class="flex flex-col gap-2">任务名称<input autofocus required maxLength={160} disabled={store.creating} value={store.title} onInput={event => setStore("title", event.currentTarget.value)} placeholder="例如：因子复核" class="rounded-md border border-border-weak-base bg-background-base px-3 py-2" /></label>
+                        <div class="flex flex-col gap-2"><span>工作目录</span><code class="break-all rounded-md bg-background-base p-3">{sdk().directory}</code><p class="text-sm text-text-weak">文件读写和命令都在此目录执行。可以通过下方项目选择器更换目录。</p></div>
+                        <Show when={store.error}><p role="alert" class="text-text-critical-base">{store.error}</p></Show>
+                        <Button type="submit" variant="primary" disabled={store.creating || !store.title.trim()} class="self-start">{store.creating ? "正在创建…" : "创建任务并进入对话"}</Button>
+                      </form>
+                    }>
                     <PromptInput
                       controls={inputController()}
                       variant="new-session"
@@ -152,6 +202,7 @@ export default function NewSessionPage() {
                         </Show>
                       }
                     />
+                    </Show>
                     <Show when={projectController.selected()}>
                       <div
                         class="flex min-h-7 min-w-0 items-center gap-0 text-v2-text-text-faint"

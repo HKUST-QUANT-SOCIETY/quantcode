@@ -1,4 +1,4 @@
-import { createRoot, createSignal, getOwner, onCleanup, runWithOwner, type Owner } from "solid-js"
+import { createRoot, getOwner, onCleanup, runWithOwner, type Owner } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import type { VcsInfo } from "@opencode-ai/sdk/v2/client"
@@ -45,6 +45,7 @@ export function createChildStoreManager(input: {
   const disposers = new Map<string, () => void>()
   const mcpDirectories = new Set<string>()
   const mcpToggles = new Map<string, (enabled: boolean) => void>()
+  const queryControls = new Map<string, { active: () => boolean; enable: () => void }>()
 
   const markKey = (key: DirectoryKey) => {
     if (!key) return
@@ -118,6 +119,7 @@ export function createChildStoreManager(input: {
     lifecycle.delete(key)
     mcpDirectories.delete(key)
     mcpToggles.delete(key)
+    queryControls.delete(key)
     const dispose = disposers.get(key)
     if (dispose) {
       dispose()
@@ -181,19 +183,21 @@ export function createChildStoreManager(input: {
         createRoot((dispose) => {
           const initialMeta = meta[0].value
           const initialIcon = icon[0].value
-          const [mcpEnabled, setMcpEnabled] = createSignal(false)
+          const [queries, setQueries] = createStore({ active: false, mcp: false })
 
-          const pathQuery = useQuery(() => input.queryOptions.path(key))
-          const mcpQuery = useQuery(() => ({ ...input.queryOptions.mcp(key), enabled: mcpEnabled() }))
-          const lspQuery = useQuery(() => input.queryOptions.lsp(key))
-          const providerQuery = useQuery(() => input.queryOptions.providers(key))
+          // Sidebar metadata must not start authenticated workspace requests.
+          // In particular, a saved local project is not a live SSH workspace.
+          const pathQuery = useQuery(() => ({ ...input.queryOptions.path(key), enabled: queries.active }))
+          const mcpQuery = useQuery(() => ({ ...input.queryOptions.mcp(key), enabled: queries.mcp }))
+          const lspQuery = useQuery(() => ({ ...input.queryOptions.lsp(key), enabled: queries.active }))
+          const providerQuery = useQuery(() => ({ ...input.queryOptions.providers(key), enabled: queries.active }))
 
           const child = createStore<State>({
             project: "",
             projectMeta: initialMeta,
             icon: initialIcon,
             get provider_ready() {
-              return !providerQuery.isLoading
+              return queries.active && !providerQuery.isLoading
             },
             get provider() {
               const EMPTY = { all: new Map(), connected: [], default: {} }
@@ -222,13 +226,13 @@ export function createChildStoreManager(input: {
             permission: {},
             question: {},
             get mcp_ready() {
-              return !mcpQuery.isLoading
+              return queries.mcp && !mcpQuery.isLoading
             },
             get mcp() {
               return mcpQuery.isLoading ? {} : (mcpQuery.data ?? {})
             },
             get lsp_ready() {
-              return !lspQuery.isLoading
+              return queries.active && !lspQuery.isLoading
             },
             get lsp() {
               return lspQuery.isLoading ? [] : (lspQuery.data ?? [])
@@ -241,7 +245,8 @@ export function createChildStoreManager(input: {
           })
           children[key] = child
           disposers.set(key, dispose)
-          mcpToggles.set(key, setMcpEnabled)
+          mcpToggles.set(key, enabled => setQueries("mcp", enabled))
+          queryControls.set(key, { active: () => queries.active, enable: () => setQueries("active", true) })
 
           const onPersistedInit = (init: Promise<string> | string | null, run: () => void) => {
             if (!(init instanceof Promise)) return
@@ -282,6 +287,7 @@ export function createChildStoreManager(input: {
     pinForOwner(key)
     if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
+    if (shouldBootstrap) queryControls.get(key)?.enable()
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
     }
@@ -293,6 +299,7 @@ export function createChildStoreManager(input: {
     const childStore = ensureChild(directory)
     if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
+    if (shouldBootstrap) queryControls.get(key)?.enable()
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
     }
@@ -343,6 +350,7 @@ export function createChildStoreManager(input: {
   return {
     children,
     ensureChild,
+    active: (directory: string) => queryControls.get(directoryKey(directory))?.active() ?? false,
     child,
     peek,
     projectMeta,

@@ -129,7 +129,16 @@ function reconcileFetched<T extends { id: string }>(
   return [...result.values()].sort((a, b) => cmp(a.id, b.id))
 }
 
-export function createServerSession(client: OpencodeClient, options?: { retry?: typeof retry }) {
+export function createServerSession(client: OpencodeClient, options?: { retry?: typeof retry; readTimeoutMs?: number }) {
+  const read = async <T>(request: (signal: AbortSignal) => Promise<T>) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), options?.readTimeoutMs ?? 8000)
+    try { return await request(controller.signal) }
+    catch (error) {
+      if (controller.signal.aborted) throw new Error("任务读取超时，连接可能正在恢复，请重试。")
+      throw error
+    } finally { clearTimeout(timer) }
+  }
   const [data, setData] = createStore({
     info: {} as Record<string, Session | undefined>,
     session_status: {} as Record<string, SessionStatus>,
@@ -234,7 +243,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     const pending = requests.get(sessionID)
     if (pending) return pending
     const active = generation(sessionID)
-    const request = client.session.get({ sessionID }).then((result) => {
+    const request = read(signal => client.session.get({ sessionID }, { signal })).then((result) => {
       if (!result.data) throw new Error(`Session not found: ${sessionID}`)
       if (generations.get(sessionID) !== active) return result.data
       return remember(result.data)
@@ -445,7 +454,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
   const fetchMessages = async (sessionID: string, limit: number, before?: string, onAttempt?: () => void) => {
     const response = await (options?.retry ?? retry)(() => {
       onAttempt?.()
-      return client.session.messages({ sessionID, limit, before })
+      return read(signal => client.session.messages({ sessionID, limit, before }, { signal }))
     })
     const items = (response.data ?? []).filter((item) => !!item?.info?.id)
     return {

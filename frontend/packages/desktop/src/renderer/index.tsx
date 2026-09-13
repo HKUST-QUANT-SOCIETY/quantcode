@@ -372,12 +372,13 @@ render(() => {
       }
       const restored = orgRestore.latest?.connection
       if (restored) list.push({ type: "http", displayName: restored.displayName, organizationAdmin: restored.organizationAdmin,
+        managedId: restored.managedId, previousUrls: restored.previousUrls, verifiedAt: restored.verifiedAt,
         http: { url: restored.url, username: restored.username, password: restored.password } })
       list.push(...readyWslConnections(wslServers.data))
       return list
     })
     const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(orgRestore.latest?.needsLogin ? "sidecar" : orgRestore.latest?.connection?.url ?? defaultServer.latest, wslServers.data)),
+      ServerConnection.Key.make(availableStartupServer(orgRestore.latest?.needsLogin ? "sidecar" : orgRestore.latest?.connection?.managedId ?? orgRestore.latest?.connection?.url ?? defaultServer.latest, wslServers.data)),
     )
 
     return (

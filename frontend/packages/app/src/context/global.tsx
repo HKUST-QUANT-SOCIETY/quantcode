@@ -36,28 +36,24 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
 
     const serverCtxs = new Map<
       ServerConnection.Key,
-      { dispose: () => void; serverCtx: ReturnType<typeof createServerCtx> }
+      { dispose: () => void; serverCtx: ReturnType<typeof createServerCtx>; connection: string }
     >()
 
     const owner = getOwner()
 
     const ensureServerCtx = (conn: ServerConnection.Any) => {
       const key = ServerConnection.key(conn)
+      const connection = JSON.stringify(conn.http)
       const existing = serverCtxs.get(key)
-      if (existing) return existing.serverCtx
+      if (existing?.connection === connection) return existing.serverCtx
+      existing?.dispose()
       const root = createRoot((dispose) => {
         const serverCtx = createServerCtx(conn, server.scope(key), server.projects.forServer(key))
-        return { dispose, serverCtx }
+        return { dispose, serverCtx, connection }
       }, owner as any)
       serverCtxs.set(key, root)
       return root.serverCtx
     }
-
-    createMemo(() => {
-      for (const conn of server.list) {
-        ensureServerCtx(conn)
-      }
-    })
 
     createEffect(() => {
       for (const [key] of serverCtxs) {

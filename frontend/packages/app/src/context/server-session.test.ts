@@ -3,6 +3,20 @@ import type { retry } from "@opencode-ai/core/util/retry"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 import { createServerSession } from "./server-session"
 
+test("a timed-out task read releases its in-flight slot and retries the same task", async () => {
+  let attempts = 0
+  const client = { session: { get: (input: { sessionID: string }, options: { signal: AbortSignal }) => {
+    attempts++
+    if (attempts > 1) return Promise.resolve({ data: session(input.sessionID) })
+    return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }))
+  } } } as unknown as OpencodeClient
+  const state = createServerSession(client, { readTimeoutMs: 10 })
+  await expect(state.resolve("same-task")).rejects.toThrow("读取超时")
+  expect(state.get("same-task")).toBeUndefined()
+  expect((await state.resolve("same-task")).id).toBe("same-task")
+  expect(attempts).toBe(2)
+})
+
 const session = (id: string, parentID?: string): Session => ({
   id,
   slug: id,

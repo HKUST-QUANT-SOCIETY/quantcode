@@ -1,6 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { type Accessor, batch, createEffect, createMemo } from "solid-js"
-import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
+import { createStore, produce, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { ServerScope } from "@/utils/server-scope"
 
@@ -8,6 +8,31 @@ type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
 type ServerProjectState = { projects: Record<string, StoredProject[]>; lastProject: Record<string, string> }
 const HEALTH_POLL_INTERVAL_MS = 10_000
+
+export function migrateManagedServerProjects<T extends ServerProjectState>(input: {
+  store: Store<T>; setStore: SetStoreFunction<T>; servers: ServerConnection.Any[];
+}) {
+  const setStore = input.setStore as unknown as SetStoreFunction<ServerProjectState>
+  batch(() => {
+    for (const conn of input.servers) {
+      if (conn.type !== "http" || !conn.managedId) continue
+      const id = conn.managedId
+      for (const alias of new Set([conn.http.url, ...(conn.previousUrls ?? [])])) {
+        if (alias === id) continue
+        if (input.store.projects[alias]) setStore("projects", produce(current => {
+          const previous = current[alias], next = current[id] ?? []
+          const known = new Set(next.map(project => project.worktree))
+          current[id] = [...next, ...previous.filter(project => !known.has(project.worktree))]
+          delete current[alias]
+        }))
+        if (input.store.lastProject[alias]) setStore("lastProject", produce(current => {
+          current[id] ??= current[alias]
+          delete current[alias]
+        }))
+      }
+    }
+  })
+}
 
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
@@ -130,6 +155,11 @@ export function resolveServerList(input: {
         : "http" in value
           ? value
           : { type: "http", http: value }
+    const managed = [...deduped.values()].find(item => item.type === "http" && item.managedId &&
+      (item.managedId === conn.managedId || (!conn.managedId && (item.http.url === conn.http.url || item.previousUrls?.includes(conn.http.url)))))
+    // Verified desktop restoration owns the live endpoint. Never overwrite it
+    // with yesterday's serialized loopback port or credentials.
+    if (managed && managed.type === "http" && (!conn.managedId || (managed.verifiedAt ?? 0) >= (conn.verifiedAt ?? 0))) continue
     const key = ServerConnection.key(conn)
 
     const existing = deduped.get(key)
@@ -159,6 +189,9 @@ export namespace ServerConnection {
     type: "http"
     http: HttpBase
     authToken?: boolean
+    managedId?: string
+    previousUrls?: string[]
+    verifiedAt?: number
   } & Base
 
   export type Sidecar = {
@@ -191,7 +224,7 @@ export namespace ServerConnection {
   export const key = (conn: Any): Key => {
     switch (conn.type) {
       case "http":
-        return Key.make(conn.http.url)
+        return Key.make(conn.managedId ?? conn.http.url)
       case "sidecar": {
         if (conn.variant === "wsl") return Key.make(`wsl:${conn.distro}`)
         return Key.make("sidecar")
@@ -206,7 +239,7 @@ export namespace ServerConnection {
 
   export const builtin = (conn: Any) => conn.type === "sidecar" && conn.variant === "base"
   export const local = (conn?: Any) =>
-    !!conn && (builtin(conn) || (conn.type === "http" && isLocalHost(conn.http.url) === "local"))
+    !!conn && (builtin(conn) || (conn.type === "http" && !conn.managedId && isLocalHost(conn.http.url) === "local"))
 }
 
 function isLoopbackHostname(hostname: string) {
@@ -241,6 +274,9 @@ function equivalentLoopbackUrl(left: string, right: string) {
  * those loopback aliases must not create a second active server scope.
  */
 export function resolveServerKey(key: ServerConnection.Key, servers: ServerConnection.Any[]) {
+  const managed = servers.filter(conn => conn.type === "http" && conn.managedId &&
+    (conn.managedId === key || conn.http.url === key || conn.previousUrls?.includes(key)))
+  if (managed.length === 1) return ServerConnection.key(managed[0])
   const match = servers.find((conn) => {
     const candidate = ServerConnection.key(conn)
     return candidate === key || equivalentLoopbackUrl(conn.http.url, key)
@@ -291,6 +327,11 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const active = createMemo(() => resolveServerKey(state.active, allServers()))
 
     createEffect(() => {
+      if (!ready()) return
+      migrateManagedServerProjects({ store, setStore, servers: allServers() })
+    })
+
+    createEffect(() => {
       const resolved = active()
       if (resolved !== state.active) setState("active", resolved)
     })
@@ -305,7 +346,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       if (!url_) return
       const conn: ServerConnection.Http = { ...input, authToken: undefined, http: { ...input.http, url: url_ } }
       return batch(() => {
-        const existing = store.list.findIndex((x) => url(x) === url_)
+        const existing = store.list.findIndex((x) => url(x) === url_ || (typeof x === "object" && "managedId" in x && !!conn.managedId && x.managedId === conn.managedId))
         if (existing !== -1) {
           setStore("list", existing, conn)
         } else {
@@ -318,7 +359,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     function remove(key: ServerConnection.Key) {
       const next = nextServerAfterRemoval(allServers(), key, props.defaultServer)
-      const list = store.list.filter((x) => url(x) !== key)
+      const list = store.list.filter((x) => (typeof x === "object" && "type" in x ? ServerConnection.key(x) : url(x)) !== key)
       batch(() => {
         setStore("list", list)
         if (state.active === key) setState("active", next)

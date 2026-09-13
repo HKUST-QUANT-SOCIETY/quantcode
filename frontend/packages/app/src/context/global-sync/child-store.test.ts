@@ -18,6 +18,32 @@ const persist: typeof import("@/utils/persist").persisted = (_target, store) => 
 const child = () => createStore({} as State)
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
 
+test("metadata-only cached projects remain passive until explicitly opened", () => {
+  const bootstraps: string[] = []
+  let manager: ReturnType<typeof createChildStoreManager> | undefined
+  const offset = querySingles.length
+  const dispose = createOwner(owner => {
+    manager = createChildStoreManager({ owner, scope: ServerScope.local, persist,
+      isBooting: () => false, isLoadingSessions: () => false,
+      onBootstrap: directory => { bootstraps.push(directory) }, onMcp() {}, onDispose() {},
+      translate: key => key, queryOptions: queryOptionsApi, global: { provider },
+    })
+  })
+  try {
+    if (!manager) throw new Error("manager required")
+    const directory = "/Users/fixture/Desktop/服务器"
+    manager.child(directory, { bootstrap: false })
+    const queries = querySingles.slice(offset)
+    expect(queries.every(query => query().enabled === false)).toBe(true)
+    expect(bootstraps).toEqual([])
+    expect(manager.active(directory)).toBe(false)
+    manager.child(directory)
+    expect(queries.find(query => query().queryKey?.[1] === "path")?.().enabled).toBe(true)
+    expect(bootstraps).toEqual([directory])
+    expect(manager.active(directory)).toBe(true)
+  } finally { dispose() }
+})
+
 const queryOptionsApi = {
   globalConfig: () => ({ queryKey: ["globalConfig"], queryFn: async () => ({}) }),
   projects: () => ({ queryKey: ["projects"], queryFn: async () => [] }),

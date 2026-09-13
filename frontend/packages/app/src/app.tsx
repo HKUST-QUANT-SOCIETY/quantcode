@@ -19,6 +19,7 @@ import {
   createRenderEffect,
   createResource,
   createSignal,
+  on,
   ErrorBoundary,
   For,
   type JSX,
@@ -61,6 +62,9 @@ import {
   sessionHref,
 } from "./utils/session-route"
 import { isSessionNotFoundError } from "./utils/server-errors"
+import { createStore } from "solid-js/store"
+import { usePlatform } from "@/context/platform"
+import { Button } from "@opencode-ai/ui/button"
 
 import Session from "@/pages/session"
 import { NewHome, LegacyHome, QuantCodeHome } from "@/pages/home"
@@ -128,19 +132,32 @@ function ResolvedTargetSessionRoute(props: { serverKey: () => ServerConnection.K
   const settings = useSettings()
   const tabs = useTabs()
   const sync = useServerSync()
+  const platform = usePlatform()
   const cached = createMemo(() => sync().session.lineage.peek(params.id))
-  const [resolved] = createResource(
-    () => {
-      if (cached()) return
-      return { id: params.id, server: props.serverKey(), sync: sync() }
-    },
-    ({ id, server, sync }) =>
-      sync.session.lineage.resolve(id).catch((error) => {
+  const [load, setLoad] = createStore({ resolved: undefined as ReturnType<typeof cached>, error: undefined as unknown, loading: false })
+  let reload = () => {}
+  createEffect(on(() => [params.id, props.serverKey(), sync()] as const, ([id, server, target]) => {
+    let live = true, revision = 0
+    const read = async () => {
+      const attempt = ++revision
+      setLoad({ resolved: undefined, error: undefined, loading: true })
+      try {
+        const result = await target.session.lineage.resolve(id)
+        if (live && attempt === revision) setLoad({ resolved: result, loading: false })
+      } catch (error) {
+        if (!live || attempt !== revision) return
+        setLoad({ error, loading: false })
         if (isSessionNotFoundError(error, id)) tabs.removeSessionTab({ server, sessionId: id })
-        throw error
-      }),
-  )
-  const current = createMemo(() => selectSessionLineage(params.id, cached(), resolved()))
+      }
+    }
+    reload = () => { void read() }
+    void read()
+    const off = platform.identity?.onSshConnectionState?.(connection => {
+      if (connection.server === server && connection.state === "connected" && load.error) void read()
+    })
+    onCleanup(() => { live = false; off?.() })
+  }))
+  const current = createMemo(() => selectSessionLineage(params.id, cached(), load.resolved))
   const directory = createMemo(() => current()?.session.directory)
   const targetDirectory = () => directory()!
 
@@ -155,8 +172,13 @@ function ResolvedTargetSessionRoute(props: { serverKey: () => ServerConnection.K
 
   return (
     <TargetServerScopedProviders directory={directory} sessionID={() => params.id}>
-      <Show when={!!current() || resolved.state !== "errored"} fallback={<ErrorPage error={resolved.error} />}>
-        <Show when={directory()}>
+        <Show when={directory()} fallback={
+          <div class="flex w-full flex-1 flex-col items-center justify-center gap-4 p-8" role="status">
+            <h1 class="text-lg font-semibold">{load.error ? "暂时无法打开任务" : "正在打开任务…"}</h1>
+            <p class="text-text-weak">{load.error instanceof Error ? load.error.message : load.error ? "工作连接尚未就绪，请检查登录或重试。" : "正在读取原任务和工作目录。"}</p>
+            <Show when={load.error}><Button onClick={reload}>重试打开原任务</Button></Show>
+          </div>
+        }>
           <Show
             when={settings.general.newLayoutDesigns()}
             fallback={<Navigate href={legacySessionHref(directory()!, params.id)} />}
@@ -168,7 +190,6 @@ function ResolvedTargetSessionRoute(props: { serverKey: () => ServerConnection.K
             </SDKProvider>
           </Show>
         </Show>
-      </Show>
     </TargetServerScopedProviders>
   )
 }

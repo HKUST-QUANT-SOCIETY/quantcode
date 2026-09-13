@@ -21,7 +21,7 @@ export type QuantCodeIdentityDisconnected = { status: "disconnected"; execution_
 /** 组织 SSH 登录向导：成员只提供本地私钥，服务器地址内置。 */
 export type QuantCodeSshLoginServer = { id: string; label: string; host: string; username: string; groups: QuantCodeIdentityGroup[] }
 export type QuantCodeSshAdministrator = { id: string; label: string; host: string; username: string; systemGroups: string[] }
-/** SSH operations access is separate from a QuantCode organization session. */
+/** SSH connection metadata belongs to the same verified administrator login. */
 export type QuantCodeServerAdminSession = { serverId: string; serverLabel: string; username: string; fingerprint: string; expires_at: string }
 export type QuantCodeServerAdminStatus = { session: QuantCodeServerAdminSession; report: string }
 export type QuantCodeSshLoginScan = {
@@ -31,11 +31,17 @@ export type QuantCodeSshLoginScan = {
   administrators?: QuantCodeSshAdministrator[]
   failed: { id: string; reason: string }[]
 }
-export type QuantCodeSshConnection = { url: string; username: string; password: string; displayName: string; organizationAdmin?: boolean }
+export type QuantCodeSshConnection = { url: string; username: string; password: string; displayName: string; organizationAdmin?: boolean; managedId?: string; previousUrls?: string[]; verifiedAt?: number }
+export type QuantCodeConnectionState = { server: string; url: string; state: "connecting" | "connected" | "reconnecting" | "offline" | "closed"; generation: number; reason?: string }
 export type QuantCodeSshLoginChoice = { serverId: string; group: QuantCodeIdentityGroup } | { serverId: string; administrator: "servers" | "organization" }
 export type QuantCodeSshLoginResult = { mode?: "member" | "organization-admin"; admin?: QuantCodeServerAdminSession; connection: QuantCodeSshConnection; session: QuantCodeIdentitySession }
-  | { mode: "server-admin"; admin: QuantCodeServerAdminSession; connection?: undefined; session?: undefined }
 export type QuantCodeDesktopIdentity = {
+  sshProgress?(): Promise<string[]>
+  sshSelectKey?(): Promise<boolean>
+  sshCancel?(): Promise<void>
+  sshConnectionState?(server: QuantCodeIdentityServer): Promise<QuantCodeConnectionState | null>
+  sshReconnect?(server: QuantCodeIdentityServer): Promise<void>
+  onSshConnectionState?(listener: (state: QuantCodeConnectionState) => void): () => void
   inspect(server: QuantCodeIdentityServer): Promise<QuantCodeIdentityInspection>
   connect(input: QuantCodeIdentityServer & { identityId?: string }): Promise<QuantCodeIdentitySession>
   importKey(server: QuantCodeIdentityServer): Promise<{ fingerprint: string } | null>
@@ -45,10 +51,9 @@ export type QuantCodeDesktopIdentity = {
   /** 私钥路径只留在主进程；重试复用刚选的文件。 */
   sshScan(input: { chooseKey?: boolean; username?: string }): Promise<QuantCodeSshLoginScan | null>
   sshConnect(input: QuantCodeSshLoginChoice): Promise<QuantCodeSshLoginResult>
-  sshAdminStatus(): Promise<QuantCodeServerAdminStatus | null>
+  sshAdminStatus(input?: { serverId?: string }): Promise<QuantCodeServerAdminStatus | null>
   sshAdminDisconnect(): Promise<void>
   /** 恢复隧道并检查既有会话，不重新签发登录。 */
   sshRestore(): Promise<{ connection: QuantCodeSshConnection; session: QuantCodeIdentitySession | null; admin?: QuantCodeServerAdminSession; needsLogin?: false }
-    | { connection?: undefined; session?: undefined; admin?: undefined; needsLogin: true }
-    | { connection?: undefined; session?: undefined; admin: QuantCodeServerAdminSession; needsLogin?: false } | null>
+    | { connection?: undefined; session?: undefined; admin?: undefined; needsLogin: true } | null>
 }

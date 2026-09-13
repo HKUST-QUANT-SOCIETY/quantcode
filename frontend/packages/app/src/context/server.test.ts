@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
+  migrateManagedServerProjects,
   createServerProjects,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
@@ -12,6 +13,34 @@ import {
 import { ServerScope } from "@/utils/server-scope"
 
 describe("resolveServerList", () => {
+  test("managed project migration removes legacy store keys and is idempotent", () => {
+    const old = "http://127.0.0.1:48199", id = "quantcode-ssh:server-c:member:key:member"
+    const project = { worktree: "/srv/member", expanded: true }
+    const [store, setStore] = createStore({ projects: { [old]: [project], [id]: [project] }, lastProject: { [old]: project.worktree } as Record<string, string> })
+    const servers: ServerConnection.Any[] = [{ type: "http", managedId: id, previousUrls: [old], http: { url: "http://127.0.0.1:49000" } }]
+    migrateManagedServerProjects({ store, setStore, servers })
+    expect(Object.keys(store.projects)).toEqual([id])
+    expect(Object.keys(store.lastProject)).toEqual([id])
+    expect(store.projects[id]).toHaveLength(1)
+    const current = store.projects[id]
+    migrateManagedServerProjects({ store, setStore, servers })
+    expect(store.projects[id]).toBe(current)
+    expect(store.lastProject[id]).toBe(project.worktree)
+  })
+  test("restored managed connections keep their identity when the local port changes", () => {
+    const managed: ServerConnection.Http = { type: "http", managedId: "quantcode-ssh:server-c:member:key:member",
+      previousUrls: ["http://127.0.0.1:48199"], http: { url: "http://127.0.0.1:49000", username: "quantcode", password: "current" } }
+    const list = resolveServerList({ props: [managed], stored: [
+      { type: "http", http: { url: "http://127.0.0.1:48199", password: "old" } },
+      { ...managed, http: { url: "http://127.0.0.1:48200", password: "old" } },
+    ] })
+    expect(list).toEqual([managed])
+    expect(resolveServerKey(ServerConnection.Key.make("http://127.0.0.1:48199"), list)).toBe(ServerConnection.Key.make(managed.managedId!))
+    expect(ServerConnection.local(managed)).toBe(false)
+    expect(ServerConnection.key({ ...managed, http: { url: "http://127.0.0.1:50000" } })).toBe(ServerConnection.key(managed))
+    const relogged = { ...managed, verifiedAt: 200, http: { ...managed.http, password: "renewed" } }
+    expect(resolveServerList({ props: [{ ...managed, verifiedAt: 100 }], stored: [relogged] })[0].http.password).toBe("renewed")
+  })
   test("lets startup auth_token credentials override a persisted same-url server", () => {
     const list = resolveServerList({
       stored: [{ url: "https://server.example.test" }],

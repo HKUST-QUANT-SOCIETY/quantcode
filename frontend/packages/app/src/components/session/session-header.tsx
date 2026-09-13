@@ -238,6 +238,9 @@ export function SessionHeader() {
     messageAgentColor(params.id ? sync().data.message[params.id] : undefined, sync().data.agent),
   )
   const v2ActionsState = createMemo<SessionHeaderV2ActionsState>(() => ({
+    terminalOpened: view().terminal.opened(),
+    terminalLabel: language.t("command.terminal.toggle"),
+    onTerminalToggle: toggleTerminal,
     statusVisible: status(),
     statusLabel: language.t("status.popover.trigger"),
     reviewLabel: language.t("command.review.toggle"),
@@ -513,6 +516,9 @@ export function SessionHeader() {
                 </div>
               }
             >
+              <Show when={isQuantCode && projectDirectory()}>
+                <button type="button" onClick={copyPath} title={projectDirectory()} aria-label={`工作目录：${projectDirectory()}，点击复制`} class="max-w-[360px] truncate px-2 text-12-regular text-text-weak">{projectDirectory()}</button>
+              </Show>
               <SessionHeaderV2Actions state={v2ActionsState()} />
             </Show>
           </Portal>
@@ -523,6 +529,9 @@ export function SessionHeader() {
 }
 
 type SessionHeaderV2ActionsState = {
+  terminalOpened: boolean
+  terminalLabel: string
+  onTerminalToggle: () => void
   statusVisible: boolean
   statusLabel: string
   reviewLabel: string
@@ -547,6 +556,12 @@ function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
           <StatusPopoverV2 />
         </Tooltip>
       </Show>
+      <TooltipV2 placement="bottom" value={props.state.terminalLabel}>
+        <IconButtonV2 type="button" variant="ghost-muted" size="large" class="!w-9 shrink-0"
+          state={props.state.terminalOpened ? "pressed" : undefined} onClick={props.state.onTerminalToggle}
+          aria-label={props.state.terminalLabel} aria-expanded={props.state.terminalOpened} aria-controls="terminal-panel"
+          icon={<Icon name={props.state.terminalOpened ? "terminal-active" : "terminal"} />} />
+      </TooltipV2>
       <Show when={props.state.reviewVisible}>
         <TooltipV2
           placement="bottom"

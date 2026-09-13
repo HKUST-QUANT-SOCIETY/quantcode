@@ -1434,7 +1434,7 @@ export function QuantCodeHome() {
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
 
-  const startResearch = (task: string) => {
+  const createTask = () => {
     const conn = server.current
     if (!conn) return false
 
@@ -1447,10 +1447,10 @@ export function QuantCodeHome() {
     return new Promise<boolean>((resolve) => {
       pickDirectory({
         server: conn,
-        title: "选择研究项目",
+        title: "选择任务工作目录",
         multiple: false,
         preferred: projects.last() ?? projects.list()[0]?.worktree,
-        useDefault: true,
+        useDefault: false,
         onSelect: (result) => {
           const directory = Array.isArray(result) ? result[0] : result
           if (!directory || !server.current || ServerConnection.key(server.current) !== key) {
@@ -1459,7 +1459,7 @@ export function QuantCodeHome() {
           }
           projects.open(directory)
           projects.touch(directory)
-          tabs.newDraft({ server: key, directory }, task, { submit: true })
+          tabs.newDraft({ server: key, directory })
           resolve(true)
         },
       })
@@ -1468,7 +1468,7 @@ export function QuantCodeHome() {
 
   return (
     <div class="size-full min-h-0 min-w-0 overflow-hidden">
-      <QuantCodePanel onSubmitInstruction={startResearch} />
+      <QuantCodePanel onCreateTask={createTask} />
     </div>
   )
 }

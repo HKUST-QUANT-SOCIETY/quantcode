@@ -105,9 +105,11 @@ export function NativeApprovalQueue(props: { scope: string; client: OpencodeClie
     onCleanup(() => lifetime.abort())
   }))
 
-  return <section class="qc-native-gates">
-    <div class="qc-section-toolbar"><h3>组织审批</h3><RefreshAction label="刷新组织审批" disabled={state.loading || !!state.busy} onClick={() => void load()} /></div>
-    <p class="qc-muted">这里显示当前身份有权处理的任务；批准只对应所列资源、参数和版本。</p>
+  return <section class="qc-detail-body qc-native-gates" aria-label="组织审批">
+    <header class="qc-native-gates-header">
+      <div class="qc-view-toolbar"><h3>组织审批</h3><RefreshAction label="刷新组织审批" disabled={state.loading || !!state.busy} onClick={() => void load()} /></div>
+      <p class="qc-muted">这里显示当前身份有权处理的任务；批准只对应所列资源、参数和版本。</p>
+    </header>
     <Show when={state.error}><p role="alert" class="qc-error-banner">{state.error}</p></Show>
     <Show when={state.notice}><p role="status">{state.notice}</p></Show>
     <For each={Object.values(state.outcomes)}>{outcome => <article class="qc-detail-section" aria-label="审批提交结果">
@@ -124,7 +126,7 @@ export function NativeApprovalQueue(props: { scope: string; client: OpencodeClie
     </article>}</For>
     <Show when={!state.loading && !state.error && !state.gates.length && !Object.keys(state.outcomes).length}><WorkspaceEmpty icon="shield" title="没有待处理的组织审批" /></Show>
     <For each={state.gates}>{gate => <article class="qc-detail-section qc-native-gate">
-      <div class="qc-section-toolbar"><strong>{gate.request.kind === "merge" ? "共享写入" : "受限资源访问"}</strong><span>待审批</span></div>
+      <div class="qc-view-toolbar"><strong>{gate.request.kind === "merge" ? "共享写入" : "受限资源访问"}</strong><span class="qc-status qc-status-waiting_for_human">待审批</span></div>
       <p class="qc-muted">申请人 · {gate.owner.actor_id} · {gate.owner.group}</p>
       <h4>{gate.request.resource}</h4>
       <Show when={gate.request.resource_version}><p>预期版本 · {gate.request.resource_version}</p></Show>
