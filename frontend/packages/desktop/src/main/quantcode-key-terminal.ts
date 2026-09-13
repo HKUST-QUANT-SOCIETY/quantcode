@@ -4,11 +4,11 @@ import { isAbsolute, win32 } from 'node:path'
 import { systemSshExecutable } from './quantcode-ssh-login'
 
 const run = promisify(execFile)
-export function unlockCommand(file: string, windows = process.platform === 'win32') {
+export function unlockCommand(file: string, windows = process.platform === 'win32', agentSocket = process.env.SSH_AUTH_SOCK) {
   if (!(windows ? win32.isAbsolute(file) : isAbsolute(file)) || file.includes('\0')) throw new Error('请先选择本地私钥。')
   const executable = systemSshExecutable('ssh-add')
-  if (windows) return `& '${executable.replace(/'/g, "''")}' '${file.replace(/'/g, "''")}'`
-  return `${executable} '${file.replace(/'/g, "'\\''")}'`
+  if (windows) return `${agentSocket ? `$env:SSH_AUTH_SOCK = '${agentSocket.replace(/'/g, "''")}'; ` : ''}& '${executable.replace(/'/g, "''")}' '${file.replace(/'/g, "''")}'`
+  return `${agentSocket ? `SSH_AUTH_SOCK='${agentSocket.replace(/'/g, "'\\''")}' ` : ''}${executable} '${file.replace(/'/g, "'\\''")}'`
 }
 
 export async function openKeyTerminal(file: string) {

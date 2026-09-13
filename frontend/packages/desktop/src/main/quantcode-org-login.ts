@@ -399,9 +399,14 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
       lifetime.abort()
       for (const tunnel of tunnels.values()) tunnel.stop()
       tunnels.clear()
+      profiles.clear()
       choices.clear()
       administrators.clear()
+      adminUsers.clear()
       activeAdmin = undefined
+      pendingLogin = undefined
+      completed = undefined
+      keyFile = fingerprint = username = activeUrl = ''
     },
   }
 }
