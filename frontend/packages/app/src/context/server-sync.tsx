@@ -36,6 +36,7 @@ import { ServerConnection, useServer } from "./server"
 import { retry } from "@opencode-ai/core/util/retry"
 import type { ServerScope } from "@/utils/server-scope"
 import { persisted } from "@/utils/persist"
+import { isQuantCode } from '@/brand'
 import { toggleMcp } from "./global-sync/mcp"
 import { createServerSession } from "./server-session"
 
@@ -83,6 +84,7 @@ function makeQueryOptionsApi(
 export type QueryOptionsApi = ReturnType<typeof makeQueryOptionsApi>
 
 export function createServerSyncContextInner(serverSDK: ServerSDK) {
+  const loginOnly = isQuantCode && serverSDK.server.type === 'sidecar'
   const language = useLanguage()
   const owner = getOwner()
   if (!owner) throw new Error("ServerSync must be created within owner")
@@ -107,12 +109,16 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const queryOptionsApi = makeQueryOptionsApi(serverSDK.scope, () => serverSDK.client, sdkFor)
 
   const [configQuery, providerQuery, pathQuery] = useQueries(() => ({
-    queries: [queryOptionsApi.globalConfig(), queryOptionsApi.providers(null), queryOptionsApi.path(null)],
+    queries: [
+      { ...queryOptionsApi.globalConfig(), enabled: !loginOnly },
+      { ...queryOptionsApi.providers(null), enabled: !loginOnly },
+      { ...queryOptionsApi.path(null), enabled: !loginOnly },
+    ],
   }))
 
   const [globalStore, setGlobalStore] = createStore<GlobalStore>({
     get ready() {
-      return !bootstrap.isPending
+      return loginOnly || !bootstrap.isPending
     },
     project: [],
     provider_auth: {},
@@ -162,6 +168,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const bootstrap = useQuery(() => ({
     queryKey: [serverSDK.scope, "bootstrap"],
     queryFn: async () => {
+      if (loginOnly) return Date.now()
       await bootstrapGlobal({
         serverSDK: serverSDK.client,
         scope: serverSDK.scope,
@@ -201,6 +208,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     persist: persisted,
     isBooting: (directory) => booting.has(directory),
     isLoadingSessions: (directory) => sessionLoads.has(directory),
+    workspaceQueries: !loginOnly,
     onBootstrap: (directory) => {
       void bootstrapInstance(directory)
     },
@@ -232,6 +240,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   })
 
   async function loadSessions(directory: string, options?: { limit?: number }) {
+    if (loginOnly) return
     const key = directoryKey(directory)
     const pending = sessionLoads.get(key)
     if (pending) {
@@ -312,6 +321,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   }
 
   async function bootstrapInstance(directory: string) {
+    if (loginOnly) return
     const key = directoryKey(directory)
     if (!key || !children.active(key)) return
     const pending = booting.get(key)
@@ -410,6 +420,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   })
 
   onMount(() => {
+    if (loginOnly) return
     if (typeof requestAnimationFrame === "function") {
       eventFrame = requestAnimationFrame(() => {
         eventFrame = undefined

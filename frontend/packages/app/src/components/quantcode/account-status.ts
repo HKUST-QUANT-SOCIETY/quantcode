@@ -6,6 +6,7 @@ export function workspaceAccount(input: {
   organizationStatus: "loading" | "ready" | "error"
   actor: string
   role: string
+  verificationPending?: boolean
   operations?: QuantCodeServerAdminSession
 }, now = Date.now()) {
   const organizationReady = input.organizationStatus === "ready"
@@ -16,8 +17,8 @@ export function workspaceAccount(input: {
     administrator,
     operationsConnected,
     operationsContext: operationsConnected && input.view === "server-admin",
-    label: organizationReady ? input.actor : "重新登录",
+    label: organizationReady ? input.actor : input.verificationPending ? '身份待核验' : "重新登录",
     showLoginNotice: !organizationReady,
-    organizationLabel: organizationReady ? input.actor : "尚未登录",
+    organizationLabel: organizationReady ? input.actor : input.verificationPending ? '暂时无法核验身份' : "尚未登录",
   }
 }

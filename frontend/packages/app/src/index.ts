@@ -19,5 +19,5 @@ export {
   type WslServersPlatform,
   type WslServersState,
 } from "./wsl/types"
-export { ServerConnection } from "./context/server"
+export { ServerConnection, useServer } from "./context/server"
 export { handleNotificationClick } from "./utils/notification-click"

@@ -26,6 +26,7 @@ export function createChildStoreManager(input: {
   persist: typeof persisted
   isBooting: (directory: string) => boolean
   isLoadingSessions: (directory: string) => boolean
+  workspaceQueries?: boolean
   onBootstrap: (directory: string) => void
   onMcp: (directory: string, setStore: SetStoreFunction<State>) => void
   onDispose: (directory: string) => void
@@ -286,7 +287,7 @@ export function createChildStoreManager(input: {
     const childStore = ensureChild(directory)
     pinForOwner(key)
     if (options.mcp) enableMcp(directory, key, childStore)
-    const shouldBootstrap = options.bootstrap ?? true
+    const shouldBootstrap = input.workspaceQueries !== false && (options.bootstrap ?? true)
     if (shouldBootstrap) queryControls.get(key)?.enable()
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
@@ -298,7 +299,7 @@ export function createChildStoreManager(input: {
     const key = directoryKey(directory)
     const childStore = ensureChild(directory)
     if (options.mcp) enableMcp(directory, key, childStore)
-    const shouldBootstrap = options.bootstrap ?? true
+    const shouldBootstrap = input.workspaceQueries !== false && (options.bootstrap ?? true)
     if (shouldBootstrap) queryControls.get(key)?.enable()
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
@@ -307,6 +308,7 @@ export function createChildStoreManager(input: {
   }
 
   function enableMcp(directory: string, key: DirectoryKey, childStore: [Store<State>, SetStoreFunction<State>]) {
+    if (input.workspaceQueries === false) return
     if (mcpDirectories.has(key)) return
     mcpDirectories.add(key)
     mcpToggles.get(key)?.(true)

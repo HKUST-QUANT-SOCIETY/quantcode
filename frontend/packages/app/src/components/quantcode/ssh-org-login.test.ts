@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { QuantCodeSshLoginScan, QuantCodeSshLoginResult } from "../../identity"
 import { SshOrgLoginWizard } from "./ssh-login"
+import { createRoot } from 'solid-js'
 
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 const scan: QuantCodeSshLoginScan = {
@@ -21,6 +22,81 @@ function button(view: HTMLElement, text: string) {
 }
 
 describe("organization login wizard", () => {
+  test('leaving before entry commits aborts the read; a committed server handoff may finish', async () => {
+    for (const committed of [false, true]) {
+      let dispose = () => {}, aborted = false
+      const entered = Promise.withResolvers<void>()
+      const view = createRoot(stop => {
+        dispose = stop
+        return SshOrgLoginWizard({ sshScan: async () => scan, sshConnect: async () => connected,
+          onEnter: async (_result, signal, onCommit) => {
+            if (committed) onCommit?.()
+            signal!.addEventListener('abort', () => { aborted = true }, { once: true })
+            entered.resolve()
+            await new Promise(resolve => setTimeout(resolve, 5))
+          } })
+      })
+      button(view, '重新登录').click(); await flush()
+      button(view, 'Server B').click(); await entered.promise
+      dispose()
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(aborted).toBe(!committed)
+    }
+  })
+  test('cancel after authentication keeps the session and resumes entry without signing again', async () => {
+    let logins = 0, entries = 0
+    const entered = Promise.withResolvers<void>()
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => true, sshScan: async () => scan,
+      sshConnect: async () => { logins++; return connected }, onEnter: async (_result, signal) => {
+        entries++
+        if (entries !== 1) return
+        entered.resolve()
+        await new Promise<void>((_resolve, reject) => signal!.addEventListener('abort', () => reject(new Error('entry stopped')), { once: true }))
+      } })
+    button(view, '重新登录').click(); await flush()
+    button(view, 'Server B').click(); await entered.promise
+    button(view, '取消进入').click(); await flush()
+    expect(view.textContent).toContain('组织会话仍有效')
+    expect(button(view, '重新登录')).toBeUndefined()
+    button(view, '继续进入工作区').click(); await flush()
+    expect(logins).toBe(1)
+    expect(entries).toBe(2)
+  })
+  test('a lost authentication response is reconciled and can be explicitly logged out', async () => {
+    let issued = false, exits = 0, entries = 0
+    const view = SshOrgLoginWizard({ sshScan: async () => scan,
+      sshConnect: async () => { issued = true; throw new Error('认证结果尚未确认') },
+      sshResolve: async () => issued ? connected : null,
+      sshExitAttempt: async () => { exits++; issued = false }, onEnter: async () => { entries++ } })
+    button(view, '重新登录').click(); await flush()
+    button(view, 'Server B').click(); await flush(); await flush()
+    expect(view.textContent).toContain('已认证为')
+    expect(entries).toBe(0)
+    button(view, '退出本次登录').click(); await flush()
+    expect(exits).toBe(1)
+    expect(button(view, '重新登录')).toBeTruthy()
+  })
+  test('pre-authentication errors stay visible after the result check finds no session', async () => {
+    const view = SshOrgLoginWizard({ sshScan: async () => scan, sshConnect: async () => { throw new Error('公钥未登记') },
+      sshResolve: async () => null, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    button(view, 'Server B').click(); await flush(); await flush()
+    expect(view.querySelector('[role="alert"]')?.textContent).toContain('公钥未登记')
+    expect(button(view, '重新登录')).toBeTruthy()
+  })
+  test('locked key offers native unlock and retries the same selection', async () => {
+    let selected = 0, scans = 0, unlocked = 0
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => { selected++; return true },
+      sshScan: async () => { if (++scans === 1) throw new Error('私钥需要解锁。'); return scan },
+      sshUnlockKey: async () => { unlocked++ }, sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    button(view, '在本机终端解锁私钥').click(); await flush()
+    button(view, '重新探测所选身份').click(); await flush()
+    expect(selected).toBe(1)
+    expect(unlocked).toBe(1)
+    expect(scans).toBe(2)
+    expect(view.querySelectorAll('.qc-ssh-group-option')).toHaveLength(2)
+  })
   test("key selection is a distinct phase and does not display stale restore logs as a scan", async () => {
     const picked = Promise.withResolvers<boolean>()
     const calls: unknown[] = []
@@ -78,7 +154,7 @@ describe("organization login wizard", () => {
     expect(button(view, "重新登录").disabled).toBe(false)
     expect(cancelled).toBe(1)
   })
-  test("a cancelled connection cannot enter a workspace when its old response arrives", async () => {
+  test("cancelled entry preserves an issued login for confirmation instead of claiming cancellation", async () => {
     const pending = Promise.withResolvers<QuantCodeSshLoginResult>()
     let entered = 0
     const view = SshOrgLoginWizard({ sshScan: async () => scan, sshConnect: () => pending.promise,
@@ -86,11 +162,13 @@ describe("organization login wizard", () => {
     button(view, "重新登录").click()
     await flush()
     button(view, "Server B").click()
-    button(view, "取消本次登录").click()
+    button(view, "取消进入").click()
     pending.resolve(connected)
     await flush()
     expect(entered).toBe(0)
-    expect(button(view, "重新登录").disabled).toBe(false)
+    expect(view.textContent).toContain('已认证为')
+    expect(button(view, '继续进入工作区')).toBeTruthy()
+    expect(button(view, '重新登录')).toBeUndefined()
   })
   test("administrators have one full-workspace login, with no work-versus-operations choice", async () => {
     let selected: unknown

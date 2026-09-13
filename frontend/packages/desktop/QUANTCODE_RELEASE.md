@@ -64,11 +64,11 @@ and tests actual key import, signing, verification, and logout with a temporary 
 
 ```bash
 gh workflow run quantcode-desktop.yml -R HKUST-QUANT-SOCIETY/quantcode \
-  --ref main -f version=1.2.0-test.1 -f internal_test=true -f publish=true -f sign=false
+  --ref main -f version=1.2.0-test.2 -f internal_test=true -f publish=true -f sign=false
 ```
 
-The published title is **QuantCode Test V1.2 (1.2.0-test.1)** and the tag remains
-`quantcode-v1.2.0-test.1`. The manifest reports `releaseClass=internal-test` and
+The published title is **QuantCode Test V1.2 (1.2.0-test.2)** and the tag remains
+`quantcode-v1.2.0-test.2`. The manifest reports `releaseClass=internal-test` and
 `platformTrust.macos/windows=unsigned-test`; it cannot report `approved-release`.
 The release is always a prerelease and is never made GitHub's latest stable
 release. Its publisher uses the separate `quantcode-test-publish` environment

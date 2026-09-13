@@ -55,6 +55,7 @@ import { SshLoginView, SshOrgLoginWizard, loginError, type SshConnectFn, type Ss
 import { CapabilityCatalogView } from "./capability-catalog"
 import { ApprovalQueue } from "./approval-queue"
 import { NativeApprovalQueue } from "./native-approval-queue"
+import { monitorIdentity } from './identity-monitor'
 import { DeploymentPanel } from "./deployment-panel"
 import { KnowledgeReview } from "./knowledge-review"
 import { RunHistoryView } from "./run-history"
@@ -517,6 +518,7 @@ function SettingsPanel(props: {
   skills: QuantCodeSkill[]
   skillsStatus: "loading" | "ready" | "error"
   sessionStatus: "loading" | "ready" | "error"
+  identityPending?: boolean
   sessionRole: string
   sessionActor: string
   workspacePath: string
@@ -538,8 +540,9 @@ function SettingsPanel(props: {
   onOpenGitgraph: () => void
   importKey?: () => Promise<{ fingerprint: string } | null>
   /** 组织 SSH 登录向导桥（desktop 提供）；未注入时回退到服务器驱动的 SshLoginView。 */
-  orgSshLogin?: Pick<QuantCodeDesktopIdentity, "sshScan" | "sshConnect" | "sshProgress" | "sshSelectKey" | "sshCancel">
-  orgSshOnEnter?: (result: QuantCodeSshLoginResult, signal?: AbortSignal) => Promise<void>
+  orgSshLogin?: QuantCodeDesktopIdentity
+  onIdentityCheck?: () => void
+  orgSshOnEnter?: (result: QuantCodeSshLoginResult, signal?: AbortSignal, onCommit?: () => void) => Promise<void>
   orgSshStart?: boolean
   serverAdminSession?: QuantCodeServerAdminSession
   orgSshOnStarted?: () => void
@@ -547,7 +550,7 @@ function SettingsPanel(props: {
   const dialog = useDialog()
   const [tab, setTab] = createSignal("account")
   const accountStatus = createMemo(() => workspaceAccount({ view: "settings", organizationStatus: props.sessionStatus,
-    actor: props.sessionActor, role: props.sessionRole, operations: props.serverAdminSession }))
+    actor: props.sessionActor, role: props.sessionRole, operations: props.serverAdminSession, verificationPending: props.identityPending }))
   const tabs = [{ id: "account", label: "账号与连接" }, { id: "providers", label: "模型供应商" }, { id: "preferences", label: "桌面偏好" }]
   return (
     <>
@@ -567,7 +570,7 @@ function SettingsPanel(props: {
           <Show when={props.sessionStatus === "ready"}><span class="qc-status">{props.sessionRole === "admin" ? "管理员" : props.sessionRole === "approver" ? "审批人" : "研究员"}</span></Show>
         </div>
         <span class="qc-connection-pill" classList={{ "is-disconnected": props.sessionStatus !== "ready" }}>
-          <i /> {props.sessionStatus === "ready" ? "组织会话已认证" : "未认证"}
+          <i /> {props.sessionStatus === "ready" ? "组织会话已认证" : props.identityPending ? '等待重新核验' : "未认证"}
         </span>
       </div>
             <div class="qc-setting-row">
@@ -586,10 +589,13 @@ function SettingsPanel(props: {
         <Show when={props.orgSshLogin}>
           <SshOrgLoginWizard sshScan={input => props.orgSshLogin!.sshScan(input)}
             sshSelectKey={props.orgSshLogin!.sshSelectKey} sshCancel={props.orgSshLogin!.sshCancel}
+            sshUnlockKey={props.orgSshLogin!.sshUnlockKey} sshAgentKeys={props.orgSshLogin!.sshAgentKeys}
+            sshSelectAgent={props.orgSshLogin!.sshSelectAgent} sshResolve={props.orgSshLogin!.sshResolve}
+            sshExitAttempt={props.orgSshLogin!.sshExitAttempt} onExited={props.onIdentityCheck}
             sshConnect={input => props.orgSshLogin!.sshConnect(input)}
             sshProgress={props.orgSshLogin!.sshProgress}
             autoStart={props.orgSshStart} onStarted={props.orgSshOnStarted}
-            onEnter={async (result, signal) => { await props.orgSshOnEnter?.(result, signal) }} />
+            onEnter={async (result, signal, onCommit) => { await props.orgSshOnEnter?.(result, signal, onCommit) }} />
         </Show>
         <Show when={props.sshSession || !props.orgSshLogin}>
           <Show keyed when={{ identities: props.sshIdentities, session: props.sshSession }}>
@@ -598,6 +604,7 @@ function SettingsPanel(props: {
           </Show>
         </Show>
       </div>
+      <Show when={props.identityPending}><button type="button" class="qc-button qc-button-secondary" onClick={() => props.onIdentityCheck?.()}>重新核验组织身份</button></Show>
       </section>
       <section class="qc-preferences-section">
       <div class="qc-section-heading"><Icon name="settings-gear" /><h3>工作区配置</h3></div>
@@ -704,6 +711,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     historyScope: "",
     githubUnread: 0,
     identityRevision: 0,
+    identityPending: false,
     unifiedRuntime: false,
     runtimeStatus: "loading" as "loading" | "ready" | "error",
     sshIdentities: [] as SshIdentity[],
@@ -716,7 +724,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     error: "",
   })
   const accountStatus = createMemo(() => workspaceAccount({ view: state.view, organizationStatus: state.sessionStatus,
-    actor: state.sessionActor, role: state.sessionRole, operations: state.adminSession }))
+    actor: state.sessionActor, role: state.sessionRole, operations: state.adminSession, verificationPending: state.identityPending }))
   createEffect(() => { if (searchParams.settings) setState("view", "settings") })
   let taskInput: HTMLTextAreaElement | undefined
   let slashPopoverRef: HTMLDivElement | undefined
@@ -883,9 +891,10 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     const client = serverSDK().client
     const serverKey = String(server.key)
     let cancelled = false
+    const loginOnly = serverKey === 'sidecar' && !!platform.identity?.sshScan
     setState({ sshIdentities: [], sshSession: undefined, sshIdentityError: "" })
     setState({ unifiedRuntime: false, runtimeStatus: "loading" })
-    const identityRequest = platform.identity
+    const identityRequest = loginOnly ? Promise.resolve({ data: { identities: [], session: null }, error: undefined }) : platform.identity
       ? platform.identity.inspect({ server: serverKey }).then(data => ({ data, error: undefined }))
       : client.quantcode.identity.list()
     void identityRequest.then(response => {
@@ -937,8 +946,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     lastResultJson = undefined
     resetQuantCodeState()
     setGroup("")
-    setState({ historyScope: "", sessionStatus: "loading", sessionRole: "未连接", sessionActor: "未连接", workspacePath: "", sessionId: "", githubSubject: "", skills: [], skill: "", memoryTab: "knowledge" })
-    void getQuantCodeSessionContext(client).then(
+    setState({ historyScope: "", sessionStatus: "loading", identityPending: false, sessionRole: "未连接", sessionActor: "未连接", workspacePath: "", sessionId: "", githubSubject: "", skills: [], skill: "", memoryTab: "knowledge" })
+    void (loginOnly ? Promise.reject(new Error('请先连接组织工作区。')) : getQuantCodeSessionContext(client)).then(
       (context) => {
         if (cancelled) return
         const group = context.group
@@ -971,37 +980,38 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
     }).catch(() => { if (!cancelled) setState("runtimeStatus", "error") })
   })
 
-  // Keep the visible account in step with revoked/expired host sessions.
+  // Keep retrying after network failures; only the authority can confirm identity.
   createEffect(() => {
-    if (state.sessionStatus !== "ready") return
-    const expected = state.sessionId
-    const scope = state.historyScope
-    const role = state.sessionRole
     const client = serverSDK().client
     const serverKey = String(server.key)
-    let cancelled = false
-    let pending = false
-    const verify = async () => {
-      if (pending) return
-      pending = true
-      try {
-        const context = await getQuantCodeSessionContext(client)
-        if (!cancelled && ((context.session_id ?? "") !== expected || context.role !== role ||
-          scopedThreadCacheKey({ ...context, group: context.group! }, serverKey) !== scope)) {
+    if (serverKey === 'sidecar' && platform.identity?.sshScan) return
+    let live = true
+    const monitor = monitorIdentity({
+      read: signal => getQuantCodeSessionContext(client, signal),
+      ready: context => {
+        if (state.sessionStatus !== 'ready' || (context.session_id ?? '') !== state.sessionId || (context.role ?? 'analyst') !== state.sessionRole ||
+          scopedThreadCacheKey({ ...context, group: context.group! }, serverKey) !== state.historyScope) {
           setState("identityRevision", value => value + 1)
         }
-      } catch {
-        if (!cancelled) {
-          activeThreadCacheKey = undefined
-          resetQuantCodeState()
-          setGroup("")
-          setState({ sessionStatus: "error", sessionActor: "未连接", sessionRole: "未连接", sessionId: "", workspacePath: "", historyScope: "", githubSubject: "", sshSession: undefined, skills: [], skill: "", skillsStatus: "error", memoryTab: "knowledge" })
-        }
-      } finally { pending = false }
-    }
-    const interval = setInterval(() => void verify(), 60_000)
+      },
+      unavailable: () => {
+        const previousSession = state.sessionId
+        setState({ sessionStatus: 'error', identityPending: !!previousSession })
+        if (!previousSession) return
+        void platform.identity?.inspect({ server: serverKey }).then(result => {
+          if (!live || result.session || state.sessionStatus === 'ready' || state.sessionId !== previousSession) return
+          // A successful inspection with no session confirms expiration/logout.
+          resetQuantCodeState(); activeThreadCacheKey = undefined; setGroup('')
+          setState({ identityPending: false, sessionId: '', sshSession: undefined, historyScope: '', sessionActor: '未连接', sessionRole: '未连接', workspacePath: '', githubSubject: '' })
+        }).catch(() => {})
+      },
+    })
+    const verify = () => { void monitor.refresh() }
     window.addEventListener("focus", verify)
-    onCleanup(() => { cancelled = true; clearInterval(interval); window.removeEventListener("focus", verify) })
+    const off = platform.identity?.onSshConnectionState?.(connection => {
+      if (connection.server === serverKey && connection.state === 'connected') verify()
+    })
+    onCleanup(() => { live = false; monitor.dispose(); window.removeEventListener("focus", verify); off?.() })
   })
 
   createEffect(() => {
@@ -1063,17 +1073,18 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
       } catch (error) { return { status: "error", reason: error instanceof Error ? error.message : "退出未完成，请重试。" } }
     }
   })
-  const enterSshWorkspace = async (result: QuantCodeSshLoginResult, signal?: AbortSignal) => {
+  const enterSshWorkspace = async (result: QuantCodeSshLoginResult, signal?: AbortSignal, onCommit?: () => void) => {
     signal?.throwIfAborted()
     if (!result.connection || !result.session) throw new Error("登录结果缺少连接信息，请重试。")
     const organizationAdmin = result.mode === "organization-admin"
-    const context = await getQuantCodeSessionContext(createSdkForServer({ server: result.connection, fetch: platform.fetch }))
+    const context = await getQuantCodeSessionContext(createSdkForServer({ server: result.connection, fetch: platform.fetch }), signal)
     signal?.throwIfAborted()
     if (context.session_id !== result.session.session_id || context.actor_id !== result.session.actor_id || context.group !== result.session.group) {
       throw new Error("登录身份正在变化，请重试。")
     }
     if (organizationAdmin && context.role !== "admin") throw new Error("当前身份没有组织管理员权限。")
     if (!context.workspace_path) throw new Error("组织尚未分配个人工作区，请联系管理员。")
+    onCommit?.()
     batch(() => {
       const connection = server.add({ type: "http", displayName: result.connection.displayName, organizationAdmin,
         managedId: result.connection.managedId, previousUrls: result.connection.previousUrls, verifiedAt: result.connection.verifiedAt,
@@ -1086,6 +1097,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
       setState("identityRevision", value => value + 1)
     })
     await platform.setDefaultServer?.(server.key)
+    signal?.throwIfAborted()
+    await platform.identity?.sshAcknowledge?.({ sessionId: result.session.session_id })
     signal?.throwIfAborted()
     setState("view", "compose")
     setState("adminSession", organizationAdmin ? result.admin : undefined)
@@ -1443,7 +1456,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
               <div class="qc-detail-body">
               <p class="qc-muted">选择任务后继续对话。新建任务时先确认工作目录，后续消息、文件和执行记录保存在同一任务中。</p>
               <Show when={accountStatus().showLoginNotice}>
-                <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录</button></div>
+                <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : state.identityPending ? "暂时无法核验身份，连接恢复后会自动重试" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录</button></div>
               </Show>
               </div>
               <NativeTaskHistory scope={state.historyScope} ready={state.sessionStatus === "ready"} source={nativeTasks()} onOpen={openNativeTask} openOnSelect />
@@ -1491,7 +1504,7 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
 
           <section class="qc-compose-zone" id="qc-research-prompt" aria-label="研究任务">
             <Show when={accountStatus().showLoginNotice}>
-              <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录<Icon name="arrow-right" size="small" /></button></div>
+              <div class="qc-login-notice"><Icon name="shield" /><span>{state.sessionStatus === "loading" ? "正在核验身份" : state.identityPending ? "暂时无法核验身份，连接恢复后会自动重试" : "当前未登录"}</span><button type="button" class="qc-button qc-button-primary" onClick={() => setState({ view: "settings", orgSshStart: !!platform.identity?.sshConnect })}>重新登录<Icon name="arrow-right" size="small" /></button></div>
             </Show>
             <div class="qc-compose-grid">
               <div class="qc-compose-left">
@@ -1858,6 +1871,8 @@ export function QuantCodePanel(props: QuantCodePanelProps = {}): JSX.Element {
                     skills={state.skills}
                     skillsStatus={state.skillsStatus}
                     sessionStatus={state.sessionStatus}
+                    identityPending={state.identityPending}
+                    onIdentityCheck={() => setState('identityRevision', value => value + 1)}
                     sessionRole={state.sessionRole}
                     sessionActor={state.sessionActor}
                     workspacePath={state.workspacePath}

@@ -4,8 +4,8 @@ QuantCode Desktop is distributed to authorized HKUST Quant Society members
 through the public `HKUST-QUANT-SOCIETY/quantcode` GitHub Releases page. A
 workflow artifact from a pull request is an unsigned QA build, not a formal
 release. Formal releases have `distribution.releaseClass=approved-release`.
-The explicitly labeled **QuantCode Test V1.0** prerelease uses version
-`1.0.0-test.1`, tag `quantcode-v1.0.0-test.1`, and `releaseClass=internal-test`.
+The explicitly labeled **QuantCode Test V1.2** prerelease uses version
+`1.2.0-test.2`, tag `quantcode-v1.2.0-test.2`, and `releaseClass=internal-test`.
 It provides unsigned macOS arm64/x64 and Windows x64 packages for member testing;
 it does not claim Apple notarization or a Windows publisher signature.
 
@@ -55,7 +55,7 @@ must report `azure-trusted-signing`. Linux is intentionally reported as
 `approved-platform-unsigned`: verify both SHA-256 and GitHub provenance before
 installing it.
 
-For Test V1.0, verify the exact `quantcode-v1.0.0-test.1` prerelease and source
+For Test V1.2, verify the exact `quantcode-v1.2.0-test.2` prerelease and source
 commit. Its manifest must report `internal-test`, `unsigned-test` for macOS and
 Windows, and `updateFeed=disabled`. Checksums and GitHub provenance identify the
 tested build; they do not turn an unsigned installer into a signed one.
@@ -66,7 +66,7 @@ tested build; they do not turn an unsigned installer into a signed one.
 
 Open the DMG, drag **QuantCode** to **Applications**, then launch QuantCode from
 Applications. The formal package is signed with Developer ID and notarized by
-Apple. Test V1.0 is unsigned and may require an explicit macOS security prompt
+Apple. Test V1.2 is unsigned and may require an explicit macOS security prompt
 to be approved by the member after verifying the release. If organization policy
 blocks unsigned applications, use an approved signed release instead. Do not
 disable Gatekeeper globally.
@@ -77,7 +77,7 @@ Run the x64 installer. QuantCode is installed for the current user and appears
 in the Start menu. The formal installer and `QuantCode.exe` are signed with the
 publisher recorded in the release manifest.
 
-Test V1.0 is unsigned and may show a SmartScreen warning. Verify the source and
+Test V1.2 is unsigned and may show a SmartScreen warning. Verify the source and
 checksum before choosing whether to run it; managed computers may require IT
 approval. Install **OpenSSH Client** in Windows Optional Features, then start
 the **OpenSSH Authentication Agent** service. In an administrator PowerShell:
@@ -90,8 +90,7 @@ Start-Service ssh-agent
 The desktop uses `%SystemRoot%\System32\OpenSSH\ssh-add.exe` and
 `ssh-keygen.exe`. Import your registered key through **From File / Import SSH
 Private Key**, or load it with that system `ssh-add.exe`; Git Bash's separate
-agent is not the Windows service used by the desktop. A passphrase-protected
-key may need to be unlocked with `ssh-add.exe` in a terminal first.
+agent is not the Windows service used by the desktop. An already unlocked key is reused from the system Agent. For a locked key, use the desktop terminal-unlock action or run `ssh-add.exe` in a terminal, then retry the selected identity. PEM conversion and key renaming are not required.
 
 ### Linux
 
@@ -129,7 +128,7 @@ project file or the desktop package.
 ## Upgrade
 
 Automatic updates are disabled for the current release workflows, including
-Test V1.0. To upgrade:
+Test V1.2. To upgrade:
 
 1. Quit QuantCode completely.
 2. Download and verify the newer package for the same architecture.

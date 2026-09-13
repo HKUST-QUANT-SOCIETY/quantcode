@@ -952,7 +952,7 @@ export const dict = {
   "quantcode.ssh.fingerprint": "指纹",
   "quantcode.ssh.groups": "组绑定",
   "quantcode.ssh.groupSuffix": "组",
-  "quantcode.ssh.disconnect": "断开",
+  "quantcode.ssh.disconnect": "退出组织会话",
   "quantcode.ssh.failed": "连接失败",
   "quantcode.ssh.retry": "重试",
   "quantcode.ssh.reason.key_rejected": "密钥被拒",

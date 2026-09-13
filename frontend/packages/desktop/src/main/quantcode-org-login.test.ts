@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { QuantCodeIdentitySession } from "@opencode-ai/app/identity"
 import { createOrgLogin } from "./quantcode-org-login"
-import { businessGroups, parseResearchProfile, sshArguments, usernameFromKeyFile } from "./quantcode-ssh-login"
+import { IdentityResultUncertain } from './quantcode-identity'
+import { businessGroups, parseResearchProfile, parseWorkspaceRoutes, sshArguments, usernameFromKeyFile } from "./quantcode-ssh-login"
 
 const keyFile = "/fixture/qc-chenzhenhong_ed25519"
 const fingerprint = "SHA256:fixture"
@@ -45,6 +46,109 @@ function fixture() {
 }
 
 describe("organization SSH login", () => {
+  test('legacy SSH account discovers its enrolled research username without exposing another actor', async () => {
+    const f = fixture()
+    const calls: string[] = []
+    f.deps.readOrgAccount = async (server, user) => {
+      calls.push(`${server.id}:${user}`)
+      if (server.id === 'server-b' && user === 'legacy-user') return { routes: [{ serverId: 'server-c', username: 'qc-member-fixture', fingerprints: [fingerprint] }] }
+      if (server.id === 'server-c' && user === 'qc-member-fixture') return { profile: { ...profile, ssh_user: user }, groups: ['model'] }
+      throw new Error('Permission denied')
+    }
+    const login = createOrgLogin(f.store, f.deps)
+    try {
+      const result = await login.scan({ keyFile, username: 'legacy-user' })
+      expect(result.servers.map(server => [server.id, server.username])).toEqual([['server-c', 'qc-member-fixture']])
+      await login.login({ serverId: 'server-c', group: 'model' })
+      expect(f.data.get('lastLogin')).toMatchObject({ username: 'qc-member-fixture', serverId: 'server-c' })
+      expect(calls).not.toContain('server-c:legacy-user')
+    } finally { login.close() }
+  })
+  test('an existing SSH account with a different key cannot borrow the mapped research identity', async () => {
+    const f = fixture()
+    f.deps.readOrgAccount = async () => ({ routes: [{ serverId: 'server-c', username: 'other-member', fingerprints: ['SHA256:different'] }] })
+    const login = createOrgLogin(f.store, f.deps)
+    try {
+      await expect(login.scan({ keyFile })).rejects.toThrow('公钥尚未关联')
+      expect(f.calls.some(call => call.startsWith('tunnel:'))).toBe(false)
+    } finally { login.close() }
+  })
+  test('rotated profile replaces the active tunnel without restarting the controller', async () => {
+    const f = fixture()
+    let password = profile.password, opened = 0
+    f.deps.readOrgAccount = async () => ({ profile: { ...profile, password }, groups: ['model'] })
+    f.deps.openResearchTunnel = async (_server, _user, _file, current) => {
+      opened++
+      let alive = true
+      return { connection: { url: `http://127.0.0.1:${49000 + opened}`, username: current.username, password: current.password, displayName: 'fixture' }, alive: () => alive, stop: () => { alive = false } }
+    }
+    const inspect = f.deps.inspect
+    f.deps.inspect = async (connection, options) => {
+      if (connection.password !== password) throw new Error('stale credentials')
+      return inspect(connection, options)
+    }
+    const login = createOrgLogin(f.store, f.deps)
+    try {
+      await login.scan({ keyFile })
+      const before = await login.login({ serverId: 'server-c', group: 'model' })
+      password = 'b'.repeat(48)
+      expect((await login.scan({ keyFile })).servers).toHaveLength(3)
+      const after = await login.login({ serverId: 'server-c', group: 'model' })
+      expect(after.connection.password).toBe(password)
+      expect(after.connection.previousUrls).toContain(before.connection.url)
+    } finally { login.close() }
+  })
+  test('unconfirmed authentication survives restart and cannot silently resume into the workspace', async () => {
+    const f = fixture(), login = createOrgLogin(f.store, f.deps)
+    await login.scan({ keyFile })
+    f.deps.connect = async () => { f.setSession(session); throw new IdentityResultUncertain('认证结果尚未确认') }
+    await expect(login.login({ serverId: 'server-c', group: 'model' })).rejects.toThrow('尚未确认')
+    expect(f.data.get('pendingLogin')).toBeTruthy()
+    login.close()
+    const restored = createOrgLogin(f.store, f.deps)
+    try {
+      expect(await restored.restore()).toMatchObject({ requiresConfirmation: true, session })
+      expect(await restored.resolveLogin()).toMatchObject({ session })
+      restored.acknowledge(session.session_id)
+      expect(await restored.resolveLogin()).toBeNull()
+      expect(f.data.get('lastLogin')).toMatchObject({ requiresConfirmation: false })
+    } finally { restored.close() }
+  })
+  test('an issued login can be explicitly revoked before entering, clearing pending restore', async () => {
+    const f = fixture(), login = createOrgLogin(f.store, f.deps)
+    try {
+      await login.scan({ keyFile })
+      await login.login({ serverId: 'server-c', group: 'model' })
+      await login.exitAttempt()
+      expect(f.calls).toContain('logout')
+      expect(f.data.get('lastLogin')).toBeNull()
+      expect(f.data.get('pendingLogin')).toBeNull()
+    } finally { login.close() }
+  })
+  test('cancelled startup restoration never adopts a late session', async () => {
+    const f = fixture(), original = createOrgLogin(f.store, f.deps)
+    await original.scan({ keyFile })
+    await original.login({ serverId: 'server-c', group: 'model' })
+    original.close()
+    const waiting = Promise.withResolvers<void>(), response = Promise.withResolvers<Awaited<ReturnType<typeof f.deps.inspect>>>()
+    f.deps.inspect = () => { waiting.resolve(); return response.promise }
+    const login = createOrgLogin(f.store, f.deps), signal = new AbortController()
+    const pending = login.restore(signal.signal).catch(error => error)
+    await waiting.promise
+    signal.abort(); login.cancelAttempt()
+    response.resolve({ identities: [], session })
+    expect(await pending).toBeInstanceOf(Error)
+    expect(login.connection('http://127.0.0.1:48198')).toBeUndefined()
+    login.close()
+  })
+  test('discovery rejects arbitrary hosts, users and malformed fingerprints', () => {
+    const raw = (route: unknown) => JSON.stringify({ version: 1, status: 'registered', routes: [route] })
+    const route = { serverId: 'server-c', username: 'qc-member', fingerprints: ['SHA256:' + 'a'.repeat(43)] }
+    expect(parseWorkspaceRoutes(raw(route)).routes).toEqual([route])
+    for (const change of [{ serverId: 'external' }, { username: '-oProxyCommand=bad' }, { fingerprints: ['not-a-key'] }]) {
+      expect(() => parseWorkspaceRoutes(raw({ ...route, ...change }))).toThrow()
+    }
+  })
   test("cancelling a scan rejects late discovery without closing the active workspace", async () => {
     const f = fixture(), login = createOrgLogin(f.store, f.deps)
     await login.scan({ keyFile })
@@ -112,12 +216,36 @@ describe("organization SSH login", () => {
     expect(profiles).toBe(0)
     await expect(login.login({ serverId: "server-c", administrator: "organization" })).rejects.toThrow("not an organization admin")
     expect(f.data.get("lastLogin")).toBeUndefined()
+    expect(f.data.get('pendingLogin')).toBeTruthy()
+    await login.exitAttempt()
     f.deps.requireAdminSession = async () => {}
+    await login.scan({ keyFile, username: 'quantadmin' })
     const result = await login.login({ serverId: "server-c", administrator: "organization" })
     expect(result.mode).toBe("organization-admin")
     expect(result.connection?.organizationAdmin).toBe(true)
     expect(profiles).toBe(2)
     login.close()
+  })
+  test('failed challenge admission permits retry, while another window cannot replace an in-flight login', async () => {
+    const f = fixture(), first = createOrgLogin(f.store, f.deps), second = createOrgLogin(f.store, f.deps)
+    try {
+      await first.scan({ keyFile }); await second.scan({ keyFile })
+      const connect = f.deps.connect
+      f.deps.connect = async () => { throw new Error('challenge unavailable') }
+      await expect(first.login({ serverId: 'server-c', group: 'model' })).rejects.toThrow('challenge unavailable')
+      expect(f.data.get('pendingLogin')).toBeNull()
+      const entered = Promise.withResolvers<void>(), response = Promise.withResolvers<QuantCodeIdentitySession>()
+      f.deps.connect = async () => { entered.resolve(); return response.promise }
+      const pending = first.login({ serverId: 'server-c', group: 'model' })
+      await entered.promise
+      const record = f.data.get('pendingLogin')
+      await expect(second.login({ serverId: 'server-c', group: 'model' })).rejects.toThrow('登录结果尚未确认')
+      expect(f.data.get('pendingLogin')).toEqual(record)
+      response.resolve(session); await pending
+      f.deps.connect = connect
+      f.data.set('lastLogin', { ...(f.data.get('lastLogin') as object), sessionId: 'b'.repeat(32) })
+      expect(() => first.acknowledge(session.session_id)).toThrow('登录身份已变化')
+    } finally { first.close(); second.close() }
   })
   test("a member cannot promote itself by choosing the administrator entry", async () => {
     const f = fixture()
@@ -143,6 +271,10 @@ describe("organization SSH login", () => {
     for (const file of ["id_ed25519", "id_ed25519_github", "private.key", "qc-user_ed25519.pub"]) expect(usernameFromKeyFile(file)).toBeUndefined()
     expect(businessGroups("qc-user model factor model sudo\n")).toEqual(["model", "factor"])
     expect(() => sshArguments(keyFile, "-oProxyCommand=anything", "fixture")).toThrow("Linux 用户名")
+    const args = sshArguments(keyFile, 'qc-member', '150.109.115.216', 'work', 'C:\\Users\\Example User\\known_hosts')
+    expect(args).toContain('UserKnownHostsFile="C:/Users/Example User/known_hosts"')
+    expect(args).toContain('StrictHostKeyChecking=yes')
+    expect(args).not.toContain('-F')
   })
   test("connection profile rejects another member, non-loopback URL and invalid ports", () => {
     expect(parseResearchProfile(JSON.stringify(profile), profile.ssh_user)).toEqual(profile)

@@ -1,7 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron"
 import type { IpcMainInvokeEvent, WebContentsDidStartNavigationEventParams } from "electron"
 import type { ServerReadyData } from "../preload/types"
-import { inspect, connect, disconnect, importKey } from "./quantcode-identity"
+import { inspect, connect, disconnect, importKey, agentIdentities } from "./quantcode-identity"
+import { openKeyTerminal } from './quantcode-key-terminal'
+import { createHash } from 'node:crypto'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { resolveResearchConnection } from "./quantcode-connection"
 import { createOrgLogin } from "./quantcode-org-login"
 import { getStore } from "./store"
@@ -69,6 +73,34 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
     const operation = active.get(event.sender.id)
     if (operation?.server !== "org" || operation.action === "select-key") return
     operation.controller.abort()
+  })
+  ipcMain.handle('quantcode-ssh-login-unlock-key', async (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    await openKeyTerminal(orgLogin(event).selectedKey()).catch(() => { throw new Error('无法打开系统终端。请手动用 ssh-add 解锁所选私钥，然后重新探测。') })
+  })
+  ipcMain.handle('quantcode-ssh-login-agent-keys', async (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    return (await agentIdentities()).map(key => ({ fingerprint: key.fingerprint, label: `已加载身份 · ${key.fingerprint}` }))
+  })
+  ipcMain.handle('quantcode-ssh-login-select-agent', async (event: IpcMainInvokeEvent, input: unknown) => {
+    requireDesktopFrame(event)
+    if (!input || typeof input !== 'object' || !('fingerprint' in input) || typeof input.fingerprint !== 'string') throw new Error('请选择本机 SSH 身份。')
+    const previous = active.get(event.sender.id)
+    if (previous && ['inspect', 'restore'].includes(previous.action)) {
+      previous.controller.abort()
+      active.delete(event.sender.id)
+    }
+    if (active.has(event.sender.id)) throw new Error('身份操作正在进行，请稍候。')
+    const identity = (await agentIdentities()).find(key => key.fingerprint === input.fingerprint)
+    if (!identity) throw new Error('所选公钥不在本机 Agent 中，请刷新身份。')
+    const directory = join(app.getPath('userData'), 'ssh-identities')
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const file = join(directory, `${createHash('sha256').update(identity.fingerprint).digest('hex')}.pub`)
+    await writeFile(file, identity.text + '\n', { mode: 0o600, flag: 'wx' }).catch(async error => {
+      if (error.code !== 'EEXIST' || (await readFile(file, 'utf8')).trim() !== identity.text) throw new Error('无法保存本机公钥引用。')
+    })
+    requireDesktopFrame(event)
+    orgLogin(event).selectKey(file)
   })
   ipcMain.handle("quantcode-ssh-connection-state", (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)
@@ -138,17 +170,23 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
     const result = await importKey(connection, file)
     return result
   })
-  for (const action of ["select-key", "scan", "connect", "restore", "progress", "admin-status", "admin-disconnect"] as const) {
+  for (const action of ["select-key", "scan", "connect", "restore", "progress", "admin-status", "admin-disconnect", 'resolve', 'exit-attempt', 'acknowledge'] as const) {
     ipcMain.handle(`quantcode-ssh-login-${action}`, async (event: IpcMainInvokeEvent, input: unknown) => {
       requireDesktopFrame(event)
       const sender = event.sender.id
       if (action === "progress") return orgLogin(event).progress()
+      if (action === 'resolve' && !orgLogin(event).needsResolution()) return null
       if (action === "admin-status") {
         if (input !== undefined && (!input || typeof input !== "object" || !("serverId" in input) || typeof input.serverId !== "string" || Object.keys(input).some(key => key !== "serverId"))) throw new Error("服务器参数无效。")
         return orgLogin(event).adminStatus(input as { serverId?: string } | undefined)
       }
+      if (action === 'acknowledge') {
+        if (!input || typeof input !== 'object' || !('sessionId' in input) || typeof input.sessionId !== 'string') throw new Error('登录结果无效。')
+        return orgLogin(event).acknowledge(input.sessionId)
+      }
       const previous = active.get(sender)
-      if ((action === "select-key" || action === "scan") && previous?.action === "inspect") {
+      if (previous && ((action === 'resolve' || action === 'exit-attempt') && previous.action === 'inspect' ||
+        (action === "select-key" || action === "scan") && ['inspect', 'restore'].includes(previous.action))) {
         previous.controller.abort()
         active.delete(sender)
       }
@@ -162,7 +200,7 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
         if (active.get(sender)?.controller === controller) active.delete(sender)
       }
       controller.signal.addEventListener("abort", cancel, { once: true })
-      let deadline = action === "connect" ? setTimeout(() => controller.abort(), 90000) : undefined
+      let deadline = action === "connect" || action === 'restore' ? setTimeout(() => controller.abort(), action === 'restore' ? 20000 : 90000) : undefined
       try {
         if (action === "select-key") {
           login.beginSelection()
@@ -174,7 +212,9 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
           return true
         }
         if (action === "admin-disconnect") return login.adminDisconnect()
-        if (action === "restore") return await login.restore().catch(() => ({ needsLogin: true as const }))
+        if (action === 'resolve') return await login.resolveLogin()
+        if (action === 'exit-attempt') return await login.exitAttempt()
+        if (action === "restore") return await login.restore(controller.signal).catch(() => ({ needsLogin: true as const }))
         if (action === "connect") {
           if (!input || typeof input !== "object" || !("serverId" in input) || typeof input.serverId !== "string") throw new Error("请选择登录入口。")
           if ("administrator" in input) {
