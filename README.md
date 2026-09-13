@@ -2,9 +2,9 @@
 
 QuantCode 是 HKUST QUANT SOCIETY 的团队研究与开发 Agent。因子、模型、风控、基本面、策略、期权、基建和 Agent 组使用同一套桌面端与执行器，身份、个人工作区、工具和 Memory 按组织授权隔离。
 
-[下载 Test V1.2](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.1) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
+[下载 Test V1.2](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.2) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
 
-Test V1.2 的版本号为 `1.2.0-test.1`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
+Test V1.2 的版本号为 `1.2.0-test.2`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
 
 ## 是否需要服务器
 
@@ -22,13 +22,13 @@ flowchart LR
 
 ## 下载和安装
 
-从 [Test V1.2 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.1) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
+从 [Test V1.2 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.2) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
 
 | 电脑 | 安装文件 |
 | --- | --- |
-| Mac，Apple Silicon（M 系列） | `quantcode-1.2.0-test.1-mac-arm64.dmg` |
-| Mac，Intel | `quantcode-1.2.0-test.1-mac-x64.dmg` |
-| Windows 10/11，x64 | `quantcode-1.2.0-test.1-win-x64.exe` |
+| Mac，Apple Silicon（M 系列） | `quantcode-1.2.0-test.2-mac-arm64.dmg` |
+| Mac，Intel | `quantcode-1.2.0-test.2-mac-x64.dmg` |
+| Windows 10/11，x64 | `quantcode-1.2.0-test.2-win-x64.exe` |
 
 Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，按提示安装到当前用户。
 
@@ -38,12 +38,12 @@ Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，�
 
 ```bash
 # macOS，比较结果与 SHA256SUMS 中对应文件的一行
-shasum -a 256 quantcode-1.2.0-test.1-mac-arm64.dmg
+shasum -a 256 quantcode-1.2.0-test.2-mac-arm64.dmg
 ```
 
 ```powershell
 # Windows PowerShell
-Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.1-win-x64.exe
+Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.2-win-x64.exe
 ```
 
 ## 首次使用
@@ -52,8 +52,8 @@ Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.1-win-x64.exe
 
 已有有效会话时，打开应用直接进入工作台。需要重新登录时，点击 **重新登录**：
 
-1. **选择私钥文件**：系统文件选择器打开后选择本地私钥。应用从文件名解析 Linux 用户名；无法解析时询问一次，并按密钥记住答案。私钥加载到本机 SSH Agent，正文不会上传到服务器或模型。
-2. **选择工作组**：应用依次探测 Server A/B/C，在可登录服务器上读取 `groups` 和本人私有连接信息。清单显示“组 × 服务器”；点击一项即完成组织认证并进入该服务器的工作区，无需再次选择服务器或点击进入按钮。
+1. **选择 SSH 身份**：可选择本地私钥文件，或使用系统 Agent 中已有的身份。PEM 和无扩展名的 OpenSSH 私钥均可使用；已解锁的密钥直接复用，未解锁时可打开本机终端处理。已有 SSH 配置会参与连接；无法确定用户名时，填写原来能登录服务器的用户名并记住。私钥正文不会上传到服务器或模型。
+2. **选择工作组**：应用探测 Server A/B/C，通过服务端登记将既有 SSH 账号对应到已授权的研究工作区。清单显示“组 × 实际工作区服务器”；点击一项即完成组织认证并进入，无需填写内部研究账号、端口或访问密码。
 
 Linux 组用于发现和排序，组织名册补足并限制可选业务组。个人研究账号可以继续只拥有自己的 Linux 私有组，不需要扩大文件系统权限。账号、角色、业务组及工作目录均以服务端签发的身份为准。
 
@@ -81,7 +81,7 @@ Test V1.2 由组织预置统一测试模型。普通成员无需填写模型 Key
 
 各量化组件只有在对应服务、数据和授权已实际接通时才能使用。页面中的 `UNAVAILABLE`、`PARTIAL` 或未连接状态不表示业务已完成；Test V1.2 不承诺所有因子评估、训练、回测、风险和估值链路已经具备真实数据。普通成员不能部署到生产环境。
 
-本次更新与验证范围见 [Test V1.2 发布说明](docs/releases/TEST_V1_2.md)。首次测试版的历史验收记录见 [Test V1.0 验收摘要](docs/TEST_V1_ACCEPTANCE.md)。
+本次更新与验证范围见 [Test V1.2 发布说明](docs/releases/TEST_V1_2_2.md)。首次测试版的历史验收记录见 [Test V1.0 验收摘要](docs/TEST_V1_ACCEPTANCE.md)。
 
 ## 常见问题
 
