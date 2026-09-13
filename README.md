@@ -1,10 +1,10 @@
-# QuantCode Test V1.0
+# QuantCode Test V1.2
 
 QuantCode 是 HKUST QUANT SOCIETY 的团队研究与开发 Agent。因子、模型、风控、基本面、策略、期权、基建和 Agent 组使用同一套桌面端与执行器，身份、个人工作区、工具和 Memory 按组织授权隔离。
 
-[下载 Test V1.0](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.0.0-test.1) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
+[下载 Test V1.2](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.1) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
 
-Test V1.0 的版本号为 `1.0.0-test.1`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
+Test V1.2 的版本号为 `1.2.0-test.1`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
 
 ## 是否需要服务器
 
@@ -22,13 +22,13 @@ flowchart LR
 
 ## 下载和安装
 
-从 [Test V1.0 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.0.0-test.1) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
+从 [Test V1.2 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.1) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
 
 | 电脑 | 安装文件 |
 | --- | --- |
-| Mac，Apple Silicon（M 系列） | `quantcode-1.0.0-test.1-mac-arm64.dmg` |
-| Mac，Intel | `quantcode-1.0.0-test.1-mac-x64.dmg` |
-| Windows 10/11，x64 | `quantcode-1.0.0-test.1-win-x64.exe` |
+| Mac，Apple Silicon（M 系列） | `quantcode-1.2.0-test.1-mac-arm64.dmg` |
+| Mac，Intel | `quantcode-1.2.0-test.1-mac-x64.dmg` |
+| Windows 10/11，x64 | `quantcode-1.2.0-test.1-win-x64.exe` |
 
 Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，按提示安装到当前用户。
 
@@ -38,12 +38,12 @@ Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，�
 
 ```bash
 # macOS，比较结果与 SHA256SUMS 中对应文件的一行
-shasum -a 256 quantcode-1.0.0-test.1-mac-arm64.dmg
+shasum -a 256 quantcode-1.2.0-test.1-mac-arm64.dmg
 ```
 
 ```powershell
 # Windows PowerShell
-Get-FileHash -Algorithm SHA256 .\quantcode-1.0.0-test.1-win-x64.exe
+Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.1-win-x64.exe
 ```
 
 ## 首次使用
@@ -61,13 +61,13 @@ Linux 组用于发现和排序，组织名册补足并限制可选业务组。�
 
 管理员需提前为成员开通个人研究宿主、登记公钥及名册权限，并在该成员服务器目录下下发 `~/.quantcode/test-v1/connection.json`。文件中的内部访问凭据由应用读取，成员无需手动配置。Windows 的系统 OpenSSH 和 SSH Agent 要求见 [平台安装说明](frontend/packages/desktop/QUANTCODE_INSTALL.md)。
 
-完整链路及验证范围见 [登录流程与验证](docs/LOGIN_FLOW.md)。
+完整链路及验证范围见 [登录流程与验证](docs/LOGIN_FLOW.md)。管理员使用 [统一管理员登录](docs/ADMIN_LOGIN.md)，一次登录使用完整工作台和全部管理员功能。
 
-Test V1.0 由组织预置统一测试模型。普通成员无需填写模型 Key；需要使用自己的供应商时，可在“模型供应商”中添加 URL、API Key 和模型，作为该个人研究宿主的一份模型配置。安装包不会内置组织模型密钥。
+Test V1.2 由组织预置统一测试模型。普通成员无需填写模型 Key；需要使用自己的供应商时，可在“模型供应商”中添加 URL、API Key 和模型，作为该个人研究宿主的一份模型配置。安装包不会内置组织模型密钥。
 
 ## 完成第一条任务
 
-在“新建研究”选择自己的授权工作目录，确认模型可用后输入：
+点击“新建任务”，选择授权工作目录并填写任务名称；创建后进入对话。继续已有任务时，从任务列表打开该任务，后续消息会沿用同一任务和工作目录。确认模型可用后输入：
 
 > 在当前个人工作区创建 hello_quantcode.md，内容为当前项目的简短说明。先查询能力目录和组内 Memory，说明计划改动的文件；需要我确认时先暂停，确认后再写入并读回核对。不要修改其他目录。
 
@@ -75,13 +75,13 @@ Test V1.0 由组织预置统一测试模型。普通成员无需填写模型 Key
 
 执行结束后，可以查看对话中的工具结果、执行记录、文件和产物。下载产物后仍可重新登录查看原任务。遇到未确认的写入回执，先核对实际文件或外部证据，不要重复执行写入。
 
-## Test V1.0 的范围
+## Test V1.2 的范围
 
 已支持：SSH 身份与多公钥选择、个人工作区、组织模型配置、组内 Memory、能力目录、方案与复用审批、原生任务、文件修改、预算、停止、任务历史和产物。
 
-各量化组件只有在对应服务、数据和授权已实际接通时才能使用。页面中的 `UNAVAILABLE`、`PARTIAL` 或未连接状态不表示业务已完成；Test V1.0 不承诺所有因子评估、训练、回测、风险和估值链路已经具备真实数据。普通成员不能部署到生产环境。
+各量化组件只有在对应服务、数据和授权已实际接通时才能使用。页面中的 `UNAVAILABLE`、`PARTIAL` 或未连接状态不表示业务已完成；Test V1.2 不承诺所有因子评估、训练、回测、风险和估值链路已经具备真实数据。普通成员不能部署到生产环境。
 
-发布验证范围与限制见 [Test V1.0 验收摘要](docs/TEST_V1_ACCEPTANCE.md)。
+本次更新与验证范围见 [Test V1.2 发布说明](docs/releases/TEST_V1_2.md)。首次测试版的历史验收记录见 [Test V1.0 验收摘要](docs/TEST_V1_ACCEPTANCE.md)。
 
 ## 常见问题
 
