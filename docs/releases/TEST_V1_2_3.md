@@ -1,10 +1,10 @@
-# QuantCode Test V1.2 · 已取消的打包轮次
+# QuantCode Test V1.2 · 登录修复
 
-此打包轮次未发布。请使用 [1.2.0-test.3](TEST_V1_2_3.md)，该修订补齐 Linux 管理组成员的普通工作区路由。
-
-版本：`1.2.0-test.2`。本版保留 Test V1.2 的工作台功能，修复普通成员的 SSH 入口和异常恢复。
+版本：`1.2.0-test.3`。本版保留 Test V1.2 的工作台功能，修复普通成员的 SSH 入口和异常恢复。
 
 ## 更新内容
+
+- Linux 管理组成员仍可使用其组织名册授权的普通工作区，不再被强制导向组织管理员入口。
 
 - 既有 SSH 账号可通过管理员安装的连接描述入口发现实际研究工作区，成员无需输入内部研究账号。用户名和公钥仍需与组织登记匹配，映射不自动追加或替换公钥。
 - 复用系统 SSH 配置和已有 Agent 身份，支持 PEM、无扩展名 OpenSSH 以及已在 Agent 解锁的加密私钥；未解锁时提供本机终端入口。
@@ -16,7 +16,7 @@
 
 ## 安装与验收
 
-[下载安装包](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.2)。退出旧版后，安装对应架构的新包。Mac Apple Silicon、Mac Intel 和 Windows x64 均提供测试包；本版仍未做平台签名，自动更新关闭。
+[下载安装包](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.3)。退出旧版后，安装对应架构的新包。Mac Apple Silicon、Mac Intel 和 Windows x64 均提供测试包；本版仍未做平台签名，自动更新关闭。
 
 1. 使用原私钥或已有 Agent 身份，填写原来的 SSH 用户名，检查是否列出正确工作区。
 2. 加密私钥先在本机终端解锁，然后点击重新探测，不重复选择文件。

@@ -46,6 +46,22 @@ function fixture() {
 }
 
 describe("organization SSH login", () => {
+  test('Linux administrators with member workspaces are not forced into organization administration', async () => {
+    const f = fixture()
+    f.deps.readOrgAccount = async (server, user) => {
+      if (user === 'legacy-maintainer') return { administrator: true, groups: [], systemGroups: ['quant-admin'],
+        routes: [{ serverId: 'server-c', username: 'qc-member-fixture', fingerprints: [fingerprint] }] }
+      if (server.id === 'server-c' && user === 'qc-member-fixture') return { profile, groups: ['model'] }
+      throw new Error('Permission denied')
+    }
+    const login = createOrgLogin(f.store, f.deps)
+    try {
+      const result = await login.scan({ keyFile, username: 'legacy-maintainer' })
+      expect(result.servers.map(server => server.id)).toEqual(['server-c'])
+      expect(result.administrators).toEqual([])
+      expect((await login.login({ serverId: 'server-c', group: 'model' })).mode).toBeUndefined()
+    } finally { login.close() }
+  })
   test('legacy SSH account discovers its enrolled research username without exposing another actor', async () => {
     const f = fixture()
     const calls: string[] = []
