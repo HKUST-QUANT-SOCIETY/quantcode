@@ -130,7 +130,7 @@ runs:
       with:
         node-version: "24"
 
-    - name: Verify Windows OpenSSH identity login
+    - name: Verify Windows SSH Agent recovery and identity login
       if: runner.os == 'Windows'
       working-directory: frontend/packages/desktop
       shell: pwsh
@@ -141,10 +141,9 @@ runs:
         foreach ($name in @('ssh-add.exe', 'ssh-keygen.exe')) {
           if (-not (Test-Path (Join-Path $sshRoot $name))) { throw "Windows OpenSSH Client is missing $name" }
         }
-        Set-Service -Name ssh-agent -StartupType Manual
-        Start-Service -Name ssh-agent
-        if ((Get-Service ssh-agent).Status -ne 'Running') { throw 'Windows SSH agent did not start' }
-        bun test ./src/main/quantcode-identity.test.ts ./src/main/quantcode-identity.windows.test.ts
+        Stop-Service -Name ssh-agent -ErrorAction Stop
+        Set-Service -Name ssh-agent -StartupType Disabled
+        bun test ./src/main/quantcode-ssh-agent.test.ts ./src/main/quantcode-identity.test.ts ./src/main/quantcode-identity.windows.test.ts
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Install Linux packaging tools

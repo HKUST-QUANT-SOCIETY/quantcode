@@ -590,6 +590,8 @@ function SettingsPanel(props: {
           <SshOrgLoginWizard sshScan={input => props.orgSshLogin!.sshScan(input)}
             sshSelectKey={props.orgSshLogin!.sshSelectKey} sshCancel={props.orgSshLogin!.sshCancel}
             sshUnlockKey={props.orgSshLogin!.sshUnlockKey} sshAgentKeys={props.orgSshLogin!.sshAgentKeys}
+            sshAgentStatus={props.orgSshLogin!.sshAgentStatus} sshStartAgent={props.orgSshLogin!.sshStartAgent}
+            sshOpenAgentSettings={props.orgSshLogin!.sshOpenAgentSettings}
             sshSelectAgent={props.orgSshLogin!.sshSelectAgent} sshResolve={props.orgSshLogin!.sshResolve}
             sshExitAttempt={props.orgSshLogin!.sshExitAttempt} onExited={props.onIdentityCheck}
             sshConnect={input => props.orgSshLogin!.sshConnect(input)}
