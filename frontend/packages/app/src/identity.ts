@@ -18,6 +18,11 @@ export type QuantCodeIdentityInspection = {
   session: QuantCodeIdentitySession | null
 }
 export type QuantCodeIdentityDisconnected = { status: "disconnected"; execution_status: "disconnected" }
+export type QuantCodeSshAgentStatus = {
+  platform: 'windows' | 'macos' | 'linux'
+  status: 'ready' | 'stopped' | 'missing-client' | 'missing-service' | 'unavailable'
+  message: string
+}
 /** 组织 SSH 登录向导：成员只提供本地私钥，服务器地址内置。 */
 export type QuantCodeSshLoginServer = { id: string; label: string; host: string; username: string; groups: QuantCodeIdentityGroup[] }
 export type QuantCodeSshAdministrator = { id: string; label: string; host: string; username: string; systemGroups: string[] }
@@ -40,6 +45,9 @@ export type QuantCodeDesktopIdentity = {
   sshSelectKey?(): Promise<boolean>
   sshCancel?(): Promise<void>
   sshUnlockKey?(): Promise<void>
+  sshAgentStatus?(): Promise<QuantCodeSshAgentStatus>
+  sshStartAgent?(): Promise<QuantCodeSshAgentStatus>
+  sshOpenAgentSettings?(): Promise<void>
   sshAgentKeys?(): Promise<{ fingerprint: string; label: string }[]>
   sshSelectAgent?(input: { fingerprint: string }): Promise<void>
   sshResolve?(): Promise<QuantCodeSshLoginResult | null>

@@ -6,11 +6,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { connect, disconnect, importKey, inspect } from "./quantcode-identity"
+import { sshAgent } from './quantcode-ssh-agent'
 
 test.skipIf(process.platform !== "win32" || process.env.QUANTCODE_WINDOWS_SSH_QA !== "1")(
-  "Windows OpenSSH imports a disposable key and completes real agent signing, verification and logout",
+  "Windows recovers its disabled agent, imports a disposable key and completes real signing, verification and logout",
   async () => {
     const run = promisify(execFile)
+    expect((await sshAgent.status()).status).toBe('stopped')
+    expect((await sshAgent.start()).status).toBe('ready')
+    const powershell = join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const service = await run(powershell, ['-NoProfile', '-NonInteractive', '-Command', '(Get-Service ssh-agent).StartType.ToString()'])
+    expect(service.stdout.trim()).toBe('Automatic')
     const ssh = (name: string) => join(process.env.SystemRoot!, "System32", "OpenSSH", `${name}.exe`)
     const dir = await mkdtemp(join(tmpdir(), "quantcode-windows-ssh-"))
     const key = join(dir, "identity")

@@ -7,6 +7,7 @@ import { promisify } from "node:util"
 import type { QuantCodeIdentityDisconnected, QuantCodeIdentityGroup, QuantCodeIdentityInspection, QuantCodeIdentitySession } from "@opencode-ai/app/identity"
 import { researchEndpoint } from "./quantcode-connection"
 import type { ResearchConnection } from "./quantcode-connection"
+import { sshAgent } from './quantcode-ssh-agent'
 
 const execFileAsync = promisify(execFile)
 const groups = new Set(["fundamental", "factor", "model", "risk", "strategy", "options", "infra", "agent"])
@@ -15,12 +16,7 @@ export type IdentityOperationOptions = { signal?: AbortSignal; checkTarget?: () 
 export class IdentityResultUncertain extends Error {}
 
 export async function agentIdentities() {
-  const result = await execFileAsync(executable("ssh-add"), ["-L"], { encoding: "utf8", timeout: 5000, maxBuffer: 262144, windowsHide: true })
-    .catch(error => {
-      if (error.code === 1) return { stdout: "" }
-      throw new Error("系统 SSH Agent 未运行。请先启动系统 SSH Agent，再重试。")
-    })
-  return result.stdout.split(/\r?\n/).filter(Boolean).map(line => publicKey(line))
+  return (await sshAgent.read()).split(/\r?\n/).filter(Boolean).map(line => publicKey(line))
 }
 
 export async function importKey(_input: ResearchConnection, filename: string) {

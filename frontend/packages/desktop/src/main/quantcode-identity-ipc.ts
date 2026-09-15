@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron"
 import type { IpcMainInvokeEvent, WebContentsDidStartNavigationEventParams } from "electron"
 import type { ServerReadyData } from "../preload/types"
 import { inspect, connect, disconnect, importKey, agentIdentities } from "./quantcode-identity"
@@ -10,6 +10,7 @@ import { resolveResearchConnection } from "./quantcode-connection"
 import { createOrgLogin } from "./quantcode-org-login"
 import { getStore } from "./store"
 import { businessGroups } from "./quantcode-ssh-login"
+import { sshAgent } from './quantcode-ssh-agent'
 
 function requireDesktopFrame(event: IpcMainInvokeEvent) {
   const origin = new URL(event.senderFrame?.url ?? "")
@@ -81,6 +82,19 @@ export function registerIdentityIpc(awaitInitialization: () => Promise<ServerRea
   ipcMain.handle('quantcode-ssh-login-agent-keys', async (event: IpcMainInvokeEvent) => {
     requireDesktopFrame(event)
     return (await agentIdentities()).map(key => ({ fingerprint: key.fingerprint, label: `已加载身份 · ${key.fingerprint}` }))
+  })
+  ipcMain.handle('quantcode-ssh-agent-status', async (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    return sshAgent.status()
+  })
+  ipcMain.handle('quantcode-ssh-agent-start', async (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    return sshAgent.start()
+  })
+  ipcMain.handle('quantcode-ssh-agent-settings', async (event: IpcMainInvokeEvent) => {
+    requireDesktopFrame(event)
+    if (process.platform !== 'win32') throw new Error('请在系统中安装 OpenSSH 客户端。')
+    await shell.openExternal('ms-settings:optionalfeatures')
   })
   ipcMain.handle('quantcode-ssh-login-select-agent', async (event: IpcMainInvokeEvent, input: unknown) => {
     requireDesktopFrame(event)

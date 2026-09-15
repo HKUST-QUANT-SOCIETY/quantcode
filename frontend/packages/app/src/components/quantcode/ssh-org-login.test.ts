@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { QuantCodeSshLoginScan, QuantCodeSshLoginResult } from "../../identity"
+import type { QuantCodeSshLoginScan, QuantCodeSshLoginResult, QuantCodeSshAgentStatus } from "../../identity"
 import { SshOrgLoginWizard } from "./ssh-login"
 import { createRoot } from 'solid-js'
 
@@ -22,6 +22,82 @@ function button(view: HTMLElement, text: string) {
 }
 
 describe("organization login wizard", () => {
+  const stopped: QuantCodeSshAgentStatus = { platform: 'windows', status: 'stopped', message: 'Windows SSH Agent 尚未启动' }
+  const ready: QuantCodeSshAgentStatus = { platform: 'windows', status: 'ready', message: 'SSH Agent 已就绪' }
+  test('agent recovery is explicit, hides irrelevant username correction, and reuses the selected key', async () => {
+    let selections = 0, scans = 0, starts = 0
+    const prepared = Promise.withResolvers<QuantCodeSshAgentStatus>()
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => { selections++; return true },
+      sshScan: async input => { expect(input.chooseKey).toBe(false); if (++scans === 1) throw new Error('无法连接系统 SSH Agent'); return scan },
+      sshAgentStatus: async () => stopped, sshStartAgent: async () => { starts++; return prepared.promise },
+      sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    expect(starts).toBe(0)
+    expect(view.querySelector('input')).toBeNull()
+    const start = button(view, '启用 SSH Agent')
+    start.click(); start.click(); await flush()
+    expect(starts).toBe(1)
+    expect(view.textContent).toContain('Windows 系统授权')
+    prepared.resolve(ready); await flush(); await flush()
+    expect(selections).toBe(1)
+    expect(scans).toBe(2)
+    expect(button(view, 'Server B')).toBeTruthy()
+  })
+  test('cancelled Windows authorization leaves recovery available without re-scanning or losing the key', async () => {
+    let scans = 0, selections = 0
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => { selections++; return true },
+      sshScan: async () => { scans++; throw new Error('无法连接系统 SSH Agent') },
+      sshAgentStatus: async () => stopped, sshStartAgent: async () => { throw new Error('已取消 Windows 系统授权') },
+      sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    button(view, '启用 SSH Agent').click(); await flush()
+    expect(view.textContent).toContain('已取消 Windows 系统授权')
+    expect(button(view, '启用 SSH Agent')).toBeTruthy()
+    expect(scans).toBe(1)
+    expect(selections).toBe(1)
+  })
+  test('missing Windows client opens component settings and re-checks before continuing', async () => {
+    let opened = 0, scans = 0, installed = false
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => true,
+      sshScan: async () => { if (++scans === 1) throw new Error('缺少 Windows OpenSSH 客户端'); return scan },
+      sshAgentStatus: async () => installed ? ready : { ...stopped, status: 'missing-client', message: '缺少 OpenSSH 客户端' },
+      sshStartAgent: async () => { throw new Error('must not start before install') },
+      sshOpenAgentSettings: async () => { opened++ }, sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    expect(button(view, '启用 SSH Agent')).toBeUndefined()
+    button(view, '打开 Windows 可选功能').click(); await flush(); expect(opened).toBe(1)
+    installed = true
+    button(view, '重新检查并继续登录').click(); await flush(); await flush()
+    expect(scans).toBe(2)
+    expect(button(view, 'Server B')).toBeTruthy()
+  })
+  test('existing-agent recovery reloads identities without opening a private-key picker', async () => {
+    let reads = 0, selections = 0
+    const view = SshOrgLoginWizard({ sshSelectKey: async () => { selections++; return true }, sshScan: async () => scan,
+      sshAgentKeys: async () => { if (++reads === 1) throw new Error('无法连接系统 SSH Agent'); return [{ fingerprint: 'SHA256:fixture', label: '已加载身份 fixture' }] },
+      sshSelectAgent: async () => {}, sshAgentStatus: async () => stopped, sshStartAgent: async () => ready,
+      sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '使用已有 SSH 身份').click(); await flush()
+    button(view, '启用 SSH Agent').click(); await flush(); await flush()
+    expect(reads).toBe(2)
+    expect(selections).toBe(0)
+    button(view, '已加载身份 fixture').click(); await flush()
+    expect(button(view, 'Server B')).toBeTruthy()
+  })
+  test('leaving the page during system authorization never resumes login in the background', async () => {
+    let dispose = () => {}, scans = 0
+    const prepared = Promise.withResolvers<QuantCodeSshAgentStatus>()
+    const view = createRoot(stop => {
+      dispose = stop
+      return SshOrgLoginWizard({ sshSelectKey: async () => true, sshScan: async () => { scans++; throw new Error('无法连接系统 SSH Agent') },
+        sshAgentStatus: async () => stopped, sshStartAgent: async () => prepared.promise,
+        sshConnect: async () => connected, onEnter: async () => {} })
+    })
+    button(view, '重新登录').click(); await flush()
+    button(view, '启用 SSH Agent').click(); await flush()
+    dispose(); prepared.resolve(ready); await flush()
+    expect(scans).toBe(1)
+  })
   test('leaving before entry commits aborts the read; a committed server handoff may finish', async () => {
     for (const committed of [false, true]) {
       let dispose = () => {}, aborted = false
