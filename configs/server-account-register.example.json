@@ -1,0 +1,39 @@
+{
+  "actors": {
+    "member-example": {
+      "name": "示例成员（待确认）",
+      "source": "姓名/归属确认来源及日期",
+      "owner": null
+    }
+  },
+  "accounts": {
+    "server-b:example": {
+      "name": "示例成员（待确认）",
+      "onboarding": "待确认归属",
+      "owner": null,
+      "next_action": "确认实际使用的账号及公钥指纹后决定是否开通",
+      "completed_at": null,
+      "source": "确认来源及日期"
+    }
+  },
+  "keys": {
+    "SHA256:example": {
+      "usage": "常用/备用/未确认",
+      "state": "启用/停用/未确认",
+      "source": "本人确认来源及日期"
+    }
+  },
+  "login_checks": [
+    {
+      "actor_id": "member-example",
+      "source_id": "server-b:example",
+      "fingerprint": "SHA256:example",
+      "os": "Windows",
+      "client_version": null,
+      "result": "unverified",
+      "stage": "尚未实测",
+      "observed_at": null,
+      "source": null
+    }
+  ]
+}

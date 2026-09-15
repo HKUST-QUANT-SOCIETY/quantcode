@@ -58,7 +58,7 @@ export function sshArguments(keyFile: string, username: string, host: string, al
     "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=no", "-l", username, alias]
 }
 
-export async function resolveSshTarget(server: OrgServer, fallback: string, signal?: AbortSignal, preferConfig = true) {
+export async function resolveSshTarget(server: OrgServer, fallback: string, signal?: AbortSignal, preferConfig = true): Promise<{ server: OrgServer; username: string; usernameSource?: 'config' | 'fallback' }> {
   const deadline = AbortSignal.any([AbortSignal.timeout(8000), ...(signal ? [signal] : [])])
   const config = await readFile(join(homedir(), '.ssh', 'config'), 'utf8').catch(() => '')
   const aliases = [...config.matchAll(/^\s*Host\s+(.+)$/gmi)].flatMap(match => match[1].split(/\s+/))
@@ -74,8 +74,12 @@ export async function resolveSshTarget(server: OrgServer, fallback: string, sign
       const index = line.indexOf(' '); return [line.slice(0, index), line.slice(index + 1)]
     }))
     if (values.hostname !== server.host) continue
-    const configured = values.user && (aliases.includes(alias) || values.user !== userInfo().username) ? values.user : ''
-    return { server: { ...server, sshHost: alias }, username: preferConfig ? configured || fallback : fallback || configured }
+    // ssh -G also prints a default local OS username when no User was set.
+    // An alias alone is not evidence of a configured remote account. If an
+    // explicit User equals the OS login, asking once is safer than guessing.
+    const configured = values.user && values.user !== userInfo().username ? values.user : ''
+    return { server: { ...server, sshHost: alias }, username: preferConfig ? configured || fallback : fallback || configured,
+      usernameSource: configured && (preferConfig || !fallback) ? 'config' : 'fallback' }
   }
   return { server, username: fallback }
 }
@@ -164,6 +168,7 @@ export async function readServerAdminStatus(server: OrgServer, username: string,
 
 export function sshFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
+  if (message.startsWith('请输入有效的 Linux 用户名')) return message
   if (/Permission denied|publickey/i.test(message)) return "这把密钥或用户名未登记"
   if (/REMOTE HOST IDENTIFICATION|Host key verification/i.test(message)) return "服务器指纹发生变化，请联系管理员核对"
   if (/个人研究宿主|工作组|工作区|组织身份|组织管理|本机 SSH|系统 SSH|私钥需要解锁/.test(message)) return message

@@ -26,6 +26,8 @@ export type QuantCodeSshAgentStatus = {
 /** 组织 SSH 登录向导：成员只提供本地私钥，服务器地址内置。 */
 export type QuantCodeSshLoginServer = { id: string; label: string; host: string; username: string; groups: QuantCodeIdentityGroup[] }
 export type QuantCodeSshAdministrator = { id: string; label: string; host: string; username: string; systemGroups: string[] }
+export const sshUsernameSources = { input: '本次输入', remembered: '已确认记录', config: 'SSH 配置', filename: '文件名', route: '工作区登记', 'workspace-cache': '上次工作区发现', missing: '未确定' } as const
+export type QuantCodeSshUsernameSource = keyof typeof sshUsernameSources
 /** SSH connection metadata belongs to the same verified administrator login. */
 export type QuantCodeServerAdminSession = { serverId: string; serverLabel: string; username: string; fingerprint: string; expires_at: string }
 export type QuantCodeServerAdminStatus = { session: QuantCodeServerAdminSession; report: string }
@@ -34,7 +36,7 @@ export type QuantCodeSshLoginScan = {
   needsUsername?: boolean
   servers: QuantCodeSshLoginServer[]
   administrators?: QuantCodeSshAdministrator[]
-  failed: { id: string; reason: string }[]
+  failed: { id: string; reason: string; username?: string; usernameSource?: QuantCodeSshUsernameSource }[]
 }
 export type QuantCodeSshConnection = { url: string; username: string; password: string; displayName: string; organizationAdmin?: boolean; managedId?: string; previousUrls?: string[]; verifiedAt?: number }
 export type QuantCodeConnectionState = { server: string; url: string; state: "connecting" | "connected" | "reconnecting" | "offline" | "closed"; generation: number; reason?: string }

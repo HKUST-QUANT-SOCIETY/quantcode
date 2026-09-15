@@ -1,5 +1,6 @@
 import type { QuantCodeDesktopIdentity, QuantCodeSshLoginScan, QuantCodeSshLoginResult, QuantCodeSshLoginChoice, QuantCodeSshAgentStatus } from "../../identity"
 import { getOwner, onCleanup } from "solid-js"
+import { sshUsernameSources } from '../../identity'
 
 /**
  * F-05 SSH 登录界面：完整登录流四态（表单 → 连接 → 已连接 / 失败）。
@@ -714,7 +715,7 @@ export function SshOrgLoginWizard(props: {
       for (const failed of scan.failed) {
         const note = document.createElement("p")
         note.className = "qc-ssh-hint"
-        note.textContent = `✗ ${failed.id.replace("server-", "Server ").toUpperCase()}：${failed.reason}`
+        note.textContent = `✗ ${failed.id.replace("server-", "Server ").toUpperCase()}${failed.username ? ` · ${failed.username}` : ''}${failed.usernameSource ? `（${sshUsernameSources[failed.usernameSource]}）` : ''}：${failed.reason}`
         root.append(note)
       }
     }
