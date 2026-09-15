@@ -2,9 +2,9 @@
 
 QuantCode 是 HKUST QUANT SOCIETY 的团队研究与开发 Agent。因子、模型、风控、基本面、策略、期权、基建和 Agent 组使用同一套桌面端与执行器，身份、个人工作区、工具和 Memory 按组织授权隔离。
 
-[下载 Test V1.2](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.4) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
+[下载 Test V1.2](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.5) · [构建状态](https://github.com/HKUST-QUANT-SOCIETY/quantcode/actions/workflows/quantcode-desktop.yml) · [功能规格](specs/FUNCTIONAL_SPEC.md) · [MIT License](LICENSE)
 
-Test V1.2 的版本号为 `1.2.0-test.4`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
+Test V1.2 的版本号为 `1.2.0-test.5`，属于内部测试预发布。Mac 和 Windows 安装包由 GitHub Actions 从同一提交构建，随包提供校验和及发布清单。测试包未做平台代码签名，自动更新关闭；它不是已签名的正式生产版本。
 
 ## 是否需要服务器
 
@@ -22,13 +22,13 @@ flowchart LR
 
 ## 下载和安装
 
-从 [Test V1.2 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.4) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
+从 [Test V1.2 Release](https://github.com/HKUST-QUANT-SOCIETY/quantcode/releases/tag/quantcode-v1.2.0-test.5) 下载与你电脑对应的文件，同时下载 `SHA256SUMS` 和 `release-manifest.json`。
 
 | 电脑 | 安装文件 |
 | --- | --- |
-| Mac，Apple Silicon（M 系列） | `quantcode-1.2.0-test.4-mac-arm64.dmg` |
-| Mac，Intel | `quantcode-1.2.0-test.4-mac-x64.dmg` |
-| Windows 10/11，x64 | `quantcode-1.2.0-test.4-win-x64.exe` |
+| Mac，Apple Silicon（M 系列） | `quantcode-1.2.0-test.5-mac-arm64.dmg` |
+| Mac，Intel | `quantcode-1.2.0-test.5-mac-x64.dmg` |
+| Windows 10/11，x64 | `quantcode-1.2.0-test.5-win-x64.exe` |
 
 Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，按提示安装到当前用户。
 
@@ -38,12 +38,12 @@ Mac 打开 DMG，将 QuantCode 拖到“应用程序”。Windows 运行 EXE，�
 
 ```bash
 # macOS，比较结果与 SHA256SUMS 中对应文件的一行
-shasum -a 256 quantcode-1.2.0-test.4-mac-arm64.dmg
+shasum -a 256 quantcode-1.2.0-test.5-mac-arm64.dmg
 ```
 
 ```powershell
 # Windows PowerShell
-Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.4-win-x64.exe
+Get-FileHash -Algorithm SHA256 .\quantcode-1.2.0-test.5-win-x64.exe
 ```
 
 ## 首次使用

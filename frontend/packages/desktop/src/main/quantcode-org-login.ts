@@ -4,6 +4,8 @@ import { ORG_SERVERS, openResearchTunnel, readOrgAccount, readAdminProfile, read
 import type { ResearchConnection } from "./quantcode-connection"
 import type { OrgServer, ResearchTunnel, OrgAccount } from "./quantcode-ssh-login"
 import { randomUUID } from 'node:crypto'
+import { sshUsernameSources } from '@opencode-ai/app/identity'
+import type { QuantCodeSshUsernameSource } from '@opencode-ai/app/identity'
 
 type SavedLogin = { keyFile: string; username: string; serverId: string; group: string; fingerprint: string; actorId: string; localPort: number; organizationAdmin?: boolean; requiresConfirmation?: boolean; sessionId?: string; attemptId?: string }
 function savedLogin(value: unknown): SavedLogin | undefined {
@@ -14,6 +16,11 @@ function savedLogin(value: unknown): SavedLogin | undefined {
   return data as SavedLogin
 }
 type LoginStore = { get: (key: string) => unknown; set: (key: string, value: unknown) => void }
+function usernames(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] =>
+    typeof entry[1] === 'string' && /^[a-z_][a-z0-9_-]{0,63}$/i.test(entry[1])))
+}
 const hostConnection = (connection: ResearchTunnel["connection"]) => ({ url: connection.url, username: connection.username, password: connection.password })
 const dependencies = { readOrgAccount, readAdminProfile, readServerAdminStatus, requireAdminSession, openResearchTunnel, inspect, connect, disconnect, resolveSshTarget,
   importKey: (file: string) => importKey({ url: "http://127.0.0.1" }, file) }
@@ -38,6 +45,27 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
   let pendingLogin: { record: SavedLogin; server: OrgServer; tunnel: ResearchTunnel } | undefined
   let completed: QuantCodeSshLoginResult | undefined
   const log = (message: string) => { transcript.push(`${new Date().toLocaleTimeString()}  ${message}`); if (transcript.length > 80) transcript.shift() }
+  const rememberServers = (updates: Record<string, string>) => {
+    const raw = store.get('serverUsernames')
+    const saved = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+    const current = usernames(saved[fingerprint])
+    if (Object.entries(updates).every(([server, user]) => current[server] === user)) return
+    store.set('serverUsernames', { ...saved, [fingerprint]: { ...current, ...updates } })
+  }
+  const rememberWorkspace = (server: string, user: string, keys: { fingerprint: string }[]) => {
+    const raw = store.get('workspaceUsernames')
+    const saved = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+    const next = { ...saved }
+    let changed = false
+    for (const key of keys) {
+      if (!/^SHA256:[A-Za-z0-9+/]{43}$/.test(key.fingerprint)) continue
+      const current = usernames(next[key.fingerprint])
+      if (current[server] === user) continue
+      next[key.fingerprint] = { ...current, [server]: user }
+      changed = true
+    }
+    if (changed) store.set('workspaceUsernames', next)
+  }
   const matches = (tunnel: ResearchTunnel, server: string) => tunnel.connection.managedId === server || tunnel.connection.url === server || tunnel.connection.previousUrls?.includes(server)
   const connectionState = (tunnel: ResearchTunnel): QuantCodeConnectionState => ({ server: tunnel.connection.managedId ?? tunnel.connection.url,
     url: tunnel.connection.url, ...(tunnel.status?.() ?? { state: tunnel.alive() ? "connected" : "offline", generation: 0 }) })
@@ -210,28 +238,58 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
           log(`本机密钥已就绪 · ${fingerprint}`)
         }
         operation.check()
-        const raw = store.get("usernames")
-        const remembered = raw && typeof raw === "object" && !Array.isArray(raw) && Object.values(raw).every(value => typeof value === "string")
-          ? raw as Record<string, string> : {}
-        username = input.username?.trim() || remembered[fingerprint] || usernameFromKeyFile(keyFile) || ""
-        const queue = await Promise.all(ORG_SERVERS.map(server => deps.resolveSshTarget?.(server, username, operation.signal, !input.username?.trim()) ?? { server, username }))
+        const remembered = usernames(store.get('usernames'))
+        const rawServers = store.get('serverUsernames')
+        const perServer = usernames(rawServers && typeof rawServers === 'object' ? (rawServers as Record<string, unknown>)[fingerprint] : undefined)
+        const explicit = input.username?.trim()
+        if (explicit) requireUsername(explicit)
+        const hint = usernameFromKeyFile(keyFile) || ''
+        const queue: { server: OrgServer; username: string; source: QuantCodeSshUsernameSource }[] = await Promise.all(ORG_SERVERS.map(async server => {
+          const confirmed = explicit || perServer[server.id] || remembered[fingerprint]
+          const fallback = confirmed || hint
+          const target = await deps.resolveSshTarget?.(server, fallback, operation.signal, !confirmed) ?? { server, username: fallback, usernameSource: 'fallback' as const }
+          return { server: target.server, username: confirmed || target.username, source: explicit ? 'input' : confirmed ? 'remembered'
+            : target.usernameSource === 'config' || target.username && target.username !== hint ? 'config' : hint ? 'filename' : 'missing' }
+        }))
+        // A key advertised by a previously reached host may be a registered
+        // spare that the legacy SSH account does not accept. Try its workspace
+        // as a fallback; SSH and roster authentication still run in full.
+        const rawWorkspaces = store.get('workspaceUsernames')
+        const workspaceUsers = usernames(rawWorkspaces && typeof rawWorkspaces === 'object' ? (rawWorkspaces as Record<string, unknown>)[fingerprint] : undefined)
+        for (const server of ORG_SERVERS) {
+          const user = workspaceUsers[server.id]
+          if (!user || queue.some(target => target.server.id === server.id && target.username === user)) continue
+          const resolved = await deps.resolveSshTarget?.(server, user, operation.signal, false) ?? { server, username: user }
+          queue.push({ server: resolved.server, username: user, source: 'workspace-cache' })
+        }
+        operation.check()
         if (!queue.some(target => target.username)) return { username: "", needsUsername: true, servers: [], failed: [] }
-        if (username) requireUsername(username)
+        const resolvedNames = [...new Set(queue.map(target => target.username).filter(Boolean))]
+        username = explicit || remembered[fingerprint] || (resolvedNames.length === 1 ? resolvedNames[0] : '') || ''
         // An explicit correction is key-specific and survives app restarts, even
         // when the subsequent network probe fails.
-        if (input.username?.trim()) store.set("usernames", { ...remembered, [fingerprint]: username })
+        if (explicit) {
+          store.set('usernames', { ...remembered, [fingerprint]: explicit })
+          rememberServers(Object.fromEntries(ORG_SERVERS.map(server => [server.id, explicit])))
+        }
         const result: QuantCodeSshLoginScan = { username, servers: [], administrators: [], failed: [] }
         const visited = new Set<string>()
         for (let index = 0; index < queue.length && index < 12; index++) {
           operation.check()
-          const { server, username: user } = queue[index]
-          if (!user || choices.has(server.id) || visited.has(`${server.id}:${user}`)) continue
+          const { server, username: user, source } = queue[index]
+          if (choices.has(server.id) || visited.has(`${server.id}:${user}`)) continue
+          if (!user) {
+            result.failed.push({ id: server.id, reason: '未确定此服务器的 SSH 用户名，未发起连接。', usernameSource: 'missing' })
+            continue
+          }
           visited.add(`${server.id}:${user}`)
           const probeSignal = AbortSignal.any([operation.signal, AbortSignal.timeout(18000)])
-          log(`连接 ${server.label} · ssh ${user}@${server.host}`)
+          log(`连接 ${server.label} · ssh ${user}@${server.host} · 用户名来源：${sshUsernameSources[source]}`)
           try {
+            requireUsername(user)
             const account = await deps.readOrgAccount(server, user, keyFile, probeSignal)
             operation.check()
+            rememberServers({ [server.id]: user })
             log(`${server.label} SSH 身份验证通过，正在读取组授权`)
             if ('routes' in account) {
               const routes = (account.routes ?? []).filter(route => route.fingerprints.includes(fingerprint))
@@ -240,7 +298,7 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
                 const target = ORG_SERVERS.find(item => item.id === route.serverId)
                 if (!target) continue
                 const resolved = await deps.resolveSshTarget?.(target, route.username, operation.signal, false) ?? { server: target, username: route.username }
-                queue.splice(index + 1, 0, resolved)
+                queue.splice(index + 1, 0, { server: resolved.server, username: route.username, source: 'route' })
                 log(`${server.label} · 已找到授权工作区，继续连接 ${target.label}`)
               }
               continue
@@ -253,7 +311,8 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
               continue
             }
             const { tunnel } = await transport(server, user, keyFile, fingerprint, undefined, account, false, probeSignal)
-            const identity = (await deps.inspect(hostConnection(tunnel.connection), { signal: probeSignal })).identities.find(item => item.fingerprint === fingerprint)
+            const inspection = await deps.inspect(hostConnection(tunnel.connection), { signal: probeSignal })
+            const identity = inspection.identities.find(item => item.fingerprint === fingerprint)
             operation.check()
             if (!identity) throw new Error("个人研究宿主未登记这把公钥，请联系管理员。")
             // Research accounts intentionally have only a private Unix group.
@@ -261,17 +320,19 @@ export function createOrgLogin(store: LoginStore, deps: LoginDependencies = depe
             // authorized list without granting additional filesystem access.
             const groups = [...new Set([...account.groups.filter(group => identity.groups.includes(group)), ...identity.groups])]
             if (!groups.length) throw new Error("组织名册尚未分配工作组，请联系管理员。")
+            rememberWorkspace(server.id, user, inspection.identities)
             log(`${server.label} · 授权工作组：${groups.join("、")}`)
             choices.set(server.id, { server, username: user, tunnel, groups })
             result.failed = result.failed.filter(item => item.id !== server.id)
             result.servers.push({ ...server, username: user, groups })
           } catch (error) {
             operation.check()
-            log(`${server.label} · ${sshFailure(error)}`)
-            result.failed.push({ id: server.id, reason: sshFailure(error) })
+            log(`${server.label} · ${user}（${sshUsernameSources[source]}）· ${sshFailure(error)}`)
+            result.failed.push({ id: server.id, username: user, usernameSource: source, reason: sshFailure(error) })
           }
         }
-        if (!result.servers.length && !result.administrators?.length) throw new Error(`用户名 ${username} 未能连接可用工作区。${result.failed.map(item => `${item.id}: ${item.reason}`).join("；")}`)
+        if (!result.servers.length && !result.administrators?.length) throw new Error(`未能连接可用工作区。${result.failed.map(item =>
+          `${item.id}${item.username ? ` · ${item.username}` : ''}（${sshUsernameSources[item.usernameSource ?? 'missing']}）：${item.reason}`).join('；')}`)
         return result
       } finally { operation.finish() }
     },

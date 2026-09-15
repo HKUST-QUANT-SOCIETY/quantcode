@@ -22,6 +22,13 @@ function button(view: HTMLElement, text: string) {
 }
 
 describe("organization login wizard", () => {
+  test('server failures show the actual attempted username and its source', async () => {
+    const view = SshOrgLoginWizard({ sshScan: async () => ({ ...scan, servers: [scan.servers[1]],
+      failed: [{ id: 'server-a', username: 'felixfeng', usernameSource: 'config', reason: '这把密钥或用户名未登记' }] }),
+      sshConnect: async () => connected, onEnter: async () => {} })
+    button(view, '重新登录').click(); await flush()
+    expect(view.textContent).toContain('SERVER A · felixfeng（SSH 配置）')
+  })
   const stopped: QuantCodeSshAgentStatus = { platform: 'windows', status: 'stopped', message: 'Windows SSH Agent 尚未启动' }
   const ready: QuantCodeSshAgentStatus = { platform: 'windows', status: 'ready', message: 'SSH Agent 已就绪' }
   test('agent recovery is explicit, hides irrelevant username correction, and reuses the selected key', async () => {

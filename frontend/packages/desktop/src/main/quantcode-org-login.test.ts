@@ -325,6 +325,79 @@ describe("organization SSH login", () => {
     expect(await next.scan({ keyFile: "/fixture/id_ed25519" })).toMatchObject({ username: "qc-chenzhenhong" })
     next.close()
   })
+  test('explicit and remembered usernames override stale SSH config, including after failed scans and reopening', async () => {
+    const f = fixture()
+    f.deps.resolveSshTarget = async (server, fallback, _signal, preferConfig) => ({ server,
+      username: preferConfig ? (server.id === 'server-a' ? 'Feng' : 'felixfeng') : fallback, usernameSource: preferConfig ? 'config' : 'fallback' })
+    f.deps.readOrgAccount = async (server, user) => { f.calls.push(`attempt:${server.id}:${user}`); throw new Error('Permission denied (publickey)') }
+    const first = createOrgLogin(f.store, f.deps)
+    await expect(first.scan({ keyFile: '/fixture/id_ed25519' })).rejects.toThrow('server-a · Feng（SSH 配置）')
+    await expect(first.scan({ username: 'fengliangji' })).rejects.toThrow('server-b · fengliangji（本次输入）')
+    first.close(); f.calls.length = 0
+    const second = createOrgLogin(f.store, f.deps)
+    await expect(second.scan({ keyFile: '/fixture/id_ed25519' })).rejects.toThrow('server-c · fengliangji（已确认记录）')
+    expect(f.calls.filter(call => call.startsWith('attempt:'))).toEqual(['attempt:server-a:fengliangji', 'attempt:server-b:fengliangji', 'attempt:server-c:fengliangji'])
+    second.close()
+  })
+  test('the previous flat username store remains authoritative when no server-specific record exists', async () => {
+    const f = fixture()
+    f.data.set('usernames', { [fingerprint]: 'confirmed-user' })
+    f.deps.resolveSshTarget = async (server, fallback, _signal, preferConfig) => {
+      expect(preferConfig).toBe(false)
+      return { server, username: fallback }
+    }
+    const login = createOrgLogin(f.store, f.deps)
+    const result = await login.scan({ keyFile: '/fixture/id_ed25519' })
+    expect(result.servers.every(server => server.username === 'confirmed-user')).toBe(true)
+    login.close()
+  })
+  test('verified usernames are remembered per server and an explicit correction replaces them', async () => {
+    const f = fixture()
+    let changed = false
+    f.deps.resolveSshTarget = async (server, fallback, _signal, preferConfig) => ({ server,
+      username: preferConfig ? (changed ? 'outdated' : server.id + '-user') : fallback, usernameSource: preferConfig ? 'config' : 'fallback' })
+    const first = createOrgLogin(f.store, f.deps)
+    await first.scan({ keyFile: '/fixture/id_ed25519' }); first.close(); changed = true
+    const second = createOrgLogin(f.store, f.deps)
+    expect((await second.scan({ keyFile: '/fixture/id_ed25519' })).servers.map(server => server.username)).toEqual(['server-a-user', 'server-b-user', 'server-c-user'])
+    expect((await second.scan({ username: 'correction' })).servers.every(server => server.username === 'correction')).toBe(true)
+    second.close()
+  })
+  test('missing usernames prompt before any network probe instead of trying the OS login', async () => {
+    const f = fixture()
+    const login = createOrgLogin(f.store, f.deps)
+    expect(await login.scan({ keyFile: '/fixture/id_ed25519' })).toMatchObject({ needsUsername: true, username: '' })
+    expect(f.calls).toEqual(['import'])
+    login.close()
+  })
+  test('an advertised spare key can retry a known workspace without granting it legacy SSH access', async () => {
+    const f = fixture()
+    const spare = 'SHA256:' + 'b'.repeat(43)
+    f.deps.importKey = async file => ({ fingerprint: file.includes('spare') ? spare : fingerprint })
+    const inspect = f.deps.inspect
+    f.deps.inspect = async connection => {
+      const value = await inspect(connection)
+      return { ...value, identities: [...value.identities, { ...value.identities[0], fingerprint: spare, id: spare }] }
+    }
+    f.deps.readOrgAccount = async (server, user, file) => {
+      f.calls.push(`attempt:${server.id}:${user}`)
+      if (server.id === 'server-b' && user === 'legacy' && !file.includes('spare')) {
+        return { routes: [{ serverId: 'server-c', username: 'qc-research', fingerprints: [fingerprint] }] }
+      }
+      if (server.id === 'server-c' && user === 'qc-research') return { profile: { ...profile, ssh_user: user }, groups: ['model'] }
+      throw new Error('Permission denied (publickey)')
+    }
+    const first = createOrgLogin(f.store, f.deps)
+    await first.scan({ keyFile, username: 'legacy' }); first.close()
+    const second = createOrgLogin(f.store, f.deps)
+    const result = await second.scan({ keyFile: '/fixture/spare_ed25519', username: 'legacy' })
+    expect(result.servers).toHaveLength(1)
+    expect(result.servers[0].username).toBe('qc-research')
+    expect(second.progress().join('\n')).toContain('上次工作区发现')
+    expect(f.calls).toContain('attempt:server-b:legacy')
+    expect(f.calls).toContain('attempt:server-c:qc-research')
+    second.close()
+  })
   test("roster fills private-only Linux groups; unrelated Unix groups cannot grant access", async () => {
     const f = fixture()
     f.deps.readOrgAccount = async () => ({ profile, groups: ["risk"] })
@@ -345,7 +418,7 @@ describe("organization SSH login", () => {
     const login = createOrgLogin(f.store, f.deps)
     const scan = await login.scan({ keyFile })
     expect(scan.servers.map(server => server.id)).toEqual(["server-b", "server-c"])
-    expect(scan.failed).toEqual([{ id: "server-a", reason: "这把密钥或用户名未登记" }])
+    expect(scan.failed).toEqual([{ id: "server-a", reason: "这把密钥或用户名未登记", username: 'qc-chenzhenhong', usernameSource: 'filename' }])
     await expect(login.login({ serverId: "server-a", group: "model" })).rejects.toThrow("已探测")
     await expect(login.login({ serverId: "server-b", group: "risk" })).rejects.toThrow("已探测")
     expect(f.calls.some(call => call.startsWith("login:"))).toBe(false)

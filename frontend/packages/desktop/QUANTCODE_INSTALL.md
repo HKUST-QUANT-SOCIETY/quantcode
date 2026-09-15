@@ -5,7 +5,7 @@ through the public `HKUST-QUANT-SOCIETY/quantcode` GitHub Releases page. A
 workflow artifact from a pull request is an unsigned QA build, not a formal
 release. Formal releases have `distribution.releaseClass=approved-release`.
 The explicitly labeled **QuantCode Test V1.2** prerelease uses version
-`1.2.0-test.4`, tag `quantcode-v1.2.0-test.4`, and `releaseClass=internal-test`.
+`1.2.0-test.5`, tag `quantcode-v1.2.0-test.5`, and `releaseClass=internal-test`.
 It provides unsigned macOS arm64/x64 and Windows x64 packages for member testing;
 it does not claim Apple notarization or a Windows publisher signature.
 
@@ -55,7 +55,7 @@ must report `azure-trusted-signing`. Linux is intentionally reported as
 `approved-platform-unsigned`: verify both SHA-256 and GitHub provenance before
 installing it.
 
-For Test V1.2, verify the exact `quantcode-v1.2.0-test.4` prerelease and source
+For Test V1.2, verify the exact `quantcode-v1.2.0-test.5` prerelease and source
 commit. Its manifest must report `internal-test`, `unsigned-test` for macOS and
 Windows, and `updateFeed=disabled`. Checksums and GitHub provenance identify the
 tested build; they do not turn an unsigned installer into a signed one.
